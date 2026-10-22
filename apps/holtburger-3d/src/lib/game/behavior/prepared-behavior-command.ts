@@ -11,6 +11,8 @@ import type { Vec3 } from "../math/types";
  * knows about frames, script times, entities, or scene nodes.
  */
 export type PreparedBehaviorCommand =
+	| { readonly kind: "no-draw"; readonly noDraw: boolean }
+	| { readonly kind: "set-light"; readonly lightsOn: boolean }
 	| {
 			readonly kind: "set-omega";
 			/** Angular velocity already converted into the app's render coordinate system. */
@@ -151,5 +153,11 @@ export function behaviorCommandLabel(command: PreparedBehaviorCommand): string {
 export function behaviorCommandBlocksActivation(
 	command: PreparedBehaviorCommand,
 ): boolean {
-	return command.kind === "unimplemented" && command.blocksActivation;
+	// Browser-only owners have no physics-state controller. Preserve their static fallback;
+	// live entity cues are appended separately and consume the host's projected state instead.
+	return (
+		command.kind === "no-draw" ||
+		command.kind === "set-light" ||
+		(command.kind === "unimplemented" && command.blocksActivation)
+	);
 }

@@ -1,5 +1,7 @@
 //! Continuous static swept-sphere collision over resident AC geometry.
 
+use std::collections::BTreeSet;
+
 use holtburger_common::{Guid, Vector3};
 use holtburger_content::{
     CellCollisionPortalTarget, CollisionPolygon, CollisionShape, PlacedCollisionShape,
@@ -318,7 +320,7 @@ impl CollisionScene {
     pub(crate) fn sweep_camera_sphere(
         &self,
         entities: &crate::spatial::EntityCollisionSnapshot,
-        excluded: SpatialBodyId,
+        excluded: &BTreeSet<SpatialBodyId>,
         request: StaticSphereSweepRequest,
         policy: CollisionQueryPolicy,
     ) -> anyhow::Result<UncoveredCollisionQuery<Option<StaticSphereSweepHit>>> {
@@ -343,7 +345,7 @@ impl CollisionScene {
     pub(crate) fn sweep_camera_entity_sphere(
         &self,
         entities: &crate::spatial::EntityCollisionSnapshot,
-        excluded: SpatialBodyId,
+        excluded: &BTreeSet<SpatialBodyId>,
         request: StaticSphereSweepRequest,
     ) -> anyhow::Result<Option<StaticSphereSweepHit>> {
         let sweep = SphereSweep {
@@ -362,7 +364,7 @@ impl CollisionScene {
     fn update_camera_entity_hit(
         &self,
         entities: &crate::spatial::EntityCollisionSnapshot,
-        excluded: SpatialBodyId,
+        excluded: &BTreeSet<SpatialBodyId>,
         request: StaticSphereSweepRequest,
         membership: &SpatialMembership,
         earliest: &mut Option<StaticSphereSweepHit>,
@@ -381,13 +383,12 @@ impl CollisionScene {
         );
         let ball = Ball::new(request.radius);
         let moving = MovingSphereCast::new(&ball, request.start, request.displacement);
-        for id in
-            entities
-                .index
-                .candidates(Some(excluded), request.anchor, minimum, maximum, membership)
+        for id in entities
+            .index
+            .candidates(None, request.anchor, minimum, maximum, membership)
         {
             let target = &entities.targets[&id];
-            if !target.camera_solid {
+            if excluded.contains(&id) || !target.camera_solid {
                 continue;
             }
             for shape in target.shapes.iter() {

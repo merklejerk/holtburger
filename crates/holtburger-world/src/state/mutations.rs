@@ -16,6 +16,25 @@ use holtburger_protocol::messages::movement::{
 use std::time::Instant;
 
 impl WorldState {
+    /// Apply one authored presentation flag; ordinary entity publication carries the effective result.
+    pub fn apply_entity_script_presentation(
+        &mut self,
+        guid: Guid,
+        authoritative_revision: u64,
+        change: crate::EntityPresentationChange,
+    ) -> anyhow::Result<bool> {
+        let entity = self
+            .entities
+            .get_mut(guid)
+            .ok_or_else(|| anyhow::anyhow!("script presentation target {guid} is absent"))?;
+        // A newer complete server state supersedes this prediction, even if its flag values
+        // equal those at activation. Asset readiness must never reverse reconciliation order.
+        if entity.physics.authoritative_revision() != authoritative_revision {
+            return Ok(false);
+        }
+        Ok(entity.physics.apply_authored_presentation(change))
+    }
+
     /// Apply a server selection or optimistic local selection through the private property path.
     pub fn set_player_character_title(&mut self, title_id: u32) -> WorldEvent {
         // PropertyInt stores the same 32 wire bits in a signed slot.

@@ -13,6 +13,8 @@ const rawPayload = z.object({
 
 /** Transport shape shared by the animation and physics-script hook manifests. */
 export const behaviorHookPayloadSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("no-draw"), noDraw: z.boolean() }),
+	z.object({ kind: z.literal("set-light"), lightsOn: z.boolean() }),
 	z.object({ kind: z.literal("no-payload") }),
 	rawPayload.extend({ kind: z.literal("raw") }),
 	z.object({
@@ -118,6 +120,8 @@ const TYPED_PAYLOAD_KIND_BY_HOOK_TYPE = new Map<
 	[1, "sound"],
 	[2, "sound-table"],
 	[3, "attack"],
+	[16, "no-draw"],
+	[25, "set-light"],
 	[5, "replace-object"],
 	[6, "ethereal"],
 	[7, "transparent-part"],
@@ -176,6 +180,10 @@ export function decodeBehaviorCommand(
 	}
 	const payload = hook.payload;
 	switch (payload.kind) {
+		case "no-draw":
+			return { kind: "no-draw", noDraw: payload.noDraw };
+		case "set-light":
+			return { kind: "set-light", lightsOn: payload.lightsOn };
 		case "set-omega":
 			// AC authors omega in its own axis convention; convert once, here.
 			return {

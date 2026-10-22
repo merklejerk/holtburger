@@ -9,7 +9,7 @@ use holtburger_core::client::runtime_fixture::RuntimeFixture;
 use holtburger_core::client::runtime_fixture::RuntimeFixtureReport;
 use holtburger_core::{
     ClientCommand, ClientLifecycleState, ClientRuntimeBuilder, ClientViewEvent,
-    ContentAssetService, ContentClientCollisionSource, ContentClientDynamicScaleSource,
+    ContentAssetService, ContentClientCollisionSource, ContentClientDynamicScriptSource,
 };
 use serde::Serialize;
 use std::{
@@ -154,7 +154,7 @@ async fn main() -> Result<()> {
                 Arc::clone(&service),
                 Arc::clone(&repository),
             )))
-            .dynamic_scale_source(Arc::new(ContentClientDynamicScaleSource::new(Arc::clone(
+            .dynamic_script_source(Arc::new(ContentClientDynamicScriptSource::new(Arc::clone(
                 &service,
             ))));
         builder.load_assets(repository.as_ref())?;

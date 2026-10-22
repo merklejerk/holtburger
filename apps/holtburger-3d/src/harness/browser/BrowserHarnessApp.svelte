@@ -557,6 +557,17 @@
 			wcid: string,
 			distance: number,
 		) => Promise<DynamicEntityView>;
+		/** Verify local collision-cue dispatch separately from the server explosion's particles. */
+		readonly probeCollisionScriptPlayback: () => Promise<{
+			readonly staleIgnored: boolean;
+			readonly dispatchedHooks: number;
+			readonly collisionHookOutcomes: readonly string[];
+			readonly geometryHidden: boolean;
+			readonly geometryRestored: boolean;
+			readonly lightsDisabled: boolean;
+			readonly lightsRestored: boolean;
+			readonly createdEmitters: number;
+		}>;
 		/** Open, close, and reopen one catalog visual through the production preview renderer. */
 		readonly probeObjectPreviewLifecycle: (
 			guid: number,
@@ -1772,6 +1783,150 @@
 		distance: number,
 	): Promise<DynamicEntityView> {
 		return spawnExplorerEntityWithMode(rawWcid, distance, "pose-only");
+	}
+
+	async function probeCollisionScriptPlayback() {
+		const entity = await spawnExplorerEntity("1499", 4);
+		if (!runtime || !renderer)
+			throw new Error(
+				"Collision script probe requires a runtime and renderer.",
+			);
+		const activeRuntime = runtime;
+		const activeRenderer = renderer;
+		const drawFrame = activeRenderer.drawFrame;
+		let lightCount = 0;
+		activeRenderer.drawFrame = (input) => {
+			lightCount = input.dynamicLights.length;
+			return drawFrame.call(activeRenderer, input);
+		};
+		// Flame Bolt's table 0x34000005 maps ProjectileCollision (0x5a) to this root.
+		const observations = () =>
+			activeRuntime
+				.getAuthoredDynamicRuntimeDiagnostics()
+				.worldOwnedBehavior.observations.filter(
+					(observation) => observation.provenance.assetId === "0x33000109",
+				);
+		const cue = {
+			guid: entity.identity.guid,
+			generation: entity.generation,
+			cue: 0x5a,
+			intensity: 1,
+		};
+		try {
+			const lit = {
+				...entity,
+				physics: { ...entity.physics, noDraw: false, lighting: true },
+			};
+			await activeRuntime.upsertDynamicEntity(lit);
+			await waitForTwoAnimationFrames();
+			const baselineLights = lightCount;
+			if (
+				baselineLights <= 0 ||
+				activeRuntime.withSpawnedEntitySelectionGeometry(
+					cue.guid,
+					() => true,
+				) !== true
+			)
+				throw new Error(
+					"Collision probe requires visible geometry and an emitted light.",
+				);
+			activeRuntime.playDynamicEntityScriptCue({
+				...cue,
+				generation: cue.generation + 1,
+			});
+			await waitForTwoAnimationFrames();
+			const staleIgnored = observations().length === 0;
+			if (!staleIgnored)
+				throw new Error("Stale collision cue started playback.");
+			const before =
+				activeRuntime.getAuthoredDynamicRuntimeDiagnostics().particles
+					.createdEmitterTotal;
+			activeRuntime.playDynamicEntityScriptCue(cue);
+			const deadline = performance.now() + 10_000;
+			while (observations().length < 2) {
+				if (performance.now() >= deadline)
+					throw new Error(
+						"Collision script did not dispatch its authored hooks.",
+					);
+				await nextAnimationFrame();
+			}
+			const collisionHooks = observations();
+			if (
+				collisionHooks.map((observation) => observation.command).join(",") !==
+					"no-draw,set-light" ||
+				collisionHooks.some(
+					(observation) => observation.outcome !== "owned-by-world",
+				)
+			)
+				throw new Error("Collision cue selected a different authored script.");
+			// The core integration test verifies these flags come from the local collision root.
+			// Exercise their production browser consumer while the cue leaves state ownership alone.
+			await activeRuntime.upsertDynamicEntity({
+				...entity,
+				physics: { ...entity.physics, noDraw: true, lighting: false },
+			});
+			await waitForTwoAnimationFrames();
+			const geometryHidden =
+				activeRuntime.withSpawnedEntitySelectionGeometry(
+					cue.guid,
+					() => true,
+				) === null;
+			const lightsDisabled = lightCount < baselineLights;
+			if (!geometryHidden || !lightsDisabled)
+				throw new Error(
+					"Projected collision state did not hide geometry and extinguish lights.",
+				);
+			// ACE sends Explode independently. Its root is different from the local collision cue.
+			activeRuntime.playDynamicEntityScriptCue({ ...cue, cue: 5 });
+			while (
+				!activeRuntime
+					.getAuthoredDynamicRuntimeDiagnostics()
+					.worldOwnedBehavior.observations.some(
+						(observation) =>
+							observation.provenance.assetId === "0x33000120" &&
+							observation.command === "create-particle" &&
+							observation.outcome === "executed",
+					)
+			) {
+				if (performance.now() >= deadline)
+					throw new Error(
+						"Server explosion did not create its authored particles.",
+					);
+				await nextAnimationFrame();
+			}
+			const createdEmitters =
+				activeRuntime.getAuthoredDynamicRuntimeDiagnostics().particles
+					.createdEmitterTotal - before;
+			if (createdEmitters <= 0)
+				throw new Error("Server explosion produced no emitter activation.");
+			await activeRuntime.upsertDynamicEntity(lit);
+			await waitForTwoAnimationFrames();
+			const geometryRestored =
+				activeRuntime.withSpawnedEntitySelectionGeometry(
+					cue.guid,
+					() => true,
+				) === true;
+			const lightsRestored = lightCount === baselineLights;
+			if (!geometryRestored || !lightsRestored)
+				throw new Error(
+					"Server reconciliation did not restore geometry and lights.",
+				);
+			return {
+				staleIgnored,
+				dispatchedHooks: collisionHooks.length,
+				collisionHookOutcomes: collisionHooks.map(
+					(observation) => observation.outcome,
+				),
+				createdEmitters,
+				geometryHidden,
+				geometryRestored,
+				lightsDisabled,
+				lightsRestored,
+			};
+		} finally {
+			activeRenderer.drawFrame = drawFrame;
+			await despawnExplorerEntityFleet();
+		}
 	}
 
 	async function spawnSimulatedExplorerEntity(
@@ -4530,6 +4685,7 @@
 					resetTiming,
 					resetTerrainGlTrace: () => terrainGlTrace?.reset(),
 					spawnExplorerEntity,
+					probeCollisionScriptPlayback,
 					spawnExplorerEntityFleet,
 					installSyntheticNameplateWorkload,
 					probeSyntheticNameplateLifecycle,

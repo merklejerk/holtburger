@@ -567,6 +567,8 @@ try {
 		);
 	}
 	// Publish success evidence only after every requested assertion has passed.
+	if (result.collisionScriptProbe)
+		report.collisionScriptProbe = result.collisionScriptProbe;
 	process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
 	await Promise.allSettled(children.toReversed().map(stopChild));
@@ -6531,6 +6533,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					? await evaluate(
 							client,
 							`async () => (await import('/src/harness/browser/dynamic-material-table-probe.ts')).probeDynamicMaterialTables()`,
+							[],
+						)
+					: null,
+			collisionScriptProbe:
+				process.env.HOLTBURGER_PROBE_COLLISION_SCRIPTS === "1"
+					? await evaluate(
+							client,
+							"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probeCollisionScriptPlayback",
 							[],
 						)
 					: null,

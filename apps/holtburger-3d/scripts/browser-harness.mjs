@@ -4953,7 +4953,8 @@ async function runClientHudHarness({ viteUrl }) {
 				`document.querySelector('nav[aria-label="Game shortcuts"] button[aria-label="Journal"]').click()`,
 			);
 			await delay(50);
-			const selector = 'section.hud-window[aria-label="Journal"] details';
+			const selector =
+				'section.hud-window[aria-label="Journal"] details.contract-row';
 			await evaluateExpression(
 				client,
 				`(() => {

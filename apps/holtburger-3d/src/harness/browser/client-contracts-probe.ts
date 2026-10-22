@@ -80,7 +80,7 @@ export async function probeContracts(options: {
 	const window = (): HTMLElement => get(windowSelector);
 	const list = (): HTMLElement => get(`${windowSelector} .journal-list`);
 	const entries = (): HTMLDetailsElement[] =>
-		Array.from(window().querySelectorAll("details"));
+		Array.from(window().querySelectorAll("details.contract-row"));
 	const named = (name: string): HTMLDetailsElement => {
 		const row = entries().find(
 			(entry) => entry.querySelector(".contract-name")?.textContent === name,
@@ -170,6 +170,18 @@ export async function probeContracts(options: {
 		require(!window()
 			.hidden, "Journal dock did not open the production window");
 		require(entries().length === rows.length, "Journal dropped identities");
+		const filters = get<HTMLDetailsElement>(
+			`${windowSelector} .journal-filters`,
+		);
+		require(!filters.open, "Contract filters must start collapsed");
+		get(`${windowSelector} .journal-filters summary`).click();
+		await settle();
+		require(filters.open, "Filters disclosure did not expand");
+		for (const pill of filters.querySelectorAll<HTMLButtonElement>("button")) {
+			require(pill.textContent?.trim() === pill.getAttribute("aria-label") ||
+				pill.textContent?.trim() ===
+					"All", "Contract filter pill is missing its text label");
+		}
 		require(entries().filter((row) => row.textContent?.includes("Same quest"))
 			.length === 2, "Duplicate names were merged");
 		for (const label of [
@@ -187,7 +199,7 @@ export async function probeContracts(options: {
 			row.textContent?.includes("7 Wins"),
 		);
 		require(counter, "Open-ended authored counter missing");
-		get<HTMLElement>(`${windowSelector} details summary`).click();
+		get<HTMLElement>(`${windowSelector} details.contract-row summary`).click();
 		await settle();
 		require(owner.read().expanded.size ===
 			1, "Disclosure click did not update the owner");

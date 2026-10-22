@@ -13,7 +13,7 @@
 	import { onMount } from "svelte";
 	import ActionCell from "./ActionCell.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
-	import ShortcutBarShapeToggle from "./ShortcutBarShapeToggle.svelte";
+	import ShortcutBarLayoutControls from "./ShortcutBarLayoutControls.svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import {
 		ACTION_SLOT_INDICES,
@@ -177,14 +177,11 @@
 			if (!event.repeat) activate(slot, clientInput.actionBarAlternate(event));
 		}
 	}
-	function operate(operation: "rotate" | "cycle" | "clone" | "delete") {
-		if (operation === "rotate") {
-			if (editable)
-				onchange({
-					...bar,
-					orientation:
-						bar.orientation === "horizontal" ? "vertical" : "horizontal",
-				});
+	function operate(operation: "clear" | "cycle" | "clone" | "delete") {
+		if (operation === "clear") {
+			const slots: [...ClientActionBar["slots"]] = [...bar.slots];
+			slots.fill(null);
+			onchange({ ...bar, slots });
 		} else onmenu(operation);
 	}
 	onMount(() => onmount(() => ({ bounds: resolved, preferred: extent })));
@@ -326,8 +323,17 @@
 				{/each}
 			</div>
 		</div>
-		{#if editable}<ShortcutBarShapeToggle
+		{#if editable}<ShortcutBarLayoutControls
 				label={`Toggle action bar shape ${sequence}`}
+				rotation={{
+					label: `Rotate action bar ${sequence}`,
+					onchange: () =>
+						onchange({
+							...bar,
+							orientation:
+								bar.orientation === "horizontal" ? "vertical" : "horizontal",
+						}),
+				}}
 				topInset={0}
 				orientation={bar.orientation}
 				shape={bar.shape}
@@ -342,7 +348,11 @@
 		anchor={menuButton}
 		label={`Action bar ${sequence} menu`}
 		items={[
-			{ action: "rotate", label: "Rotate", disabled: !editable },
+			{
+				action: "clear",
+				label: "Clear",
+				disabled: bar.slots.every((slot) => slot === null),
+			},
 			{ action: "cycle", label: "Cycle", disabled: count <= 1 },
 			{ action: "clone", label: "Clone", disabled: count >= MAX_ACTION_BARS },
 			{ action: "delete", label: "Delete", disabled: count <= 1 },

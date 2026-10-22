@@ -1,5 +1,8 @@
 import type { ViewportInputGate } from "./viewport-input-gate";
 
+/** Focus transfers release held controls; discontinuities also retire persistent game modes. */
+export type KeyboardCancellationReason = "focus-transfer" | "reset";
+
 /** One keyboard consumer; native browser behavior survives unless a handler prevents it. */
 export interface KeyboardConsumer {
 	/** Receives presses only while this consumer owns the keyboard. */
@@ -7,7 +10,7 @@ export interface KeyboardConsumer {
 	/** Receives releases only for presses delivered to this consumer. */
 	readonly keyup: (event: KeyboardEvent) => void;
 	/** Drop held actions without triggering release actions such as charged jumps. */
-	readonly cancel: () => void;
+	readonly cancel: (reason: KeyboardCancellationReason) => void;
 }
 
 /** An explicitly activatable UI surface, also used by editors nested within it. */
@@ -355,9 +358,13 @@ export class KeyboardInputPolicy {
 
 	/** Cancel without release edges, and quarantine physical presses until they are released. */
 	cancel(): void {
+		this.#cancel("reset");
+	}
+
+	#cancel(reason: KeyboardCancellationReason): void {
 		this.#focusReturnGesture = null;
 		for (const key of this.#presses.keys()) this.#presses.set(key, "cancelled");
-		this.#game?.cancel();
+		this.#game?.cancel(reason);
 		if (this.#owner !== null) {
 			const owner = this.#owner;
 			const scope = this.#scopeFor(owner);
@@ -592,7 +599,14 @@ export class KeyboardInputPolicy {
 					this.#presses.set(key, "cancelled");
 			}
 			if (this.#owner !== null) this.#scopeFor(this.#owner)?.cancel?.();
-		} else this.cancel();
+		} else {
+			// Modality and viewport blockers retain their hard cancellation boundary.
+			this.#cancel(
+				this.#modals.length === 0 && this.viewport.allowed
+					? "focus-transfer"
+					: "reset",
+			);
+		}
 		this.#owner = owner;
 	}
 

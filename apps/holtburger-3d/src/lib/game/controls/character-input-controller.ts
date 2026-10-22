@@ -207,6 +207,23 @@ export class CharacterInputController {
 		this.#onEdge({ kind: "reset", sequence: this.#nextSequence() });
 	}
 
+	/** Release physical controls without releasing a jump; the arbiter supplies surviving autorun. */
+	releaseHeldActions(persistentForward: boolean): void {
+		const cancelledCharge = this.#activeCharge !== null;
+		const restoreForward = persistentForward && !this.#persistentForward;
+		this.#clear();
+		// A reset is needed only to cancel a charge. It also relinquishes host movement ownership,
+		// so continuing autorun must acquire again after that ordered edge.
+		if (cancelledCharge)
+			this.#onEdge({ kind: "reset", sequence: this.#nextSequence() });
+		this.#persistentForward = persistentForward;
+		this.#publishDrive(
+			persistentForward && (cancelledCharge || restoreForward)
+				? "acquire"
+				: "synchronize",
+		);
+	}
+
 	/** Drops frontend ownership without sending an edge to an already-retired host generation. */
 	releaseOwnership(): void {
 		this.#clear();

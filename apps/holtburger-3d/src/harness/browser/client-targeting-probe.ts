@@ -102,6 +102,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		ordinary: {
 			applyAction: () => false,
 			restoreHeldAction() {},
+			releaseHeldActions() {},
 			reset() {},
 			setPersistentForward() {},
 		},

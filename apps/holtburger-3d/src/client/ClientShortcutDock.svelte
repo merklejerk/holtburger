@@ -1,4 +1,8 @@
 <script lang="ts" module>
+	import {
+		CLIENT_PANEL_SHORTCUT_ACTIONS,
+		type ClientPanelShortcut,
+	} from "../lib/input/input-contract";
 	import type { ClientHudIconName } from "./ClientHudIcon.svelte";
 
 	/** Implemented floating system windows; the combat action does not open a panel. */
@@ -10,6 +14,16 @@
 		| "world"
 		| "social"
 		| "journal";
+
+	/** Shared dispatch targets for configured keyboard actions and dock hints. */
+	export const PANEL_SHORTCUTS = {
+		toggleInventory: "inventory",
+		toggleCharacter: "characterSheet",
+		toggleSocial: "social",
+		toggleWorld: "world",
+		toggleJournal: "journal",
+		toggleSettings: "settings",
+	} as const satisfies Readonly<Record<ClientPanelShortcut, ClientSystemPanel>>;
 
 	function systemPanel(icon: ClientHudIconName): ClientSystemPanel | null {
 		if (icon === "party") return "social";
@@ -72,7 +86,7 @@
 		readonly editable: boolean;
 		readonly viewport: ClientHudViewport;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
-		/** Accepted stance shortcut alternatives. */
+		/** Accepted keyboard bindings for stance and system-panel hints. */
 		readonly input: ClientKeyboardConfiguration;
 		readonly displayPlatform: InputDisplayPlatform;
 		/** Server-confirmed stance, independent of the active panel. */
@@ -144,6 +158,17 @@
 	>
 		{#each shortcuts as shortcut}
 			{@const panel = systemPanel(shortcut.icon)}
+			{@const panelAction = CLIENT_PANEL_SHORTCUT_ACTIONS.find(
+				(action) => PANEL_SHORTCUTS[action] === panel,
+			)}
+			{@const panelBinding =
+				panelAction === undefined
+					? null
+					: presentClientBinding(
+							input,
+							{ kind: "client", action: panelAction },
+							displayPlatform,
+						)}
 			{@const combat = shortcut.icon === "combat"}
 			{@const combatActive = combatMode !== "peace" && combatMode !== "unknown"}
 			<button
@@ -155,7 +180,9 @@
 						? `${shortcut.label} (stub)`
 						: panel === "debug"
 							? "Client diagnostics"
-							: shortcut.label}
+							: panelBinding === null
+								? shortcut.label
+								: `${shortcut.label} (${panelBinding.description})`}
 				aria-label={combat
 					? `${shortcut.label} (${combatShortcut.description})`
 					: shortcut.label}

@@ -15,6 +15,7 @@ import {
 	CHARACTER_ACTIONS,
 	PRECISE_JUMP_ACTIONS,
 	CLIENT_SHORTCUT_ACTIONS,
+	CLIENT_PANEL_SHORTCUT_ACTIONS,
 	COMBAT_BREAKPOINT_INDICES,
 	COMBAT_HEIGHT_INDICES,
 	type CharacterAction,
@@ -35,6 +36,7 @@ type BindingContext =
 	| "focused-bar"
 	| "chat";
 type ClientBindingGroup =
+	| "System panels"
 	| "Movement"
 	| "Targeting & interaction"
 	| "Combat"
@@ -68,6 +70,13 @@ const CHARACTER_LABELS: Readonly<Record<CharacterAction, string>> = {
 	jump: "Jump",
 };
 const CLIENT_LABELS: Readonly<Record<ClientShortcut, string>> = {
+	toggleInventory: "Toggle inventory",
+	toggleCharacter: "Toggle character",
+	toggleSocial: "Toggle social",
+	toggleWorld: "Toggle world",
+	toggleJournal: "Toggle journal",
+	toggleSettings: "Toggle settings",
+
 	selectSelf: "Select self",
 	nextCreature: "Next creature",
 	previousCreature: "Previous creature",
@@ -114,21 +123,28 @@ function characterRow(action: CharacterAction): BindingDefinition {
 
 function clientRow(action: ClientShortcut): BindingDefinition {
 	const chatOnly = action === "chatPreviousPage" || action === "chatNextPage";
-	const group: ClientBindingGroup =
-		action === "toggleAutoRun" || action === "preciseJump"
+	const group: ClientBindingGroup = CLIENT_PANEL_SHORTCUT_ACTIONS.some(
+		(panelAction) => panelAction === action,
+	)
+		? "System panels"
+		: action === "toggleAutoRun" || action === "preciseJump"
 			? "Movement"
 			: action === "toggleCombat"
 				? "Combat"
 				: chatOnly || action === "chat" || action === "toggleChatHistory"
 					? "Chat"
 					: "Targeting & interaction";
-	const contexts: readonly BindingContext[] = chatOnly
-		? ["chat"]
-		: action === "toggleChatHistory"
-			? [...GAME_CONTEXTS, "chat"]
-			: action === "cancel"
-				? [...GAME_CONTEXTS, "precise-jump", "focused-bar", "chat"]
-				: GAME_CONTEXTS;
+	// Panels remain available during precise aiming and unhandled focused-bar input.
+	const contexts: readonly BindingContext[] =
+		group === "System panels"
+			? [...GAME_CONTEXTS, "precise-jump", "focused-bar"]
+			: chatOnly
+				? ["chat"]
+				: action === "toggleChatHistory"
+					? [...GAME_CONTEXTS, "chat"]
+					: action === "cancel"
+						? [...GAME_CONTEXTS, "precise-jump", "focused-bar", "chat"]
+						: GAME_CONTEXTS;
 	return {
 		reference: { kind: "client", action },
 		label: CLIENT_LABELS[action],
@@ -234,6 +250,10 @@ const bindingGroups: readonly {
 		rows: [...spellTabRows, spellCasterRow, ...spellSlotRows],
 	},
 	{ title: "Action bars", rows: actionBarRows },
+	{
+		title: "System panels",
+		rows: clientRows.filter((row) => row.group === "System panels"),
+	},
 	{
 		title: "Chat",
 		rows: clientRows.filter((row) => row.group === "Chat"),

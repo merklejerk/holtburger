@@ -217,6 +217,8 @@
 		createDefaultClientUserSettings,
 	} from "../../client/client-settings-defaults";
 
+	/** Mounted production panel owner for keyboard routing diagnostics. */
+	let worldView = $state<ClientWorldView | null>(null);
 	let warningVitals = $state<readonly ClientVital[]>([
 		{ kind: "health", current: 1_555, maximum: 12_555 },
 		{ kind: "stamina", current: 210, maximum: 245 },
@@ -1140,6 +1142,8 @@
 		readonly probeOverlayTheme: () => ReturnType<typeof probeOverlayTheme>;
 		/** Verify accepted Settings changes, shortcut presentation, and feature dispatch. */
 		readonly probeBindings: typeof probeBindings;
+		/** Route real browser presses to the production main-panel owner. */
+		readonly bindSystemPanelKeys: () => () => void;
 		/** Accepted settings seam for focused browser remapping scenarios. */
 		readonly bindingSettings: {
 			read: () => ClientKeyboardConfiguration;
@@ -4919,6 +4923,17 @@
 				}),
 			probeOverlayTheme: () => probeOverlayTheme(partyProbeContext),
 			probeBindings,
+			bindSystemPanelKeys: () => {
+				hudMode = "runtime";
+				keyboard.returnToGame();
+				return keyboard.bindGame({
+					keydown: (event) => {
+						worldView?.handleSystemPanelKeydown(event);
+					},
+					keyup: () => {},
+					cancel: () => {},
+				});
+			},
 			bindingSettings: { read: () => userSettings.input, replace: changeInput },
 			probeSelectedActions: () => probeSelectedActions(partyProbeContext),
 			probeContractMap: () =>
@@ -5156,6 +5171,7 @@
 
 {#if !previewCharacters}
 	<ClientWorldView
+		bind:this={worldView}
 		{emotesEnabled}
 		nearby={nearbyOwner}
 		onSelectNearbyEntity={(guid) => selection.selectKnownEntity(guid)}

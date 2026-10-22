@@ -51,6 +51,31 @@ export const INPUT_DEFAULTS = {
 	},
 	/** Contextual client and chat commands. */
 	client: {
+		/** Toggle the inventory system panel. */
+		toggleInventory: [
+			{ key: "b", shift: false, ctrl: false, alt: false, meta: false },
+		],
+		/** Toggle the character system panel. */
+		toggleCharacter: [
+			{ key: "f", shift: false, ctrl: false, alt: false, meta: false },
+		],
+		/** Toggle the social system panel. */
+		toggleSocial: [
+			{ key: "o", shift: false, ctrl: false, alt: false, meta: false },
+		],
+		/** Toggle the world system panel. */
+		toggleWorld: [
+			{ key: "m", shift: false, ctrl: false, alt: false, meta: false },
+		],
+		/** Toggle the journal system panel. */
+		toggleJournal: [
+			{ key: "j", shift: false, ctrl: false, alt: false, meta: false },
+		],
+		/** Toggle the settings system panel. */
+		toggleSettings: [
+			{ key: "F10", shift: false, ctrl: false, alt: false, meta: false },
+		],
+
 		/** Select the authoritative local player identity. */
 		selectSelf: [{ key: "x", ctrl: false, alt: false, meta: false }],
 		/** Stable forward creature traversal. */

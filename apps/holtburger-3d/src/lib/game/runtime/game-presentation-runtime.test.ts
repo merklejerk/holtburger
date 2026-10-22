@@ -817,10 +817,10 @@ describe("GamePresentationRuntime view and interest control", () => {
 
 		const diagnostics = runtime.getAuthoredDynamicRuntimeDiagnostics();
 		expect(diagnostics.behavior.outcomeCounts).toEqual({ executed: 1 });
-		expect(diagnostics.worldScaleBehavior.outcomeCounts).toEqual({});
+		expect(diagnostics.worldOwnedBehavior.outcomeCounts).toEqual({});
 		expect(diagnostics.effects.appliedCommandCount).toBe(1);
 		expect(diagnostics.physicsScripts.activeOwnerCount).toBe(1);
-		expect(diagnostics.worldScalePhysicsScripts.activeOwnerCount).toBe(0);
+		expect(diagnostics.worldOwnedPhysicsScripts.activeOwnerCount).toBe(0);
 		await runtime.destroy();
 	});
 
@@ -1299,7 +1299,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		]);
 		await vi.waitFor(() =>
 			expect(
-				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldOwnedPhysicsScripts
 					.activeOwnerCount,
 			).toBe(1),
 		);
@@ -1308,7 +1308,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		runtime.render(0);
 
 		expect(
-			runtime.getAuthoredDynamicRuntimeDiagnostics().worldScaleBehavior
+			runtime.getAuthoredDynamicRuntimeDiagnostics().worldOwnedBehavior
 				.outcomeCounts,
 		).toEqual({ "owned-by-world": 1 });
 		await runtime.destroy();
@@ -1361,7 +1361,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await vi.waitFor(() => expect(loadScript).toHaveBeenCalledTimes(1));
 		await vi.waitFor(() =>
 			expect(
-				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldOwnedPhysicsScripts
 					.activeScriptCount,
 			).toBe(1),
 		);
@@ -1370,7 +1370,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(
 			runtime
 				.getAuthoredDynamicRuntimeDiagnostics()
-				.worldScaleBehavior.observations.map(
+				.worldOwnedBehavior.observations.map(
 					(observation) => observation.provenance.assetId,
 				),
 		).toEqual([hiddenScriptId]);
@@ -1383,7 +1383,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await vi.waitFor(() => expect(loadScript).toHaveBeenCalledTimes(2));
 		await vi.waitFor(() =>
 			expect(
-				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldOwnedPhysicsScripts
 					.pendingActivationCount,
 			).toBe(1),
 		);
@@ -1391,7 +1391,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(
 			runtime
 				.getAuthoredDynamicRuntimeDiagnostics()
-				.worldScaleBehavior.observations.map(
+				.worldOwnedBehavior.observations.map(
 					(observation) => observation.provenance.assetId,
 				),
 		).toEqual([hiddenScriptId, unhideScriptId]);
@@ -1440,14 +1440,14 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		});
 		await vi.waitFor(() =>
 			expect(
-				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldOwnedPhysicsScripts
 					.pendingActivationCount,
 			).toBe(0),
 		);
 		setTestCamera(runtime, SPAWN_TEST_CAMERA);
 		runtime.render(0);
 		expect(
-			runtime.getAuthoredDynamicRuntimeDiagnostics().worldScaleBehavior
+			runtime.getAuthoredDynamicRuntimeDiagnostics().worldOwnedBehavior
 				.observations,
 		).toEqual([]);
 		await runtime.destroy();
@@ -1500,7 +1500,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			]);
 			await vi.waitFor(() => expect(loadScript).toHaveBeenCalledTimes(1));
 			expect(
-				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldOwnedPhysicsScripts
 					.activeOwnerCount,
 			).toBe(0);
 			if (outcome === "clear") runtime.clearDynamicEntityCues();
@@ -1511,7 +1511,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				await vi.waitFor(() =>
 					expect(
 						runtime.getAuthoredDynamicRuntimeDiagnostics()
-							.worldScalePhysicsScripts.activeOwnerCount,
+							.worldOwnedPhysicsScripts.activeOwnerCount,
 					).toBe(1),
 				);
 				await runtime.replaceDynamicEntitySnapshot([]);
@@ -1520,7 +1520,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				await vi.waitFor(() =>
 					expect(
 						runtime.getAuthoredDynamicRuntimeDiagnostics()
-							.worldScalePhysicsScripts.activeOwnerCount,
+							.worldOwnedPhysicsScripts.activeOwnerCount,
 					).toBe(1),
 				);
 				expect(loadTable).toHaveBeenCalledTimes(1);
@@ -1528,7 +1528,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			} else {
 				expect(
 					runtime.getAuthoredDynamicRuntimeDiagnostics()
-						.worldScalePhysicsScripts.activeOwnerCount,
+						.worldOwnedPhysicsScripts.activeOwnerCount,
 				).toBe(0);
 			}
 			await runtime.destroy();
@@ -1603,7 +1603,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			expect(requestedScripts).toEqual([firstScriptId, secondScriptId]),
 		);
 		expect(
-			runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+			runtime.getAuthoredDynamicRuntimeDiagnostics().worldOwnedPhysicsScripts
 				.activeOwnerCount,
 		).toBe(0);
 		firstScript.resolve(
@@ -1617,7 +1617,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 
 		await vi.waitFor(() =>
 			expect(
-				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldOwnedPhysicsScripts
 					.pendingActivationCount,
 			).toBe(1),
 		);
@@ -1626,7 +1626,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(
 			runtime
 				.getAuthoredDynamicRuntimeDiagnostics()
-				.worldScaleBehavior.observations.map(
+				.worldOwnedBehavior.observations.map(
 					(observation) => observation.provenance.assetId,
 				),
 		).toEqual([firstScriptId, secondScriptId]);
@@ -1687,7 +1687,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		delayedScript.resolve({ id: scriptId, lengthSeconds: 0, records: [] });
 		await Promise.resolve();
 		expect(
-			runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+			runtime.getAuthoredDynamicRuntimeDiagnostics().worldOwnedPhysicsScripts
 				.activeOwnerCount,
 		).toBe(0);
 
@@ -1954,14 +1954,14 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			});
 			await vi.waitFor(() => expect(emitterRequested).toBe(true));
 			expect(
-				runtime.getAuthoredDynamicRuntimeDiagnostics().worldScalePhysicsScripts
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldOwnedPhysicsScripts
 					.activeOwnerCount,
 			).toBe(0);
 			delayedEmitter.resolve(particleEmitterInfo(emitterId, meshId));
 			await vi.waitFor(() =>
 				expect(
 					runtime.getAuthoredDynamicRuntimeDiagnostics()
-						.worldScalePhysicsScripts.activeOwnerCount,
+						.worldOwnedPhysicsScripts.activeOwnerCount,
 				).toBe(1),
 			);
 			setTestCamera(runtime, SPAWN_TEST_CAMERA);
@@ -2041,12 +2041,12 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		runtime.render(0);
 
 		const diagnostics = runtime.getAuthoredDynamicRuntimeDiagnostics();
-		expect(diagnostics.worldScaleBehavior.outcomeCounts).toEqual({
+		expect(diagnostics.worldOwnedBehavior.outcomeCounts).toEqual({
 			"owned-by-world": 1,
 		});
 		expect(diagnostics.behavior.outcomeCounts).toEqual({});
 		expect(diagnostics.effects.appliedCommandCount).toBe(0);
-		expect(diagnostics.worldScalePhysicsScripts.activeOwnerCount).toBe(1);
+		expect(diagnostics.worldOwnedPhysicsScripts.activeOwnerCount).toBe(1);
 		expect(diagnostics.physicsScripts.activeOwnerCount).toBe(0);
 		await runtime.destroy();
 	});

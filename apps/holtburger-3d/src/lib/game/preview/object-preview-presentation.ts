@@ -126,8 +126,9 @@ export class ObjectPreviewPresentation {
 				stop: (target, emitterId) =>
 					particleWiring.system?.stop(target, emitterId),
 			},
-			scale: {
-				applyScale: (target, values, mode) => {
+			objectState: {
+				applyObjectState: (target, values, mode) => {
+					if (values.kind !== "scale") return "no-consumer";
 					this.#effects.applyScale(target, values);
 					return mode === "initial-state" ? "folded-initial-state" : "executed";
 				},

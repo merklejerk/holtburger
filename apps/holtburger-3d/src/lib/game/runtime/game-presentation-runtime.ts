@@ -775,8 +775,8 @@ export class GamePresentationRuntime {
 	readonly #effects: EffectSystem;
 	/** Routes animation plus browser-scale static and sky script consequences. */
 	readonly #behaviorRouter: BehaviorEventRouter;
-	/** Routes spawned-client script consequences while consuming scale as world-owned. */
-	readonly #worldScaleBehaviorRouter: BehaviorEventRouter;
+	/** Routes spawned-client script consequences while consuming object state as world-owned. */
+	readonly #worldOwnedBehaviorRouter: BehaviorEventRouter;
 	readonly #physicsScripts: PhysicsScriptRepository;
 	readonly #physicsScriptTables: PhysicsScriptTableRepository;
 	readonly #particleEmitters: ParticleEmitterRepository;
@@ -815,8 +815,8 @@ export class GamePresentationRuntime {
 	readonly #physicsScriptSystem: PhysicsScriptSystem<
 		DynamicOwnerId | SkyOwnerId
 	>;
-	/** Browser presentation playback for spawned entities whose scale comes from world projection. */
-	readonly #worldScalePhysicsScriptSystem: PhysicsScriptSystem<DynamicOwnerId>;
+	/** Browser effects playback for spawned entities whose object state comes from world projection. */
+	readonly #worldOwnedPhysicsScriptSystem: PhysicsScriptSystem<DynamicOwnerId>;
 	readonly #audio: AudioSystem;
 	readonly #ambient: AmbientSystem;
 	/** Bounded owner for live ambient-weight and voice-placement control work. */
@@ -1462,7 +1462,7 @@ export class GamePresentationRuntime {
 		const scriptWiring: {
 			system?: PhysicsScriptSystem<DynamicOwnerId | SkyOwnerId>;
 		} = {};
-		const worldScaleScriptWiring: {
+		const worldOwnedScriptWiring: {
 			system?: PhysicsScriptSystem<DynamicOwnerId>;
 		} = {};
 		const behaviorAudio = this.#createBehaviorAudioCommands();
@@ -1473,7 +1473,7 @@ export class GamePresentationRuntime {
 			isLive: (target) =>
 				this.#animation.holds(target) ||
 				(scriptWiring.system?.holds(target) ?? false) ||
-				(worldScaleScriptWiring.system?.holds(target) ?? false),
+				(worldOwnedScriptWiring.system?.holds(target) ?? false),
 		};
 		this.#behaviorRouter = new BehaviorEventRouter(
 			{
@@ -1483,8 +1483,9 @@ export class GamePresentationRuntime {
 				// until Phase 7 activates them. Reporting unprepared keeps the outcome honest
 				// instead of pretending an emitter was created.
 				particles: behaviorParticles,
-				scale: {
-					applyScale: (target, values, mode) => {
+				objectState: {
+					applyObjectState: (target, values, mode) => {
+						if (values.kind !== "scale") return "no-consumer";
 						this.#effects.applyScale(target, values);
 						return mode === "initial-state"
 							? "folded-initial-state"
@@ -1507,20 +1508,20 @@ export class GamePresentationRuntime {
 			},
 			SHARED_FRONTEND_TUNING.diagnostics.maximumRecentEffectObservations,
 		);
-		this.#worldScaleBehaviorRouter = new BehaviorEventRouter(
+		this.#worldOwnedBehaviorRouter = new BehaviorEventRouter(
 			{
 				audio: behaviorAudio,
 				effects: this.#effects,
 				particles: behaviorParticles,
-				// Spawned entities receive their authoritative absolute scale in world projection.
-				// Browser playback records the understood hook but cannot mutate another scalar.
-				scale: { applyScale: () => "owned-by-world" },
+				// Spawned entities receive scale, visibility, and emitted-light state in world projection.
+				// Browser playback records each understood state hook without mutating host-owned facts.
+				objectState: { applyObjectState: () => "owned-by-world" },
 				scheduler: {
 					scheduleActivation: (target, activation) => {
-						const system = worldScaleScriptWiring.system;
+						const system = worldOwnedScriptWiring.system;
 						if (!system)
 							throw new Error(
-								"World-scale script activation reached an unwired scheduler.",
+								"World-owned script activation reached an unwired scheduler.",
 							);
 						system.scheduleActivation(target, activation);
 					},
@@ -1535,12 +1536,12 @@ export class GamePresentationRuntime {
 			Math.random,
 		);
 		scriptWiring.system = this.#physicsScriptSystem;
-		this.#worldScalePhysicsScriptSystem =
+		this.#worldOwnedPhysicsScriptSystem =
 			new PhysicsScriptSystem<DynamicOwnerId>(
-				this.#worldScaleBehaviorRouter,
+				this.#worldOwnedBehaviorRouter,
 				Math.random,
 			);
-		worldScaleScriptWiring.system = this.#worldScalePhysicsScriptSystem;
+		worldOwnedScriptWiring.system = this.#worldOwnedPhysicsScriptSystem;
 		this.#skyScripts = new SkyScriptSystem({
 			acquireClosure: (scriptId) =>
 				this.#physicsScripts.acquireClosure(scriptId),
@@ -1803,7 +1804,7 @@ export class GamePresentationRuntime {
 			});
 	}
 
-	/** Queue one server-authored PlayScript cue for the exact dynamic entity generation. */
+	/** Queue one server or locally triggered PlayScript cue for the exact entity generation. */
 	playDynamicEntityScriptCue(cue: DynamicEntityScriptCue): void {
 		if (this.#destroyed)
 			throw new Error(
@@ -2022,7 +2023,7 @@ export class GamePresentationRuntime {
 		// 10,743 CreateParticle hooks at time zero, so starting at readiness preserves the common
 		// effect while accepting host/browser activation skew.
 		if (
-			!this.#worldScalePhysicsScriptSystem.appendRoot(
+			!this.#worldOwnedPhysicsScriptSystem.appendRoot(
 				current.ownerId,
 				{
 					generation: current.behaviorGeneration,
@@ -3638,11 +3639,11 @@ export class GamePresentationRuntime {
 			ambientBakes: this.#ambientBakes.getDiagnostics(),
 			dynamics: this.#dynamics.getDiagnostics(),
 			behavior: this.#behaviorRouter.getDiagnostics(),
-			worldScaleBehavior: this.#worldScaleBehaviorRouter.getDiagnostics(),
+			worldOwnedBehavior: this.#worldOwnedBehaviorRouter.getDiagnostics(),
 			particles: this.#particles.getDiagnostics(),
 			physicsScripts: this.#physicsScriptSystem.getDiagnostics(),
-			worldScalePhysicsScripts:
-				this.#worldScalePhysicsScriptSystem.getDiagnostics(),
+			worldOwnedPhysicsScripts:
+				this.#worldOwnedPhysicsScriptSystem.getDiagnostics(),
 			skyScripts: { activeCount: this.#skyScripts.activeCount },
 			effects: this.#effects.getDiagnostics(),
 			presentationCadence: this.#animationPresentation.getDiagnostics(),
@@ -4079,7 +4080,7 @@ export class GamePresentationRuntime {
 		// already reached this frame's behavior step, exactly as it did when animation drove it.
 		this.#effects.advance(timeSeconds);
 		this.#physicsScriptSystem.advance(timeSeconds);
-		this.#worldScalePhysicsScriptSystem.advance(timeSeconds);
+		this.#worldOwnedPhysicsScriptSystem.advance(timeSeconds);
 		tick?.mark("scriptAdvance");
 		// Advance against the same previous-frame owner selection used below for draw routing. Sky
 		// owners remain unconditionally visible through #particleRenderOwner.
@@ -4221,7 +4222,7 @@ export class GamePresentationRuntime {
 		this.#animationPresentation.clear();
 		this.#animation.destroy();
 		this.#physicsScriptSystem.destroy();
-		this.#worldScalePhysicsScriptSystem.destroy();
+		this.#worldOwnedPhysicsScriptSystem.destroy();
 		this.#audio.destroy();
 		this.#skyScripts.destroy();
 		// Dynamic residents own emitter and sound-table handles; release them before their repositories.
@@ -4513,7 +4514,7 @@ export class GamePresentationRuntime {
 	async #prepareDynamicOwner(
 		ownerId: DynamicOwnerId,
 		sources: readonly PlacedDynamicPresentationSource[],
-		scaleAuthority: "browser" | "world",
+		objectStateAuthority: "browser" | "world",
 	) {
 		if (this.#destroyed)
 			throw new Error("Cannot prepare dynamics after runtime shutdown.");
@@ -4550,8 +4551,8 @@ export class GamePresentationRuntime {
 			throw cause;
 		}
 		const scriptSystem =
-			scaleAuthority === "world"
-				? this.#worldScalePhysicsScriptSystem
+			objectStateAuthority === "world"
+				? this.#worldOwnedPhysicsScriptSystem
 				: this.#physicsScriptSystem;
 		let scriptStage: ReturnType<
 			PhysicsScriptSystem<DynamicOwnerId>["stageOwner"]
@@ -4726,7 +4727,7 @@ export class GamePresentationRuntime {
 		this.#releaseDynamicCueAssets(ownerId);
 		this.#animation.removeOwner(ownerId);
 		this.#physicsScriptSystem.removeOwner(ownerId);
-		this.#worldScalePhysicsScriptSystem.removeOwner(ownerId);
+		this.#worldOwnedPhysicsScriptSystem.removeOwner(ownerId);
 		this.#dynamics.removeOwner(ownerId);
 	}
 

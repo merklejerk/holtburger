@@ -330,7 +330,7 @@ impl ClientRuntime {
         self.advance_pack_exchange(now).await?;
         let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);
         if active_world {
-            self.advance_dynamic_scale(self.dynamic_scale_time())?;
+            self.advance_dynamic_scripts(self.dynamic_script_time())?;
             self.poll_selection_envelopes();
         }
         if active_world {
@@ -443,6 +443,9 @@ impl ClientRuntime {
                     advanced_runtime_bodies.push(body);
                 }
                 self.handle_runtime_world_event(&event);
+            }
+            for cue in simulation_tick.collision_script_cues {
+                self.dispatch_script_cue(cue)?;
             }
             advanced_runtime_bodies.sort_by_key(|body| body.body_id);
             if !advanced_runtime_bodies.is_empty() {

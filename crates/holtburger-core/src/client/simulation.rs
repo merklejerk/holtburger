@@ -41,6 +41,8 @@ const ACTIVE_SOLVE_RADIUS_M: f32 = 96.0;
 pub(super) struct ClientSimulationTick {
     /// World mutations emitted by ordinary physical and pose-only advancement.
     pub events: Vec<WorldEvent>,
+    /// Committed local collision scripts consumed by core's common entity-cue dispatcher.
+    pub collision_script_cues: Vec<crate::ClientDynamicScriptCue>,
     /// Explicit placement consequences consumed by dynamic publication.
     pub body_motions: HashMap<Guid, ClientBodyMotion>,
     /// Jump packet facts present only after the local physical launch committed.
@@ -66,6 +68,8 @@ pub(super) enum ClientBodyMotion {
 struct PhysicalSimulationTick {
     /// World changes emitted after scene publication.
     events: Vec<WorldEvent>,
+    /// Generation-bound default scripts resolved from the scene's committed callback starts.
+    collision_script_cues: Vec<crate::ClientDynamicScriptCue>,
     /// Complete per-entity placement consequences.
     body_motions: HashMap<Guid, ClientBodyMotion>,
     /// Whether the local pending launch was accepted.
@@ -129,6 +133,7 @@ pub(super) fn tick_with_precise_jump(
     if dt.is_zero() {
         return Ok(ClientSimulationTick {
             events: Vec::new(),
+            collision_script_cues: Vec::new(),
             body_motions: HashMap::new(),
             committed_jump: None,
             character_motion_feedback: None,
@@ -189,6 +194,7 @@ pub(super) fn tick_with_precise_jump(
     });
     let mut committed_jump = None;
     let mut body_motions = HashMap::new();
+    let mut collision_script_cues = Vec::new();
     let mut character_motion_feedback = pending_jump
         .as_ref()
         .and_then(|result| result.as_ref().err().copied());
@@ -217,6 +223,7 @@ pub(super) fn tick_with_precise_jump(
             prepared_jump.map(|jump| jump.launch),
         )?;
         events.extend(physical_tick.events);
+        collision_script_cues = physical_tick.collision_script_cues;
         body_motions = physical_tick.body_motions;
         let jump_committed = physical_tick.jump_committed;
         if let Some(Ok(jump)) = pending_jump {
@@ -256,6 +263,7 @@ pub(super) fn tick_with_precise_jump(
     ));
     Ok(ClientSimulationTick {
         events,
+        collision_script_cues,
         body_motions,
         committed_jump,
         character_motion_feedback,
@@ -618,14 +626,15 @@ fn tick_physical_entities(
     let mut events = Vec::new();
     let mut jump_committed = false;
     let mut body_motions = HashMap::new();
-    // Reporting remains a scene-owned collision lifecycle. The client has no delivery consumer
-    // for report edges. Coverage is orthogonal: preserve accepted prefixes and the existing
-    // client locomotion policy; residency refresh retries the body when coverage becomes available.
+    // Reporting remains a scene-owned collision lifecycle. Coverage is orthogonal: preserve
+    // accepted prefixes and client locomotion policy; residency refresh retries missing owners.
     let holtburger_world::DynamicEntityCollectionTick {
         outcomes,
-        collision_reports: _,
+        collision_reports,
         coverage_rejections: _,
     } = collection;
+    let collision_script_cues =
+        super::entity_cues::collision_script_cues(world, &collision_reports)?;
     for outcome in outcomes {
         let guid = outcome
             .body_id()
@@ -688,6 +697,7 @@ fn tick_physical_entities(
     }
     Ok(PhysicalSimulationTick {
         events,
+        collision_script_cues,
         jump_committed,
         body_motions,
     })

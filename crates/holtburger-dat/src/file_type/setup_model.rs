@@ -75,6 +75,10 @@ pub enum AnimationHookPayload {
     Raw(Vec<u8>),
     Attack(AttackConeHookPayload),
     Ethereal(EtherealHookPayload),
+    /// NoDrawHook toggles the physics object's rendering flag (acclient.c:328629).
+    NoDraw(bool),
+    /// SetLightHook toggles the physics object's emitted lights (acclient.c:328898).
+    SetLight(bool),
     ReplaceObject(ReplaceObjectHookPayload),
     SetOmega(SetOmegaHookPayload),
     TransparentPart(TransparentPartHookPayload),
@@ -280,8 +284,8 @@ impl AnimationHook {
             15 => AnimationHookPayload::StopParticle(ParticleEmitterHookPayload {
                 emitter_id: u32::read_le(reader)?,
             }),
-            16 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // NoDraw
-            17 => AnimationHookPayload::NoPayload,                           // DefaultScript
+            16 => AnimationHookPayload::NoDraw(i32::read_le(reader)? != 0),
+            17 => AnimationHookPayload::NoPayload, // DefaultScript
             18 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // DefaultScriptPart
             19 => AnimationHookPayload::CallPes(read_call_pes_payload(reader)?),
             20 => AnimationHookPayload::Raw(read_exact_payload(reader, 12)?), // Transparent
@@ -296,7 +300,7 @@ impl AnimationHook {
                 u_speed: f32::read_le(reader)?,
                 v_speed: f32::read_le(reader)?,
             }),
-            25 => AnimationHookPayload::Raw(read_exact_payload(reader, 4)?), // SetLight
+            25 => AnimationHookPayload::SetLight(i32::read_le(reader)? != 0),
             26 => AnimationHookPayload::Raw(read_exact_payload(reader, 40)?), // CreateBlockingParticle
             _ => {
                 return Err(binrw::Error::Custom {
@@ -348,6 +352,7 @@ impl AnimationHookPayload {
                 writer.write_all(data)?;
                 Ok(())
             }
+            Self::NoDraw(enabled) | Self::SetLight(enabled) => i32::from(*enabled).write_le(writer),
             Self::Attack(payload) => {
                 payload.part_index.write_le(writer)?;
                 payload.left_x.write_le(writer)?;
@@ -1139,6 +1144,25 @@ mod tests {
             hook.payload,
             AnimationHookPayload::Ethereal(EtherealHookPayload { ethereal: true })
         );
+    }
+
+    #[test]
+    fn presentation_flag_hooks_round_trip_typed_values() {
+        for enabled in [false, true] {
+            for (hook_type, payload) in [
+                (16u32, AnimationHookPayload::NoDraw(enabled)),
+                (25u32, AnimationHookPayload::SetLight(enabled)),
+            ] {
+                let bytes = [
+                    hook_type.to_le_bytes(),
+                    (-1i32).to_le_bytes(),
+                    i32::from(enabled).to_le_bytes(),
+                ]
+                .concat();
+                let hook = round_trip_hook(bytes, "presentation flag hook should parse");
+                assert_eq!(hook.payload, payload);
+            }
+        }
     }
 
     #[test]

@@ -40,8 +40,8 @@ function build(options: { roll?: () => number; liveTargets?: boolean } = {}) {
 				applyTransparentPart: vi.fn(),
 				applyTextureVelocity: vi.fn(),
 			},
-			scale: {
-				applyScale: (_target, _values, mode) =>
+			objectState: {
+				applyObjectState: (_target, _values, mode) =>
 					mode === "initial-state" ? "folded-initial-state" : "executed",
 			},
 			scheduler: {

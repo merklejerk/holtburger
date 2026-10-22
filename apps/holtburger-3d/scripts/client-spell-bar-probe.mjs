@@ -31,6 +31,24 @@ export async function probeSpellBar(
 		await mouse("mousePressed", p, 1);
 		await mouse("mouseReleased", p, 0);
 	};
+	const openSpellbook = async () => {
+		const closed = await read(`(() => {
+			const panel = document.querySelector('[aria-label="Character sheet"]');
+			return !panel || panel.closest('[hidden]') !== null;
+		})()`);
+		if (closed)
+			await click('nav[aria-label="Game shortcuts"] [aria-label="Character"]');
+		await read(`new Promise(resolve => requestAnimationFrame(resolve))`);
+		await click('[role="tab"][id$="-spells-tab"]');
+		assert.equal(
+			await read(
+				`document.querySelector('[aria-label="Character sheet"]').closest('[hidden]') === null`,
+			),
+			true,
+			"Opening the spellbook reveals its character window",
+		);
+	};
+
 	const key = async (key, code, modifiers = 0, autoRepeat = false) => {
 		await client.send("Input.dispatchKeyEvent", {
 			type: "keyDown",
@@ -62,10 +80,7 @@ export async function probeSpellBar(
 			`${api}.inventoryDragCommands().filter(c=>c.command==='cast_client_spell')`,
 		);
 	await read(`${probe}.begin()`);
-	// Spell browser probe leaves its panel mounted; reopen if necessary.
-	await read(
-		`(() => { if (!document.querySelector('[aria-label="Known spells"]')) document.querySelector('[aria-label="Spells"]').click(); })()`,
-	);
+	await openSpellbook();
 	await read(`new Promise((resolve,reject)=>{ const start=performance.now(); const timer=setInterval(()=>{
   if(document.querySelector('[data-spell-drag-source="1"] img')) {clearInterval(timer);resolve(true);}
   else if(performance.now()-start>5000){clearInterval(timer);reject(new Error('Spell sources did not load'));}
@@ -139,15 +154,21 @@ export async function probeSpellBar(
 	assert.equal((await casts()).length, initialCasts, "Modal owns digits");
 	await read(`${probe}.modal(false)`);
 	assert.equal(await binding(1), 1, "Modal interruption preserves source");
-	// Removing a panel-origin element while pressed cannot populate a cell.
+	// Hiding the character window while pressed cannot populate a cell.
 	const source = await point('[data-spell-drag-source="3"]');
 	const destination = await point(cell(3));
 	await mouse("mousePressed", source, 1);
 	await mouse("mouseMoved", destination, 1);
-	await read(`document.querySelector('[aria-label="Close Spells"]').click()`);
+	await read(
+		`document.querySelector('[aria-label="Close Character"]').click()`,
+	);
 	await mouse("mouseReleased", destination, 0);
-	assert.equal(await binding(3), null, "Source removal cancels transfer");
-	await click('[aria-label="Spells"]');
+	assert.equal(
+		await binding(3),
+		null,
+		"Hiding the source window cancels transfer",
+	);
+	await openSpellbook();
 	await read(`${probe}.select(7)`);
 	await key("2", "Digit2");
 	assert.equal((await casts()).length, initialCasts + 1);
@@ -181,12 +202,18 @@ export async function probeSpellBar(
 		0,
 		"Focused action bar consumes shifted digit",
 	);
-	await read(
-		`document.querySelector('[aria-label="Search spell names"]').focus()`,
+	assert.equal(
+		await read(`(() => {
+		const input = document.querySelector('[aria-label="Search spell names"]');
+		input.focus();
+		return document.activeElement === input;
+	})()`),
+		true,
+		"Spell search must accept editor focus",
 	);
 	await key("2", "Digit2");
 	assert.equal((await casts()).length, initialCasts + 1, "Editor owns digits");
-	await click('[aria-label="Close Spells"]');
+	await click('[aria-label="Close Character"]');
 	await read(`${probe}.mode('peace')`);
 	assert.equal(
 		await read(`document.querySelector('[data-spell-bar-surface]') === null`),
@@ -550,7 +577,10 @@ export async function probeSpellBar(
 		document.documentElement.style.removeProperty('--ui-spell-scrollbar-thumb-opacity');
 	})()`);
 	await settled();
-	await click('[aria-label="Spells"]');
+	await openSpellbook();
+	// Keep the overflow target exposed beside the wider character window.
+	await drag('[aria-label="Character window controls"]', { x: 250, y: 100 });
+	await settled();
 	await drag('[data-spell-drag-source="1"]', cell(10));
 	assert.equal(await binding(10), 1);
 	assert.equal(
@@ -582,7 +612,7 @@ export async function probeSpellBar(
 			`document.querySelector('.spell-cells-viewport').scrollLeft > 0`,
 		),
 	);
-	await click('[aria-label="Close Spells"]');
+	await click('[aria-label="Close Character"]');
 	await click('[aria-label="Unlock UI layout"]');
 	await toggleShape();
 	const overflowFolded = await read(`(() => {

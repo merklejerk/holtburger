@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { probeSpellBar } from "./client-spell-bar-probe.mjs";
 import { probeClientWaypoint } from "./client-waypoint-probe.mjs";
 import { probePreciseJumpCamera } from "./client-precise-camera-probe.mjs";
 import { probeBindingControls } from "./client-binding-controls-probe.mjs";
@@ -309,6 +310,8 @@ try {
 			...result.clientInventory,
 			browserErrors,
 		};
+	} else if (options.clientSpells) {
+		report = { suite: "client-spells", ...result.clientSpells, browserErrors };
 	} else if (options.clientNearby) {
 		report = { suite: "client-nearby", ...result.clientNearby, browserErrors };
 	} else if (options.clientHud) {
@@ -582,6 +585,7 @@ function parseArgs(args) {
 		clientHousing: false,
 		clientHud: false,
 		clientNearby: false,
+		clientSpells: false,
 		clientInventory: false,
 		clientLoadouts: false,
 		clientPreciseJump: false,
@@ -776,6 +780,10 @@ function parseArgs(args) {
 			case "--client-inventory":
 				parsed.clientHud = true;
 				parsed.clientInventory = true;
+				break;
+			case "--client-spells":
+				parsed.clientHud = true;
+				parsed.clientSpells = true;
 				break;
 			case "--client-nearby":
 				parsed.clientHud = true;
@@ -1843,6 +1851,7 @@ function printHelp() {
 
 Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
+  --client-spells       Exercise the character spellbook tab and spell-bar interactions.
   --brief               Print summary evidence (the default for --client-hud).
   --client-contracts    Exercise Journal and outdoor contract map markers, tooltips, timers, and removal.
   --client-book         Exercise the book reader through the client HUD fixture.
@@ -4563,6 +4572,24 @@ async function runClientHudHarness({ viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
+		if (options.clientSpells) {
+			return {
+				clientSpells: {
+					spellbook: await evaluate(
+						client,
+						"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeSpells",
+						[],
+					),
+					spellBar: await probeSpellBar(
+						client,
+						evaluateExpression,
+						options.screenshotPath,
+					),
+				},
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
 		if (options.clientNearby)
 			return {
 				clientNearby: await evaluate(

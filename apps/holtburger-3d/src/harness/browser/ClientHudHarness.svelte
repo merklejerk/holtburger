@@ -362,11 +362,9 @@
 		caster: (spell: number | null, wielded: boolean) => {
 			const read = interactionLifecycle.entities.read();
 			if (read.kind !== "current") throw new Error("Current entities required");
-			const source =
-				savedCaster ??
-				inventoryEquipment(read.level).rows[0]?.item ??
-				read.level.entities.get(95);
-			if (source?.description.kind !== "known")
+			// Own this fixture rather than depending on an earlier inventory probe's equipment.
+			const source = savedCaster ?? entityFacts(95);
+			if (source.description.kind !== "known")
 				throw new Error("Caster fixture required");
 			savedCaster = source;
 			emitInteractionEvent("client-entity-facts-changed", {

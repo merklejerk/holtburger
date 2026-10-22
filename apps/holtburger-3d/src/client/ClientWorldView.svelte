@@ -1633,6 +1633,7 @@
 						visible={nearbyOpen}
 						selectedGuid={selectedEntityGuid}
 						onSelectEntity={onSelectNearbyEntity}
+						{onExamineEntity}
 						{onSetWaypoint}
 					/>
 				</ClientHudWindow>

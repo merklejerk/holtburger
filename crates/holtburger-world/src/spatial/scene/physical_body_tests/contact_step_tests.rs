@@ -1228,17 +1228,19 @@ fn driven_corner_crowd_respects_hard_walls_and_releases_the_player() {
         for id in ids {
             let body = scene.body(id).unwrap();
             assert!(
-                body.pose.coords.x <= corner.x - radius + FLY_CONFIG.separation_epsilon,
+                body.pose.coords.x
+                    <= corner.x - radius + crate::spatial::bsp_query::CONTACT_EPSILON,
                 "crossed x wall: {:?}",
                 body.pose.coords
             );
             assert!(
-                body.pose.coords.y <= corner.y - radius + FLY_CONFIG.separation_epsilon,
+                body.pose.coords.y
+                    <= corner.y - radius + crate::spatial::bsp_query::CONTACT_EPSILON,
                 "crossed y wall: {:?}",
                 body.pose.coords
             );
             assert_eq!(body.retained.velocity.z, 0.0);
-            assert!((body.pose.coords.z - radius).abs() <= GROUNDED_CONFIG.separation_epsilon);
+            assert!((body.pose.coords.z - radius).abs() <= CONTACT_EPSILON);
         }
     }
     let escaped = scene.body(player).unwrap().pose.coords;
@@ -1565,7 +1567,7 @@ fn bsp_stairs_allow_forward_progress_with_a_mobile_body_on_the_steps() {
             }
             publish_contact_updates(&mut scene, updates);
             for body in scene.body_store.bodies.values() {
-                assert!(body.pose.coords.z >= floor_z - GROUNDED_CONFIG.separation_epsilon);
+                assert!(body.pose.coords.z >= floor_z - CONTACT_EPSILON);
             }
         }
         let position = scene.body(player).unwrap().pose.coords;
@@ -1581,7 +1583,7 @@ fn bsp_stairs_allow_forward_progress_with_a_mobile_body_on_the_steps() {
                 .map(|body| (body.pose.coords, body.retained.velocity))
         );
         assert!(
-            (position.z - floor_z - 0.6).abs() < GROUNDED_CONFIG.separation_epsilon,
+            (position.z - floor_z - 0.6).abs() < CONTACT_EPSILON,
             "player did not retain top support (mob={with_mob}): {position:?}"
         );
         if with_mob {
@@ -1943,7 +1945,7 @@ fn grounded_landing_bounces_then_settles_without_persistent_tiny_rebounds() {
         bounced |= rebound;
         assert!(
             scene.body(mover).unwrap().pose.coords.z + update.displacement.z
-                >= floor_z - GROUNDED_CONFIG.separation_epsilon
+                >= floor_z - CONTACT_EPSILON
         );
         publish_contact_updates(&mut scene, updates);
     }
@@ -2104,13 +2106,13 @@ fn ordinary_edge_protection_keeps_footing_and_tangent_motion_but_accepts_short_d
             {
                 assert!(
                     (path.primary().initial().center() - accepted_center).length()
-                        < config.separation_epsilon
+                        < CONTACT_EPSILON
                 );
                 accepted_center = path.primary().final_point().center();
             }
             assert!(
                 (accepted_center - start_center - updates[0].displacement).length()
-                    < config.separation_epsilon
+                    < CONTACT_EPSILON
             );
             if protected && height > config.step_down_height {
                 assert!(
@@ -2123,21 +2125,23 @@ fn ordinary_edge_protection_keeps_footing_and_tangent_motion_but_accepts_short_d
         }
         let final_pose = scene.body(player).unwrap().pose.coords;
         if wall {
+            // Compare the fixed collision band plus world-coordinate float roundoff.
+            let clearance_tolerance = CONTACT_EPSILON + wall_y.abs() * f32::EPSILON;
             assert!(
-                final_pose.y <= wall_y - primary.radius + config.separation_epsilon,
+                final_pose.y <= wall_y - primary.radius + clearance_tolerance,
                 "edge slide crossed hard wall: {final_pose:?}"
             );
         }
         if protected && height > config.step_down_height {
             assert!(
-                final_pose.x <= 92.5 + primary.radius + config.separation_epsilon,
+                final_pose.x <= 92.5 + primary.radius + CONTACT_EPSILON,
                 "crossed protected edge: {final_pose:?}"
             );
             assert!(
                 final_pose.y > initial.y + 0.1,
                 "lost edge tangent motion: {final_pose:?}"
             );
-            assert!((final_pose.z - initial.z).abs() < config.separation_epsilon);
+            assert!((final_pose.z - initial.z).abs() < CONTACT_EPSILON);
         } else {
             assert!(
                 final_pose.x > initial.x + 0.5,
@@ -2195,7 +2199,7 @@ fn centered_yaw_preserves_footing_without_sphere_traversal() {
         segment,
         crate::spatial::ContactMotionSegment::Rotation { .. }
     )));
-    assert!(update.displacement.length() < GROUNDED_CONFIG.separation_epsilon);
+    assert!(update.displacement.length() < CONTACT_EPSILON);
     assert_eq!(update.velocity, Vector3::zero());
     let direction = Vector3::new(1.0, 0.0, 0.0);
     assert!(
@@ -2345,11 +2349,10 @@ fn offset_rotation_preserves_root_and_checks_hard_obstacles_during_full_turns() 
             } else {
                 assert!(chords < crate::spatial::MOBILE_CONTACT_ANGULAR_CHORDS);
                 if obstruction == 1 {
-                    assert!(final_center.y + radius <= wall_y + GROUNDED_CONFIG.separation_epsilon);
+                    assert!(final_center.y + radius <= wall_y + CONTACT_EPSILON);
                 } else {
                     assert!(
-                        (final_center - target_center).length()
-                            >= 2.0 * radius - GROUNDED_CONFIG.separation_epsilon
+                        (final_center - target_center).length() >= 2.0 * radius - CONTACT_EPSILON
                     );
                 }
             }

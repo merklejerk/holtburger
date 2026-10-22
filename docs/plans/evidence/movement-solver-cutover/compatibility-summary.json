@@ -1,0 +1,1014 @@
+{
+  "date": "2026-10-22",
+  "head": "491122c7080d078ab9ae1f3e7026decf1a835795",
+  "tolerance": 0.0002,
+  "comparison": "post-cutover active solver before correction versus candidate-selected correction; no legacy movement runtime mode",
+  "baseline_recipe": "Active stairs.rs from HEAD with separation_epsilon renamed minimum_stair_rise; same canonical collision queries, retained post-cutover harness, and authored body parameters. The baseline executables were copied before changing production admission. No source mutation remains.",
+  "baseline_executables": [
+    {
+      "file": "baseline-v2-stair_compatibility_probe",
+      "sha256": "2fbb8df61ec103454e65ad244a63f09b9b8ac3a4d13bc547e4d8cf6a5c93f769"
+    },
+    {
+      "file": "baseline-audited-stair_content_census",
+      "sha256": "796fddb2a48f252531a530b2fb18c60dee4d57fae308f57d365ea6389d3a767b"
+    }
+  ],
+  "synthetic": {
+    "strata": [
+      {
+        "stratum": "unit",
+        "workload": {
+          "dimensions": {
+            "angle": [
+              0.0,
+              0.2
+            ],
+            "ceiling": [
+              false,
+              true
+            ],
+            "floor_delta": [
+              0.3,
+              0.6,
+              0.795,
+              0.9
+            ],
+            "lateral": [
+              0.0,
+              3.7
+            ],
+            "retreat": [
+              0.0,
+              0.01,
+              0.03
+            ],
+            "seam": [
+              -0.05,
+              0.0,
+              0.05
+            ],
+            "slope": [
+              0.0,
+              0.5,
+              0.8
+            ],
+            "speed": [
+              1.0,
+              2.0,
+              4.0,
+              8.0
+            ],
+            "upper": [
+              false,
+              true
+            ]
+          },
+          "label": "candidate",
+          "radius_factor": 1.0,
+          "scale": 1.0,
+          "scope": "single-tick synthetic characterization; reference is polygon selection plus final placement, not full retail trajectory",
+          "workload": "stair-joins-v2"
+        },
+        "cases": 6912,
+        "initially_unsupported": 576,
+        "reference_clear": 1264,
+        "baseline_endpoint_match": 352,
+        "corrected_endpoint_match": 1232,
+        "endpoint_match_regression": 0,
+        "changed_endpoint": 880,
+        "new_clear_endpoint_match": 880
+      },
+      {
+        "stratum": "small",
+        "workload": {
+          "dimensions": {
+            "angle": [
+              0.0,
+              0.2
+            ],
+            "ceiling": [
+              false,
+              true
+            ],
+            "floor_delta": [
+              0.3,
+              0.6,
+              0.795,
+              0.9
+            ],
+            "lateral": [
+              0.0,
+              3.7
+            ],
+            "retreat": [
+              0.0,
+              0.01,
+              0.03
+            ],
+            "seam": [
+              -0.05,
+              0.0,
+              0.05
+            ],
+            "slope": [
+              0.0,
+              0.5,
+              0.8
+            ],
+            "speed": [
+              1.0,
+              2.0,
+              4.0,
+              8.0
+            ],
+            "upper": [
+              false,
+              true
+            ]
+          },
+          "label": "candidate",
+          "radius_factor": 1.0,
+          "scale": 0.5,
+          "scope": "single-tick synthetic characterization; reference is polygon selection plus final placement, not full retail trajectory",
+          "workload": "stair-joins-v2"
+        },
+        "cases": 6912,
+        "initially_unsupported": 576,
+        "reference_clear": 1264,
+        "baseline_endpoint_match": 352,
+        "corrected_endpoint_match": 1232,
+        "endpoint_match_regression": 0,
+        "changed_endpoint": 880,
+        "new_clear_endpoint_match": 880
+      },
+      {
+        "stratum": "large",
+        "workload": {
+          "dimensions": {
+            "angle": [
+              0.0,
+              0.2
+            ],
+            "ceiling": [
+              false,
+              true
+            ],
+            "floor_delta": [
+              0.3,
+              0.6,
+              0.795,
+              0.9
+            ],
+            "lateral": [
+              0.0,
+              3.7
+            ],
+            "retreat": [
+              0.0,
+              0.01,
+              0.03
+            ],
+            "seam": [
+              -0.05,
+              0.0,
+              0.05
+            ],
+            "slope": [
+              0.0,
+              0.5,
+              0.8
+            ],
+            "speed": [
+              1.0,
+              2.0,
+              4.0,
+              8.0
+            ],
+            "upper": [
+              false,
+              true
+            ]
+          },
+          "label": "candidate",
+          "radius_factor": 1.0,
+          "scale": 1.5,
+          "scope": "single-tick synthetic characterization; reference is polygon selection plus final placement, not full retail trajectory",
+          "workload": "stair-joins-v2"
+        },
+        "cases": 6912,
+        "initially_unsupported": 576,
+        "reference_clear": 1264,
+        "baseline_endpoint_match": 352,
+        "corrected_endpoint_match": 1232,
+        "endpoint_match_regression": 0,
+        "changed_endpoint": 880,
+        "new_clear_endpoint_match": 880
+      },
+      {
+        "stratum": "narrow",
+        "workload": {
+          "dimensions": {
+            "angle": [
+              0.0,
+              0.2
+            ],
+            "ceiling": [
+              false,
+              true
+            ],
+            "floor_delta": [
+              0.3,
+              0.6,
+              0.795,
+              0.9
+            ],
+            "lateral": [
+              0.0,
+              3.7
+            ],
+            "retreat": [
+              0.0,
+              0.01,
+              0.03
+            ],
+            "seam": [
+              -0.05,
+              0.0,
+              0.05
+            ],
+            "slope": [
+              0.0,
+              0.5,
+              0.8
+            ],
+            "speed": [
+              1.0,
+              2.0,
+              4.0,
+              8.0
+            ],
+            "upper": [
+              false,
+              true
+            ]
+          },
+          "label": "candidate",
+          "radius_factor": 0.800000011920929,
+          "scale": 1.0,
+          "scope": "single-tick synthetic characterization; reference is polygon selection plus final placement, not full retail trajectory",
+          "workload": "stair-joins-v2"
+        },
+        "cases": 6912,
+        "initially_unsupported": 384,
+        "reference_clear": 956,
+        "baseline_endpoint_match": 388,
+        "corrected_endpoint_match": 900,
+        "endpoint_match_regression": 0,
+        "changed_endpoint": 528,
+        "changed_existing_footprint_difference": 16,
+        "new_clear_endpoint_match": 512
+      },
+      {
+        "stratum": "wide",
+        "workload": {
+          "dimensions": {
+            "angle": [
+              0.0,
+              0.2
+            ],
+            "ceiling": [
+              false,
+              true
+            ],
+            "floor_delta": [
+              0.3,
+              0.6,
+              0.795,
+              0.9
+            ],
+            "lateral": [
+              0.0,
+              3.7
+            ],
+            "retreat": [
+              0.0,
+              0.01,
+              0.03
+            ],
+            "seam": [
+              -0.05,
+              0.0,
+              0.05
+            ],
+            "slope": [
+              0.0,
+              0.5,
+              0.8
+            ],
+            "speed": [
+              1.0,
+              2.0,
+              4.0,
+              8.0
+            ],
+            "upper": [
+              false,
+              true
+            ]
+          },
+          "label": "candidate",
+          "radius_factor": 1.2000000476837158,
+          "scale": 1.0,
+          "scope": "single-tick synthetic characterization; reference is polygon selection plus final placement, not full retail trajectory",
+          "workload": "stair-joins-v2"
+        },
+        "cases": 6912,
+        "initially_unsupported": 640,
+        "reference_clear": 1460,
+        "baseline_endpoint_match": 352,
+        "corrected_endpoint_match": 1460,
+        "endpoint_match_regression": 0,
+        "changed_endpoint": 1108,
+        "new_clear_endpoint_match": 1108
+      }
+    ],
+    "total_cases": 34560,
+    "changed_cases": 4276,
+    "unchanged_reference_endpoint_differences": 152,
+    "raw_capture_hashes": [
+      {
+        "file": "synthetic-v2-unit-baseline.jsonl",
+        "bytes": 5065078,
+        "sha256": "a2acc90f0deb7c7d7e6ea22f1db7a8298a37d4f1e60a737056ded0c27921bc3a"
+      },
+      {
+        "file": "synthetic-v2-unit-candidate.jsonl",
+        "bytes": 5047615,
+        "sha256": "42cdf92dd3070634811db3e42402729ea829b9195c0e485927158ba49f2186b3"
+      },
+      {
+        "file": "synthetic-v2-small-baseline.jsonl",
+        "bytes": 5076278,
+        "sha256": "b937a02a6bdb2cbb6f2b8ba14cc4b036cfd11933f9f829672baa82f9dd4572b3"
+      },
+      {
+        "file": "synthetic-v2-small-candidate.jsonl",
+        "bytes": 5059729,
+        "sha256": "8b941f102b53d17e0e0a82a722656cd29342ce230be50b6e6777251b57f1f215"
+      },
+      {
+        "file": "synthetic-v2-large-baseline.jsonl",
+        "bytes": 5059074,
+        "sha256": "2700b833a8d4fffb6d9a359ab546687860effb8be7bca1679a73dc15a367d9f8"
+      },
+      {
+        "file": "synthetic-v2-large-candidate.jsonl",
+        "bytes": 5042121,
+        "sha256": "0967d029c4c1c33b64e74b885185aac63f8cdec08fde171ff4fdbb70c0e7f395"
+      },
+      {
+        "file": "synthetic-v2-narrow-baseline.jsonl",
+        "bytes": 5094276,
+        "sha256": "693780a598b656ebff6f8494c8797ad60d16e1f3ee78ba53184fa007316a4630"
+      },
+      {
+        "file": "synthetic-v2-narrow-candidate.jsonl",
+        "bytes": 5086073,
+        "sha256": "db69e42b96e6fda71481fe09119e8daed9349122831a3ee0047f5904fcc049f4"
+      },
+      {
+        "file": "synthetic-v2-wide-baseline.jsonl",
+        "bytes": 5220691,
+        "sha256": "7361b2944d8f8e6aba80fce9dff0814af5fce79bcc82a9edbd88be0e137f64e5"
+      },
+      {
+        "file": "synthetic-v2-wide-candidate.jsonl",
+        "bytes": 5195868,
+        "sha256": "a6344966844f32f53ae8f83425ba28be912ef189f5ee897dffd836498e93f77b"
+      }
+    ],
+    "scope": "Single-tick target BSP selection and both-sphere final placement, compared with current scene motion. Initial unsupported states are excluded from grounded parity. Target admission is not a complete retail transition oracle. The 152 shorter endpoints still acquire the same floor and are retained as unresolved full-trajectory differences."
+  },
+  "authored": {
+    "workload": {
+      "building_instances": 6979,
+      "driven_ticks": 45,
+      "dungeon_owners_excluded_from_geometry_sample": 1720,
+      "explicit_instances": 42942,
+      "indexed_owner_denominator": 65025,
+      "label": "candidate",
+      "mounted_sources": [
+        {
+          "bytes": 634425693,
+          "modified": "SystemTime { tv_sec: 1789745398, tv_nsec: 318248665 }",
+          "path": "/home/cluracan/code/holtburger/dats/assets.hba"
+        }
+      ],
+      "outdoor_building_owners": 1639,
+      "record": "census",
+      "routes_per_owner_limit": 12,
+      "sampled_owners": [
+        34340863,
+        595722239,
+        896532479,
+        973864959,
+        1270022143,
+        1871839231,
+        2206728191,
+        2412183551,
+        2610036735,
+        2806251519,
+        3000238079,
+        3160670207,
+        3364618239,
+        3587244031,
+        3663069183,
+        3846111231
+      ],
+      "scope": "all shallow owner metadata; deterministic sample of placed static joins with 3x3 collision neighborhoods; no dynamic peers or universal pose coverage",
+      "speeds": [
+        1.0,
+        4.0,
+        8.0
+      ],
+      "workload": "authored-stair-joins-v1"
+    },
+    "owners": 16,
+    "candidate_edges": 5327,
+    "cross_placement_edges": 1975,
+    "cross_cell_edges": 1429,
+    "cross_owner_edges": 0,
+    "neighbor_colliders": 13365,
+    "routes": 576,
+    "initially_unsupported": 15,
+    "initial_overlap": 24,
+    "baseline_final_overlap": 54,
+    "corrected_final_overlap": 50,
+    "new_final_overlap": 0,
+    "changed_routes": [
+      {
+        "owner": "0x356fffff",
+        "collider": 0,
+        "polygon": 4,
+        "edge": 1,
+        "speed": 4.0,
+        "baseline_forward": 0.03020477294921875,
+        "corrected_forward": 5.9478759765625,
+        "baseline_final_depth": 0.00020262598991394043,
+        "corrected_final_depth": 0.0
+      },
+      {
+        "owner": "0x356fffff",
+        "collider": 0,
+        "polygon": 4,
+        "edge": 1,
+        "speed": 8.0,
+        "baseline_forward": 0.03020477294921875,
+        "corrected_forward": 9.229393005371094,
+        "baseline_final_depth": 0.00020262598991394043,
+        "corrected_final_depth": 0.0
+      },
+      {
+        "owner": "0x356fffff",
+        "collider": 1,
+        "polygon": 4,
+        "edge": 1,
+        "speed": 4.0,
+        "baseline_forward": 0.5302047729492188,
+        "corrected_forward": 5.678092956542969,
+        "baseline_final_depth": 0.00020262598991394043,
+        "corrected_final_depth": 0.0
+      },
+      {
+        "owner": "0x356fffff",
+        "collider": 1,
+        "polygon": 4,
+        "edge": 1,
+        "speed": 8.0,
+        "baseline_forward": 0.5302047729492188,
+        "corrected_forward": 9.759346008300781,
+        "baseline_final_depth": 0.00020262598991394043,
+        "corrected_final_depth": 0.0
+      },
+      {
+        "owner": "0x356fffff",
+        "collider": 7,
+        "polygon": 6,
+        "edge": 3,
+        "speed": 8.0,
+        "baseline_forward": 5.865480422973633,
+        "corrected_forward": 6.259952545166016,
+        "baseline_final_depth": 0.00020262598991394043,
+        "corrected_final_depth": 0.00020453333854675293
+      },
+      {
+        "owner": "0x356fffff",
+        "collider": 7,
+        "polygon": 7,
+        "edge": 0,
+        "speed": 8.0,
+        "baseline_forward": 2.8736753463745117,
+        "corrected_forward": 6.086071968078613,
+        "baseline_final_depth": 0.0,
+        "corrected_final_depth": 0.0
+      },
+      {
+        "owner": "0x356fffff",
+        "collider": 8,
+        "polygon": 7,
+        "edge": 2,
+        "speed": 8.0,
+        "baseline_forward": 5.326934814453125,
+        "corrected_forward": 11.121844291687012,
+        "baseline_final_depth": 0.0,
+        "corrected_final_depth": 0.0
+      },
+      {
+        "owner": "0x3a0bffff",
+        "collider": 0,
+        "polygon": 9,
+        "edge": 2,
+        "speed": 8.0,
+        "baseline_forward": 8.16978645324707,
+        "corrected_forward": 8.570100784301758,
+        "baseline_final_depth": 0.0,
+        "corrected_final_depth": 0.0
+      }
+    ],
+    "changed_routes_with_less_forward_travel": 0,
+    "scope": "Shallow owner metadata census plus bounded placement replay. Existing overlapped/unsupported seeds and final placement discrepancies are retained, not counted as parity passes. All new-overlap comparisons use the same body-owned final membership."
+  },
+  "gaits": {
+    "walk": {
+      "phases": 36,
+      "crossed": 36
+    },
+    "run": {
+      "phases": 36,
+      "crossed": 36
+    },
+    "source": "Standard motion table 0x09000001, default state, WALK_FORWARD and RUN_FORWARD at rate one through PhysicalBodyInput authored root motion."
+  },
+  "exclusions": [
+    "No universal pose/content/retail parity claim.",
+    "No dynamic peer census; active hard-support and crowd unit coverage remains separate.",
+    "No full retail cell/object visitation, retry history or whole-transition oracle.",
+    "Nonuniform transformed sphere reference and unaudited nonpolygon final placements report unresolved.",
+    "Dungeon geometry excluded from sampled owner selection; portal-connected interior geometry included through canonical neighborhoods.",
+    "No cross-owner candidate in the measured sample; neighboring geometry participates, but this is not demonstrated cross-owner transition coverage.",
+    "No network movement, TUI or visual acceptance.",
+    "F12 footprint/recovery, F13 unguarded airborne carry, F14 curved-flank landing, F15 polygon back-face handling remain separately classified."
+  ],
+  "artifacts": [
+    {
+      "path": "synthetic-changes.jsonl.gz",
+      "records": 4276,
+      "sha256": "6b3f5510e71587090576c5c79d2ab8ca196ec7001d2d45ec2789c8784ad685c8"
+    },
+    {
+      "path": "synthetic-reference-differences.jsonl.gz",
+      "records": 152,
+      "sha256": "793885f25768b0f7509b9718b8cdd028da94444875e7d7b3a4188d3ee72e9c74"
+    },
+    {
+      "path": "authored-before-after.jsonl.gz",
+      "records": 593,
+      "sha256": "b778dfb42e163055ab3f0455df50bf6c3c5ed430c33f38998b0793336bbe70b9"
+    },
+    {
+      "path": "authored-gaits.jsonl.gz",
+      "records": 73,
+      "sha256": "ff7a8c9c66e0fc89f0a30f82782e6ab3d75b1ad8817256fc4a2f1878b2c1451a"
+    },
+    {
+      "path": "candidate-da55-selected-portal.log.gz",
+      "sha256": "9547f49457696717b9d4e7150aff9c47480baa765c33d604e78e7aca9be09f7e"
+    },
+    {
+      "path": "candidate-world-tests.log.gz",
+      "sha256": "21704f4a55f2ec9115f8d461b98ca7be8855ee26956855d8580c4a3b6dc0fd43"
+    },
+    {
+      "path": "candidate-core-host-tests.log.gz",
+      "sha256": "59b688f8d9d94ffec91e1fa54e86e3124a6d06bb2fc25eb662627b8ada32cbd7"
+    },
+    {
+      "path": "candidate-probe-tests.log.gz",
+      "sha256": "94e9e7e6222d1b69428ee386fc318d0efaf5af435018f0f55c4302a59eec6343"
+    },
+    {
+      "path": "candidate-clippy.log.gz",
+      "sha256": "951331cdedefe4a5f50356554098690c4ca25492de66fb1a45e6909f6be42d16"
+    },
+    {
+      "path": "review-checks.log.gz",
+      "sha256": "9916a4ca739a4e2aef399af6a79d77f7f732d34ba8301c1651764bce597bde4f"
+    }
+  ],
+  "pre_review_source_files": [
+    {
+      "path": "apps/holtburger-3d/host/src/explorer_entity_runtime.rs",
+      "sha256": "91cf7e5311533237a0f302b914342c000a8770411587f58dbd9802df8da53093"
+    },
+    {
+      "path": "apps/holtburger-3d/host/src/host_physical_fly_runtime/mod.rs",
+      "sha256": "4c9fb23ab0751002dfbece7cd733de6928240f9152c21deab91246890a0bffbb"
+    },
+    {
+      "path": "apps/holtburger-3d/host/src/host_physical_fly_runtime/tests.rs",
+      "sha256": "9fdfd53c6aaf8b7a4cd0972a4ab53946fdac2cad55acc1d264773f899e238739"
+    },
+    {
+      "path": "apps/holtburger-3d/host/src/host_simulation_runtime.rs",
+      "sha256": "847e81586e54712a57c17d3549f8e80b356f9a892c415da56cf8e0cd18812acc"
+    },
+    {
+      "path": "crates/holtburger-core/src/client/camera.rs",
+      "sha256": "f8b67a7e8f58abc5d260fc68998a9c51e1bd71e2d37718df3a59169b88954fc8"
+    },
+    {
+      "path": "crates/holtburger-core/src/client/collision.rs",
+      "sha256": "5846197503e78e83dcbc893be9e682f30707f39e41632d2fede04e4dbf34f77f"
+    },
+    {
+      "path": "crates/holtburger-core/src/client/mod.rs",
+      "sha256": "82c1f098bb536eedadc139fc64713eebe525b081879681ed24ed1ac06f2f682d"
+    },
+    {
+      "path": "crates/holtburger-core/src/client/precise_jump.rs",
+      "sha256": "b31d5b8ac5afb4af4cea7d189222c6cd047efc817bee280ea2cb8fbab4f373f5"
+    },
+    {
+      "path": "crates/holtburger-core/src/lib.rs",
+      "sha256": "95c95ce58fd0b8c6d88a9300d070a2f12d2e1371ef48a46d9425fc32b4365343"
+    },
+    {
+      "path": "crates/holtburger-core/src/physical_body_definition.rs",
+      "sha256": "8b7c80d55d66d0c0d5ff5c7360b5ebf4830c18ca8d049145b9c60aa58db904ec"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/bin/authored_stair_replay.rs",
+      "sha256": "b5129412cbf2c7145e409a4a9505c0423c46db3b1171749f8b248e840c0985b9"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/bin/collision_scene_probe.rs",
+      "sha256": "118729ad7d530b3af77a8245c06f151a57afd789a49c5a26af613519e58b811c"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/bin/contact_collection_benchmark.rs",
+      "sha256": "6aaed021d8115f66357f8dc9e2f1438acb1472409fe9640d92f330b61f0c4400"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/bin/stair_compatibility_probe.rs",
+      "sha256": "9691582f7566e1eeb88c2eccfd7cb8887d619ab54188b350e92c2fb7d8573cb2"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/bin/stair_content_census.rs",
+      "sha256": "e4724e601455ef3992147e25ee331e4ddfa3ba081112db657e240a76371cabd2"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/bin/stair_reference_probe.rs",
+      "sha256": "e16e1723a82d5acd4d600984dbfba8799028abaab87057ffe9db22481c445e8d"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/lib.rs",
+      "sha256": "750dd8a5605b89e312db22e2a3796d680cc7a9f6a761cc05fbca9671e4ba7c6c"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/movement_probe.rs",
+      "sha256": "8e8417cc7ed43ef7bb5e68c5002be03237ced8a9b2d781ac72337b54c4cbb753"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/retail_step_reference.rs",
+      "sha256": "0a7126bb73e4a9d8546878fa8c5ccbd6cd29be9ecca5aac33186545fc068c774"
+    },
+    {
+      "path": "crates/holtburger-world/ARCHITECTURE.md",
+      "sha256": "805b599b0b93809826c572a8b15abddee6dbd0d0e0c8144246f4311a09305020"
+    },
+    {
+      "path": "crates/holtburger-world/src/lib.rs",
+      "sha256": "3ebf7b649f86feff2f28db7a43dcaaaba9f708b467c1a9129a92cf4a73d0a1e7"
+    },
+    {
+      "path": "crates/holtburger-world/src/motion/actuation.rs",
+      "sha256": "c64f1521544f644095c87f387540b7ab8ea0fc6da96561ffceb60b986f481dd9"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial.rs",
+      "sha256": "daac481b6da7c7fd5855d072d7edc32de3c009152c56d0af60b8bcb985a3b94f"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/bsp_query.rs",
+      "sha256": "43786346344e33097f92f3f93fa41c0cf38ec3c22d24dd7d8a28b1b4543959c2"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/collision.rs",
+      "sha256": "e0cc66a1bd10fe37598cd210819cf931f75bd3ee3f8d921119f0489ab99b4c90"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/differential_fixtures.rs",
+      "sha256": "6beb5025a0e33e26f4aa69282e4c1f2040da05bbe9d2221e04264b972e8375ae"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/dynamic_body.rs",
+      "sha256": "a76a1c3147e9374892baae2c9f7164aa1cf1baaeb6bbc4a2747f74bfbe3f0d10"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/free_sphere.rs",
+      "sha256": "2b37247358050dad55f8e41768e2c12a869af2a8a49b63a3fc0ccdbd60f9cfb4"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/grounded_landing_retail_differential.rs",
+      "sha256": "0b5d95f35a5b2a23cb7d5a7be2f6835dbd3e86ce05fc55e5145211e1b10e6fd4"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/grounded_movement_tests.rs",
+      "sha256": "b180359ea8274c6296fee01264c988a3c5279d852e726deac8ff9135d7bda8fb"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/grounded_retail_differential.rs",
+      "sha256": "8c4bb895b3d0cbcec750931ffeac1d325a84c13879439924203a5e25e1a13dcc"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/grounded_types.rs",
+      "sha256": "e80cbe48647713e1f435fdc58f413bfec21ef25b3ae4763a164854042b77b272"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/mobile_contact/step/stairs.rs",
+      "sha256": "78bd2b53fc15e24d025660f285224ca6390c50bfd3d26668c344fbdea8e0aecc"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/mobile_contact/step/targets.rs",
+      "sha256": "cc8e7b1f9cf4a72eca5b8f42cc6016e67f9fe30a860740ad0832534bf9e91b2b"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/physical_body.rs",
+      "sha256": "cd06f4dce9121e6176468882d65acacc850d797facbaf71fab3e4f89d61ed549"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/physics_work.rs",
+      "sha256": "145a61037ad3ed66c0f3fc8a1f5da02b836c8b6944fd6b135d5660466e56be9c"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/scene.rs",
+      "sha256": "0edd3779de5bd1eb4c521df052e7ade8ae9cb7da3746311d9947fd131855bcb3"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/scene/physical_body_tests/collision_pose_tests.rs",
+      "sha256": "25b93d63ab0979c34d2bd47a7d6967bd1a2c02d2ef5e4bf89f718999da97a1a2"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/scene/physical_body_tests/connected_crowd_benchmark.rs",
+      "sha256": "c3d017fe458a2d9e120547486da39b4e075789d76be9a7853d8ba1c9f20c49fe"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/scene/physical_body_tests/contact_step_tests.rs",
+      "sha256": "68a32490d4d7db3fd60816a81a64cb70a692143364293d0ca8d179eb96929ca7"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/scene/physical_body_tests/footing_tests.rs",
+      "sha256": "afac0d50d5a6b5398efada79244e2c2f9b7a19da7c114fbbb46df2eae6559941"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/tests.rs",
+      "sha256": "57dc78cf0c3af9b83c44beccf29f95514a2281eff51750528b85c117be165ed5"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/volume_query.rs",
+      "sha256": "30435befa0d9960f0079ad9004fde7bea84024a15cf3e49630922ab81f9fcac0"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/volume_retail_differential.rs",
+      "sha256": "3844cd14d4f00d0ee0abd99498cfa02f1d35d6d68c16d8f1ed6d89af095b0d67"
+    },
+    {
+      "path": "crates/holtburger-world/src/state/tests.rs",
+      "sha256": "e4bcb17e59baef5531efa7e9657786e8eef2f221b3f4e352c92646d2ccc739cf"
+    }
+  ],
+  "source_files": [
+    {
+      "path": "apps/holtburger-3d/host/src/explorer_entity_runtime.rs",
+      "sha256": "91cf7e5311533237a0f302b914342c000a8770411587f58dbd9802df8da53093"
+    },
+    {
+      "path": "apps/holtburger-3d/host/src/host_physical_fly_runtime/mod.rs",
+      "sha256": "4c9fb23ab0751002dfbece7cd733de6928240f9152c21deab91246890a0bffbb"
+    },
+    {
+      "path": "apps/holtburger-3d/host/src/host_physical_fly_runtime/tests.rs",
+      "sha256": "9fdfd53c6aaf8b7a4cd0972a4ab53946fdac2cad55acc1d264773f899e238739"
+    },
+    {
+      "path": "apps/holtburger-3d/host/src/host_simulation_runtime.rs",
+      "sha256": "847e81586e54712a57c17d3549f8e80b356f9a892c415da56cf8e0cd18812acc"
+    },
+    {
+      "path": "crates/holtburger-core/src/client/camera.rs",
+      "sha256": "f8b67a7e8f58abc5d260fc68998a9c51e1bd71e2d37718df3a59169b88954fc8"
+    },
+    {
+      "path": "crates/holtburger-core/src/client/collision.rs",
+      "sha256": "5846197503e78e83dcbc893be9e682f30707f39e41632d2fede04e4dbf34f77f"
+    },
+    {
+      "path": "crates/holtburger-core/src/client/mod.rs",
+      "sha256": "82c1f098bb536eedadc139fc64713eebe525b081879681ed24ed1ac06f2f682d"
+    },
+    {
+      "path": "crates/holtburger-core/src/client/precise_jump.rs",
+      "sha256": "b31d5b8ac5afb4af4cea7d189222c6cd047efc817bee280ea2cb8fbab4f373f5"
+    },
+    {
+      "path": "crates/holtburger-core/src/lib.rs",
+      "sha256": "95c95ce58fd0b8c6d88a9300d070a2f12d2e1371ef48a46d9425fc32b4365343"
+    },
+    {
+      "path": "crates/holtburger-core/src/physical_body_definition.rs",
+      "sha256": "8b7c80d55d66d0c0d5ff5c7360b5ebf4830c18ca8d049145b9c60aa58db904ec"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/bin/authored_stair_replay.rs",
+      "sha256": "b5129412cbf2c7145e409a4a9505c0423c46db3b1171749f8b248e840c0985b9"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/bin/collision_scene_probe.rs",
+      "sha256": "118729ad7d530b3af77a8245c06f151a57afd789a49c5a26af613519e58b811c"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/bin/contact_collection_benchmark.rs",
+      "sha256": "6aaed021d8115f66357f8dc9e2f1438acb1472409fe9640d92f330b61f0c4400"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/bin/stair_compatibility_probe.rs",
+      "sha256": "9691582f7566e1eeb88c2eccfd7cb8887d619ab54188b350e92c2fb7d8573cb2"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/bin/stair_content_census.rs",
+      "sha256": "e4724e601455ef3992147e25ee331e4ddfa3ba081112db657e240a76371cabd2"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/bin/stair_reference_probe.rs",
+      "sha256": "e16e1723a82d5acd4d600984dbfba8799028abaab87057ffe9db22481c445e8d"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/lib.rs",
+      "sha256": "750dd8a5605b89e312db22e2a3796d680cc7a9f6a761cc05fbca9671e4ba7c6c"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/movement_probe.rs",
+      "sha256": "8e8417cc7ed43ef7bb5e68c5002be03237ced8a9b2d781ac72337b54c4cbb753"
+    },
+    {
+      "path": "crates/holtburger-debug-harness/src/retail_step_reference.rs",
+      "sha256": "0a7126bb73e4a9d8546878fa8c5ccbd6cd29be9ecca5aac33186545fc068c774"
+    },
+    {
+      "path": "crates/holtburger-world/ARCHITECTURE.md",
+      "sha256": "805b599b0b93809826c572a8b15abddee6dbd0d0e0c8144246f4311a09305020"
+    },
+    {
+      "path": "crates/holtburger-world/src/lib.rs",
+      "sha256": "3ebf7b649f86feff2f28db7a43dcaaaba9f708b467c1a9129a92cf4a73d0a1e7"
+    },
+    {
+      "path": "crates/holtburger-world/src/motion/actuation.rs",
+      "sha256": "c64f1521544f644095c87f387540b7ab8ea0fc6da96561ffceb60b986f481dd9"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial.rs",
+      "sha256": "daac481b6da7c7fd5855d072d7edc32de3c009152c56d0af60b8bcb985a3b94f"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/bsp_query.rs",
+      "sha256": "43786346344e33097f92f3f93fa41c0cf38ec3c22d24dd7d8a28b1b4543959c2"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/collision.rs",
+      "sha256": "8766e1871066d557414834470d66c62c92b2cb941feecc59cf07c157da2dfbd9"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/differential_fixtures.rs",
+      "sha256": "63f0a8f7ad57ab23ccd84febf007f090a532575152c0867d8b9853815d96f557"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/dynamic_body.rs",
+      "sha256": "a76a1c3147e9374892baae2c9f7164aa1cf1baaeb6bbc4a2747f74bfbe3f0d10"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/free_sphere.rs",
+      "sha256": "2b37247358050dad55f8e41768e2c12a869af2a8a49b63a3fc0ccdbd60f9cfb4"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/grounded_landing_retail_differential.rs",
+      "sha256": "0b5d95f35a5b2a23cb7d5a7be2f6835dbd3e86ce05fc55e5145211e1b10e6fd4"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/grounded_movement_tests.rs",
+      "sha256": "b180359ea8274c6296fee01264c988a3c5279d852e726deac8ff9135d7bda8fb"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/grounded_retail_differential.rs",
+      "sha256": "8c4bb895b3d0cbcec750931ffeac1d325a84c13879439924203a5e25e1a13dcc"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/grounded_types.rs",
+      "sha256": "e80cbe48647713e1f435fdc58f413bfec21ef25b3ae4763a164854042b77b272"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/mobile_contact/step/stairs.rs",
+      "sha256": "bd0a104c2172fa78d6396e5995a290e36c3cd0c0a3a11fe7ae9e9b9d6f7adb16"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/mobile_contact/step/targets.rs",
+      "sha256": "cc8e7b1f9cf4a72eca5b8f42cc6016e67f9fe30a860740ad0832534bf9e91b2b"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/physical_body.rs",
+      "sha256": "cd06f4dce9121e6176468882d65acacc850d797facbaf71fab3e4f89d61ed549"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/physics_work.rs",
+      "sha256": "145a61037ad3ed66c0f3fc8a1f5da02b836c8b6944fd6b135d5660466e56be9c"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/scene.rs",
+      "sha256": "0edd3779de5bd1eb4c521df052e7ade8ae9cb7da3746311d9947fd131855bcb3"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/scene/physical_body_tests/collision_pose_tests.rs",
+      "sha256": "32cbc5ecf21bb1cfed8ebc64c0261214ec78437dc35d6027aaa2421714d5f15f"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/scene/physical_body_tests/connected_crowd_benchmark.rs",
+      "sha256": "c3d017fe458a2d9e120547486da39b4e075789d76be9a7853d8ba1c9f20c49fe"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/scene/physical_body_tests/contact_step_tests.rs",
+      "sha256": "68a32490d4d7db3fd60816a81a64cb70a692143364293d0ca8d179eb96929ca7"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/scene/physical_body_tests/footing_tests.rs",
+      "sha256": "afac0d50d5a6b5398efada79244e2c2f9b7a19da7c114fbbb46df2eae6559941"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/tests.rs",
+      "sha256": "57dc78cf0c3af9b83c44beccf29f95514a2281eff51750528b85c117be165ed5"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/volume_query.rs",
+      "sha256": "30435befa0d9960f0079ad9004fde7bea84024a15cf3e49630922ab81f9fcac0"
+    },
+    {
+      "path": "crates/holtburger-world/src/spatial/volume_retail_differential.rs",
+      "sha256": "3844cd14d4f00d0ee0abd99498cfa02f1d35d6d68c16d8f1ed6d89af095b0d67"
+    },
+    {
+      "path": "crates/holtburger-world/src/state/tests.rs",
+      "sha256": "e4bcb17e59baef5531efa7e9657786e8eef2f221b3f4e352c92646d2ccc739cf"
+    }
+  ],
+  "post_acceptance_review": {
+    "verdict": "ready within measured scope",
+    "findings_addressed": [
+      "Single composite support query owns admission instead of duplicated request/probe limits.",
+      "Migrated fixtures require an Integrated outcome rather than any single placement outcome."
+    ],
+    "generated_outcomes_identical": 34560,
+    "authored_routes_identical": 576,
+    "actual_gait_routes_identical": 72,
+    "comparison": "All JSON records match exactly after excluding provenance labels; existing captures remain the measured baseline/corrected evidence.",
+    "captures": [
+      {
+        "file": "synthetic-v2-large-review.jsonl",
+        "sha256": "5bab9fc4b1ae6f54a19b899e73ef82d342f20f2801b1d4db8388cd5aa8730576"
+      },
+      {
+        "file": "synthetic-v2-narrow-review.jsonl",
+        "sha256": "da716c0bb8db3fb931b803e71f8954b0a4c75fe3d8da3ffd44f117d5703c0b3b"
+      },
+      {
+        "file": "synthetic-v2-small-review.jsonl",
+        "sha256": "c0d0ffb7c62ecc25997e13d62ce2f82756109bda5315a808bf0a7a0a54b9627f"
+      },
+      {
+        "file": "synthetic-v2-unit-review.jsonl",
+        "sha256": "54988f5dfd41fc95fa3624ab9b2feb1437630bc47aa2449c6284a1129e9ae7f2"
+      },
+      {
+        "file": "synthetic-v2-wide-review.jsonl",
+        "sha256": "81cf72c90fab449abf77b534668bddc18f247dc74131e2b1e08d8fdf42e5e590"
+      },
+      {
+        "file": "authored-review.jsonl",
+        "sha256": "6ebe53ee930232ffe0674eee053096bd430d3730c964b4fee818d682a7fae61a"
+      },
+      {
+        "file": "authored-gaits-review.jsonl",
+        "sha256": "523344e0969495c727f60d96e0b1cee75986e96b69f028c91f9144be42b80adf"
+      }
+    ]
+  }
+}

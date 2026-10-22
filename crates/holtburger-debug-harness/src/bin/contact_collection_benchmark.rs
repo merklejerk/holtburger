@@ -47,8 +47,6 @@ struct Measurements {
     elapsed_ns: u128,
     maximum_tick_ns: u128,
     body_preparations: u64,
-    /// Actual geometry steps performed by admitted contact collections.
-    environment_steps: u64,
     shape_queries: u64,
     stationary_bodies: usize,
     /// Sum of per-body net root displacement magnitudes, including positional correction.
@@ -82,7 +80,7 @@ fn main() -> Result<()> {
         player_id,
     )?;
     println!(
-        "bodies,ticks,run,total_ms,mean_tick_ms,max_tick_ms,body_preparations,environment_steps,shape_queries,stationary_bodies,accepted_displacement_m,player_displacement_m,max_penetration_m"
+        "bodies,ticks,run,total_ms,mean_tick_ms,max_tick_ms,body_preparations,shape_queries,stationary_bodies,accepted_displacement_m,player_displacement_m,max_penetration_m"
     );
     for repeat in 1..=args.repeats {
         let result = run(
@@ -93,7 +91,7 @@ fn main() -> Result<()> {
             player_id,
         )?;
         println!(
-            "{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{:.6},{:.6},{:.6}",
+            "{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.6},{:.6},{:.6}",
             args.bodies + 1,
             args.ticks,
             repeat,
@@ -101,7 +99,6 @@ fn main() -> Result<()> {
             result.elapsed_ns as f64 / args.ticks as f64 / 1e6,
             result.maximum_tick_ns as f64 / 1e6,
             result.body_preparations,
-            result.environment_steps,
             result.shape_queries,
             result.stationary_bodies,
             result.accepted_displacement_m,
@@ -331,7 +328,6 @@ fn run(
         measured.maximum_tick_ns = measured.maximum_tick_ns.max(elapsed);
         let work = take_physics_work();
         measured.body_preparations += work.body_preparations;
-        measured.environment_steps += work.environment_steps;
         measured.shape_queries += work.shape_queries;
         let bodies = scene.iter_runtime_body_views().collect::<Vec<_>>();
         for (index, left) in bodies.iter().enumerate() {

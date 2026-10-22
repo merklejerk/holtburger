@@ -166,7 +166,7 @@ fn ramped_fly_control() -> PhysicalFlyInputAccumulator {
         },
         movement_elapsed_seconds: 0.0,
         movement_epoch: 1,
-        maximum_displacement_per_tick: 8.0,
+        maximum_displacement_per_tick: MAXIMUM_INPUT_DISPLACEMENT_PER_TICK,
         applied_world_displacement_total: Vector3::zero(),
     }
 }

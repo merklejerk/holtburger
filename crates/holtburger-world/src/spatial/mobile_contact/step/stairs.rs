@@ -6,9 +6,11 @@ use super::{
     translated_spheres,
 };
 use crate::spatial::{
-    CollisionQueryError, CollisionScene, GroundState, GroundSupport, GroundedConfig,
-    SpatialMembership, SupportContact, SupportRequest, SupportSource, bsp_query::CONTACT_EPSILON,
+    CellTransitRequest, CollisionQueryError, CollisionScene, GroundState, GroundSupport,
+    GroundedConfig, PlacementRequest, SpatialMembership, SupportContact, SupportRequest,
+    SupportSource, bsp_query::CONTACT_EPSILON,
 };
+use crate::spatial::{bsp_query::SupportProbe, collision::SupportQuery};
 use anyhow::Result;
 use holtburger_common::{Guid, Vector3};
 
@@ -20,7 +22,7 @@ pub(super) struct StairManeuver {
     pub membership: SpatialMembership,
     /// Current world or hard-entity support at the accepted pose.
     pub support: GroundSupport,
-    /// Lift, timed forward travel, and optional settle in application order.
+    /// Candidate-sized lift followed by timed forward travel, in application order.
     pub motion: Vec<ContactMotionSegment>,
 }
 
@@ -177,14 +179,18 @@ pub(super) fn try_edge_slide(
     settle_after_movement(collision, hard, anchor, body, movement)
 }
 
-/// Fan in world and pair-eligible hard shapes before choosing support.
+/// Fan in world and pair-eligible hard shapes under one support admission contract.
 fn support_candidates(
     collision: &CollisionScene,
     hard: &HardTargets,
     contact: &ContactParticipant,
-    request: SupportRequest<'_>,
+    query: SupportQuery<'_>,
 ) -> std::result::Result<Vec<SupportContact>, CollisionQueryError> {
-    let mut supports = collision.support_contacts(request)?;
+    let mut supports = collision.support_query(query)?;
+    let SupportQuery {
+        sphere: request,
+        probe,
+    } = query;
     for target in hard
         .support_candidates(request.center, request.radius)?
         .filter(|target| {
@@ -200,8 +206,7 @@ fn support_candidates(
                     shape,
                     request.center,
                     request.radius,
-                    request.maximum_drop,
-                    request.maximum_rise,
+                    probe,
                 )
                 .into_iter()
                 .map(|support| SupportContact {
@@ -263,7 +268,8 @@ fn standing_support_candidate(
             // Upward acquisition uses the authored step limit, independently of downward reach.
             maximum_rise: config.step_up_height,
             placement: &contact.membership,
-        },
+        }
+        .into(),
     )?
     .into_iter()
     .filter(|support| {
@@ -529,7 +535,8 @@ fn settle_down(
             maximum_drop: probe.maximum_drop,
             maximum_rise: 0.0,
             placement: domains,
-        },
+        }
+        .into(),
     )?
     .into_iter()
     .filter(|support| support.normal.z >= probe.normal_threshold);
@@ -609,6 +616,39 @@ pub(super) fn try_stair_maneuver(
         return Ok(None);
     }
     let initial = body.mobile.spheres.primary();
+    // Retail searches from its attempted check position, before geometric correction
+    // (CTransition::step_up, acclient.c:301457-301486). The shape query owns finite
+    // polygon admission and interpolation; ordinary tangent ascent is never charged twice.
+    let attempted = initial.center + requested;
+    let placement = collision.transit_cell(CellTransitRequest {
+        previous_cell: body.contact.membership.committed_cell(),
+        anchor,
+        center: attempted,
+        radius: initial.radius,
+    })?;
+    let supports = support_candidates(
+        collision,
+        hard,
+        &body.contact,
+        SupportQuery {
+            sphere: PlacementRequest {
+                anchor,
+                center: attempted,
+                radius: initial.radius,
+                placement: &placement,
+            },
+            probe: SupportProbe::Stair {
+                height: config.step_up_height,
+            },
+        },
+    )?;
+    let Some(target) = supports
+        .into_iter()
+        .filter(|support| support.normal.z > config.walkable_normal_z && support.height_delta > 0.0)
+        .max_by(|a, b| a.height_delta.total_cmp(&b.height_delta))
+    else {
+        return Ok(None);
+    };
     let mut cursor = StairCursor {
         contact: body.contact.clone(),
         spheres: body.mobile.spheres,
@@ -619,10 +659,9 @@ pub(super) fn try_stair_maneuver(
         anchor,
         &cursor.contact,
         cursor.spheres,
-        Vector3::new(0.0, 0.0, config.step_up_height),
+        Vector3::new(0.0, 0.0, target.height_delta),
     )?;
-    let fraction = up.hit.map_or(1.0, |hit| hit.contact().time_of_impact);
-    if fraction == 0.0 {
+    if up.hit.is_some() {
         return Ok(None);
     }
     let up = up.path;
@@ -644,27 +683,12 @@ pub(super) fn try_stair_maneuver(
     }
     cursor.accept(&forward.path)?;
 
-    let SettleOutcome::Supported(settled) = settle_down(
-        collision,
-        hard,
-        anchor,
-        &mut cursor,
-        DescentProbe {
-            maximum_drop: rise,
-            normal_threshold: config.walkable_normal_z,
-        },
-    )?
-    else {
-        return Ok(None);
-    };
     let final_rise = cursor.spheres.primary().center.z - initial.center.z;
-    if final_rise <= config.separation_epsilon
-        || final_rise > config.step_up_height + config.separation_epsilon
-    {
+    if final_rise <= config.minimum_stair_rise {
         return Ok(None);
     }
 
-    let mut motion = vec![
+    let motion = vec![
         ContactMotionSegment::Adjustment {
             path: up,
             fraction: elapsed,
@@ -676,16 +700,10 @@ pub(super) fn try_stair_maneuver(
             end_fraction: 1.0,
         },
     ];
-    if let Some(path) = settled.path {
-        motion.push(ContactMotionSegment::Adjustment {
-            path: *path,
-            fraction: 1.0,
-        });
-    }
     Ok(Some(StairManeuver {
         spheres: cursor.spheres,
         membership: cursor.contact.membership,
-        support: settled.support,
+        support: ground_support(target),
         motion,
     }))
 }

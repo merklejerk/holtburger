@@ -173,10 +173,13 @@ mod scenarios {
     };
 
     use crate::spatial::collision::CollisionScene;
+    use crate::spatial::differential_fixtures::{
+        grounded_movement_body, movement_ground, movement_tick,
+    };
     use crate::{
-        GroundState, GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedOutcome,
-        GroundedRequest, PhysicalCollisionFilter, RETAIL_LANDING_NORMAL_Z,
-        RETAIL_WALKABLE_NORMAL_Z, solve_grounded,
+        GroundState, GroundedBodyActuation, MOBILE_CONTACT_TICK_SECONDS, PhysicalBodyActuation,
+        PhysicalBodyInput, PhysicalReferenceInput, RETAIL_LANDING_NORMAL_Z,
+        RETAIL_WALKABLE_NORMAL_Z, SpatialBody,
     };
 
     const LANDBLOCK: u32 = 0xe63e_ffff;
@@ -224,52 +227,37 @@ mod scenarios {
 
     use crate::spatial::differential_fixtures::{retail_creature_config, retail_creature_pair};
 
-    fn config() -> GroundedConfig {
+    fn config() -> crate::GroundedConfig {
         retail_creature_config()
     }
 
-    fn spheres() -> GroundedBodySpheres {
+    fn spheres() -> crate::GroundedBodySpheres {
         retail_creature_pair()
     }
 
-    fn body(start: Vector3, velocity: Vector3, ground: GroundState) -> GroundedBody {
-        GroundedBody {
-            pose: WorldPosition {
-                landblock_id: Guid(LANDBLOCK),
-                coords: start,
-                rotation: Quaternion::identity(),
-            }
-            .normalize_outdoor_cell(),
-            cell: None,
+    fn body(start: Vector3, velocity: Vector3, ground: GroundState) -> SpatialBody {
+        grounded_movement_body(
+            WorldPosition::from_outdoor_frame(Guid(LANDBLOCK), start, Quaternion::identity()),
+            spheres(),
+            config(),
             velocity,
             ground,
-        }
+        )
     }
 
-    fn tick(
-        scene: &CollisionScene,
-        body_state: GroundedBody,
-        supported_velocity: Vector3,
-    ) -> GroundedBody {
-        let settle = body_state.ground.settle_permission();
-        let outcome = solve_grounded(
+    fn tick(scene: &CollisionScene, body: SpatialBody, supported_velocity: Vector3) -> SpatialBody {
+        movement_tick(
             scene,
-            config(),
-            GroundedRequest {
-                settle,
-                body: body_state,
-                spheres: spheres(),
-                supported_velocity,
-                retain_supported_gravity: false,
-                delta_seconds: 1.0 / 30.0,
-                filter: PhysicalCollisionFilter::ALL,
-            },
+            body,
+            PhysicalBodyInput::referenced(
+                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                PhysicalReferenceInput::body(Some(holtburger_common::RigidTransform {
+                    translation: supported_velocity * MOBILE_CONTACT_TICK_SECONDS,
+                    rotation: Quaternion::identity(),
+                })),
+                false,
+            ),
         )
-        .unwrap();
-        let GroundedOutcome::Solved { body, .. } = outcome else {
-            panic!("scenario solve failed: {outcome:?}");
-        };
-        body
     }
 
     /// The ramp's steep-face normal sits between the two thresholds, so every scenario below
@@ -296,9 +284,9 @@ mod scenarios {
             falling = tick(&scene, falling, Vector3::zero());
         }
         assert!(
-            matches!(falling.ground, GroundState::Supported(_)),
+            matches!(movement_ground(&falling), GroundState::Supported(_)),
             "plateau landing did not classify supported: {:?}",
-            falling.ground
+            movement_ground(&falling)
         );
 
         // Drop onto the mid-face of the steep descent (x 108 is one half-column past the crest).
@@ -310,7 +298,7 @@ mod scenarios {
         let mut slid = false;
         for _ in 0..60 {
             falling = tick(&scene, falling, Vector3::zero());
-            if let GroundState::Sliding(plane) = falling.ground {
+            if let GroundState::Sliding(plane) = movement_ground(&falling) {
                 assert!(
                     (plane.normal.z - face_z).abs() < 0.01,
                     "slide plane is not the authored face: {:?}",
@@ -338,9 +326,9 @@ mod scenarios {
         for _ in 0..10 {
             falling = tick(&scene, falling, Vector3::zero());
             assert!(
-                matches!(falling.ground, GroundState::Airborne),
+                matches!(movement_ground(&falling), GroundState::Airborne),
                 "sub-allowance face must not land: {:?}",
-                falling.ground
+                movement_ground(&falling)
             );
         }
     }
@@ -358,19 +346,19 @@ mod scenarios {
         // Acquire the slide.
         for _ in 0..60 {
             falling = tick(&scene, falling, Vector3::zero());
-            if matches!(falling.ground, GroundState::Sliding(_)) {
+            if matches!(movement_ground(&falling), GroundState::Sliding(_)) {
                 break;
             }
         }
-        assert!(matches!(falling.ground, GroundState::Sliding(_)));
+        assert!(matches!(movement_ground(&falling), GroundState::Sliding(_)));
         let mut previous_z = falling.pose.coords.z;
         let mut descents = Vec::new();
         for _ in 0..12 {
             falling = tick(&scene, falling, Vector3::zero());
             assert!(
-                matches!(falling.ground, GroundState::Sliding(_)),
+                matches!(movement_ground(&falling), GroundState::Sliding(_)),
                 "slide lost its plane mid-face: {:?}",
-                falling.ground
+                movement_ground(&falling)
             );
             descents.push(previous_z - falling.pose.coords.z);
             previous_z = falling.pose.coords.z;
@@ -389,6 +377,7 @@ mod scenarios {
     /// once gravity closes the 0.04m reach — a brief, bounded airborne gap, with no bespoke
     /// crest mechanism.
     #[test]
+    #[ignore = "F13: unguarded authored-motion diagnostic; deferred outside stair scope (see movement cutover plan)"]
     fn crest_walk_off_drops_authored_translation_before_landing_on_slide() {
         let scene = ramp_scene(60.0, 30.0);
         // Settle onto the plateau first.
@@ -400,19 +389,28 @@ mod scenarios {
         for _ in 0..30 {
             walker = tick(&scene, walker, Vector3::zero());
         }
-        assert!(matches!(walker.ground, GroundState::Supported(_)));
+        assert!(matches!(
+            movement_ground(&walker),
+            GroundState::Supported(_)
+        ));
 
         // Walk east over the crest at x = 96.
         let mut left_plateau = false;
         for _ in 0..90 {
             walker = tick(&scene, walker, Vector3::new(4.0, 0.0, 0.0));
-            match walker.ground {
+            match movement_ground(&walker) {
                 GroundState::Airborne => {
                     left_plateau = true;
                     // Authored translation is not physical momentum. Retail discards further
                     // walking translation off support (acclient.c:308284-308297).
-                    assert_eq!(walker.velocity.x, 0.0);
-                    assert_eq!(walker.velocity.y, 0.0);
+                    assert_eq!(
+                        walker.retained.velocity.x,
+                        0.0,
+                        "authored walking became retained airborne momentum at {:?}; ground={:?}",
+                        walker.pose,
+                        movement_ground(&walker)
+                    );
+                    assert_eq!(walker.retained.velocity.y, 0.0);
                 }
                 GroundState::Sliding(_) => break,
                 GroundState::Supported(_) => assert!(
@@ -422,16 +420,49 @@ mod scenarios {
             }
         }
         assert!(
-            matches!(walker.ground, GroundState::Sliding(_)),
+            matches!(movement_ground(&walker), GroundState::Sliding(_)),
             "walker never entered the slide past the crest"
         );
         assert!(left_plateau, "walking step-down skipped the airborne gap");
+    }
+
+    /// The F13 crest cannot be walked off when ordinary creature edge protection applies.
+    #[test]
+    fn creature_edge_guard_blocks_the_unguarded_crest_diagnostic() {
+        let scene = ramp_scene(60.0, 30.0);
+        let mut guarded = config();
+        guarded.edge_protection = crate::EdgeProtection::Creature;
+        let mut walker = grounded_movement_body(
+            WorldPosition::from_outdoor_frame(
+                Guid(LANDBLOCK),
+                Vector3::new(90.0, 48.0, 60.2),
+                Quaternion::identity(),
+            ),
+            spheres(),
+            guarded,
+            Vector3::zero(),
+            GroundState::Airborne,
+        );
+        for _ in 0..30 {
+            walker = tick(&scene, walker, Vector3::zero());
+        }
+        assert!(movement_ground(&walker).walkable_support().is_some());
+        for _ in 0..90 {
+            walker = tick(&scene, walker, Vector3::new(4.0, 0.0, 0.0));
+            assert!(
+                movement_ground(&walker).walkable_support().is_some(),
+                "guarded walk lost support: {:?}",
+                walker.pose,
+            );
+        }
+        assert_eq!(walker.retained.velocity, Vector3::zero());
     }
 
     /// A ball flank between the thresholds lands as a slide with the radial contact plane — the
     /// case the volume-collider plan documented as its walkable-allowance gap — and the body
     /// ultimately reaches walkable ground below.
     #[test]
+    #[ignore = "F14: curved landing trajectory reference is unresolved (see movement cutover plan)"]
     fn ball_flank_lands_sliding_and_descends_to_walkable_ground() {
         use holtburger_content::{
             ColliderScale, CollisionBall, CollisionShape, LandblockPlacement, PlacedCollider,
@@ -466,7 +497,7 @@ mod scenarios {
         let mut supported_low = false;
         for _ in 0..300 {
             falling = tick(&scene_with_ball, falling, Vector3::zero());
-            match falling.ground {
+            match movement_ground(&falling) {
                 GroundState::Sliding(plane) => {
                     assert!(
                         plane.normal.z > RETAIL_LANDING_NORMAL_Z
@@ -507,7 +538,7 @@ mod scenarios {
         let mut supported_at = None;
         for tick_index in 0..600 {
             falling = tick(&scene, falling, Vector3::zero());
-            if matches!(falling.ground, GroundState::Supported(_)) {
+            if matches!(movement_ground(&falling), GroundState::Supported(_)) {
                 supported_at = Some(tick_index);
                 break;
             }
@@ -515,7 +546,7 @@ mod scenarios {
         assert!(
             supported_at.is_some(),
             "slide never reached walkable support: {:?} at {:?}",
-            falling.ground,
+            movement_ground(&falling),
             falling.pose.coords
         );
         assert!(

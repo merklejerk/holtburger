@@ -11,16 +11,18 @@ use holtburger_content::{
 };
 use holtburger_core::ContentAssetService;
 use holtburger_dat::physics::BspNode;
+use holtburger_debug_harness::movement_probe::{
+    ProbeBodyView, ProbeMovement, advance_probe_body, collision_neighborhood, flight_body,
+    grounded_body,
+};
 use holtburger_world::{
-    CellTransitRequest, CollisionQueryPolicy, CollisionScene, EdgeProtection, FreeSphereConfig,
-    FreeSphereOutcome, FreeSphereRequest, FreeSphereState, GroundState, GroundedBody,
-    GroundedBodySpheres, GroundedConfig, GroundedObstructionRequest, GroundedOutcome,
-    GroundedRequest, GroundedSphere, MotionWaypoint, MotionWaypointPlacement,
-    PhysicalCollisionFilter, PlacedMotionPathRequest, PlacementRequest, RETAIL_WALKABLE_NORMAL_Z,
-    SpatialMembership, SphereSweep, SupportRequest, solve_free_sphere, solve_grounded,
+    CellTransitRequest, CollisionScene, GroundState, GroundedBodyActuation, GroundedBodySpheres,
+    GroundedObstructionRequest, GroundedSphere, MOBILE_CONTACT_TICK_SECONDS, MotionWaypoint,
+    MotionWaypointPlacement, PhysicalBodyActuation, PlacedMotionPathRequest, PlacementRequest,
+    SpatialBody, SpatialMembership, SphereSweep, SupportRequest,
 };
 
-const HOST_TICK_SECONDS: f32 = 1.0 / 30.0;
+const HOST_TICK_SECONDS: f32 = MOBILE_CONTACT_TICK_SECONDS;
 const WALK_SPEED: f32 = 4.0;
 const PHYSICAL_FLY_RADIUS: f32 = 0.25;
 /// Retail first-person pivot height (`acclient.c:138168-138196`).
@@ -35,26 +37,6 @@ const HUMAN_RADIUS: f32 = 0.480;
 const FOOT_CLEARANCE: f32 = HUMAN_RADIUS - SUPPORT_CENTER_Z;
 /// Mirrors Explorer's radius-two application simulation-interest policy.
 const SIMULATION_INTEREST_RADIUS: i32 = 2;
-const PHYSICAL_FLY_CONFIG: FreeSphereConfig = FreeSphereConfig {
-    maximum_substep_distance: PHYSICAL_FLY_RADIUS,
-    maximum_substeps: 32,
-    maximum_contact_passes: 8,
-    separation_epsilon: 0.000_5,
-};
-const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
-    gravity: -9.8,
-    walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
-    landing_normal_z: holtburger_world::RETAIL_LANDING_NORMAL_Z,
-    airborne_step_down_height: holtburger_world::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
-    step_up_height: 0.6,
-    step_down_height: 1.5,
-    edge_protection: EdgeProtection::Creature,
-    maximum_substep_distance: HUMAN_RADIUS * 0.5,
-    maximum_substeps: 32,
-    maximum_contact_passes: 8,
-    separation_epsilon: 0.000_5,
-};
-
 /// Grounded collider roles exercised by one explicit diagnostic route.
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum GroundedRouteBody {
@@ -123,8 +105,8 @@ struct GroundedRouteSpec {
 }
 
 /// Compact tri-state label for route output.
-fn ground_label(body: &GroundedBody) -> &'static str {
-    match body.ground {
+fn ground_label(body: &SpatialBody) -> &'static str {
+    match body.ground() {
         GroundState::Supported(_) => "supported",
         GroundState::Sliding(_) => "sliding",
         GroundState::Airborne => "airborne",
@@ -623,28 +605,8 @@ fn insert_simulation_interest_neighborhood(
     center_asset: holtburger_content::LandblockCollisionAsset,
     scene: &mut CollisionScene,
 ) -> Result<()> {
-    let center = center_asset.landblock_id;
-    let center_x = ((center >> 24) & 0xff) as i32;
-    let center_y = ((center >> 16) & 0xff) as i32;
-    let mut insertions = vec![center_asset];
-    for offset_x in -SIMULATION_INTEREST_RADIUS..=SIMULATION_INTEREST_RADIUS {
-        for offset_y in -SIMULATION_INTEREST_RADIUS..=SIMULATION_INTEREST_RADIUS {
-            if offset_x == 0 && offset_y == 0 {
-                continue;
-            }
-            let x = center_x + offset_x;
-            let y = center_y + offset_y;
-            if !(0..=255).contains(&x) || !(0..=255).contains(&y) {
-                continue;
-            }
-            let owner = ((x as u32) << 24) | ((y as u32) << 16) | 0xffff;
-            let Some(landblock) = service.load_landblock(owner)? else {
-                continue;
-            };
-            insertions.push(service.resolve_collision(&landblock)?);
-        }
-    }
-    scene.apply_residency_change(insertions, &[])?;
+    let neighborhood = collision_neighborhood(service, center_asset, SIMULATION_INTEREST_RADIUS)?;
+    scene.apply_residency_change(neighborhood.assets, &[])?;
     Ok(())
 }
 
@@ -661,7 +623,7 @@ struct OutsidePortalWaypoint {
 #[derive(Debug)]
 struct PhysicalFlyPortalTrace {
     /// Last atomically committed physical-fly body.
-    body: FreeSphereState,
+    body: SpatialBody,
     /// First EnvCell committed during the drive, when entry occurred.
     entered_cell: Option<Guid>,
     /// Final camera-viewer cell from continuous placed-motion traversal.
@@ -670,10 +632,6 @@ struct PhysicalFlyPortalTrace {
     viewer_mismatch_ticks: usize,
     /// Initial camera-sphere elevation used to detect grounded-policy leakage.
     start_z: f32,
-    /// Total bounded collision substeps used across the drive.
-    substeps: usize,
-    /// Total contact-separation passes used across the drive.
-    contact_passes: usize,
     /// Ordered placement changes emitted by the shared placed-motion primitive.
     placement_transitions: Vec<PlacementLegTransition>,
 }
@@ -700,10 +658,16 @@ fn append_placed_motion_transitions(
         "ordinary placed-motion probe unexpectedly required placement recovery"
     );
     let initial_cell = path.initial().placement().committed_cell();
-    ensure!(
-        initial_cell == previous_cell,
-        "placed-motion trace changed its initial committed cell"
-    );
+    // A fresh outdoor query may enter a building at its initial point after the previous
+    // query rebased outdoors. This is a reported zero-time transition, not a recovery.
+    if initial_cell != previous_cell {
+        transitions.push(PlacementLegTransition {
+            tick,
+            end_fraction: 0.0,
+            from: previous_cell,
+            to: initial_cell,
+        });
+    }
     let mut cell = initial_cell;
     for leg in path.legs() {
         let next = leg.end().placement().committed_cell();
@@ -787,7 +751,7 @@ enum PhysicalFlyPortalAttempt {
     /// The synthetic seed overlaps authored collision before any request is solved.
     InvalidStart { contacts: usize },
     /// A valid seed completed every bounded solve request.
-    Trace(PhysicalFlyPortalTrace),
+    Trace(Box<PhysicalFlyPortalTrace>),
 }
 
 fn probe_physical_fly_outside_portals(
@@ -822,7 +786,7 @@ fn probe_physical_fly_outside_portals(
                     ));
                 }
                 Ok(PhysicalFlyPortalAttempt::Trace(trace)) => {
-                    if trace.entered_cell.is_some() && trace.body.cell.is_some() {
+                    if trace.entered_cell.is_some() && trace.body.cell().is_some() {
                         traversals.push((*waypoint, direction, trace));
                     }
                 }
@@ -862,9 +826,9 @@ fn probe_physical_fly_outside_portals(
     let selected = canonical.or_else(|| traversals.first());
     if let Some((waypoint, direction, trace)) = selected {
         let (exited, exited_viewer_cell, reverse_mismatch_ticks, reverse_transitions) =
-            exit_physical_fly_portal(scene, trace.body, trace.viewer_cell, *direction)?;
+            exit_physical_fly_portal(scene, trace.body.clone(), trace.viewer_cell, *direction)?;
         ensure!(
-            exited.cell.is_none(),
+            exited.cell().is_none(),
             "selected physical-fly route did not reverse outdoors"
         );
         ensure!(
@@ -873,12 +837,12 @@ fn probe_physical_fly_outside_portals(
         );
         if waypoint.cell == 0xda55_0100 && waypoint.portal_index == 1 && direction.x < -0.9 {
             ensure!(
-                trace.body.cell == Some(Guid(0xda55_0103)),
+                trace.body.cell() == Some(Guid(0xda55_0103)),
                 "DA55 canonical physical-fly route did not finish in linked EnvCell 0xDA550103"
             );
         }
         println!(
-            "physical_fly_route cell=0x{:08X} portal={} direction=({:.3},{:.3}) start_z={:.3} entered=0x{:08X} final_cell={} viewer_cell={} viewer_mismatch_ticks={} final=({:.3},{:.3},{:.3}) vertical_drift={:.4} substeps={} contact_passes={} placement_legs={} reverse_cell={} reverse_viewer_cell={} reverse_viewer_mismatch_ticks={} reverse_final=({:.3},{:.3},{:.3}) reverse_placement_legs={}",
+            "physical_fly_route cell=0x{:08X} portal={} direction=({:.3},{:.3}) start_z={:.3} entered=0x{:08X} final_cell={} viewer_cell={} viewer_mismatch_ticks={} final=({:.3},{:.3},{:.3}) vertical_drift={:.4} placement_legs={} reverse_cell={} reverse_viewer_cell={} reverse_viewer_mismatch_ticks={} reverse_final=({:.3},{:.3},{:.3}) reverse_placement_legs={}",
             waypoint.cell,
             waypoint.portal_index,
             direction.x,
@@ -887,7 +851,7 @@ fn probe_physical_fly_outside_portals(
             trace.entered_cell.expect("selected trace entered a cell").0,
             trace
                 .body
-                .cell
+                .cell()
                 .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
             format_cell(trace.viewer_cell),
             trace.viewer_mismatch_ticks,
@@ -895,11 +859,9 @@ fn probe_physical_fly_outside_portals(
             trace.body.pose.coords.y,
             trace.body.pose.coords.z,
             trace.body.pose.coords.z - trace.start_z,
-            trace.substeps,
-            trace.contact_passes,
             format_placement_transitions(&trace.placement_transitions),
             exited
-                .cell
+                .cell()
                 .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
             format_cell(exited_viewer_cell),
             reverse_mismatch_ticks,
@@ -930,26 +892,25 @@ fn traverse_physical_fly_portal(
     direction: Vector3,
 ) -> Result<PhysicalFlyPortalAttempt> {
     let start = waypoint.center - direction * 1.25;
-    let mut body = FreeSphereState {
-        pose: WorldPosition {
+    let mut body = flight_body(
+        WorldPosition {
             landblock_id: Guid(landblock_id),
             coords: start,
             rotation: Quaternion::identity(),
         }
         .normalize_outdoor_cell(),
-        cell: None,
-        radius: PHYSICAL_FLY_RADIUS,
-    };
+        None,
+    )?;
     let placement = scene.transit_cell(CellTransitRequest {
         previous_cell: None,
         anchor: Guid(landblock_id),
         center: body.pose.coords,
-        radius: body.radius,
+        radius: PHYSICAL_FLY_RADIUS,
     })?;
     let contacts = scene.placement_contacts(PlacementRequest {
         anchor: Guid(landblock_id),
         center: body.pose.coords,
-        radius: body.radius,
+        radius: PHYSICAL_FLY_RADIUS,
         placement: &placement,
     })?;
     if !contacts.is_empty() {
@@ -957,43 +918,35 @@ fn traverse_physical_fly_portal(
             contacts: contacts.len(),
         });
     }
-    body.cell = placement.committed_cell();
-    if let Some(cell) = body.cell {
+    if let Some(cell) = placement.committed_cell() {
         body.pose.landblock_id = cell;
+        body = flight_body(body.pose, Some(cell))?;
     }
     let start_z = body.pose.coords.z;
-    if body.cell.is_some() {
-        return Ok(PhysicalFlyPortalAttempt::Trace(PhysicalFlyPortalTrace {
-            body,
-            entered_cell: None,
-            viewer_cell: body.cell,
-            viewer_mismatch_ticks: 0,
-            start_z,
-            substeps: 0,
-            contact_passes: 0,
-            placement_transitions: Vec::new(),
-        }));
+    if body.cell().is_some() {
+        return Ok(PhysicalFlyPortalAttempt::Trace(Box::new(
+            PhysicalFlyPortalTrace {
+                entered_cell: None,
+                viewer_cell: body.cell(),
+                body,
+                viewer_mismatch_ticks: 0,
+                start_z,
+                placement_transitions: Vec::new(),
+            },
+        )));
     }
 
     let mut entered_cell = None;
-    let mut substeps = 0;
-    let mut contact_passes = 0;
-    let mut viewer_cell = body.cell;
+    let mut viewer_cell = body.cell();
     let mut viewer_mismatch_ticks = 0;
     let mut placement_transitions = Vec::new();
     for tick in 0..30 {
-        let previous = body;
-        let solved = solved_free_sphere(solve_free_sphere(
+        let previous = body.clone();
+        let solved = advance_probe_body(
             scene,
-            PHYSICAL_FLY_CONFIG,
-            FreeSphereRequest {
-                body,
-                displacement: direction * WALK_SPEED * HOST_TICK_SECONDS,
-                filter: PhysicalCollisionFilter::ALL,
-                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
-            },
-        )?)
-        .with_context(|| format!("drive tick {tick}"))?;
+            body,
+            PhysicalBodyActuation::free_flight(direction * WALK_SPEED)?,
+        )?;
         let path_cell = append_physical_fly_viewer_transitions(
             scene,
             tick,
@@ -1004,74 +957,29 @@ fn traverse_physical_fly_portal(
             &mut placement_transitions,
         )?;
         viewer_cell = path_cell;
-        viewer_mismatch_ticks += usize::from(viewer_cell != solved.body.cell);
+        viewer_mismatch_ticks += usize::from(viewer_cell != solved.body.cell());
         body = solved.body;
-        substeps += solved.substeps;
-        contact_passes += solved.contact_passes;
-        entered_cell = entered_cell.or(body.cell);
+        entered_cell = entered_cell.or(body.cell());
     }
-    Ok(PhysicalFlyPortalAttempt::Trace(PhysicalFlyPortalTrace {
-        body,
-        entered_cell,
-        viewer_cell,
-        viewer_mismatch_ticks,
-        start_z,
-        substeps,
-        contact_passes,
-        placement_transitions,
-    }))
-}
-
-/// Physical-fly facts needed after one successful bounded solve.
-struct SolvedFreeSphere {
-    /// Atomically committed body.
-    body: FreeSphereState,
-    /// Collision substeps consumed by the solve.
-    substeps: usize,
-    /// Contact-separation passes consumed by the solve.
-    contact_passes: usize,
-    /// Ordered collision-accepted endpoints produced by the solver.
-    motion: Vec<MotionWaypoint>,
-}
-
-fn solved_free_sphere(outcome: FreeSphereOutcome) -> Result<SolvedFreeSphere> {
-    match outcome {
-        FreeSphereOutcome::Solved {
+    Ok(PhysicalFlyPortalAttempt::Trace(Box::new(
+        PhysicalFlyPortalTrace {
             body,
-            motion,
-            substeps,
-            contact_passes,
-            ..
-        } => Ok(SolvedFreeSphere {
-            body,
-            substeps,
-            contact_passes,
-            motion,
-        }),
-        FreeSphereOutcome::BudgetExceeded {
-            body,
-            budget,
-            substeps,
-            contact_passes,
-            ..
-        } => anyhow::bail!(
-            "free-sphere portal trace exceeded its {budget:?} budget at ({:.3},{:.3},{:.3}) cell={} after {substeps} substeps/{contact_passes} passes",
-            body.pose.coords.x,
-            body.pose.coords.y,
-            body.pose.coords.z,
-            body.cell
-                .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
-        ),
-    }
+            entered_cell,
+            viewer_cell,
+            viewer_mismatch_ticks,
+            start_z,
+            placement_transitions,
+        },
+    )))
 }
 
 fn exit_physical_fly_portal(
     scene: &CollisionScene,
-    mut body: FreeSphereState,
+    mut body: SpatialBody,
     mut viewer_cell: Option<Guid>,
     entry_direction: Vector3,
 ) -> Result<(
-    FreeSphereState,
+    SpatialBody,
     Option<Guid>,
     usize,
     Vec<PlacementLegTransition>,
@@ -1080,18 +988,12 @@ fn exit_physical_fly_portal(
     let mut viewer_mismatch_ticks = 0;
     let mut placement_transitions = Vec::new();
     for tick in 0..60 {
-        let previous = body;
-        let solved = solved_free_sphere(solve_free_sphere(
+        let previous = body.clone();
+        let solved = advance_probe_body(
             scene,
-            PHYSICAL_FLY_CONFIG,
-            FreeSphereRequest {
-                body,
-                displacement: entry_direction * -WALK_SPEED * HOST_TICK_SECONDS,
-                filter: PhysicalCollisionFilter::ALL,
-                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
-            },
-        )?)
-        .with_context(|| format!("reverse tick {tick}"))?;
+            body,
+            PhysicalBodyActuation::free_flight(entry_direction * -WALK_SPEED)?,
+        )?;
         let path_cell = append_physical_fly_viewer_transitions(
             scene,
             tick,
@@ -1102,7 +1004,7 @@ fn exit_physical_fly_portal(
             &mut placement_transitions,
         )?;
         viewer_cell = path_cell;
-        viewer_mismatch_ticks += usize::from(viewer_cell != solved.body.cell);
+        viewer_mismatch_ticks += usize::from(viewer_cell != solved.body.cell());
         body = solved.body;
     }
     Ok((
@@ -1113,14 +1015,6 @@ fn exit_physical_fly_portal(
     ))
 }
 
-/// Whether one explicit route tick may feed the next tick.
-enum GroundedRouteTick {
-    /// The solver committed a body that may continue the replay.
-    Solved(GroundedBody),
-    /// Coverage or a finite solver budget stopped the replay at its last safe state.
-    Stopped,
-}
-
 /// Correlated inputs for one explicit grounded replay tick.
 struct GroundedRouteTickRequest {
     /// Stable replay phase label.
@@ -1128,7 +1022,7 @@ struct GroundedRouteTickRequest {
     /// Zero-based tick within `phase`.
     tick: usize,
     /// Last safely committed body supplied to the production solver.
-    body: GroundedBody,
+    body: SpatialBody,
     /// Velocity submitted for this tick.
     requested_velocity: Vector3,
     /// Axis used only to report signed forward progress.
@@ -1141,16 +1035,15 @@ fn probe_explicit_grounded_route(
     route: GroundedRouteSpec,
 ) -> Result<()> {
     let anchor = Guid(landblock_id);
-    let mut body = GroundedBody {
-        pose: WorldPosition {
+    let mut body = grounded_body(
+        WorldPosition {
             landblock_id: route.cell.unwrap_or(anchor),
             coords: route.start,
             rotation: Quaternion::identity(),
         },
-        cell: route.cell,
-        velocity: Vector3::zero(),
-        ground: GroundState::Airborne,
-    };
+        route.spheres,
+        route.cell,
+    )?;
     let support_center = route.start + route.spheres.support.center;
     let placement = scene.transit_cell(CellTransitRequest {
         previous_cell: route.cell,
@@ -1178,9 +1071,8 @@ fn probe_explicit_grounded_route(
         usize::from(route.spheres.upper.is_some()) + 1,
     );
     for tick in 0..route.settle_ticks {
-        match emit_grounded_route_tick(
+        body = emit_grounded_route_tick(
             scene,
-            route.spheres,
             GroundedRouteTickRequest {
                 phase: "settle",
                 tick,
@@ -1188,15 +1080,11 @@ fn probe_explicit_grounded_route(
                 requested_velocity: Vector3::zero(),
                 progress_axis: route.drive_velocity,
             },
-        )? {
-            GroundedRouteTick::Solved(solved) => body = solved,
-            GroundedRouteTick::Stopped => return Ok(()),
-        }
+        )?;
     }
     for tick in 0..route.drive_ticks {
-        match emit_grounded_route_tick(
+        body = emit_grounded_route_tick(
             scene,
-            route.spheres,
             GroundedRouteTickRequest {
                 phase: "drive",
                 tick,
@@ -1204,99 +1092,57 @@ fn probe_explicit_grounded_route(
                 requested_velocity: route.drive_velocity,
                 progress_axis: route.drive_velocity,
             },
-        )? {
-            GroundedRouteTick::Solved(solved) => body = solved,
-            GroundedRouteTick::Stopped => return Ok(()),
-        }
+        )?;
     }
     Ok(())
 }
 
 fn emit_grounded_route_tick(
     scene: &CollisionScene,
-    spheres: GroundedBodySpheres,
     request: GroundedRouteTickRequest,
-) -> Result<GroundedRouteTick> {
+) -> Result<SpatialBody> {
     let phase = request.phase;
     let tick = request.tick;
     let start = request.body.pose.coords;
-    let outcome = solve_grounded(
+    let solved = advance_probe_body(
         scene,
-        GROUNDED_CONFIG,
-        GroundedRequest {
-            settle: request.body.ground.settle_permission(),
-            body: request.body,
-            spheres,
-            supported_velocity: request.requested_velocity,
-            retain_supported_gravity: false,
-            delta_seconds: HOST_TICK_SECONDS,
-            filter: PhysicalCollisionFilter::ALL,
-        },
+        request.body,
+        PhysicalBodyActuation::Grounded(GroundedBodyActuation::drive(request.requested_velocity)?),
     )?;
-    match outcome {
-        GroundedOutcome::Solved {
-            body,
-            achieved_velocity,
-            substeps,
-            contact_passes,
-            constraint_count,
-            ..
-        } => {
-            let displacement = body.pose.coords - start;
-            let forward = if request.progress_axis.length_squared() > f32::EPSILON {
-                displacement.dot(&request.progress_axis.normalize())
-            } else {
-                0.0
-            };
-            let support_normal = format_ground_support(&body);
-            println!(
-                "grounded_explicit phase={phase} tick={tick} status=solved start=({:.6},{:.6},{:.6}) final=({:.6},{:.6},{:.6}) displacement=({:.6},{:.6},{:.6}) forward={forward:.6} achieved=({:.6},{:.6},{:.6}) cell={} ground={} support_normal={support_normal} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
-                start.x,
-                start.y,
-                start.z,
-                body.pose.coords.x,
-                body.pose.coords.y,
-                body.pose.coords.z,
-                displacement.x,
-                displacement.y,
-                displacement.z,
-                achieved_velocity.x,
-                achieved_velocity.y,
-                achieved_velocity.z,
-                format_cell(body.cell),
-                ground_label(&body),
-                body.velocity.x,
-                body.velocity.y,
-                body.velocity.z,
-            );
-            Ok(GroundedRouteTick::Solved(body))
-        }
-        GroundedOutcome::BudgetExceeded {
-            body,
-            budget,
-            substeps,
-            contact_passes,
-            constraint_count,
-            ..
-        } => {
-            println!(
-                "grounded_explicit phase={phase} tick={tick} status=budget_exceeded budget={budget:?} final=({:.6},{:.6},{:.6}) cell={} ground={} body_velocity=({:.6},{:.6},{:.6}) constraints={constraint_count} substeps={substeps} contact_passes={contact_passes}",
-                body.pose.coords.x,
-                body.pose.coords.y,
-                body.pose.coords.z,
-                format_cell(body.cell),
-                ground_label(&body),
-                body.velocity.x,
-                body.velocity.y,
-                body.velocity.z,
-            );
-            Ok(GroundedRouteTick::Stopped)
-        }
-    }
+    let body = solved.body;
+    let displacement = body.pose.coords - start;
+    let forward = if request.progress_axis.length_squared() > f32::EPSILON {
+        displacement.dot(&request.progress_axis.normalize())
+    } else {
+        0.0
+    };
+    let achieved = displacement / HOST_TICK_SECONDS;
+    println!(
+        "grounded_explicit phase={phase} tick={tick} status=solved start=({:.6},{:.6},{:.6}) final=({:.6},{:.6},{:.6}) displacement=({:.6},{:.6},{:.6}) forward={forward:.6} achieved=({:.6},{:.6},{:.6}) cell={} ground={} support_normal={} body_velocity=({:.6},{:.6},{:.6})",
+        start.x,
+        start.y,
+        start.z,
+        body.pose.coords.x,
+        body.pose.coords.y,
+        body.pose.coords.z,
+        displacement.x,
+        displacement.y,
+        displacement.z,
+        achieved.x,
+        achieved.y,
+        achieved.z,
+        format_cell(body.cell()),
+        ground_label(&body),
+        format_ground_support(&body),
+        body.retained.velocity.x,
+        body.retained.velocity.y,
+        body.retained.velocity.z,
+    );
+    Ok(body)
 }
 
-fn format_ground_support(body: &GroundedBody) -> String {
-    let Some(support) = body.ground.walkable_support() else {
+fn format_ground_support(body: &SpatialBody) -> String {
+    let Some(support) = body.ground().walkable_support() else {
         return "none".to_owned();
     };
     format!(
@@ -1377,19 +1223,13 @@ fn probe_grounded_outside_portals(
                 if let Ok(GroundedPortalAttempt::Trace(pair)) = &pair
                     && pair.entered_cell.is_none()
                 {
-                    pair_vetoes.push((
-                        *waypoint,
-                        direction,
-                        lower.body.clone(),
-                        pair.body.clone(),
-                        pair.constraint_count,
-                    ));
+                    pair_vetoes.push((*waypoint, direction, lower.body.clone(), pair.body.clone()));
                 }
                 lower_only.push((*waypoint, direction, lower));
             }
             if let Ok(GroundedPortalAttempt::Trace(pair)) = pair
                 && pair.entered_cell.is_some()
-                && pair.body.cell.is_some()
+                && pair.body.cell().is_some()
             {
                 traversable_pair.push((*waypoint, direction, pair));
             }
@@ -1430,18 +1270,18 @@ fn probe_grounded_outside_portals(
             waypoint.floor_z,
             trace
                 .body
-                .cell
+                .cell()
                 .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
             trace.body.pose.coords.z,
         );
     }
     if let Some((waypoint, direction, trace)) = traversable_pair
         .iter()
-        .find(|(_, _, trace)| trace.body.ground.walkable_support().is_some())
+        .find(|(_, _, trace)| trace.body.ground().walkable_support().is_some())
     {
-        let exited = exit_outside_portal(scene, trace.body.clone(), *direction, production_pair())?;
+        let exited = exit_outside_portal(scene, trace.body.clone(), *direction)?;
         println!(
-            "grounded_route pair cell=0x{:08X} portal={} center=({:.3},{:.3},{:.3}) direction=({:.3},{:.3}) entered=0x{:08X} final_cell={} viewer_cell={} viewer_heading={} viewer_mismatch_ticks={} viewer_placement_legs={} final=({:.3},{:.3},{:.3}) grounded={} constraints={} reverse_cell={} reverse_final=({:.3},{:.3},{:.3}) reverse_grounded={}",
+            "grounded_route pair cell=0x{:08X} portal={} center=({:.3},{:.3},{:.3}) direction=({:.3},{:.3}) entered=0x{:08X} final_cell={} viewer_cell={} viewer_heading={} viewer_mismatch_ticks={} viewer_placement_legs={} final=({:.3},{:.3},{:.3}) grounded={} reverse_cell={} reverse_final=({:.3},{:.3},{:.3}) reverse_grounded={}",
             waypoint.cell,
             waypoint.portal_index,
             waypoint.center.x,
@@ -1452,7 +1292,7 @@ fn probe_grounded_outside_portals(
             trace.entered_cell.expect("selected trace entered a cell").0,
             trace
                 .body
-                .cell
+                .cell()
                 .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
             trace
                 .viewer_cell
@@ -1463,44 +1303,42 @@ fn probe_grounded_outside_portals(
             trace.body.pose.coords.x,
             trace.body.pose.coords.y,
             trace.body.pose.coords.z,
-            trace.body.ground.walkable_support().is_some(),
-            trace.constraint_count,
+            trace.body.ground().walkable_support().is_some(),
             exited
                 .body
-                .cell
+                .cell()
                 .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
             exited.body.pose.coords.x,
             exited.body.pose.coords.y,
             exited.body.pose.coords.z,
-            exited.body.ground.walkable_support().is_some(),
+            exited.body.ground().walkable_support().is_some(),
         );
     } else {
         if let Some((waypoint, direction, trace)) = traversable_pair.first() {
             println!(
-                "grounded_route pair_unsettled cell=0x{:08X} portal={} direction=({:.3},{:.3}) final_cell={} final=({:.3},{:.3},{:.3}) body_velocity=({:.3},{:.3},{:.3}) constraints={}",
+                "grounded_route pair_unsettled cell=0x{:08X} portal={} direction=({:.3},{:.3}) final_cell={} final=({:.3},{:.3},{:.3}) body_velocity=({:.3},{:.3},{:.3})",
                 waypoint.cell,
                 waypoint.portal_index,
                 direction.x,
                 direction.y,
                 trace
                     .body
-                    .cell
+                    .cell()
                     .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
                 trace.body.pose.coords.x,
                 trace.body.pose.coords.y,
                 trace.body.pose.coords.z,
-                trace.body.velocity.x,
-                trace.body.velocity.y,
-                trace.body.velocity.z,
-                trace.constraint_count,
+                trace.body.retained.velocity.x,
+                trace.body.retained.velocity.y,
+                trace.body.retained.velocity.z,
             );
         } else {
             println!("grounded_route pair=none");
         }
     }
-    if let Some((waypoint, direction, lower, pair, pair_constraint_count)) = pair_vetoes.first() {
+    if let Some((waypoint, direction, lower, pair)) = pair_vetoes.first() {
         println!(
-            "grounded_route pair_veto cell=0x{:08X} portal={} center=({:.3},{:.3},{:.3}) direction=({:.3},{:.3}) lower_final_cell={} pair_final_cell={} pair_final=({:.3},{:.3},{:.3}) pair_grounded={} pair_constraints={}",
+            "grounded_route pair_veto cell=0x{:08X} portal={} center=({:.3},{:.3},{:.3}) direction=({:.3},{:.3}) lower_final_cell={} pair_final_cell={} pair_final=({:.3},{:.3},{:.3}) pair_grounded={}",
             waypoint.cell,
             waypoint.portal_index,
             waypoint.center.x,
@@ -1509,15 +1347,14 @@ fn probe_grounded_outside_portals(
             direction.x,
             direction.y,
             lower
-                .cell
+                .cell()
                 .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
-            pair.cell
+            pair.cell()
                 .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
             pair.pose.coords.x,
             pair.pose.coords.y,
             pair.pose.coords.z,
-            pair.ground.walkable_support().is_some(),
-            pair_constraint_count,
+            pair.ground().walkable_support().is_some(),
         );
     }
     ensure!(
@@ -1530,35 +1367,22 @@ fn probe_grounded_outside_portals(
 
 fn exit_outside_portal(
     scene: &CollisionScene,
-    mut body: GroundedBody,
+    mut body: SpatialBody,
     entry_direction: Vector3,
-    spheres: GroundedBodySpheres,
-) -> Result<SolvedGrounded> {
-    let mut constraint_count = 0;
+) -> Result<ProbeMovement> {
     let mut motion = Vec::new();
     for _ in 0..60 {
-        let solved = solved_grounded(solve_grounded(
+        let solved = advance_probe_body(
             scene,
-            GROUNDED_CONFIG,
-            GroundedRequest {
-                settle: body.ground.settle_permission(),
-                body,
-                spheres,
-                supported_velocity: entry_direction * -WALK_SPEED,
-                retain_supported_gravity: false,
-                delta_seconds: HOST_TICK_SECONDS,
-                filter: PhysicalCollisionFilter::ALL,
-            },
-        )?)?;
+            body,
+            PhysicalBodyActuation::Grounded(GroundedBodyActuation::drive(
+                entry_direction * -WALK_SPEED,
+            )?),
+        )?;
         body = solved.body;
-        constraint_count = solved.constraint_count;
         motion = solved.motion;
     }
-    Ok(SolvedGrounded {
-        body,
-        constraint_count,
-        motion,
-    })
+    Ok(ProbeMovement { body, motion })
 }
 
 fn outside_portal_waypoints(
@@ -1645,13 +1469,12 @@ fn outside_portal_waypoints(
 
 #[derive(Debug)]
 struct GroundedPortalTrace {
-    body: GroundedBody,
+    body: SpatialBody,
     entered_cell: Option<Guid>,
     viewer_cell: Option<Guid>,
     viewer_heading: &'static str,
     viewer_mismatch_ticks: usize,
     viewer_placement_transitions: Vec<PlacementLegTransition>,
-    constraint_count: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -1665,13 +1488,7 @@ struct GroundedViewerTrace {
 
 enum GroundedPortalAttempt {
     InvalidStart { contacts: usize },
-    Trace(GroundedPortalTrace),
-}
-
-struct SolvedGrounded {
-    body: GroundedBody,
-    constraint_count: usize,
-    motion: Vec<MotionWaypoint>,
+    Trace(Box<GroundedPortalTrace>),
 }
 
 fn traverse_outside_portal(
@@ -1682,26 +1499,25 @@ fn traverse_outside_portal(
     spheres: GroundedBodySpheres,
 ) -> Result<GroundedPortalAttempt> {
     let start = waypoint.center - direction * 1.25;
-    let mut body = GroundedBody {
-        pose: WorldPosition {
+    let mut body = grounded_body(
+        WorldPosition {
             landblock_id: Guid(landblock_id),
             coords: Vector3::new(start.x, start.y, waypoint.floor_z + FOOT_CLEARANCE),
             rotation: Quaternion::identity(),
         }
         .normalize_outdoor_cell(),
-        cell: None,
-        velocity: Vector3::zero(),
-        ground: GroundState::Airborne,
-    };
+        spheres,
+        None,
+    )?;
     let registration = scene.transit_cell(CellTransitRequest {
         previous_cell: None,
         anchor: Guid(landblock_id),
         center: body.pose.coords + body.pose.rotation.rotate_vector(spheres.support.center),
         radius: spheres.support.radius,
     })?;
-    body.cell = registration.committed_cell();
-    if let Some(cell) = body.cell {
+    if let Some(cell) = registration.committed_cell() {
         body.pose.landblock_id = cell;
+        body = grounded_body(body.pose, spheres, Some(cell))?;
     }
     let initial_contacts = initial_placement_contacts(scene, &body, spheres)?;
     if initial_contacts > 0 {
@@ -1709,26 +1525,16 @@ fn traverse_outside_portal(
             contacts: initial_contacts,
         });
     }
-    let mut constraint_count = 0;
+
     let mut viewer_traces = grounded_viewer_traces(direction);
     for tick in 0..4 {
         let previous = body.clone();
-        let solved = solved_grounded(solve_grounded(
+        let solved = advance_probe_body(
             scene,
-            GROUNDED_CONFIG,
-            GroundedRequest {
-                settle: body.ground.settle_permission(),
-                body,
-                spheres,
-                supported_velocity: Vector3::zero(),
-                retain_supported_gravity: false,
-                delta_seconds: HOST_TICK_SECONDS,
-                filter: PhysicalCollisionFilter::ALL,
-            },
-        )?)
-        .with_context(|| format!("settle tick {tick}"))?;
+            body,
+            PhysicalBodyActuation::Grounded(GroundedBodyActuation::drive(Vector3::zero())?),
+        )?;
         body = solved.body;
-        constraint_count = solved.constraint_count;
         transit_grounded_viewers(
             scene,
             landblock_id,
@@ -1739,39 +1545,30 @@ fn traverse_outside_portal(
             &mut viewer_traces,
         )?;
     }
-    if body.cell.is_some() {
+    if body.cell().is_some() {
         let viewer = most_divergent_viewer(viewer_traces);
-        return Ok(GroundedPortalAttempt::Trace(GroundedPortalTrace {
-            entered_cell: None,
-            body,
-            viewer_cell: viewer.cell,
-            viewer_heading: viewer.label,
-            viewer_mismatch_ticks: viewer.mismatch_ticks,
-            viewer_placement_transitions: viewer.placement_transitions,
-            constraint_count,
-        }));
+        return Ok(GroundedPortalAttempt::Trace(Box::new(
+            GroundedPortalTrace {
+                entered_cell: None,
+                body,
+                viewer_cell: viewer.cell,
+                viewer_heading: viewer.label,
+                viewer_mismatch_ticks: viewer.mismatch_ticks,
+                viewer_placement_transitions: viewer.placement_transitions,
+            },
+        )));
     }
 
     let mut entered_cell = None;
     for tick in 0..30 {
         let previous = body.clone();
-        let solved = solved_grounded(solve_grounded(
+        let solved = advance_probe_body(
             scene,
-            GROUNDED_CONFIG,
-            GroundedRequest {
-                settle: body.ground.settle_permission(),
-                body,
-                spheres,
-                supported_velocity: direction * WALK_SPEED,
-                retain_supported_gravity: false,
-                delta_seconds: HOST_TICK_SECONDS,
-                filter: PhysicalCollisionFilter::ALL,
-            },
-        )?)
-        .with_context(|| format!("drive tick {tick}"))?;
+            body,
+            PhysicalBodyActuation::Grounded(GroundedBodyActuation::drive(direction * WALK_SPEED)?),
+        )?;
         body = solved.body;
-        constraint_count = solved.constraint_count;
-        entered_cell = entered_cell.or(body.cell);
+        entered_cell = entered_cell.or(body.cell());
         transit_grounded_viewers(
             scene,
             landblock_id,
@@ -1783,15 +1580,16 @@ fn traverse_outside_portal(
         )?;
     }
     let viewer = most_divergent_viewer(viewer_traces);
-    Ok(GroundedPortalAttempt::Trace(GroundedPortalTrace {
-        body,
-        entered_cell,
-        viewer_cell: viewer.cell,
-        viewer_heading: viewer.label,
-        viewer_mismatch_ticks: viewer.mismatch_ticks,
-        viewer_placement_transitions: viewer.placement_transitions,
-        constraint_count,
-    }))
+    Ok(GroundedPortalAttempt::Trace(Box::new(
+        GroundedPortalTrace {
+            body,
+            entered_cell,
+            viewer_cell: viewer.cell,
+            viewer_heading: viewer.label,
+            viewer_mismatch_ticks: viewer.mismatch_ticks,
+            viewer_placement_transitions: viewer.placement_transitions,
+        },
+    )))
 }
 
 fn grounded_viewer_traces(travel_direction: Vector3) -> [GroundedViewerTrace; 4] {
@@ -1832,9 +1630,9 @@ fn transit_grounded_viewers(
     scene: &CollisionScene,
     landblock_id: u32,
     tick: usize,
-    previous_body: &GroundedBody,
+    previous_body: &SpatialBody,
     motion: &[MotionWaypoint],
-    body: &GroundedBody,
+    body: &SpatialBody,
     traces: &mut [GroundedViewerTrace],
 ) -> Result<()> {
     for trace in traces {
@@ -1860,7 +1658,7 @@ fn transit_grounded_viewers(
             },
             &mut trace.placement_transitions,
         )?;
-        trace.mismatch_ticks += usize::from(body.cell != trace.cell);
+        trace.mismatch_ticks += usize::from(body.cell() != trace.cell);
     }
     Ok(())
 }
@@ -1874,14 +1672,14 @@ fn most_divergent_viewer(traces: [GroundedViewerTrace; 4]) -> GroundedViewerTrac
 
 fn initial_placement_contacts(
     scene: &CollisionScene,
-    body: &GroundedBody,
+    body: &SpatialBody,
     spheres: GroundedBodySpheres,
 ) -> Result<usize> {
     let mut contact_count = 0;
     for sphere in [Some(spheres.support), spheres.upper].into_iter().flatten() {
         let center = body.pose.coords + body.pose.rotation.rotate_vector(sphere.center);
         let placement = scene.transit_cell(CellTransitRequest {
-            previous_cell: body.cell,
+            previous_cell: body.cell(),
             anchor: body.pose.landblock_id,
             center,
             radius: sphere.radius,
@@ -1896,40 +1694,6 @@ fn initial_placement_contacts(
             .len();
     }
     Ok(contact_count)
-}
-
-fn solved_grounded(outcome: GroundedOutcome) -> Result<SolvedGrounded> {
-    match outcome {
-        GroundedOutcome::Solved {
-            body,
-            constraint_count,
-            motion,
-            ..
-        } => Ok(SolvedGrounded {
-            body,
-            constraint_count,
-            motion,
-        }),
-        GroundedOutcome::BudgetExceeded {
-            body,
-            budget,
-            substeps,
-            contact_passes,
-            constraint_count,
-            ..
-        } => {
-            anyhow::bail!(
-                "grounded portal trace exceeded its {budget:?} budget at ({:.3},{:.3},{:.3}) cell={} ground={} constraints={} after {substeps} substeps/{contact_passes} passes",
-                body.pose.coords.x,
-                body.pose.coords.y,
-                body.pose.coords.z,
-                body.cell
-                    .map_or_else(|| "outdoor".to_owned(), |cell| format!("0x{:08X}", cell.0)),
-                ground_label(&body),
-                constraint_count,
-            )
-        }
-    }
 }
 
 fn support_sphere() -> GroundedSphere {

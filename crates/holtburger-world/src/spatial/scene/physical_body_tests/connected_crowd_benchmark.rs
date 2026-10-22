@@ -181,7 +181,7 @@ fn connected_crowd_benchmark() {
                 "horizontal crowd contact created vertical velocity: {maximum_vertical_speed}"
             );
             assert!(
-                maximum_hard_penetration <= FLY_CONFIG.separation_epsilon,
+                maximum_hard_penetration <= crate::spatial::bsp_query::CONTACT_EPSILON,
                 "player penetrated a fixed target: {maximum_hard_penetration}"
             );
             let forward = (scene.body(source).unwrap().pose.coords

@@ -959,8 +959,8 @@ mod tests {
     use holtburger_common::{Quaternion, Sphere, Vector3};
     use holtburger_content::{LandblockColliders, TerrainCollisionSurface};
     use holtburger_world::{
-        FreeSphereConfig, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
-        PhysicalSphereSet, PhysicalSurfaceMotion,
+        PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
+        PhysicalSurfaceMotion,
     };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Instant;
@@ -1108,12 +1108,6 @@ mod tests {
                 None,
             )
             .unwrap(),
-            FreeSphereConfig {
-                maximum_substep_distance: 0.25,
-                maximum_substeps: 8,
-                maximum_contact_passes: 4,
-                separation_epsilon: 0.001,
-            },
         )
         .unwrap();
         service

@@ -12,6 +12,12 @@ use holtburger_dat::file_type::{
 use holtburger_dat::graphics::Frame;
 use holtburger_dat::physics::InternalNode;
 
+/// Explicit stationary camera-query work budget, independent of body movement.
+const CAMERA_SETTLE_CONFIG: crate::FreeSphereSettleConfig = crate::FreeSphereSettleConfig {
+    maximum_contact_passes: 8,
+    separation_epsilon: 0.0001,
+};
+
 fn animated_panel_configuration() -> (u32, DynamicPhysicalBodyConfiguration) {
     let animation_id = 0x03000001;
     let animation = Animation {
@@ -118,7 +124,7 @@ fn stationary_camera_recovery_checks_entity_paths_endpoints_and_target_exclusion
     assert!(matches!(
         settle_free_sphere(
             &environment,
-            FLY_CONFIG.into(),
+            CAMERA_SETTLE_CONFIG,
             original,
             PhysicalCollisionFilter::ALL
         )
@@ -158,7 +164,7 @@ fn stationary_camera_recovery_checks_entity_paths_endpoints_and_target_exclusion
         };
         let outcome = settle_free_sphere(
             &query,
-            FLY_CONFIG.into(),
+            CAMERA_SETTLE_CONFIG,
             original,
             PhysicalCollisionFilter::ALL,
         )
@@ -174,7 +180,7 @@ fn stationary_camera_recovery_checks_entity_paths_endpoints_and_target_exclusion
         assert!(matches!(
             settle_free_sphere(
                 &excluded,
-                FLY_CONFIG.into(),
+                CAMERA_SETTLE_CONFIG,
                 original,
                 PhysicalCollisionFilter::ALL
             )
@@ -398,9 +404,7 @@ fn authored_panel_pose_changes_shared_collision_and_retires_old_surface_proofs()
 #[test]
 fn camera_queries_share_animated_solids_and_refresh_participation() {
     use crate::spatial::{
-        CameraCollisionQuery, CollisionQueryPolicy, FreeSphereConfig, FreeSphereOutcome,
-        FreeSphereRequest, FreeSphereState, SphereCollisionQuery, StaticSphereSweepRequest,
-        solve_free_sphere,
+        CameraCollisionQuery, CollisionQueryPolicy, SphereCollisionQuery, StaticSphereSweepRequest,
     };
     let now = Instant::now();
     let (animation_id, config) = animated_panel_configuration();
@@ -449,31 +453,6 @@ fn camera_queries_share_animated_solids_and_refresh_participation() {
         .unwrap();
     assert!(hit.time_of_impact < 0.4);
     assert_eq!(query.entity_sweep_sphere(request).unwrap(), Some(hit));
-    let config = FreeSphereConfig {
-        maximum_substep_distance: 0.1,
-        maximum_substeps: 64,
-        maximum_contact_passes: 8,
-        separation_epsilon: 0.0001,
-    };
-    let outcome = solve_free_sphere(
-        &query,
-        config,
-        FreeSphereRequest {
-            body: FreeSphereState {
-                pose: pose(request.start),
-                cell: None,
-                radius: request.radius,
-            },
-            displacement: request.displacement,
-            filter: request.filter,
-            query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
-        },
-    )
-    .unwrap();
-    let FreeSphereOutcome::Solved { body, .. } = outcome else {
-        panic!("camera movement should converge");
-    };
-    assert!(body.pose.coords.x < 96.0 - request.radius + 0.001);
     // An authored pose changes even when the root is stationary and the target is active.
     scene
         .publish_collision_pose(
@@ -493,7 +472,7 @@ fn camera_queries_share_animated_solids_and_refresh_participation() {
     };
     let overlap = crate::spatial::settle_free_sphere_with_policy(
         &moved_query,
-        config.into(),
+        CAMERA_SETTLE_CONFIG,
         FreeSphereState {
             pose: pose(Vector3::new(96.9, 96.0, 1.0)),
             cell: None,

@@ -1426,13 +1426,12 @@ mod tests {
     use holtburger_world::{
         CollisionScene, DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
         DynamicPhysicalBodyDefinition, EdgeProtection, EntityCollisionParticipation,
-        EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, FreeSphereConfig,
-        GroundedConfig, LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand,
-        PhysicalBodyDefinition, PhysicalBodyResponsePolicy, PhysicalCollisionFilter,
-        PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
-        PhysicalSurfaceMotion, PlayerMotionTableSource, PreparedEntityTargetGeometry,
-        RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
-        SelfMovementCapabilities, SelfMovementKinematics,
+        EntityCollisionReportPolicy, EntityDynamicCollisionPolicy, GroundedConfig,
+        LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand, PhysicalBodyDefinition,
+        PhysicalBodyResponsePolicy, PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction,
+        PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PlayerMotionTableSource,
+        PreparedEntityTargetGeometry, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z,
+        RETAIL_WALKABLE_NORMAL_Z, SelfMovementCapabilities, SelfMovementKinematics,
     };
 
     const JUMP_FIXTURE_RELEASE_COMMAND: u32 = 0x4000_002b;
@@ -2290,10 +2289,7 @@ mod tests {
                 step_up_height: 0.6,
                 step_down_height: 1.5,
                 edge_protection: EdgeProtection::Creature,
-                maximum_substep_distance: 0.24,
-                maximum_substeps: 32,
-                maximum_contact_passes: 8,
-                separation_epsilon: 0.0005,
+                minimum_stair_rise: 0.0005,
             },
         )
         .unwrap()
@@ -4879,12 +4875,6 @@ mod tests {
                 None,
             )
             .expect("test sphere should be valid"),
-            FreeSphereConfig {
-                maximum_substep_distance: 0.25,
-                maximum_substeps: 32,
-                maximum_contact_passes: 8,
-                separation_epsilon: 0.0005,
-            },
         )
         .expect("test physical definition should be valid");
         let body_id = holtburger_world::SpatialBodyId::LocalPlayer(guid);
@@ -5112,12 +5102,6 @@ mod tests {
                 None,
             )
             .unwrap(),
-            FreeSphereConfig {
-                maximum_substep_distance: 0.25,
-                maximum_substeps: 32,
-                maximum_contact_passes: 8,
-                separation_epsilon: 0.0005,
-            },
         )
         .unwrap();
         client
@@ -5346,10 +5330,7 @@ mod tests {
                 step_up_height: 0.6,
                 step_down_height: 1.5,
                 edge_protection: EdgeProtection::Creature,
-                maximum_substep_distance: 0.24,
-                maximum_substeps: 32,
-                maximum_contact_passes: 8,
-                separation_epsilon: 0.0005,
+                minimum_stair_rise: 0.0005,
             },
         )
         .unwrap();

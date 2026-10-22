@@ -36,8 +36,8 @@ use holtburger_content::{
 use thiserror::Error;
 
 use super::bsp_query::{
-    placed_polygon_contacts, placed_polygon_obstructions, placed_solid_contacts,
-    polygon_sphere_contact, support_on_polygon,
+    SupportProbe, placed_polygon_contacts, placed_polygon_obstructions, placed_solid_contacts,
+    polygon_sphere_contact,
 };
 use super::cell_index::{GlobalCellRange, OUTDOOR_CELL_METERS};
 use super::volume_query::{placed_ball_contact, placed_cylinder_contact};
@@ -390,6 +390,32 @@ pub struct SupportRequest<'a> {
     pub maximum_rise: f32,
     /// Candidate placement selecting the collision domains visible to this query.
     pub placement: &'a SpatialMembership,
+}
+
+/// Internal support query: sphere/domain selection and one owner of vertical admission.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SupportQuery<'a> {
+    /// Queried sphere and collision domains; no placement is committed by this query.
+    pub sphere: PlacementRequest<'a>,
+    /// Shape-specific search distances and finite-face admission.
+    pub probe: SupportProbe,
+}
+
+impl<'a> From<SupportRequest<'a>> for SupportQuery<'a> {
+    fn from(request: SupportRequest<'a>) -> Self {
+        Self {
+            sphere: PlacementRequest {
+                anchor: request.anchor,
+                center: request.center,
+                radius: request.radius,
+                placement: request.placement,
+            },
+            probe: SupportProbe::Column {
+                maximum_drop: request.maximum_drop,
+                maximum_rise: request.maximum_rise,
+            },
+        }
+    }
 }
 
 /// Body-primary directional query for optional filtered movement restrictions.
@@ -1475,17 +1501,36 @@ impl CollisionScene {
         &self,
         request: SupportRequest,
     ) -> Result<Vec<SupportContact>, CollisionQueryError> {
-        validate_probe(request)?;
+        self.support_query(request.into())
+    }
+
+    /// Shares coverage, ownership and shape selection for ordinary footing and stair admission.
+    pub(super) fn support_query(
+        &self,
+        query: SupportQuery,
+    ) -> Result<Vec<SupportContact>, CollisionQueryError> {
+        let SupportQuery {
+            sphere: request,
+            probe,
+        } = query;
+        let (maximum_drop, maximum_rise) = probe.column_limits();
+        validate_probe(request, maximum_drop, maximum_rise)?;
         let sweep = SphereSweep {
             anchor: request.anchor,
             start: request.center,
-            end: request.center - Vector3::new(0.0, 0.0, request.maximum_drop),
+            end: request.center - Vector3::new(0.0, 0.0, maximum_drop),
             radius: request.radius,
         };
         let touched = touched_landblocks(sweep);
         self.require_query_coverage(&touched, request.placement)?;
 
         let mut supports = Vec::new();
+        // Terrain grounding does not use CPolygon's walk_interp rule. Keep its
+        // existing bounded column; the finite stair allowance belongs to BSP faces.
+        let terrain_probe = SupportProbe::Column {
+            maximum_drop,
+            maximum_rise,
+        };
         for owner in &touched {
             let Some(asset) = self.landblocks.get(owner) else {
                 continue;
@@ -1497,14 +1542,12 @@ impl CollisionScene {
                 for cell in overlapped_terrain_cells(&asset.terrain, local_center, request.radius) {
                     for triangle in &cell.triangles {
                         let plane_d = -triangle.normal.dot(&triangle.vertices[0]);
-                        if let Some(support) = support_on_polygon(
+                        if let Some(support) = terrain_probe.on_polygon(
                             || triangle.vertices.iter().copied(),
                             triangle.normal,
                             plane_d,
                             local_center,
                             request.radius,
-                            request.maximum_drop,
-                            request.maximum_rise,
                         ) {
                             supports.push(SupportContact {
                                 source: SupportSource::World(
@@ -1543,8 +1586,7 @@ impl CollisionScene {
                 collider,
                 local_center,
                 request.radius,
-                request.maximum_drop,
-                request.maximum_rise,
+                probe,
             )
             .into_iter()
             .for_each(&mut push);
@@ -3164,17 +3206,21 @@ fn validate_sweep_radius(
     Ok(())
 }
 
-fn validate_probe(request: SupportRequest) -> Result<(), CollisionQueryError> {
+fn validate_probe(
+    request: PlacementRequest,
+    maximum_drop: f32,
+    maximum_rise: f32,
+) -> Result<(), CollisionQueryError> {
     validate_sweep(SphereSweep {
         anchor: request.anchor,
         start: request.center,
         end: request.center,
         radius: request.radius,
     })?;
-    if !request.maximum_drop.is_finite()
-        || request.maximum_drop < 0.0
-        || !request.maximum_rise.is_finite()
-        || request.maximum_rise < 0.0
+    if !maximum_drop.is_finite()
+        || maximum_drop < 0.0
+        || !maximum_rise.is_finite()
+        || maximum_rise < 0.0
     {
         return Err(CollisionQueryError::InvalidDistance);
     }

@@ -16,17 +16,15 @@ use holtburger_content::{
 };
 use holtburger_dat::physics::{BspLeaf, BspNode};
 
-use super::{
-    GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedConfig,
-    GroundedObstruction, GroundedOutcome, GroundedRequest, GroundedSolveContext, GroundedSphere,
-    RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
-    RoleContacts, SettlePermission, SettleResult, SphereRole, horizontal_response_normal,
-    remember_next_sliding_normal, settle_candidate, solve_grounded, step_up_candidate,
-};
 use crate::spatial::collision::CollisionScene;
+use crate::spatial::differential_fixtures::{
+    grounded_movement_body, movement_ground, movement_tick,
+};
 use crate::{
-    CellTransitRequest, EdgeProtection, GroundedObstructionRequest, PhysicalCollisionFilter,
-    SpatialMembership, SphereSweep, SupportRequest,
+    CellTransitRequest, EdgeProtection, GroundState, GroundedBodyActuation, GroundedBodySpheres,
+    GroundedConfig, GroundedObstructionRequest, GroundedSphere, PhysicalBodyActuation,
+    PhysicalBodyInput, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z,
+    RETAIL_WALKABLE_NORMAL_Z, SpatialBody, SpatialMembership, SphereSweep, SupportRequest,
 };
 use holtburger_common::position::WorldPosition;
 
@@ -41,19 +39,19 @@ struct RetailPolygon<'a> {
     d: f32,
 }
 
-/// Literal `CPolygon::polygon_hits_sphere_precise` decision (`acclient.c:345595-345674`).
+/// Literal `CPolygon::polygon_hits_sphere_precise` decision (`acclient.c:345135-345254`).
 fn retail_polygon_hits_sphere_precise(
     polygon: RetailPolygon<'_>,
     center: Vector3,
     radius: f32,
 ) -> bool {
-    if polygon.vertices.is_empty() {
-        return true;
-    }
     let plane_distance = polygon.normal.dot(&center) + polygon.d;
     let radius = radius - RETAIL_EPSILON;
     if plane_distance.abs() > radius {
         return false;
+    }
+    if polygon.vertices.is_empty() {
+        return true;
     }
     let radial_squared = radius * radius - plane_distance * plane_distance;
     let projected = center - polygon.normal * plane_distance;
@@ -100,62 +98,6 @@ fn retail_polygon_hits_sphere_precise(
 fn retail_sliding_normal(collision_normal: Vector3) -> Option<Vector3> {
     let horizontal = Vector3::new(collision_normal.x, collision_normal.y, 0.0);
     (horizontal.length() >= RETAIL_EPSILON).then(|| horizontal.normalize())
-}
-
-/// Relevant no-contact-plane branch of `CTransition::adjust_offset` (`acclient.c:300589-300730`).
-fn retail_adjust_offset(offset: Vector3, sliding_normal: Option<Vector3>) -> Vector3 {
-    let Some(normal) = sliding_normal else {
-        return offset;
-    };
-    let angle = offset.dot(&normal);
-    if angle < 0.0 {
-        offset - normal * angle
-    } else {
-        offset
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum RetailCollisionDisposition {
-    LowerStep,
-    UpperSlide,
-    LowerBackFace,
-    UpperBackFaceSlide,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct RetailCollisionSemantic {
-    disposition: RetailCollisionDisposition,
-    response_normal: Vector3,
-    next_offset: Vector3,
-}
-
-/// Semantic projection of retail's lower/upper polygon routing and next-offset adjustment
-/// (`acclient.c:346436-346559`, `:300478-300493`, `:300589-300630`).
-fn retail_polygon_collision_semantic(
-    role: SphereRole,
-    polygon_normal: Vector3,
-    separation_normal: Vector3,
-    offset: Vector3,
-) -> RetailCollisionSemantic {
-    let same_side = polygon_normal.dot(&separation_normal) >= 0.0;
-    let response_normal = if same_side {
-        polygon_normal
-    } else {
-        polygon_normal * -1.0
-    };
-    let disposition = match (role, same_side) {
-        (SphereRole::Support, true) => RetailCollisionDisposition::LowerStep,
-        (SphereRole::Upper, true) => RetailCollisionDisposition::UpperSlide,
-        (SphereRole::Support, false) => RetailCollisionDisposition::LowerBackFace,
-        (SphereRole::Upper, false) => RetailCollisionDisposition::UpperBackFaceSlide,
-    };
-    let sliding_normal = retail_sliding_normal(response_normal);
-    RetailCollisionSemantic {
-        disposition,
-        response_normal,
-        next_offset: retail_adjust_offset(offset, sliding_normal),
-    }
 }
 
 /// Literal non-water correction selected by `OBJECTINFO::validate_walkable`
@@ -207,50 +149,6 @@ fn retail_step_down_semantic(
 }
 
 #[test]
-fn retail_sliding_response_matches_production_across_edge_normal_matrix() {
-    let collision_normals = [
-        Vector3::new(-1.0, 0.0, 0.0),
-        Vector3::new(-0.8, 0.2, 0.56).normalize(),
-        Vector3::new(-0.2, -0.8, 0.56).normalize(),
-        Vector3::new(0.0, 0.0, 1.0),
-        Vector3::new(RETAIL_EPSILON * 0.5, 0.0, 1.0).normalize(),
-    ];
-    let offsets = [
-        Vector3::new(0.24, 0.0, 0.0),
-        Vector3::new(0.20, 0.12, 0.0),
-        Vector3::new(-0.12, 0.20, 0.0),
-    ];
-
-    for collision_normal in collision_normals {
-        for offset in offsets {
-            let expected_normal = retail_sliding_normal(collision_normal);
-            assert_vector_option_close(
-                horizontal_response_normal(collision_normal),
-                expected_normal,
-                "sliding normal",
-            );
-
-            let contacts = [RoleContacts {
-                role: SphereRole::Upper,
-                contacts: vec![GroundedObstruction {
-                    separation_normal: collision_normal,
-                    response_normal: collision_normal,
-                    depth: 0.01,
-                }],
-            }];
-            let mut actual_normal = None;
-            remember_next_sliding_normal(&mut actual_normal, &contacts, 0.7, offset);
-            let expected_active = expected_normal.filter(|normal| offset.dot(normal) <= 0.0);
-            assert_vector_option_close(actual_normal, expected_active, "active normal");
-
-            let actual_offset = super::apply_sliding_normal(offset, actual_normal);
-            let expected_offset = retail_adjust_offset(offset, expected_active);
-            assert_vector_close(actual_offset, expected_offset, "adjusted offset");
-        }
-    }
-}
-
-#[test]
 fn retail_floor_threshold_accepts_shallow_mound_face_but_rejects_steep_face() {
     const SHALLOW_NORMAL_Z: f32 = 0.682_300;
     const STEEP_NORMAL_Z: f32 = 0.613_462;
@@ -277,131 +175,16 @@ fn retail_floor_threshold_accepts_shallow_mound_face_but_rejects_steep_face() {
             5.0 * horizontal / normal_z + grounded_pair().support.radius / normal_z
                 - grounded_pair().support.center.z,
         );
-        let body = GroundedBody {
-            pose: WorldPosition {
-                landblock_id: Guid(LANDBLOCK),
-                coords: candidate,
-                rotation: Quaternion::identity(),
-            }
-            .normalize_outdoor_cell(),
-            cell: None,
-            velocity: Vector3::zero(),
-            ground: GroundState::Airborne,
-        };
+
         let mut config = grounded_config();
         config.walkable_normal_z = RETAIL_WALKABLE_NORMAL_Z;
-        let settled = settle_candidate(
-            GroundedSolveContext {
-                scene: &scene,
-                config,
-                anchor: Guid(LANDBLOCK),
-                pose: body.pose,
-                spheres: grounded_pair(),
-                filter: PhysicalCollisionFilter::ALL,
-            },
-            &body,
-            candidate,
-            super::transit_pair(
-                &scene,
-                Guid(LANDBLOCK),
-                &body,
-                body.pose,
-                grounded_pair(),
-                candidate,
-            )
-            .unwrap(),
-            config.step_down_height,
-            config.walkable_normal_z,
-        )
-        .unwrap();
+        let body = settle(&scene, candidate, None, config);
         assert_eq!(
-            matches!(settled, SettleResult::Supported(_)),
+            movement_ground(&body).walkable_support().is_some(),
             expected_walkable,
-            "production floor classification diverged at normal.z={normal_z}: {settled:?}"
+            "floor classification diverged at normal.z={normal_z}: {body:?}"
         );
     }
-}
-
-#[test]
-fn single_polygon_role_and_back_face_routing_match_retail_semantics() {
-    let authored = Vector3::new(-1.0, 0.0, 0.0);
-    let offset = Vector3::new(0.2, 0.4, 0.0);
-    let cases = [
-        (
-            SphereRole::Support,
-            authored,
-            RetailCollisionDisposition::LowerStep,
-        ),
-        (
-            SphereRole::Upper,
-            authored,
-            RetailCollisionDisposition::UpperSlide,
-        ),
-        (
-            SphereRole::Support,
-            authored * -1.0,
-            RetailCollisionDisposition::LowerBackFace,
-        ),
-        (
-            SphereRole::Upper,
-            authored * -1.0,
-            RetailCollisionDisposition::UpperBackFaceSlide,
-        ),
-    ];
-
-    for (role, separation_normal, expected_disposition) in cases {
-        let expected = retail_polygon_collision_semantic(role, authored, separation_normal, offset);
-        assert_eq!(expected.disposition, expected_disposition);
-        let contacts = [RoleContacts {
-            role,
-            contacts: vec![GroundedObstruction {
-                separation_normal,
-                response_normal: expected.response_normal,
-                depth: 0.01,
-            }],
-        }];
-        let mut actual_normal = None;
-        remember_next_sliding_normal(&mut actual_normal, &contacts, 0.7, offset);
-        let actual = super::apply_sliding_normal(offset, actual_normal);
-        assert_vector_close(actual, expected.next_offset, "single-producer next offset");
-    }
-}
-
-#[test]
-fn aggregate_contact_selection_is_order_independent_when_opposition_has_a_unique_winner() {
-    let offset = Vector3::new(0.5, 4.0, 0.0);
-    let contacts = [
-        GroundedObstruction {
-            separation_normal: Vector3::new(-1.0, 0.0, 0.0),
-            response_normal: Vector3::new(-1.0, 0.0, 0.0),
-            depth: 0.01,
-        },
-        GroundedObstruction {
-            separation_normal: Vector3::new(-0.98, -0.2, 0.0).normalize(),
-            response_normal: Vector3::new(-0.98, -0.2, 0.0).normalize(),
-            depth: 0.01,
-        },
-    ];
-    let mut selected = Vec::new();
-    for ordered in [contacts.to_vec(), contacts.into_iter().rev().collect()] {
-        let mut normal = None;
-        remember_next_sliding_normal(
-            &mut normal,
-            &[RoleContacts {
-                role: SphereRole::Upper,
-                contacts: ordered,
-            }],
-            0.7,
-            offset,
-        );
-        selected.push(normal.expect("unique opposing contact was not selected"));
-    }
-    assert_vector_close(selected[0], selected[1], "unique aggregate winner");
-    assert_vector_close(
-        selected[0],
-        contacts[1].response_normal,
-        "most opposing aggregate plane",
-    );
 }
 
 #[test]
@@ -445,17 +228,7 @@ fn authored_crest_plane_not_radial_edge_normal_controls_grounded_response() {
         "authored response normal",
     );
 
-    let role_contacts = [RoleContacts {
-        role: SphereRole::Support,
-        contacts: vec![*contact],
-    }];
-    let mut sliding = None;
-    remember_next_sliding_normal(&mut sliding, &role_contacts, 0.7, movement);
-    assert_eq!(
-        sliding,
-        retail_sliding_normal(polygon.normal),
-        "walkable crest edge manufactured a horizontal sliding constraint"
-    );
+    assert_eq!(retail_sliding_normal(contact.response_normal), None);
 }
 
 #[test]
@@ -517,16 +290,7 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
         .unwrap();
 
     let candidate = Vector3::new(15.0, 15.0, 0.0);
-    let body = GroundedBody {
-        pose: WorldPosition {
-            landblock_id: Guid(LANDBLOCK),
-            coords: candidate,
-            rotation: Quaternion::identity(),
-        },
-        cell: Some(Guid(CELL)),
-        velocity: Vector3::zero(),
-        ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0))),
-    };
+
     let spheres = grounded_pair();
     let expected_lift = retail_walkable_height_delta(
         RetailPolygon {
@@ -539,38 +303,13 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
     );
     let mut config = grounded_config();
     config.step_down_height = 1.5;
-    let settled = settle_candidate(
-        GroundedSolveContext {
-            scene: &scene,
-            config,
-            anchor: Guid(LANDBLOCK),
-            pose: body.pose,
-            spheres,
-            filter: PhysicalCollisionFilter::ALL,
-        },
-        &body,
-        candidate,
-        super::transit_pair(
-            &scene,
-            Guid(LANDBLOCK),
-            &body,
-            body.pose,
-            grounded_pair(),
-            candidate,
-        )
-        .unwrap(),
-        config.step_down_height,
-        config.walkable_normal_z,
-    )
-    .unwrap();
-    let SettleResult::Supported(settled) = settled else {
-        panic!("portal-visible terrain lip vetoed the walkable transaction: {settled:?}");
-    };
+    let body = settle(&scene, candidate, Some(Guid(CELL)), config);
     assert!((expected_lift - TERRAIN_HEIGHT).abs() < TEST_EPSILON);
     assert!(
-        (settled.body_center.z - expected_lift).abs() < TEST_EPSILON,
-        "production lift diverged from retail: expected={expected_lift} settled={settled:?}"
+        (body.pose.coords.z - expected_lift).abs() < TEST_EPSILON,
+        "portal-visible terrain correction diverged: {body:?}"
     );
+    assert!(movement_ground(&body).walkable_support().is_some());
 }
 
 #[test]
@@ -612,17 +351,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         .unwrap();
 
     let candidate = Vector3::new(15.0, 20.0, 0.0);
-    let body = GroundedBody {
-        pose: WorldPosition {
-            landblock_id: Guid(LANDBLOCK),
-            coords: candidate,
-            rotation: Quaternion::identity(),
-        }
-        .normalize_outdoor_cell(),
-        cell: None,
-        velocity: Vector3::zero(),
-        ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0))),
-    };
+
     let spheres = grounded_pair();
     let mut config = grounded_config();
     config.step_down_height = 1.5;
@@ -631,7 +360,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
     let candidate_center = candidate + spheres.support.center;
     let candidate_placement = scene
         .transit_cell(CellTransitRequest {
-            previous_cell: body.cell,
+            previous_cell: None,
             anchor: Guid(LANDBLOCK),
             center: candidate_center,
             radius: spheres.support.radius,
@@ -644,7 +373,7 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
 
     let lowered_placement = scene
         .transit_cell(CellTransitRequest {
-            previous_cell: body.cell,
+            previous_cell: None,
             anchor: Guid(LANDBLOCK),
             center: candidate_center - Vector3::new(0.0, 0.0, config.step_down_height),
             radius: spheres.support.radius,
@@ -667,47 +396,13 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         config.step_down_height,
     )
     .expect("retail oracle found no portal ramp support");
-    let settled = settle_candidate(
-        GroundedSolveContext {
-            scene: &scene,
-            config,
-            anchor: Guid(LANDBLOCK),
-            pose: body.pose,
-            spheres,
-            filter: PhysicalCollisionFilter::ALL,
-        },
-        &body,
-        candidate,
-        super::transit_pair(
-            &scene,
-            Guid(LANDBLOCK),
-            &body,
-            body.pose,
-            grounded_pair(),
-            candidate,
-        )
-        .unwrap(),
-        config.step_down_height,
-        config.walkable_normal_z,
-    )
-    .unwrap();
-    let SettleResult::Supported(settled) = settled else {
-        panic!("lowered placement rebuild lost portal ramp support: {settled:?}");
-    };
+    let body = settle(&scene, candidate, None, config);
     assert!(
-        (settled.body_center.z - (expected.adjusted_center.z - spheres.support.center.z)).abs()
+        (body.pose.coords.z - (expected.adjusted_center.z - spheres.support.center.z)).abs()
             < TEST_EPSILON,
-        "portal step-down diverged from retail: expected={expected:?} settled={settled:?}"
+        "portal step-down diverged: expected={expected:?} body={body:?}"
     );
-    assert!(
-        settled.placement.reached_env_cells().contains(&Guid(CELL)),
-        "the accepted ramp pose lost the destination collision domain"
-    );
-    assert_eq!(
-        settled.placement.committed_cell(),
-        None,
-        "probe-only portal reach prematurely committed authoritative residency"
-    );
+    assert!(movement_ground(&body).walkable_support().is_some());
 }
 
 #[test]
@@ -755,17 +450,7 @@ fn overlapping_walkable_planes_select_retails_highest_reached_surface_in_any_aut
             placed_polygon(1, vertices[0].clone()),
             placed_polygon(2, vertices[1].clone()),
         ]);
-        let body = GroundedBody {
-            pose: WorldPosition {
-                landblock_id: Guid(LANDBLOCK),
-                coords: candidate,
-                rotation: Quaternion::identity(),
-            }
-            .normalize_outdoor_cell(),
-            cell: None,
-            velocity: Vector3::zero(),
-            ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0))),
-        };
+
         let spheres = grounded_pair();
         let mut config = grounded_config();
         config.step_down_height = 1.5;
@@ -776,39 +461,14 @@ fn overlapping_walkable_planes_select_retails_highest_reached_surface_in_any_aut
             config.step_down_height,
         )
         .expect("retail oracle found no overlapping support");
-        let settled = settle_candidate(
-            GroundedSolveContext {
-                scene: &scene,
-                config,
-                anchor: Guid(LANDBLOCK),
-                pose: body.pose,
-                spheres,
-                filter: PhysicalCollisionFilter::ALL,
-            },
-            &body,
-            candidate,
-            super::transit_pair(
-                &scene,
-                Guid(LANDBLOCK),
-                &body,
-                body.pose,
-                grounded_pair(),
-                candidate,
-            )
-            .unwrap(),
-            config.step_down_height,
-            config.walkable_normal_z,
-        )
-        .unwrap();
-        let SettleResult::Supported(settled) = settled else {
-            panic!("overlapping supports did not settle: order={order:?} result={settled:?}");
-        };
+        let body = settle(&scene, candidate, None, config);
         assert!(
-            (settled.body_center.z - (expected.adjusted_center.z - spheres.support.center.z)).abs()
+            (body.pose.coords.z - (expected.adjusted_center.z - spheres.support.center.z)).abs()
                 < TEST_EPSILON,
-            "support selection diverged from retail time-of-impact winner: order={order:?} expected={expected:?} settled={settled:?}"
+            "support selection diverged: order={order:?} expected={expected:?} body={body:?}"
         );
         assert_eq!(order[expected.selected_surface], UPPER_HEIGHT);
+        assert!(movement_ground(&body).walkable_support().is_some());
     }
 }
 
@@ -823,142 +483,72 @@ fn failed_step_restores_the_exact_pose_and_support_before_retreat() {
         ),
     ]);
     let start = Vector3::new(9.4, 20.0, 0.0);
-    let support = GroundSupport {
-        feature: crate::spatial::SupportFeature::Surface,
-        normal: Vector3::new(0.0, 0.0, 1.0),
-        source: crate::spatial::SupportSource::World(scene.owner_proof(Guid(LANDBLOCK)).unwrap()),
-    };
-    let body = GroundedBody {
-        pose: WorldPosition {
-            landblock_id: Guid(LANDBLOCK),
-            coords: start,
-            rotation: Quaternion::identity(),
-        }
-        .normalize_outdoor_cell(),
-        cell: None,
-        velocity: Vector3::zero(),
-        ground: GroundState::Supported(support),
-    };
-    let blocked = solve_grounded(
-        &scene,
-        grounded_config(),
-        GroundedRequest {
-            filter: PhysicalCollisionFilter::ALL,
-            body: body.clone(),
-            spheres: grounded_pair(),
-            supported_velocity: Vector3::new(1.0, 0.0, 0.0),
-            settle: SettlePermission::Walking,
-            retain_supported_gravity: false,
-            delta_seconds: 0.5,
-        },
-    )
-    .unwrap();
-    let GroundedOutcome::Solved { body: blocked, .. } = blocked else {
-        panic!("failed step did not produce a safe solved pose: {blocked:?}");
-    };
+    let mut body = settle(&scene, start, None, grounded_config());
+    let support = movement_ground(&body).walkable_support().unwrap();
+    for _ in 0..15 {
+        body = drive(&scene, body, Vector3::new(1.0, 0.0, 0.0));
+    }
     assert!(
-        blocked.pose.coords.z.abs() < TEST_EPSILON,
-        "failed step leaked its raised trial pose: {blocked:?}"
+        body.pose.coords.z.abs() < TEST_EPSILON,
+        "failed step leaked lift: {body:?}"
     );
-    assert_eq!(blocked.ground.walkable_support(), Some(support));
-
-    let retreated = solve_grounded(
-        &scene,
-        grounded_config(),
-        GroundedRequest {
-            filter: PhysicalCollisionFilter::ALL,
-            body: blocked,
-            spheres: grounded_pair(),
-            supported_velocity: Vector3::new(-1.0, 0.0, 0.0),
-            settle: SettlePermission::Walking,
-            retain_supported_gravity: false,
-            delta_seconds: 0.5,
-        },
-    )
-    .unwrap();
-    let GroundedOutcome::Solved {
-        body: retreated, ..
-    } = retreated
-    else {
-        panic!("retreat after restored step did not solve: {retreated:?}");
-    };
-    assert!(retreated.pose.coords.x < start.x - 0.3);
-    assert!(retreated.pose.coords.z.abs() < TEST_EPSILON);
+    assert_eq!(movement_ground(&body).walkable_support(), Some(support));
+    for _ in 0..15 {
+        body = drive(&scene, body, Vector3::new(-1.0, 0.0, 0.0));
+    }
+    assert!(body.pose.coords.x < start.x - 0.3);
+    assert!(body.pose.coords.z.abs() < TEST_EPSILON);
 }
 
 #[test]
 fn upper_sphere_independently_vetoes_an_otherwise_valid_lower_step() {
-    let mut step_geometry = vec![placed_polygon(1, horizontal_quad(0.0, 30.0, 0.0))];
-    step_geometry.push(placed_polygon(2, horizontal_quad(10.0, 14.0, 0.4)));
-    step_geometry.push(placed_polygon_with_normal(
-        3,
-        vertical_quad_x(10.0, 0.0, 0.4),
-        Vector3::new(-1.0, 0.0, 0.0),
-    ));
-    let start = Vector3::new(9.4, 20.0, 0.0);
-    let candidate = Vector3::new(10.1, 20.0, 0.0);
-    let supported = GroundedBody {
-        pose: WorldPosition {
-            landblock_id: Guid(LANDBLOCK),
-            coords: start,
-            rotation: Quaternion::identity(),
-        }
-        .normalize_outdoor_cell(),
-        cell: None,
-        velocity: Vector3::zero(),
-        ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0))),
-    };
-    let lower_scene = scene(step_geometry.clone());
-    let lower_step = step_up_candidate(
-        GroundedSolveContext {
-            scene: &lower_scene,
-            config: grounded_config(),
-            anchor: Guid(LANDBLOCK),
-            pose: supported.pose,
-            spheres: GroundedBodySpheres {
-                support: grounded_pair().support,
-                upper: None,
-            },
-            filter: PhysicalCollisionFilter::ALL,
-        },
-        &supported,
-        start,
-        candidate,
-    )
-    .unwrap();
-    let Some(lower_step) = lower_step else {
-        panic!("lower-only step did not produce a candidate: {lower_step:?}");
-    };
-    assert!(
-        (lower_step.body_center.z - 0.4).abs() < TEST_EPSILON,
-        "lower step selected the wrong support: {lower_step:?}"
-    );
-
+    let mut geometry = vec![
+        placed_polygon(1, horizontal_quad(0.0, 30.0, 0.0)),
+        placed_polygon(2, horizontal_quad(10.0, 14.0, 0.4)),
+        placed_polygon_with_normal(
+            3,
+            vertical_quad_x(10.0, 0.0, 0.4),
+            Vector3::new(-1.0, 0.0, 0.0),
+        ),
+    ];
     let mut ceiling = horizontal_quad(8.0, 15.0, 2.75);
     ceiling.reverse();
-    step_geometry.push(placed_polygon_with_normal(
+    geometry.push(placed_polygon_with_normal(
         4,
         ceiling,
         Vector3::new(0.0, 0.0, -1.0),
     ));
-    let pair_scene = scene(step_geometry);
-    let paired_step = step_up_candidate(
-        GroundedSolveContext {
-            scene: &pair_scene,
-            config: grounded_config(),
-            anchor: Guid(LANDBLOCK),
-            pose: supported.pose,
-            spheres: grounded_pair(),
-            filter: PhysicalCollisionFilter::ALL,
-        },
-        &supported,
-        start,
-        candidate,
-    )
-    .unwrap();
+    let scene = scene(geometry);
+    let mut final_positions = Vec::new();
+    for upper in [None, grounded_pair().upper] {
+        let mut spheres = grounded_pair();
+        spheres.upper = upper;
+        let mut body = grounded_movement_body(
+            WorldPosition::from_outdoor_frame(
+                Guid(LANDBLOCK),
+                Vector3::new(9.4, 20.0, 0.0),
+                Quaternion::identity(),
+            ),
+            spheres,
+            grounded_config(),
+            Vector3::zero(),
+            GroundState::Airborne,
+        );
+        for _ in 0..30 {
+            body = drive(&scene, body, Vector3::zero());
+        }
+        for _ in 0..30 {
+            body = drive(&scene, body, Vector3::new(1.0, 0.0, 0.0));
+        }
+        final_positions.push(body.pose.coords);
+    }
     assert!(
-        paired_step.is_none(),
-        "upper sphere failed to veto the otherwise valid raised placement: {paired_step:?}"
+        (final_positions[0].z - 0.4).abs() < TEST_EPSILON,
+        "lower-only step failed: {final_positions:?}"
+    );
+    assert!(
+        final_positions[1].x < 10.0 && final_positions[1].z <= TEST_EPSILON,
+        "upper sphere did not veto the step: {final_positions:?}"
     );
 }
 
@@ -983,46 +573,13 @@ fn separate_stair_and_landing_polygons_cross_crest_matrix_without_zero_progress(
                         ),
                     ]);
                     let start = Vector3::new(start_x, 20.0, 0.0);
-                    let body = GroundedBody {
-                        pose: WorldPosition {
-                            landblock_id: Guid(LANDBLOCK),
-                            coords: start,
-                            rotation: Quaternion::identity(),
-                        }
-                        .normalize_outdoor_cell(),
-                        cell: None,
-                        velocity: Vector3::zero(),
-                        ground: GroundState::Supported(GroundSupport::fixture(Vector3::new(
-                            0.0, 0.0, 1.0,
-                        ))),
-                    };
-                    let outcome = solve_grounded(
-                        &scene,
-                        grounded_config(),
-                        GroundedRequest {
-                            filter: PhysicalCollisionFilter::ALL,
-                            body,
-                            spheres: grounded_pair(),
-                            supported_velocity: Vector3::new(1.0, lateral_velocity, 0.0),
-                            settle: SettlePermission::Walking,
-                            retain_supported_gravity: false,
-                            delta_seconds: 0.5,
-                        },
-                    )
-                    .unwrap();
-                    let GroundedOutcome::Solved {
-                        body,
-                        achieved_velocity,
-                        ..
-                    } = outcome
-                    else {
-                        panic!(
-                            "crest matrix did not solve: seam={seam} height={height_delta} start={start_x} lateral={lateral_velocity}: {outcome:?}"
-                        );
-                    };
+                    let mut body = settle(&scene, start, None, grounded_config());
+                    for _ in 0..15 {
+                        body = drive(&scene, body, Vector3::new(1.0, lateral_velocity, 0.0));
+                    }
                     assert!(
-                        body.pose.coords.x > start_x + 0.35 && achieved_velocity.x > 0.7,
-                        "crest consumed forward motion: seam={seam} height={height_delta} start={start_x} lateral={lateral_velocity}: body={body:?} velocity={achieved_velocity:?}"
+                        body.pose.coords.x > start_x + 0.35,
+                        "crest consumed forward motion: seam={seam} height={height_delta} start={start_x} lateral={lateral_velocity}: body={body:?}"
                     );
                 }
             }
@@ -1039,10 +596,7 @@ fn grounded_config() -> GroundedConfig {
         step_up_height: 0.6,
         step_down_height: 0.2,
         edge_protection: EdgeProtection::None,
-        maximum_substep_distance: 0.24,
-        maximum_substeps: 32,
-        maximum_contact_passes: 8,
-        separation_epsilon: 0.000_5,
+        minimum_stair_rise: 0.000_5,
     }
 }
 
@@ -1169,17 +723,48 @@ fn artifact(landblock_id: u32, colliders: Vec<PlacedCollider>) -> LandblockColli
     }
 }
 
-fn assert_vector_option_close(actual: Option<Vector3>, expected: Option<Vector3>, context: &str) {
-    match (actual, expected) {
-        (Some(actual), Some(expected)) => assert_vector_close(actual, expected, context),
-        (None, None) => {}
-        _ => panic!("{context} differs: actual={actual:?} expected={expected:?}"),
-    }
-}
-
 fn assert_vector_close(actual: Vector3, expected: Vector3, context: &str) {
     assert!(
         (actual - expected).length() <= TEST_EPSILON,
         "{context} differs: actual={actual:?} expected={expected:?}"
     );
+}
+
+/// Current scene execution with an explicit controller drive, never a diagnostic solver.
+fn drive(scene: &CollisionScene, body: SpatialBody, velocity: Vector3) -> SpatialBody {
+    movement_tick(
+        scene,
+        body,
+        PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+            GroundedBodyActuation::drive(velocity).unwrap(),
+        )),
+    )
+}
+
+/// Establishes support through current navigation and placement recovery.
+fn settle(
+    scene: &CollisionScene,
+    start: Vector3,
+    cell: Option<Guid>,
+    config: GroundedConfig,
+) -> SpatialBody {
+    let pose = match cell {
+        Some(cell) => WorldPosition {
+            landblock_id: cell,
+            coords: start,
+            rotation: Quaternion::identity(),
+        },
+        None => WorldPosition::from_outdoor_frame(Guid(LANDBLOCK), start, Quaternion::identity()),
+    };
+    let mut body = grounded_movement_body(
+        pose,
+        grounded_pair(),
+        config,
+        Vector3::zero(),
+        GroundState::Airborne,
+    );
+    for _ in 0..30 {
+        body = drive(scene, body, Vector3::zero());
+    }
+    body
 }

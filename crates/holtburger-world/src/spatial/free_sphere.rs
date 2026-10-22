@@ -1,30 +1,16 @@
-//! Bounded collision-query movement for unregistered spheres.
+//! Stationary sphere settlement and bounded solid-placement recovery for camera queries.
 
 use anyhow::{Result, ensure};
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
 
 use super::collision::{
-    CellTransitRequest, CollisionQueryPolicy, MotionWaypoint, MovementObstructionRequest,
-    MovementRestrictionRequest, PlacementRequest, PlacementRestrictionRequest,
-    SolidPlacementRecovery, SpatialMembership, SphereSweep, StaticContact,
-    StaticSphereSweepRequest, anchor_point_to_cell_position, anchor_point_to_outdoor_position,
-    landblock_key, separating_displacement,
+    CellTransitRequest, CollisionQueryPolicy, PlacementRequest, PlacementRestrictionRequest,
+    SolidPlacementRecovery, SpatialMembership, StaticContact, StaticSphereSweepRequest,
+    anchor_point_to_cell_position, anchor_point_to_outdoor_position, landblock_key,
+    separating_displacement,
 };
 use super::{PhysicalCollisionFilter, SphereCollisionQuery};
-
-/// Explicit safety budgets for one free-sphere displacement solve.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FreeSphereConfig {
-    /// Maximum world-meter length of one collision substep.
-    pub maximum_substep_distance: f32,
-    /// Maximum number of substeps accepted for one requested displacement.
-    pub maximum_substeps: usize,
-    /// Maximum separation passes per substep.
-    pub maximum_contact_passes: usize,
-    /// Small outward displacement added after contact separation.
-    pub separation_epsilon: f32,
-}
 
 /// Work and separation policy for a stationary sphere; no movement substeps are performed.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,15 +19,6 @@ pub struct FreeSphereSettleConfig {
     pub maximum_contact_passes: usize,
     /// Outward displacement added after contact separation.
     pub separation_epsilon: f32,
-}
-
-impl From<FreeSphereConfig> for FreeSphereSettleConfig {
-    fn from(config: FreeSphereConfig) -> Self {
-        Self {
-            maximum_contact_passes: config.maximum_contact_passes,
-            separation_epsilon: config.separation_epsilon,
-        }
-    }
 }
 
 /// One unregistered free sphere and its atomically committed cell context.
@@ -53,19 +30,6 @@ pub struct FreeSphereState {
     pub cell: Option<Guid>,
     /// Positive fixed radius in meters.
     pub radius: f32,
-}
-
-/// One desired free-sphere displacement.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FreeSphereRequest {
-    /// Last safely committed body state.
-    pub body: FreeSphereState,
-    /// World-space displacement requested for this solve.
-    pub displacement: Vector3,
-    /// Body-owned optional collision-domain exclusions.
-    pub filter: PhysicalCollisionFilter,
-    /// Coverage behavior selected explicitly by the physical or exceptional consumer.
-    pub query_policy: CollisionQueryPolicy,
 }
 
 /// Result of bounded directionless separation for one stationary free sphere.
@@ -99,255 +63,8 @@ pub enum FreeSphereSettleOutcome {
     },
 }
 
-/// Which finite solver budget refused a request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FreeSphereBudget {
-    /// The displacement requires more anti-tunneling substeps than configured.
-    Substeps,
-    /// Contact separation did not converge inside one substep's pass budget.
-    Contacts,
-}
-
-/// Observable result of one free-sphere solve.
-#[derive(Debug, Clone, PartialEq)]
-pub enum FreeSphereOutcome {
-    /// The requested displacement completed, possibly after collision separation and sliding.
-    Solved {
-        /// Atomically committed body state.
-        body: FreeSphereState,
-        /// Actual world-space displacement from the request's starting pose.
-        achieved_displacement: Vector3,
-        /// Strongest unit contact normal opposing the requested displacement, if any.
-        collision_normal: Option<Vector3>,
-        /// Ordered accepted substep endpoints spanning the normalized solve interval.
-        motion: Vec<MotionWaypoint>,
-        /// Anti-tunneling substeps evaluated.
-        substeps: usize,
-        /// Contact passes evaluated across all substeps.
-        contact_passes: usize,
-        /// First unavailable owner crossed by an explicitly uncovered query.
-        unavailable_owner: Option<Guid>,
-    },
-    /// A finite safety budget was reached after committing the safe prefix it could evaluate.
-    BudgetExceeded {
-        /// Body state at the end of the evaluated safe prefix.
-        body: FreeSphereState,
-        /// Actual world-space displacement across the full tick interval.
-        achieved_displacement: Vector3,
-        /// Strongest unit contact normal opposing the requested displacement, if any.
-        collision_normal: Option<Vector3>,
-        /// Evaluated motion followed by a stationary leg through the remainder of the tick.
-        motion: Vec<MotionWaypoint>,
-        /// Budget that stopped the solve.
-        budget: FreeSphereBudget,
-        /// Completed substeps before the stop.
-        substeps: usize,
-        /// Contact passes evaluated before the stop.
-        contact_passes: usize,
-        /// First unavailable owner crossed by an explicitly uncovered query.
-        unavailable_owner: Option<Guid>,
-    },
-}
-
-/// Solves one bounded free-sphere displacement without grounded behavior.
-pub fn solve_free_sphere(
-    scene: &dyn SphereCollisionQuery,
-    config: FreeSphereConfig,
-    request: FreeSphereRequest,
-) -> Result<FreeSphereOutcome> {
-    FreeSphereMotion::prepare(scene, config, request)?.solve()
-}
-
-/// Accepted geometric progress within one already-integrated displacement request.
-/// Force integration and physical response remain outside this cursor.
-#[derive(Clone)]
-pub(super) struct FreeSphereMotion<'a> {
-    /// Immutable collision queries used for every interval.
-    scene: &'a dyn SphereCollisionQuery,
-    /// Contact and geometric work limits for this solve.
-    config: FreeSphereConfig,
-    /// Original pose, collision policy, and direction used to choose the response normal.
-    request: FreeSphereRequest,
-    /// Fixed coordinate anchor, retained across normalized cell/landblock commits.
-    anchor: Guid,
-    /// Latest accepted body placement.
-    body: FreeSphereState,
-    /// Latest accepted center in the original anchor's coordinates.
-    current: Vector3,
-    /// Accepted endpoints; a stationary remainder is appended only when finishing.
-    motion: Vec<MotionWaypoint>,
-    /// Contact passes spent, including an unsuccessful interval.
-    contact_passes: usize,
-    /// Strongest contact opposing the original requested displacement.
-    collision_normal: Option<Vector3>,
-    /// First unavailable owner observed under the explicitly uncovered policy.
-    unavailable_owner: Option<Guid>,
-}
-
-impl<'a> FreeSphereMotion<'a> {
-    pub(super) fn prepare(
-        scene: &'a dyn SphereCollisionQuery,
-        config: FreeSphereConfig,
-        request: FreeSphereRequest,
-    ) -> Result<Self> {
-        validate(config, request.body.radius, request.displacement)?;
-        Ok(Self {
-            scene,
-            config,
-            request,
-            anchor: landblock_key(request.body.pose.landblock_id),
-            body: request.body,
-            current: request.body.pose.coords,
-            motion: Vec::new(),
-            contact_passes: 0,
-            collision_normal: None,
-            unavailable_owner: None,
-        })
-    }
-
-    pub(super) fn solve(mut self) -> Result<FreeSphereOutcome> {
-        let distance = self.request.displacement.length();
-        let required_substeps = if distance <= f32::EPSILON {
-            1
-        } else {
-            (distance / self.config.maximum_substep_distance).ceil() as usize
-        };
-        let substep = self.request.displacement / required_substeps as f32;
-        let evaluated_substeps = required_substeps.min(self.config.maximum_substeps);
-        self.motion.reserve(evaluated_substeps + 1);
-        for completed_substeps in 0..evaluated_substeps {
-            let end_fraction = (completed_substeps + 1) as f32 / required_substeps as f32;
-            if !self.advance(substep, end_fraction)? {
-                return Ok(self.finish(Some(FreeSphereBudget::Contacts)));
-            }
-        }
-        Ok(self
-            .finish((evaluated_substeps < required_substeps).then_some(FreeSphereBudget::Substeps)))
-    }
-
-    /// Evaluates one geometric interval and commits it only after contact separation converges.
-    /// False leaves the preceding accepted placement/path intact; spent work is still recorded.
-    pub(super) fn advance(&mut self, displacement: Vector3, end_fraction: f32) -> Result<bool> {
-        super::physics_work::record_environment_step();
-        let mut candidate = self.current + displacement;
-        let mut candidate_placement = transit(
-            self.scene,
-            self.anchor,
-            self.body,
-            candidate,
-            self.request.query_policy,
-            &mut self.unavailable_owner,
-        )?;
-        let mut converged = false;
-        let sweep = SphereSweep {
-            anchor: self.anchor,
-            start: self.current,
-            end: candidate,
-            radius: self.body.radius,
-        };
-        let mut contacts = movement_contacts(
-            self.scene,
-            sweep,
-            &candidate_placement,
-            self.request.filter,
-            self.request.query_policy,
-            &mut self.unavailable_owner,
-        )?;
-
-        for _ in 0..self.config.maximum_contact_passes {
-            self.contact_passes += 1;
-            if contacts.is_empty() {
-                converged = true;
-                break;
-            }
-
-            remember_collision_normal(
-                &mut self.collision_normal,
-                &contacts,
-                self.request.displacement,
-            );
-
-            candidate =
-                candidate + separating_displacement(&contacts, self.config.separation_epsilon);
-            candidate_placement = transit(
-                self.scene,
-                self.anchor,
-                self.body,
-                candidate,
-                self.request.query_policy,
-                &mut self.unavailable_owner,
-            )?;
-            contacts = placement_contacts(
-                self.scene,
-                PlacementRequest {
-                    anchor: self.anchor,
-                    center: candidate,
-                    radius: self.body.radius,
-                    placement: &candidate_placement,
-                },
-                self.request.filter,
-                self.request.query_policy,
-                &mut self.unavailable_owner,
-            )?;
-            if contacts.is_empty() {
-                converged = true;
-                break;
-            }
-        }
-
-        if !converged {
-            return Ok(false);
-        }
-
-        self.current = candidate;
-        self.body.cell = candidate_placement.committed_cell();
-        self.body.pose = pose_for_commit(
-            self.anchor,
-            self.current,
-            self.request.body.pose,
-            self.body.cell,
-        );
-        self.motion.push(MotionWaypoint {
-            center: self.current,
-            end_fraction,
-            placement: super::collision::MotionWaypointPlacement::Committed(self.body.cell),
-        });
-        Ok(true)
-    }
-
-    pub(super) fn finish(mut self, budget: Option<FreeSphereBudget>) -> FreeSphereOutcome {
-        let substeps = self.motion.len();
-        let achieved_displacement = self.current - self.request.body.pose.coords;
-        close_partial_motion(&mut self.motion, self.current, self.body.cell);
-        match budget {
-            Some(budget) => FreeSphereOutcome::BudgetExceeded {
-                body: self.body,
-                achieved_displacement,
-                collision_normal: self.collision_normal,
-                motion: self.motion,
-                budget,
-                substeps,
-                contact_passes: self.contact_passes,
-                unavailable_owner: self.unavailable_owner,
-            },
-            None => FreeSphereOutcome::Solved {
-                body: self.body,
-                achieved_displacement,
-                collision_normal: self.collision_normal,
-                motion: self.motion,
-                substeps,
-                contact_passes: self.contact_passes,
-                unavailable_owner: self.unavailable_owner,
-            },
-        }
-    }
-}
-
-/// Separates a stationary sphere using undirected placement contacts and a finite pass budget.
-///
-/// Unlike [`solve_free_sphere`], this function does not author a transit path. Callers that need
-/// continuous motion to the returned placement must solve that leg independently with their
-/// already-committed collision envelope.
+/// Separates a stationary sphere without authoring a transit path.
+/// Callers needing motion must use the scene/contact movement pipeline.
 pub fn settle_free_sphere(
     scene: &dyn SphereCollisionQuery,
     config: FreeSphereSettleConfig,
@@ -552,53 +269,6 @@ fn recover_solid_placement(
     Ok(SolidRecoveryResult::Unavailable)
 }
 
-/// Closes a partial solve's normalized tick without inventing unevaluated geometry.
-pub(super) fn close_partial_motion(
-    motion: &mut Vec<MotionWaypoint>,
-    center: Vector3,
-    cell: Option<Guid>,
-) {
-    if motion
-        .last()
-        .is_some_and(|waypoint| waypoint.end_fraction == 1.0)
-    {
-        return;
-    }
-    motion.push(MotionWaypoint {
-        center,
-        end_fraction: 1.0,
-        placement: super::collision::MotionWaypointPlacement::Committed(cell),
-    });
-}
-
-fn movement_contacts(
-    scene: &dyn SphereCollisionQuery,
-    sweep: SphereSweep,
-    placement: &SpatialMembership,
-    filter: PhysicalCollisionFilter,
-    query_policy: CollisionQueryPolicy,
-    unavailable_owner: &mut Option<Guid>,
-) -> Result<Vec<StaticContact>> {
-    let obstruction = scene.environment().movement_obstructions_with_policy(
-        MovementObstructionRequest { sweep, placement },
-        query_policy,
-    )?;
-    remember_unavailable_owner(unavailable_owner, obstruction.unavailable_owner);
-    let mut contacts = obstruction.value;
-    let restriction = scene.environment().movement_restrictions_with_policy(
-        MovementRestrictionRequest {
-            sweep,
-            placement,
-            filter,
-        },
-        query_policy,
-    )?;
-    remember_unavailable_owner(unavailable_owner, restriction.unavailable_owner);
-    contacts.extend(restriction.value);
-    contacts.extend(scene.entity_contacts(sweep.anchor, sweep.end, sweep.radius, placement)?);
-    Ok(contacts)
-}
-
 fn placement_contacts(
     scene: &dyn SphereCollisionQuery,
     request: PlacementRequest<'_>,
@@ -630,27 +300,6 @@ fn placement_contacts(
         request.placement,
     )?);
     Ok(contacts)
-}
-
-fn remember_collision_normal(
-    selected: &mut Option<Vector3>,
-    contacts: &[super::StaticContact],
-    requested_displacement: Vector3,
-) {
-    for contact in contacts {
-        let length_squared = contact.normal.length_squared();
-        if length_squared <= f32::EPSILON || !length_squared.is_finite() {
-            continue;
-        }
-        let normal = contact.normal / length_squared.sqrt();
-        let opposition = requested_displacement.dot(&normal);
-        if opposition >= 0.0 {
-            continue;
-        }
-        if selected.is_none_or(|current| opposition < requested_displacement.dot(&current)) {
-            *selected = Some(normal);
-        }
-    }
 }
 
 fn transit(
@@ -712,23 +361,6 @@ fn pose_for_commit(
     )
 }
 
-fn validate(config: FreeSphereConfig, radius: f32, displacement: Vector3) -> Result<()> {
-    validate_settlement(config.into(), radius)?;
-    ensure!(
-        displacement.x.is_finite() && displacement.y.is_finite() && displacement.z.is_finite(),
-        "free-sphere displacement must be finite"
-    );
-    ensure!(
-        config.maximum_substep_distance.is_finite() && config.maximum_substep_distance > 0.0,
-        "physical-fly maximum substep distance must be finite and positive"
-    );
-    ensure!(
-        config.maximum_substeps > 0,
-        "physical-fly requires at least one substep"
-    );
-    Ok(())
-}
-
 fn validate_settlement(config: FreeSphereSettleConfig, radius: f32) -> Result<()> {
     ensure!(
         radius.is_finite() && radius > 0.0,
@@ -767,10 +399,8 @@ mod tests {
     const EAST: u32 = 0xdb55_ffff;
     const WATER_TERRAIN_SAMPLE: u16 = 0x10 << 2;
 
-    fn config() -> FreeSphereConfig {
-        FreeSphereConfig {
-            maximum_substep_distance: 0.5,
-            maximum_substeps: 64,
+    fn config() -> FreeSphereSettleConfig {
+        FreeSphereSettleConfig {
             maximum_contact_passes: 8,
             separation_epsilon: 0.000_5,
         }
@@ -1090,13 +720,7 @@ mod tests {
         let scene = scene(vec![partitioned_slab()]);
         let original = body(Vector3::new(10.0, 20.05, 5.0));
         let result = settled(
-            settle_free_sphere(
-                &scene,
-                config().into(),
-                original,
-                PhysicalCollisionFilter::ALL,
-            )
-            .unwrap(),
+            settle_free_sphere(&scene, config(), original, PhysicalCollisionFilter::ALL).unwrap(),
         );
         assert!(
             result.pose.coords.x < 8.0 || result.pose.coords.x > 12.0,
@@ -1112,13 +736,7 @@ mod tests {
         let scene = scene(vec![partitioned_slab()]);
         let original = body(Vector3::new(12.5, 20.05, 5.0));
         let result = settled(
-            settle_free_sphere(
-                &scene,
-                config().into(),
-                original,
-                PhysicalCollisionFilter::ALL,
-            )
-            .unwrap(),
+            settle_free_sphere(&scene, config(), original, PhysicalCollisionFilter::ALL).unwrap(),
         );
         assert!(result.pose.coords.x > original.pose.coords.x);
         assert_eq!(result.radius, original.radius);
@@ -1145,13 +763,7 @@ mod tests {
         let original = body(collider.point_to_landblock_space(Vector3::new(10.0, 20.05, 5.0)));
         let scene = scene(vec![collider]);
         let result = settled(
-            settle_free_sphere(
-                &scene,
-                config().into(),
-                original,
-                PhysicalCollisionFilter::ALL,
-            )
-            .unwrap(),
+            settle_free_sphere(&scene, config(), original, PhysicalCollisionFilter::ALL).unwrap(),
         );
         assert_eq!(result.radius, original.radius);
         assert_clear(&scene, result);
@@ -1173,13 +785,7 @@ mod tests {
         let scene = scene(vec![inner, outer]);
         let original = body(Vector3::new(10.0, 20.05, 5.0));
         let result = settled(
-            settle_free_sphere(
-                &scene,
-                config().into(),
-                original,
-                PhysicalCollisionFilter::ALL,
-            )
-            .unwrap(),
+            settle_free_sphere(&scene, config(), original, PhysicalCollisionFilter::ALL).unwrap(),
         );
         assert!(
             result.pose.coords.x < 6.0 || result.pose.coords.x > 14.0,
@@ -1220,7 +826,7 @@ mod tests {
         assert!(matches!(
             settle_free_sphere(
                 &scene(vec![deeply_partitioned_slab()]),
-                config().into(),
+                config(),
                 body(Vector3::new(10.0, 20.05, 5.0)),
                 PhysicalCollisionFilter::ALL
             )
@@ -1236,13 +842,7 @@ mod tests {
         // finish through the deep BSP before ordinary surface settlement separates the sphere.
         let original = body(Vector3::new(12.5, 20.05, 5.0));
         let result = settled(
-            settle_free_sphere(
-                &scene,
-                config().into(),
-                original,
-                PhysicalCollisionFilter::ALL,
-            )
-            .unwrap(),
+            settle_free_sphere(&scene, config(), original, PhysicalCollisionFilter::ALL).unwrap(),
         );
         assert!(result.pose.coords.x > original.pose.coords.x);
         assert_clear(&scene, result);
@@ -1269,13 +869,7 @@ mod tests {
             );
         }
         assert!(matches!(
-            settle_free_sphere(
-                &scene,
-                config().into(),
-                original,
-                PhysicalCollisionFilter::ALL
-            )
-            .unwrap(),
+            settle_free_sphere(&scene, config(), original, PhysicalCollisionFilter::ALL).unwrap(),
             FreeSphereSettleOutcome::RecoveryUnavailable { .. }
         ));
     }
@@ -1300,7 +894,7 @@ mod tests {
         assert!(matches!(
             settle_free_sphere(
                 &scene,
-                config().into(),
+                config(),
                 body(Vector3::new(10.0, 20.05, 5.0)),
                 PhysicalCollisionFilter::ALL
             )
@@ -1344,24 +938,6 @@ mod tests {
         }
     }
 
-    fn solve(
-        scene: &CollisionScene,
-        body: FreeSphereState,
-        displacement: Vector3,
-    ) -> FreeSphereOutcome {
-        solve_free_sphere(
-            scene,
-            config(),
-            FreeSphereRequest {
-                body,
-                displacement,
-                filter: PhysicalCollisionFilter::ALL,
-                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
-            },
-        )
-        .unwrap()
-    }
-
     fn water_boundary_scene() -> CollisionScene {
         let mut scene = CollisionScene::new();
         insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK, EAST]);
@@ -1379,13 +955,6 @@ mod tests {
         scene
     }
 
-    fn solved(outcome: FreeSphereOutcome) -> FreeSphereState {
-        match outcome {
-            FreeSphereOutcome::Solved { body, .. } => body,
-            other => panic!("expected solved physical fly, got {other:?}"),
-        }
-    }
-
     fn settled(outcome: FreeSphereSettleOutcome) -> FreeSphereState {
         match outcome {
             FreeSphereSettleOutcome::Settled { body, .. } => body,
@@ -1398,7 +967,7 @@ mod tests {
         let original = body(Vector3::new(20.0, 20.0, 5.0));
         let outcome = settle_free_sphere(
             &scene(Vec::new()),
-            config().into(),
+            config(),
             original,
             PhysicalCollisionFilter::ALL,
         )
@@ -1424,7 +993,7 @@ mod tests {
         let result = settled(
             settle_free_sphere(
                 &scene(vec![wall_x(10.0), wall_y]),
-                config().into(),
+                config(),
                 original,
                 PhysicalCollisionFilter::ALL,
             )
@@ -1447,7 +1016,7 @@ mod tests {
         );
         let outcome = settle_free_sphere(
             &scene(vec![west_wall, wall_x(10.0)]),
-            config().into(),
+            config(),
             body(Vector3::new(9.8, 20.0, 5.0)),
             PhysicalCollisionFilter::ALL,
         )
@@ -1462,496 +1031,377 @@ mod tests {
         );
     }
 
-    #[test]
-    fn whole_water_landblock_blocks_ordinary_body_but_not_viewer_exemption() {
-        // Retail returns collision before terrain response for an entirely-water landblock, except
-        // for viewer and missile physics states (`CLandCell::find_env_collisions`,
-        // `acclient.c:340351-340399`).
-        let scene = water_boundary_scene();
-        let original = body(Vector3::new(191.5, 96.0, 50.0));
-        let blocked = solved(solve(&scene, original, Vector3::new(1.0, 0.0, 0.0)));
-        assert_eq!(landblock_key(blocked.pose.landblock_id), Guid(LANDBLOCK));
-
-        let exempt = solve_free_sphere(
-            &scene,
-            config(),
-            FreeSphereRequest {
-                body: original,
-                displacement: Vector3::new(1.0, 0.0, 0.0),
-                filter: PhysicalCollisionFilter::excluding(
-                    crate::PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER,
-                ),
-                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
-            },
-        )
-        .unwrap();
-        assert_eq!(landblock_key(solved(exempt).pose.landblock_id), Guid(EAST));
-    }
-
-    #[test]
-    fn open_motion_preserves_full_three_dimensional_intent() {
-        let displacement = Vector3::new(2.0, -3.0, 4.0);
-        let FreeSphereOutcome::Solved { body, motion, .. } = solve(
-            &scene(Vec::new()),
-            body(Vector3::new(50.0, 50.0, 10.0)),
-            displacement,
-        ) else {
-            panic!("expected solved physical fly");
+    /// Current contact-collection flight scenarios, sharing geometry with settlement tests.
+    mod flight {
+        use super::*;
+        use crate::spatial::differential_fixtures::{movement_body, movement_tick};
+        use crate::{
+            GroundState, MOBILE_CONTACT_TICK_SECONDS, PhysicalBodyActuation,
+            PhysicalBodyDefinition, PhysicalBodyInput, PhysicalElasticity, PhysicalRestitution,
+            PhysicalSphereSet, SpatialBody,
         };
-        assert!(
-            (body.pose.coords - Vector3::new(52.0, 47.0, 14.0)).length() < 1e-4,
-            "{body:?}"
-        );
-        let expected_substeps =
-            (displacement.length() / config().maximum_substep_distance).ceil() as usize;
-        assert_eq!(motion.len(), expected_substeps);
-        assert!(
-            motion
-                .windows(2)
-                .all(|pair| pair[0].end_fraction < pair[1].end_fraction),
-            "accepted path fractions were not strictly ordered: {motion:?}"
-        );
-        let final_waypoint = motion.last().expect("solved motion path was empty");
-        assert_eq!(final_waypoint.end_fraction, 1.0);
-        assert!((final_waypoint.center - body.pose.coords).length() < 1e-4);
-    }
 
-    #[test]
-    fn wall_impact_stops_normal_motion_and_preserves_oblique_slide() {
-        let scene = scene(vec![wall_x(10.0)]);
-        let FreeSphereOutcome::Solved {
-            body,
-            collision_normal,
-            ..
-        } = solve(
-            &scene,
-            body(Vector3::new(7.0, 20.0, 5.0)),
-            Vector3::new(6.0, 4.0, 0.0),
-        )
-        else {
-            panic!("wall solve did not complete")
-        };
-        assert!((body.pose.coords.x - 9.0).abs() < 0.002, "{body:?}");
-        assert!((body.pose.coords.y - 24.0).abs() < 0.002, "{body:?}");
-        assert_eq!(collision_normal, Some(Vector3::new(-1.0, 0.0, 0.0)));
-    }
-
-    #[test]
-    fn retreat_from_a_blocking_contact_is_immediate() {
-        let scene = scene(vec![wall_x(10.0)]);
-        let body = solved(solve(
-            &scene,
-            body(Vector3::new(9.0, 20.0, 5.0)),
-            Vector3::new(-2.0, 0.0, 0.0),
-        ));
-        assert!((body.pose.coords.x - 7.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn polygon_only_interior_shell_blocks_and_allows_retreat() {
-        let scene = scene(vec![polygon_wall_x(10.0)]);
-        let blocked = solved(solve(
-            &scene,
-            body(Vector3::new(7.0, 20.0, 5.0)),
-            Vector3::new(6.0, 0.0, 0.0),
-        ));
-        assert!((blocked.pose.coords.x - 9.0).abs() < 0.002);
-        let retreated = solved(solve(&scene, blocked, Vector3::new(-2.0, 0.0, 0.0)));
-        assert!((retreated.pose.coords.x - 7.0).abs() < 0.003);
-    }
-
-    #[test]
-    fn non_uniformly_scaled_bsp_plane_keeps_world_space_sphere_math_exact() {
-        let wall = wall_x(5.0);
-        let wall = PlacedCollider::new(
-            wall.shape.clone(),
-            wall.placement,
-            ColliderScale::from_components(Vector3::new(2.0, 3.0, 4.0)).unwrap(),
-            wall.source_placement,
-        )
-        .unwrap();
-        let body = solved(solve(
-            &scene(vec![wall]),
-            body(Vector3::new(7.0, 20.0, 5.0)),
-            Vector3::new(6.0, 0.0, 0.0),
-        ));
-        assert!((body.pose.coords.x - 9.0).abs() < 0.002, "{body:?}");
-    }
-
-    #[test]
-    fn intersecting_wall_constraints_stop_at_the_corner() {
-        let wall_y = half_space(
-            Plane {
-                normal: Vector3::new(0.0, 1.0, 0.0),
-                d: -10.0,
-            },
-            true,
-            false,
-        );
-        let body = solved(solve(
-            &scene(vec![wall_x(10.0), wall_y]),
-            body(Vector3::new(7.0, 7.0, 5.0)),
-            Vector3::new(6.0, 6.0, 0.0),
-        ));
-        assert!((body.pose.coords.x - 9.0).abs() < 0.002);
-        assert!((body.pose.coords.y - 9.0).abs() < 0.002);
-    }
-
-    #[test]
-    fn terrain_and_ceiling_constrain_vertical_flight() {
-        let ceiling = half_space(
-            Plane {
-                normal: Vector3::new(0.0, 0.0, 1.0),
-                d: -10.0,
-            },
-            true,
-            false,
-        );
-        let scene = scene(vec![ceiling]);
-        let floor = solved(solve(
-            &scene,
-            body(Vector3::new(50.0, 50.0, 5.0)),
-            Vector3::new(0.0, 0.0, -8.0),
-        ));
-        assert!((floor.pose.coords.z - 1.0).abs() < 0.002);
-        let FreeSphereOutcome::Solved {
-            body: ceiling,
-            collision_normal,
-            ..
-        } = solve(
-            &scene,
-            body(Vector3::new(50.0, 50.0, 5.0)),
-            Vector3::new(0.0, 0.0, 8.0),
-        )
-        else {
-            panic!("ceiling solve did not complete")
-        };
-        assert!((ceiling.pose.coords.z - 9.0).abs() < 0.002);
-        assert_eq!(collision_normal, Some(Vector3::new(0.0, 0.0, -1.0)));
-    }
-
-    #[test]
-    fn water_barrier_exempt_free_sphere_uses_the_adjusted_collision_mesh() {
-        let mut collision = scene(Vec::new());
-        collision
-            .insert(LandblockCollisionAsset {
-                landblock_id: LANDBLOCK,
-                terrain: terrain_with_sample(LANDBLOCK, WATER_TERRAIN_SAMPLE),
-                static_geometry: LandblockColliders::default(),
-            })
-            .unwrap();
-
-        let floor = solved(
-            solve_free_sphere(
-                &collision,
-                config(),
-                FreeSphereRequest {
-                    body: body(Vector3::new(50.0, 50.0, 5.0)),
-                    displacement: Vector3::new(0.0, 0.0, -8.0),
-                    filter: PhysicalCollisionFilter::excluding(
-                        crate::PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER,
-                    ),
-                    query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
-                },
+        fn flight_body(local: Vector3) -> SpatialBody {
+            let definition = PhysicalBodyDefinition::free_sphere(
+                PhysicalSphereSet::new(
+                    Sphere {
+                        center: Vector3::zero(),
+                        radius: 1.0,
+                    },
+                    None,
+                )
+                .unwrap(),
             )
-            .unwrap(),
-        );
-        let expected_center = 1.0 - TERRAIN_WATER_COLLISION_DEPTH;
-        assert!((floor.pose.coords.z - expected_center).abs() < 0.002);
-    }
+            .unwrap();
+            let mut body = movement_body(
+                WorldPosition::from_outdoor_frame(Guid(LANDBLOCK), local, Quaternion::identity()),
+                definition,
+                Vector3::zero(),
+                GroundState::Airborne,
+            );
+            // Viewer-style zero restitution preserves tangent travel at hard surfaces.
+            body.physical.as_mut().unwrap().response_policy.restitution =
+                PhysicalRestitution::Elastic(PhysicalElasticity::ZERO);
+            body
+        }
 
-    #[test]
-    fn free_sphere_rejects_motion_requiring_a_missing_owner() {
-        let original = body(Vector3::new(50.0, 50.0, 5.0));
-        let mut scene = CollisionScene::new();
-        for owner in test_coverage_neighborhood_owners(&[LANDBLOCK]) {
-            if owner != LANDBLOCK {
-                scene
-                    .insert(artifact(owner, Vec::new(), Vec::new()))
-                    .unwrap();
+        fn travel(scene: &CollisionScene, body: SpatialBody, displacement: Vector3) -> SpatialBody {
+            movement_tick(
+                scene,
+                body,
+                PhysicalBodyInput::autonomous(
+                    PhysicalBodyActuation::free_flight(displacement / MOBILE_CONTACT_TICK_SECONDS)
+                        .unwrap(),
+                ),
+            )
+        }
+        #[test]
+        fn whole_water_landblock_blocks_ordinary_body_but_not_viewer_exemption() {
+            let scene = water_boundary_scene();
+            let original = flight_body(Vector3::new(191.5, 96.0, 50.0));
+            let blocked = travel(&scene, original.clone(), Vector3::new(1.0, 0.0, 0.0));
+            // Swept movement accepts the exact boundary, which normalizes into the east
+            // owner at x=0. Legacy separation instead nudged the center west of it.
+            assert_eq!(blocked.pose.coords.x, 0.0);
+            assert_eq!(landblock_key(blocked.pose.landblock_id), Guid(EAST));
+            assert_eq!(blocked.retained.velocity.x, 0.0);
+            let mut viewer = original;
+            viewer.physical.as_mut().unwrap().collision_filter = PhysicalCollisionFilter::excluding(
+                crate::PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER,
+            );
+            let exempt = travel(&scene, viewer, Vector3::new(1.0, 0.0, 0.0));
+            assert_eq!(landblock_key(exempt.pose.landblock_id), Guid(EAST));
+        }
+
+        #[test]
+        fn open_motion_preserves_full_three_dimensional_intent() {
+            let body = travel(
+                &scene(Vec::new()),
+                flight_body(Vector3::new(50.0, 50.0, 10.0)),
+                Vector3::new(2.0, -3.0, 4.0),
+            );
+            assert!(
+                (body.pose.coords - Vector3::new(52.0, 47.0, 14.0)).length() < 1e-4,
+                "{body:?}"
+            );
+        }
+
+        #[test]
+        fn wall_impact_stops_normal_motion_and_preserves_oblique_slide() {
+            let body = travel(
+                &scene(vec![wall_x(10.0)]),
+                flight_body(Vector3::new(7.0, 20.0, 5.0)),
+                Vector3::new(6.0, 4.0, 0.0),
+            );
+            assert!((body.pose.coords.x - 9.0).abs() < 0.002, "{body:?}");
+            assert!((body.pose.coords.y - 24.0).abs() < 0.002, "{body:?}");
+            assert_eq!(body.retained.velocity.x, 0.0);
+        }
+
+        #[test]
+        fn retreat_from_a_blocking_contact_is_immediate() {
+            let scene = scene(vec![wall_x(10.0)]);
+            let body = travel(
+                &scene,
+                flight_body(Vector3::new(9.0, 20.0, 5.0)),
+                Vector3::new(-2.0, 0.0, 0.0),
+            );
+            assert!((body.pose.coords.x - 7.0).abs() < 1e-4);
+        }
+
+        #[test]
+        fn polygon_only_interior_shell_blocks_and_allows_retreat() {
+            let scene = scene(vec![polygon_wall_x(10.0)]);
+            let blocked = travel(
+                &scene,
+                flight_body(Vector3::new(7.0, 20.0, 5.0)),
+                Vector3::new(6.0, 0.0, 0.0),
+            );
+            assert!((blocked.pose.coords.x - 9.0).abs() < 0.002);
+            let retreated = travel(&scene, blocked, Vector3::new(-2.0, 0.0, 0.0));
+            assert!((retreated.pose.coords.x - 7.0).abs() < 0.003);
+        }
+
+        #[test]
+        fn non_uniformly_scaled_bsp_plane_keeps_world_space_sphere_math_exact() {
+            let wall = wall_x(5.0);
+            let wall = PlacedCollider::new(
+                wall.shape.clone(),
+                wall.placement,
+                ColliderScale::from_components(Vector3::new(2.0, 3.0, 4.0)).unwrap(),
+                wall.source_placement,
+            )
+            .unwrap();
+            let body = travel(
+                &scene(vec![wall]),
+                flight_body(Vector3::new(7.0, 20.0, 5.0)),
+                Vector3::new(6.0, 0.0, 0.0),
+            );
+            assert!((body.pose.coords.x - 9.0).abs() < 0.002, "{body:?}");
+        }
+
+        #[test]
+        fn intersecting_wall_constraints_stop_at_the_corner() {
+            let wall_y = half_space(
+                Plane {
+                    normal: Vector3::new(0.0, 1.0, 0.0),
+                    d: -10.0,
+                },
+                true,
+                false,
+            );
+            let body = travel(
+                &scene(vec![wall_x(10.0), wall_y]),
+                flight_body(Vector3::new(7.0, 7.0, 5.0)),
+                Vector3::new(6.0, 6.0, 0.0),
+            );
+            assert!((body.pose.coords.x - 9.0).abs() < 0.002);
+            assert!((body.pose.coords.y - 9.0).abs() < 0.002);
+        }
+
+        #[test]
+        fn terrain_and_ceiling_constrain_vertical_flight() {
+            let ceiling = half_space(
+                Plane {
+                    normal: Vector3::new(0.0, 0.0, 1.0),
+                    d: -10.0,
+                },
+                true,
+                false,
+            );
+            let scene = scene(vec![ceiling]);
+            for (travel_z, expected_z) in [(-8.0, 1.0), (8.0, 9.0)] {
+                let body = travel(
+                    &scene,
+                    flight_body(Vector3::new(50.0, 50.0, 5.0)),
+                    Vector3::new(0.0, 0.0, travel_z),
+                );
+                assert!((body.pose.coords.z - expected_z).abs() < 0.002, "{body:?}");
+                assert_eq!(body.retained.velocity.z, 0.0);
             }
         }
-        let error = solve_free_sphere(
-            &scene,
-            config(),
-            FreeSphereRequest {
-                body: original,
-                displacement: Vector3::new(1.0, 0.0, 0.0),
-                filter: PhysicalCollisionFilter::ALL,
-                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
-            },
-        )
-        .unwrap_err();
-        assert_eq!(
-            error.downcast_ref::<crate::CollisionQueryError>(),
-            Some(&crate::CollisionQueryError::UnavailableOwner { owner: LANDBLOCK })
-        );
 
-        let uncovered = solve_free_sphere(
-            &scene,
-            config(),
-            FreeSphereRequest {
-                body: original,
-                displacement: Vector3::new(1.0, 0.0, 0.0),
-                filter: PhysicalCollisionFilter::ALL,
-                query_policy: CollisionQueryPolicy::AllowUncoveredQuery,
-            },
-        )
-        .unwrap();
-        let FreeSphereOutcome::Solved {
-            body,
-            unavailable_owner,
-            ..
-        } = uncovered
-        else {
-            panic!("uncovered free-sphere query should still solve installed topology")
-        };
-        assert_eq!(body.pose.coords, Vector3::new(51.0, 50.0, 5.0));
-        assert_eq!(unavailable_owner, Some(Guid(LANDBLOCK)));
-    }
+        #[test]
+        fn water_barrier_exempt_free_sphere_uses_the_adjusted_collision_mesh() {
+            let mut collision = scene(Vec::new());
+            collision
+                .insert(LandblockCollisionAsset {
+                    landblock_id: LANDBLOCK,
+                    terrain: terrain_with_sample(LANDBLOCK, WATER_TERRAIN_SAMPLE),
+                    static_geometry: LandblockColliders::default(),
+                })
+                .unwrap();
+            let mut viewer = flight_body(Vector3::new(50.0, 50.0, 5.0));
+            viewer.physical.as_mut().unwrap().collision_filter = PhysicalCollisionFilter::excluding(
+                crate::PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER,
+            );
+            let floor = travel(&collision, viewer, Vector3::new(0.0, 0.0, -8.0));
+            let expected_center = 1.0 - TERRAIN_WATER_COLLISION_DEPTH;
+            assert!((floor.pose.coords.z - expected_center).abs() < 0.002);
+        }
 
-    #[test]
-    fn anti_tunneling_budget_is_finite_and_observable() {
-        let original = body(Vector3::new(5.0, 20.0, 5.0));
-        let mut limited = config();
-        limited.maximum_substeps = 2;
-        let outcome = solve_free_sphere(
-            &scene(vec![wall_x(10.0)]),
-            limited,
-            FreeSphereRequest {
-                body: original,
-                displacement: Vector3::new(20.0, 0.0, 0.0),
-                filter: PhysicalCollisionFilter::ALL,
-                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
-            },
-        )
-        .unwrap();
-        let FreeSphereOutcome::BudgetExceeded {
-            body,
-            achieved_displacement,
-            motion,
-            budget,
-            substeps,
-            ..
-        } = outcome
-        else {
-            panic!("oversized solve unexpectedly completed")
-        };
-        assert_eq!(budget, FreeSphereBudget::Substeps);
-        assert_eq!(substeps, 2);
-        assert_eq!(body.pose.coords, Vector3::new(6.0, 20.0, 5.0));
-        assert_eq!(achieved_displacement, Vector3::new(1.0, 0.0, 0.0));
-        assert_eq!(motion.len(), 3);
-        assert_eq!(motion.last().unwrap().end_fraction, 1.0);
-        assert_eq!(motion.last().unwrap().center, body.pose.coords);
-    }
+        #[test]
+        fn crossing_a_landblock_commits_the_neighbor_pose() {
+            let mut scene = CollisionScene::new();
+            insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK, EAST]);
+            scene
+                .insert(artifact(LANDBLOCK, Vec::new(), Vec::new()))
+                .unwrap();
+            scene
+                .insert(artifact(EAST, Vec::new(), Vec::new()))
+                .unwrap();
+            let body = travel(
+                &scene,
+                flight_body(Vector3::new(190.0, 50.0, 5.0)),
+                Vector3::new(4.0, 0.0, 0.0),
+            );
+            assert_eq!(body.pose.landblock_id.0 & 0xffff_0000, EAST & 0xffff_0000);
+            assert!((body.pose.coords.x - 2.0).abs() < 1e-4);
+        }
 
-    #[test]
-    fn impossible_placement_exhausts_the_contact_budget_without_recursion() {
-        let left = wall_x(10.0);
-        let right = half_space(
-            Plane {
-                normal: Vector3::new(1.0, 0.0, 0.0),
-                d: -10.5,
-            },
-            false,
-            false,
-        );
-        let original = body(Vector3::new(10.25, 20.0, 5.0));
-        let mut limited = config();
-        limited.maximum_contact_passes = 2;
-        let outcome = solve_free_sphere(
-            &scene(vec![left, right]),
-            limited,
-            FreeSphereRequest {
-                body: original,
-                displacement: Vector3::new(0.1, 0.0, 0.0),
-                filter: PhysicalCollisionFilter::ALL,
-                query_policy: CollisionQueryPolicy::RequireCollisionCoverage,
-            },
-        )
-        .unwrap();
-        assert!(matches!(
-            outcome,
-            FreeSphereOutcome::BudgetExceeded {
-                budget: FreeSphereBudget::Contacts,
-                contact_passes: 2,
-                ..
-            }
-        ));
-    }
-
-    #[test]
-    fn crossing_a_landblock_commits_the_neighbor_pose() {
-        let mut scene = CollisionScene::new();
-        insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK, EAST]);
-        scene
-            .insert(artifact(LANDBLOCK, Vec::new(), Vec::new()))
-            .unwrap();
-        scene
-            .insert(artifact(EAST, Vec::new(), Vec::new()))
-            .unwrap();
-        let body = solved(solve(
-            &scene,
-            body(Vector3::new(190.0, 50.0, 5.0)),
-            Vector3::new(4.0, 0.0, 0.0),
-        ));
-        assert_eq!(body.pose.landblock_id.0 & 0xffff_0000, EAST & 0xffff_0000);
-        assert!((body.pose.coords.x - 2.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn candidate_placement_disables_building_center_solid_and_commits_through_an_opening() {
-        let mut building = wall_x(10.0);
-        building.source_placement = StaticColliderPlacement::BuildingShell { source_index: 0 };
-        let opening_vertices = vec![
-            Vector3::new(10.0, 0.0, 0.0),
-            Vector3::new(10.0, 0.0, 20.0),
-            Vector3::new(10.0, 5.0, 20.0),
-            Vector3::new(10.0, 5.0, 0.0),
-        ];
-        let building_solid = building
-            .shape
-            .as_bsp()
-            .expect("synthetic wall is a BSP solid");
-        building.shape = Arc::new(CollisionShape::Bsp(BspSolid {
-            bsp: building_solid.bsp.clone(),
-            bounds: building_solid.bounds,
-            box_bounds: CollisionBox::from_points(opening_vertices.iter().copied())
-                .expect("synthetic boundary polygon has finite bounds"),
-            polygons: HashMap::from([(
-                1,
-                CollisionPolygon {
-                    vertices: opening_vertices,
-                    normal: Vector3::new(-1.0, 0.0, 0.0),
-                    d: 10.0,
-                },
-            )]),
-        }));
-        let volume = CellVolume {
-            cell_selector: 0x0100,
-            placement: LandblockPlacement {
-                origin: Vector3::zero(),
-                orientation: Quaternion::identity(),
-            },
-            planes: vec![Plane {
-                normal: Vector3::new(1.0, 0.0, 0.0),
-                d: -10.0,
-            }],
-            portals: vec![CellCollisionPortal {
-                plane: Plane {
-                    normal: Vector3::new(1.0, 0.0, 0.0),
-                    d: -10.0,
-                },
-                aperture_vertices: Vec::new(),
-                reciprocal_visibility_vertices: None,
-                positive_side: true,
-                target: CellCollisionPortalTarget::Outdoor,
-                outdoor_building: None,
-            }],
-        };
-        let mut scene = CollisionScene::new();
-        insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK]);
-        scene
-            .insert(artifact(LANDBLOCK, vec![building], vec![volume]))
-            .unwrap();
-        let body = solved(solve(
-            &scene,
-            body(Vector3::new(8.0, 20.0, 5.0)),
-            Vector3::new(4.0, 0.0, 0.0),
-        ));
-        assert_eq!(body.cell, Some(Guid(0xda55_0100)));
-        assert_eq!(body.pose.landblock_id, Guid(0xda55_0100));
-        assert!((body.pose.coords.x - 12.0).abs() < 1e-4);
-        let stationary = settled(
-            settle_free_sphere(&scene, config().into(), body, PhysicalCollisionFilter::ALL)
-                .unwrap(),
-        );
-        assert_eq!(stationary, body);
-    }
-
-    #[test]
-    fn prior_cell_transits_to_its_neighbor_then_back_outdoors() {
-        let first = CellVolume {
-            cell_selector: 0x0100,
-            placement: LandblockPlacement {
-                origin: Vector3::zero(),
-                orientation: Quaternion::identity(),
-            },
-            planes: vec![
-                Plane {
-                    normal: Vector3::new(1.0, 0.0, 0.0),
-                    d: 0.0,
-                },
-                Plane {
-                    normal: Vector3::new(-1.0, 0.0, 0.0),
-                    d: 10.0,
-                },
-            ],
-            portals: vec![CellCollisionPortal {
-                plane: Plane {
-                    normal: Vector3::new(1.0, 0.0, 0.0),
-                    d: -10.0,
-                },
-                aperture_vertices: Vec::new(),
-                reciprocal_visibility_vertices: None,
-                positive_side: true,
-                target: CellCollisionPortalTarget::EnvCell(0x0101),
-                outdoor_building: None,
-            }],
-        };
-        let second = CellVolume {
-            cell_selector: 0x0101,
-            placement: first.placement,
-            planes: vec![
-                Plane {
-                    normal: Vector3::new(1.0, 0.0, 0.0),
-                    d: -10.0,
-                },
-                Plane {
-                    normal: Vector3::new(-1.0, 0.0, 0.0),
-                    d: 20.0,
-                },
-            ],
-            portals: vec![
-                CellCollisionPortal {
-                    plane: Plane {
+        #[test]
+        fn candidate_placement_disables_building_center_solid_and_commits_through_an_opening() {
+            let mut building = wall_x(10.0);
+            building.source_placement = StaticColliderPlacement::BuildingShell { source_index: 0 };
+            let opening_vertices = vec![
+                Vector3::new(10.0, 0.0, 0.0),
+                Vector3::new(10.0, 0.0, 20.0),
+                Vector3::new(10.0, 5.0, 20.0),
+                Vector3::new(10.0, 5.0, 0.0),
+            ];
+            let building_solid = building
+                .shape
+                .as_bsp()
+                .expect("synthetic wall is a BSP solid");
+            building.shape = Arc::new(CollisionShape::Bsp(BspSolid {
+                bsp: building_solid.bsp.clone(),
+                bounds: building_solid.bounds,
+                box_bounds: CollisionBox::from_points(opening_vertices.iter().copied())
+                    .expect("synthetic boundary polygon has finite bounds"),
+                polygons: HashMap::from([(
+                    1,
+                    CollisionPolygon {
+                        vertices: opening_vertices,
                         normal: Vector3::new(-1.0, 0.0, 0.0),
                         d: 10.0,
                     },
-                    aperture_vertices: Vec::new(),
-                    reciprocal_visibility_vertices: None,
-                    positive_side: true,
-                    target: CellCollisionPortalTarget::EnvCell(0x0100),
-                    outdoor_building: None,
+                )]),
+            }));
+            let volume = CellVolume {
+                cell_selector: 0x0100,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
                 },
-                CellCollisionPortal {
+                planes: vec![Plane {
+                    normal: Vector3::new(1.0, 0.0, 0.0),
+                    d: -10.0,
+                }],
+                portals: vec![CellCollisionPortal {
                     plane: Plane {
                         normal: Vector3::new(1.0, 0.0, 0.0),
-                        d: -20.0,
+                        d: -10.0,
+                    },
+                    aperture_vertices: Vec::new(),
+                    reciprocal_visibility_vertices: None,
+                    // The room is x >= 10: exiting travels toward the negative side.
+                    // The legacy endpoint-placement runner never checked this direction.
+                    positive_side: false,
+                    target: CellCollisionPortalTarget::Outdoor,
+                    outdoor_building: None,
+                }],
+            };
+            let mut scene = CollisionScene::new();
+            insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK]);
+            scene
+                .insert(artifact(LANDBLOCK, vec![building], vec![volume]))
+                .unwrap();
+            let body = travel(
+                &scene,
+                flight_body(Vector3::new(8.0, 20.0, 5.0)),
+                Vector3::new(4.0, 0.0, 0.0),
+            );
+            assert_eq!(
+                body.physical.as_ref().unwrap().response.cell(),
+                Some(Guid(0xda55_0100)),
+                "pose={:?} velocity={:?}",
+                body.pose,
+                body.retained.velocity
+            );
+            assert_eq!(body.pose.landblock_id, Guid(0xda55_0100));
+            assert!((body.pose.coords.x - 12.0).abs() < 1e-4);
+        }
+
+        #[test]
+        fn prior_cell_transits_to_its_neighbor_then_back_outdoors() {
+            let first = CellVolume {
+                cell_selector: 0x0100,
+                placement: LandblockPlacement {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                },
+                planes: vec![
+                    Plane {
+                        normal: Vector3::new(1.0, 0.0, 0.0),
+                        d: 0.0,
+                    },
+                    Plane {
+                        normal: Vector3::new(-1.0, 0.0, 0.0),
+                        d: 10.0,
+                    },
+                ],
+                portals: vec![CellCollisionPortal {
+                    plane: Plane {
+                        normal: Vector3::new(1.0, 0.0, 0.0),
+                        d: -10.0,
                     },
                     aperture_vertices: Vec::new(),
                     reciprocal_visibility_vertices: None,
                     positive_side: true,
-                    target: CellCollisionPortalTarget::Outdoor,
+                    target: CellCollisionPortalTarget::EnvCell(0x0101),
                     outdoor_building: None,
-                },
-            ],
-        };
-        let mut scene = CollisionScene::new();
-        insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK]);
-        scene
-            .insert(artifact(LANDBLOCK, Vec::new(), vec![first, second]))
-            .unwrap();
-        let mut inside = body(Vector3::new(9.0, 20.0, 5.0));
-        inside.cell = Some(Guid(0xda55_0100));
-        inside.pose.landblock_id = Guid(0xda55_0100);
-        let neighbor = solved(solve(&scene, inside, Vector3::new(4.0, 0.0, 0.0)));
-        assert_eq!(neighbor.cell, Some(Guid(0xda55_0101)));
-        assert_eq!(neighbor.pose.landblock_id, Guid(0xda55_0101));
+                }],
+            };
+            let second = CellVolume {
+                cell_selector: 0x0101,
+                placement: first.placement,
+                planes: vec![
+                    Plane {
+                        normal: Vector3::new(1.0, 0.0, 0.0),
+                        d: -10.0,
+                    },
+                    Plane {
+                        normal: Vector3::new(-1.0, 0.0, 0.0),
+                        d: 20.0,
+                    },
+                ],
+                portals: vec![
+                    CellCollisionPortal {
+                        plane: Plane {
+                            normal: Vector3::new(-1.0, 0.0, 0.0),
+                            d: 10.0,
+                        },
+                        aperture_vertices: Vec::new(),
+                        reciprocal_visibility_vertices: None,
+                        positive_side: true,
+                        target: CellCollisionPortalTarget::EnvCell(0x0100),
+                        outdoor_building: None,
+                    },
+                    CellCollisionPortal {
+                        plane: Plane {
+                            normal: Vector3::new(1.0, 0.0, 0.0),
+                            d: -20.0,
+                        },
+                        aperture_vertices: Vec::new(),
+                        reciprocal_visibility_vertices: None,
+                        positive_side: true,
+                        target: CellCollisionPortalTarget::Outdoor,
+                        outdoor_building: None,
+                    },
+                ],
+            };
+            let mut scene = CollisionScene::new();
+            insert_test_coverage_neighborhood(&mut scene, &[LANDBLOCK]);
+            scene
+                .insert(artifact(LANDBLOCK, Vec::new(), vec![first, second]))
+                .unwrap();
+            let mut inside = flight_body(Vector3::new(9.0, 20.0, 5.0));
+            inside.pose.landblock_id = Guid(0xda55_0100);
+            inside
+                .physical
+                .as_mut()
+                .unwrap()
+                .reset_placement(Some(Guid(0xda55_0100)));
+            let neighbor = travel(&scene, inside, Vector3::new(4.0, 0.0, 0.0));
+            assert_eq!(
+                neighbor.physical.as_ref().unwrap().response.cell(),
+                Some(Guid(0xda55_0101))
+            );
+            assert_eq!(neighbor.pose.landblock_id, Guid(0xda55_0101));
 
-        let outdoors = solved(solve(&scene, neighbor, Vector3::new(10.0, 0.0, 0.0)));
-        assert_eq!(outdoors.cell, None);
-        assert!(!outdoors.pose.is_indoors(), "{outdoors:?}");
+            let outdoors = travel(&scene, neighbor, Vector3::new(10.0, 0.0, 0.0));
+            assert_eq!(outdoors.physical.as_ref().unwrap().response.cell(), None);
+            assert!(!outdoors.pose.is_indoors(), "{outdoors:?}");
+        }
     }
 }

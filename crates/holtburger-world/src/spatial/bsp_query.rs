@@ -106,7 +106,7 @@ pub(super) fn placed_solid_recovery_candidates(
     }
 }
 
-/// One polygon surface reachable by lowering a sphere vertically.
+/// One authored footing surface admitted by a vertical column or finite stair probe.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShapeSupport {
     /// Authored outward-facing unit normal.
@@ -115,6 +115,104 @@ pub struct ShapeSupport {
     pub height_delta: f32,
     /// Authored feature reached by the bounded vertical probe.
     pub feature: SupportFeature,
+}
+
+/// Geometry admission for ordinary vertical footing versus a blocked stair attempt.
+#[derive(Debug, Clone, Copy)]
+pub(super) enum SupportProbe {
+    /// A vertical column bounded by caller-owned rise and drop distances.
+    Column {
+        /// Maximum descent from the queried sphere center.
+        maximum_drop: f32,
+        /// Maximum ascent from the queried sphere center.
+        maximum_rise: f32,
+    },
+    /// A stair correction measured from the attempted, uncorrected sphere center.
+    Stair {
+        /// Authored step height, before shape-specific polygon interpolation.
+        height: f32,
+    },
+}
+
+impl SupportProbe {
+    /// Volume footing retains its bounded vertical-column admission. Polygon interpolation
+    /// is deliberately confined to the finite polygon test below.
+    pub(super) fn column_limits(self) -> (f32, f32) {
+        match self {
+            Self::Column {
+                maximum_drop,
+                maximum_rise,
+            } => (maximum_drop, maximum_rise),
+            Self::Stair { height } => (0.0, height),
+        }
+    }
+
+    /// Transform vertices only after the plane enters this probe's height envelope.
+    pub(super) fn on_polygon<V: ExactSizeIterator<Item = Vector3>>(
+        self,
+        vertices: impl FnOnce() -> V,
+        normal: Vector3,
+        plane_d: f32,
+        center: Vector3,
+        radius: f32,
+    ) -> Option<ShapeSupport> {
+        if normal.z <= CONTACT_EPSILON {
+            return None;
+        }
+        let projection = normal.dot(&center);
+        let plane_distance = projection + plane_d;
+        // Preserve ordinary footing's operation order; the stair branch follows retail's
+        // signed plane-distance arithmetic, independently checked by the reference harness.
+        let height_delta = match self {
+            Self::Column { .. } => (radius - projection - plane_d) / normal.z,
+            Self::Stair { .. } => (radius - plane_distance) / normal.z,
+        };
+        match self {
+            Self::Column {
+                maximum_drop,
+                maximum_rise,
+            } => {
+                if height_delta < -maximum_drop - CONTACT_EPSILON
+                    || height_delta > maximum_rise + CONTACT_EPSILON
+                {
+                    return None;
+                }
+            }
+            Self::Stair { height } => {
+                // RETAIL QUIRK: CPolygon::adjust_sphere_to_plane (acclient.c:344680-344737)
+                // admits negative interpolation. Clamping it to zero strands ordinary
+                // WalkForward at the 0x356F stair lip. The authored-stair-joins-v1 census
+                // replayed 576 routes across 16 owners: eight final poses changed, with
+                // no newly overlapping endpoints. The 34,560-case stair-joins-v2 grid
+                // gained 4,260 clear-reference endpoint matches; it is bounded coverage.
+                // initial walk_interp is one, and the adjusted value must be in [-0.5, 1).
+                // This bounds correction from the attempted position, not total tick ascent.
+                if height * normal.z <= CONTACT_EPSILON {
+                    return None;
+                }
+                let interpolation = 1.0 - (plane_distance - radius) / (-height * normal.z);
+                if !(-0.5..1.0).contains(&interpolation) {
+                    return None;
+                }
+            }
+        }
+        let vertices = vertices();
+        if vertices.len() < 3 {
+            return None;
+        }
+        let feature = if matches!(self, Self::Stair { .. }) {
+            let vertices = vertices.collect::<Vec<_>>();
+            polygon_sphere_contact(&vertices, normal, plane_d, center, radius)?;
+            polygon_footprint(vertices.into_iter(), center, radius)?
+        } else {
+            polygon_footprint(vertices, center, radius)?
+        };
+        Some(ShapeSupport {
+            normal,
+            height_delta,
+            feature,
+        })
+    }
 }
 
 /// Two-sided polygon obstruction used only by grounded response routing.
@@ -223,14 +321,13 @@ pub fn placed_polygon_obstructions(
     contacts
 }
 
-/// Returns authored polygon surfaces reached by one bounded vertical settle probe.
-pub fn placed_supports(
+/// Visits placed polygon supports under one shape-owned admission rule.
+pub(super) fn placed_supports(
     collider: &PlacedCollisionShape,
     solid: &BspSolid,
     center: Vector3,
     radius: f32,
-    maximum_drop: f32,
-    maximum_rise: f32,
+    probe: SupportProbe,
 ) -> Vec<ShapeSupport> {
     let mut supports = Vec::new();
     visit_polygons(
@@ -252,7 +349,7 @@ pub fn placed_supports(
                 },
                 collider,
             );
-            if let Some(support) = support_on_polygon(
+            if let Some(support) = probe.on_polygon(
                 || {
                     polygon
                         .vertices
@@ -263,8 +360,6 @@ pub fn placed_supports(
                 plane.d,
                 center,
                 radius,
-                maximum_drop,
-                maximum_rise,
             ) {
                 supports.push(support);
             }
@@ -521,45 +616,17 @@ pub(super) fn polygon_sphere_contact(
     })
 }
 
-/// Visit footprint geometry only after its plane enters the vertical search envelope.
-/// Terrain supplies existing vertices; placed BSP faces transform each vertex once on demand.
-pub(super) fn support_on_polygon<V: ExactSizeIterator<Item = Vector3>>(
-    vertices: impl FnOnce() -> V,
-    normal: Vector3,
-    plane_d: f32,
-    center: Vector3,
-    radius: f32,
-    maximum_drop: f32,
-    maximum_rise: f32,
-) -> Option<ShapeSupport> {
-    if normal.z <= CONTACT_EPSILON {
-        return None;
-    }
-    let height_delta = (radius - normal.dot(&center) - plane_d) / normal.z;
-    if height_delta < -maximum_drop - CONTACT_EPSILON
-        || height_delta > maximum_rise + CONTACT_EPSILON
-    {
-        return None;
-    }
-    let vertices = vertices();
-    if vertices.len() < 3 {
-        return None;
-    }
-    let feature = polygon_footprint(vertices, center, radius)?;
-    Some(ShapeSupport {
-        normal,
-        height_delta,
-        feature,
-    })
-}
-
 /// Horizontal footing is invariant under applying a candidate's vertical adjustment.
 /// RETAIL DIVERGENCE: `acclient.c:345329–345510,302082–302090` checks a projected
 /// polygon footprint, ordinarily with half-radius. We use a full-radius horizontal disk
-/// consistently for standing and stair entry; restoring the narrower/transient rules can
+/// for standing and post-movement recovery; stair admission separately requires a finite
+/// sphere/face intersection. Restoring the narrower/transient standing rules can
 /// strand the first bounded stair step. The asset-free footing gate covers seams, corners,
 /// slopes and a 0.3m stair. The template/setup census covers preparation, not every authored
 /// stair or ledge; full support-geometry coverage is not claimed.
+/// The later 34,560-case stair-joins-v2 comparison retained 16 changed narrow-body cases
+/// with a rejected initial finite target: both versions nevertheless acquire that same
+/// floor through existing recovery. These remain differences, not retail parity passes.
 fn polygon_footprint(
     mut vertices: impl Iterator<Item = Vector3>,
     center: Vector3,
@@ -666,6 +733,35 @@ mod tests {
     use holtburger_dat::physics::{BspLeaf, InternalNode};
 
     use super::*;
+
+    #[test]
+    fn stair_probe_bounds_correction_and_requires_finite_intersection() {
+        let vertices = [
+            Vector3::new(-2.0, 0.0, 0.0),
+            Vector3::new(2.0, 0.0, 0.0),
+            Vector3::new(2.0, 2.0, 0.0),
+            Vector3::new(-2.0, 2.0, 0.0),
+        ];
+        let normal = Vector3::new(0.0, 0.0, 1.0);
+        let probe = SupportProbe::Stair { height: 1.0 };
+        for (center, expected) in [
+            (Vector3::new(0.0, -0.9, 0.6), false),
+            (Vector3::new(0.0, -0.7, 0.6), true),
+            (Vector3::new(0.0, 1.0, -0.5), true),
+            (
+                Vector3::new(0.0, 1.0, 1.0 - f32::from_bits(1.5_f32.to_bits() + 1)),
+                false,
+            ),
+        ] {
+            assert_eq!(
+                probe
+                    .on_polygon(|| vertices.into_iter(), normal, 0.0, center, 1.0)
+                    .is_some(),
+                expected,
+                "center={center:?}"
+            );
+        }
+    }
 
     fn split_solid() -> PlacedCollider {
         let bounds = Sphere {

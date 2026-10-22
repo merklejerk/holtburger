@@ -1418,10 +1418,7 @@ mod tests {
                     step_up_height: 0.6,
                     step_down_height: 1.5,
                     edge_protection: holtburger_world::EdgeProtection::Creature,
-                    maximum_substep_distance: 0.24,
-                    maximum_substeps: 32,
-                    maximum_contact_passes: 8,
-                    separation_epsilon: 0.0005,
+                    minimum_stair_rise: 0.0005,
                 },
             )?;
             Ok(DynamicPhysicalBodyDefinition {

@@ -1779,7 +1779,7 @@ mod physical_body_tests {
         CollisionReportClassification, CollisionReportPhase, DynamicBodyCollisionDefinition,
         DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EdgeProtection,
         EntityCollisionParticipation, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
-        FreeSphereConfig, GroundSupport, GroundedBodyActuation, GroundedConfig, GroundedLaunch,
+        GroundSupport, GroundedBodyActuation, GroundedConfig, GroundedLaunch,
         LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand, PhysicalBodyDefinition,
         PhysicalBodyResponsePolicy, PhysicalBodyResponseState, PhysicalBodySceneResidency,
         PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
@@ -1799,12 +1799,6 @@ mod physical_body_tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    const FLY_CONFIG: FreeSphereConfig = FreeSphereConfig {
-        maximum_substep_distance: 0.25,
-        maximum_substeps: 32,
-        maximum_contact_passes: 8,
-        separation_epsilon: 0.000_5,
-    };
     const GROUNDED_CONFIG: GroundedConfig = GroundedConfig {
         gravity: -9.8,
         walkable_normal_z: RETAIL_WALKABLE_NORMAL_Z,
@@ -1813,10 +1807,7 @@ mod physical_body_tests {
         step_up_height: 0.6,
         step_down_height: 1.5,
         edge_protection: EdgeProtection::Creature,
-        maximum_substep_distance: 0.25,
-        maximum_substeps: 32,
-        maximum_contact_passes: 8,
-        separation_epsilon: 0.000_5,
+        minimum_stair_rise: 0.000_5,
     };
     const WATER_TERRAIN_SAMPLE: u16 = 0x10 << 2;
 
@@ -1831,7 +1822,6 @@ mod physical_body_tests {
     fn free_definition(center: Vector3, radius: f32) -> PhysicalBodyDefinition {
         PhysicalBodyDefinition::free_sphere(
             PhysicalSphereSet::new(Sphere { center, radius }, None).unwrap(),
-            FLY_CONFIG,
         )
         .unwrap()
     }
@@ -1902,8 +1892,10 @@ mod physical_body_tests {
         acquire_support(&mut scene, &collision, id, origin);
         let velocity = Vector3::new(2.0, 0.0, 0.0);
         let interval = Duration::from_secs_f32(CONTACT_INTERVAL);
-        let tolerance = GROUNDED_CONFIG.separation_epsilon;
         let start = scene.body(id).unwrap().pose;
+        // Swept contact admits one fixed band; world-coordinate rounding adds a float ULP.
+        let tolerance =
+            crate::spatial::bsp_query::CONTACT_EPSILON + start.coords.x.abs() * f32::EPSILON;
         let mut steps = 12;
         for step in 1..=steps {
             scene.wake_dynamic_body(id);
@@ -3511,7 +3503,7 @@ mod physical_body_tests {
         let target = policy.1;
         let wall_x = scene.body(target).unwrap().pose.coords.x + 0.8;
         let radius = grounded_definition().spheres().primary().radius;
-        let tolerance = GROUNDED_CONFIG.separation_epsilon;
+        let tolerance = crate::spatial::bsp_query::CONTACT_EPSILON;
         let mut asset = flat_collision_asset(0);
         asset.static_geometry = LandblockColliders::new(
             vec![

@@ -45,7 +45,7 @@ pub fn grounded_character_actuation(
 /// actuation accepts, and every authored root rotation in referenced content is yaw-only — measured
 /// at 19 of 19 animations with a maximum tilt axis component of zero.
 ///
-/// The vertical component of the authored translation is dropped. That is not a loss: `solve_grounded`
+/// The vertical component of the authored translation is dropped. That is not a loss: the contact runtime
 /// projects the whole displacement into the support plane whenever the body has walkable support,
 /// and the support gate has already zeroed the translation when it does not.
 pub fn authored_grounded_actuation(

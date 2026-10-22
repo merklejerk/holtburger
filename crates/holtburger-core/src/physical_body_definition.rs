@@ -5,10 +5,10 @@ use holtburger_dat::file_type::SetupModel;
 #[cfg(test)]
 use holtburger_world::PhysicalCollisionFilter;
 use holtburger_world::{
-    EdgeProtection, FreeSphereConfig, GroundedConfig, PhysicalBodyDefinition,
-    PhysicalBodyDefinitionError, PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction,
-    PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
-    RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
+    EdgeProtection, GroundedConfig, PhysicalBodyDefinition, PhysicalBodyDefinitionError,
+    PhysicalBodyResponsePolicy, PhysicalElasticity, PhysicalFriction, PhysicalRestitution,
+    PhysicalSphereSet, PhysicalSurfaceMotion, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
+    RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
 };
 use thiserror::Error;
 
@@ -119,10 +119,7 @@ pub fn retail_grounded_body_with_policy(
             step_up_height: 0.6,
             step_down_height: 1.5,
             edge_protection,
-            maximum_substep_distance: 0.24,
-            maximum_substeps: 32,
-            maximum_contact_passes: 8,
-            separation_epsilon: 0.000_5,
+            minimum_stair_rise: 0.000_5,
         },
     )?;
     Ok(ResolvedBodyProfile {
@@ -161,17 +158,6 @@ pub fn retail_player_grounded_profile(
 /// wall clearance by 0.05 m. The call-site census is one production consumer,
 /// `HostPhysicalFlyRuntime`, plus its focused tests. Possession-camera clearance is projection-
 /// derived and does not consume this profile.
-///
-/// Anti-tunneling and separation budgets for one small free-flying sphere.
-///
-/// The 0.25 m substep over 32 substeps bounds any one solve at 8 m.
-pub const FREE_SPHERE_FLY_CONFIG: FreeSphereConfig = FreeSphereConfig {
-    maximum_substep_distance: 0.25,
-    maximum_substeps: 32,
-    maximum_contact_passes: 8,
-    separation_epsilon: 0.000_5,
-};
-
 pub fn physical_fly_viewer_profile() -> Result<ResolvedBodyProfile, PhysicalBodyDefinitionError> {
     let spheres = PhysicalSphereSet::new(
         Sphere {
@@ -180,7 +166,7 @@ pub fn physical_fly_viewer_profile() -> Result<ResolvedBodyProfile, PhysicalBody
         },
         None,
     )?;
-    let definition = PhysicalBodyDefinition::free_sphere(spheres, FREE_SPHERE_FLY_CONFIG)?;
+    let definition = PhysicalBodyDefinition::free_sphere(spheres)?;
     Ok(ResolvedBodyProfile {
         definition,
         response_policy: stable_policy(PhysicalElasticity::ZERO),
@@ -218,10 +204,7 @@ mod tests {
         step_up_height: 0.6,
         step_down_height: 1.5,
         edge_protection: EdgeProtection::Creature,
-        maximum_substep_distance: 0.25,
-        maximum_substeps: 8,
-        maximum_contact_passes: 4,
-        separation_epsilon: 0.001,
+        minimum_stair_rise: 0.001,
     };
     const STABLE_POLICY: PhysicalBodyResponsePolicy = PhysicalBodyResponsePolicy {
         restitution: PhysicalRestitution::Elastic(PhysicalElasticity::DEFAULT),
@@ -427,10 +410,7 @@ mod profile_tests {
         assert_eq!(config.gravity, -9.8);
         assert_eq!(config.step_up_height, 0.6);
         assert_eq!(config.step_down_height, 1.5);
-        assert_eq!(config.maximum_substep_distance, 0.24);
-        assert_eq!(config.maximum_substeps, 32);
-        assert_eq!(config.maximum_contact_passes, 8);
-        assert_eq!(config.separation_epsilon, 0.000_5);
+        assert_eq!(config.minimum_stair_rise, 0.000_5);
     }
 
     /// Edge protection is caller policy; both choices produce otherwise identical configs.

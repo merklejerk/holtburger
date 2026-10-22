@@ -17,9 +17,12 @@ use super::{
     placed_ball_contact, placed_ball_support, placed_cylinder_contact, placed_cylinder_support,
 };
 use crate::spatial::collision::CollisionScene;
+use crate::spatial::differential_fixtures::{
+    grounded_movement_body, movement_ground, movement_tick,
+};
 use crate::{
-    GroundState, GroundSupport, GroundedBody, GroundedBodySpheres, GroundedConfig, GroundedOutcome,
-    GroundedRequest, PhysicalCollisionFilter, SettlePermission, solve_grounded,
+    GroundState, GroundSupport, GroundedBodyActuation, GroundedBodySpheres, GroundedConfig,
+    PhysicalBodyActuation, PhysicalBodyInput, SpatialBody,
 };
 
 const LANDBLOCK: u32 = 0xe63e_ffff;
@@ -274,7 +277,7 @@ fn grounded_pair() -> GroundedBodySpheres {
     crate::spatial::differential_fixtures::retail_creature_pair()
 }
 
-fn drive(scene: &CollisionScene, start: Vector3, velocity: Vector3, ticks: usize) -> GroundedBody {
+fn drive(scene: &CollisionScene, start: Vector3, velocity: Vector3, ticks: usize) -> SpatialBody {
     drive_body(scene, start, velocity, ticks, true)
 }
 
@@ -284,41 +287,28 @@ fn drive_body(
     velocity: Vector3,
     ticks: usize,
     supported: bool,
-) -> GroundedBody {
-    let mut body = GroundedBody {
-        pose: WorldPosition {
-            landblock_id: Guid(LANDBLOCK),
-            coords: start,
-            rotation: Quaternion::identity(),
-        }
-        .normalize_outdoor_cell(),
-        cell: None,
-        velocity: Vector3::zero(),
-        ground: if supported {
-            GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0)))
-        } else {
-            GroundState::Airborne
-        },
+) -> SpatialBody {
+    let pose = WorldPosition::from_outdoor_frame(Guid(LANDBLOCK), start, Quaternion::identity());
+    let ground = if supported {
+        GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0)))
+    } else {
+        GroundState::Airborne
     };
+    let mut body = grounded_movement_body(
+        pose,
+        grounded_pair(),
+        grounded_config(),
+        Vector3::zero(),
+        ground,
+    );
     for _ in 0..ticks {
-        let outcome = solve_grounded(
+        body = movement_tick(
             scene,
-            grounded_config(),
-            GroundedRequest {
-                filter: PhysicalCollisionFilter::ALL,
-                body: body.clone(),
-                spheres: grounded_pair(),
-                supported_velocity: velocity,
-                settle: SettlePermission::Walking,
-                retain_supported_gravity: false,
-                delta_seconds: 1.0 / 30.0,
-            },
-        )
-        .unwrap();
-        let GroundedOutcome::Solved { body: solved, .. } = outcome else {
-            panic!("grounded solve failed: {outcome:?}");
-        };
-        body = solved;
+            body,
+            PhysicalBodyInput::autonomous(PhysicalBodyActuation::Grounded(
+                GroundedBodyActuation::drive(velocity).unwrap(),
+            )),
+        );
     }
     body
 }
@@ -341,7 +331,7 @@ fn body_settles_grounded_on_a_stump_top() {
         false,
     );
     assert!(
-        settled.ground.walkable_support().is_some(),
+        movement_ground(&settled).walkable_support().is_some(),
         "body never acquired stump support"
     );
     assert!(
@@ -364,7 +354,7 @@ fn body_walking_into_a_trunk_stops_at_the_radial_wall() {
         90,
     );
     // The support sphere (r 0.48) stops where its center reaches the shrunk radius sum, plus the
-    // solver's substep quantization and separation epsilon.
+    // solver's fixed contact band.
     let minimum_x = low.x + radius + 0.48 - RETAIL_EPSILON;
     assert!(
         stopped.pose.coords.x >= minimum_x - 0.001,
@@ -377,7 +367,7 @@ fn body_walking_into_a_trunk_stops_at_the_radial_wall() {
         stopped.pose.coords.x
     );
     assert!(
-        stopped.ground.walkable_support().is_some(),
+        movement_ground(&stopped).walkable_support().is_some(),
         "body lost ground support at the trunk"
     );
 }
@@ -400,7 +390,7 @@ fn body_steps_up_onto_a_low_stump() {
         "body did not mount the stump: z {}",
         mounted.pose.coords.z
     );
-    assert!(mounted.ground.walkable_support().is_some());
+    assert!(movement_ground(&mounted).walkable_support().is_some());
     assert!(
         (mounted.pose.coords.x - 50.0).abs() < 1.0,
         "body did not advance onto the stump: x {}",
@@ -428,7 +418,7 @@ fn body_walks_off_a_stump_onto_the_terrain_below() {
         departed.pose.coords.z
     );
     assert!(
-        departed.ground.walkable_support().is_some(),
+        movement_ground(&departed).walkable_support().is_some(),
         "body lost terrain support after departure"
     );
 }

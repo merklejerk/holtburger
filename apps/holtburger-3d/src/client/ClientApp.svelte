@@ -1235,6 +1235,7 @@
 
 	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
+		if (worldView?.handleSystemPanelKeydown(event)) return;
 		if (preciseJumpActive && !event.isComposing) {
 			if (
 				inputArbiter?.applyPowerKey(event, true) ||

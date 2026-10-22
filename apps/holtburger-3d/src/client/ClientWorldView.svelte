@@ -33,9 +33,10 @@
 	import type { ClientItemDrag } from "./client-item-drag";
 	import { bindSpellCell, swapSpellCells } from "./client-spell-bar-state";
 	import type { ClientSpellBarState } from "./client-spell-bar-state";
-	import type {
-		ClientKeyboardConfiguration,
-		InputDigitIndex,
+	import {
+		CLIENT_PANEL_SHORTCUT_ACTIONS,
+		type ClientKeyboardConfiguration,
+		type InputDigitIndex,
 	} from "../lib/input/input-contract";
 	import { inputDisplayPlatform } from "../lib/input/input-presentation";
 	import ClientSpellBar from "./ClientSpellBar.svelte";
@@ -108,6 +109,7 @@
 	import ClientSelectedEntityHud from "./ClientSelectedEntityHud.svelte";
 	import ClientShortcutDock, {
 		createClientShortcuts,
+		PANEL_SHORTCUTS,
 		type ClientSystemPanel,
 	} from "./ClientShortcutDock.svelte";
 	import ClientToastOverlay from "./ClientToastOverlay.svelte";
@@ -665,6 +667,22 @@
 	};
 	let nearbyOpen = $state(false);
 	let activePanel = $state<ClientSystemPanel | null>(null);
+	/** Dock and keyboard share the single-open-panel policy. */
+	function toggleSystemPanel(panel: ClientSystemPanel): void {
+		activePanel = activePanel === panel ? null : panel;
+	}
+	/** Called only after the app keyboard policy admits a gameplay press. */
+	export function handleSystemPanelKeydown(event: KeyboardEvent): boolean {
+		if (event.defaultPrevented || event.isComposing || hudMode !== "runtime")
+			return false;
+		const action = CLIENT_PANEL_SHORTCUT_ACTIONS.find((action) =>
+			clientInput.shortcut(action, event),
+		);
+		if (action === undefined) return false;
+		event.preventDefault();
+		if (!event.repeat) toggleSystemPanel(PANEL_SHORTCUTS[action]);
+		return true;
+	}
 	let enchantmentsOpen = $state(false);
 	let enchantmentLaunch = $state<{
 		kind: "beneficial" | "harmful";
@@ -1395,7 +1413,7 @@
 		{onToggleCombat}
 		{shortcuts}
 		{activePanel}
-		onToggle={(panel) => (activePanel = activePanel === panel ? null : panel)}
+		onToggle={toggleSystemPanel}
 	/>
 	{#if worldContainer !== null && itemInteractions !== null}
 		{#key worldContainer}

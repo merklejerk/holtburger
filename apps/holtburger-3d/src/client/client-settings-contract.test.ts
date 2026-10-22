@@ -1,3 +1,4 @@
+import { CLIENT_PANEL_SHORTCUT_ACTIONS } from "../lib/input/input-contract";
 import { describe, expect, it } from "vitest";
 import { SPELL_BAR_INDICES } from "./client-spell-bar-state";
 import {
@@ -25,6 +26,29 @@ import {
 const viewport = { width: 1440, height: 900 };
 
 describe("current client settings values", () => {
+	it("adds panel defaults to old profiles and preserves remapped and unbound panels", () => {
+		const olderClient = Object.fromEntries(
+			Object.entries(CLIENT_KEYBOARD_DEFAULTS.client).filter(
+				([action]) =>
+					!CLIENT_PANEL_SHORTCUT_ACTIONS.some((panel) => panel === action),
+			),
+		);
+		const previous = { ...CLIENT_KEYBOARD_DEFAULTS, client: olderClient };
+		expect(clientKeyboardSettingsSchema.parse(previous)).toEqual(
+			CLIENT_KEYBOARD_DEFAULTS,
+		);
+		const client = {
+			...olderClient,
+			toggleInventory: [],
+			toggleCharacter: [{ key: "F8" }],
+		};
+		const loaded = clientKeyboardSettingsSchema.parse({ ...previous, client });
+		expect(loaded.client).toEqual({
+			...CLIENT_KEYBOARD_DEFAULTS.client,
+			...client,
+		});
+	});
+
 	it("fills the missing history toggle while preserving saved alternatives and unbound choices", () => {
 		const { toggleChatHistory, ...olderClient } =
 			CLIENT_KEYBOARD_DEFAULTS.client;

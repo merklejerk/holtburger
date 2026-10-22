@@ -163,11 +163,11 @@ export async function probeClientBindings(options: {
 		splitKey.click();
 		await tick();
 		await click("Add key for Split stack");
-		press("F10", "F10");
+		press("F9", "F9");
 		await tick();
 		await click("Selected entity actions");
 		require(Array.from(target.querySelectorAll('[role="menuitem"]')).some(
-			(item) => item.textContent?.trim() === "Split stack (F10)",
+			(item) => item.textContent?.trim() === "Split stack (F9)",
 		), "Split-stack menu hint did not update after remapping");
 		await click("Selected entity actions");
 		await click("Restore default keys for Split stack");

@@ -186,7 +186,7 @@ pub(crate) fn resolve_generated_scenery_from_source(
             }
 
             let terrain_sample = sample_landblock_terrain(&landblock.terrain, local_x, local_y)?;
-            if !generated_template_matches_slope(template, terrain_sample.normal_z) {
+            if !generated_template_matches_slope(template, terrain_sample.normal.z) {
                 continue;
             }
             if occupied_points.iter().any(|(x, y)| {
@@ -202,8 +202,7 @@ pub(crate) fn resolve_generated_scenery_from_source(
                 global_cell_x,
                 global_cell_y,
                 template_index as u32,
-                Vector3::new(local_x, local_y, terrain_sample.height + local_position.z),
-                terrain_sample.normal,
+                terrain_sample,
             );
             if !generated_source_within_landblock(
                 source_reader,
@@ -246,10 +245,12 @@ pub(crate) fn resolve_generated_scenery_from_source(
     })
 }
 
+/// One candidate projected onto an authored terrain polygon.
 struct TerrainSample {
-    height: f32,
+    /// Landblock-local origin whose Z lies on the selected polygon.
+    origin: Vector3,
+    /// Unit face normal used by both slope acceptance and alignment.
     normal: Vector3,
-    normal_z: f32,
 }
 
 fn cell_for_local_position(x: f32, y: f32) -> (usize, usize) {
@@ -357,32 +358,47 @@ fn build_generated_template_frame(
     global_cell_x: u32,
     global_cell_y: u32,
     template_index: u32,
-    origin: Vector3,
-    terrain_normal: Vector3,
+    terrain_sample: TerrainSample,
 ) -> LandblockPlacement {
     let orientation = if template.align != 0 {
-        terrain_normal_alignment(terrain_normal)
+        let downhill = Vector3::new(-terrain_sample.normal.x, -terrain_sample.normal.y, 0.0);
+        // Vector3::get_heading returns zero for a near-zero XY vector, including flat ground
+        // (acclient.c:141871-141886, normalize_check_small at 137456).
+        let heading = if downhill.length() < 0.0002 {
+            0.0
+        } else {
+            downhill.x.atan2(downhill.y).to_degrees().rem_euclid(360.0)
+        };
+        set_generated_heading(template.base_frame.orientation, heading)
     } else if template.max_rotation_degrees > 0.0 {
         let heading_degrees =
             (generated_template_random(global_cell_x, global_cell_y, template_index, 63_127)
                 * f64::from(template.max_rotation_degrees)) as f32;
-        Quaternion::from_heading(heading_degrees.to_radians())
+        set_generated_heading(template.base_frame.orientation, heading_degrees)
     } else {
         template.base_frame.orientation
     };
 
     LandblockPlacement {
-        origin,
+        origin: terrain_sample.origin,
         orientation,
     }
 }
 
-fn terrain_normal_alignment(terrain_normal: Vector3) -> Quaternion {
-    let downhill = Vector3::new(-terrain_normal.x, -terrain_normal.y, 0.0);
-    if downhill.length_squared() < 1e-6 {
-        Quaternion::identity()
-    } else {
-        Quaternion::from_heading(Vector3::zero().heading_to(&downhill))
+/// Retail Frame::set_heading / set_vector_heading (acclient.c:342872-342908).
+/// Heading zero is +Y, increasing toward +X. Retail retains the base forward-vector Z,
+/// normalizes `(sin(heading), cos(heading), z)`, then reconstructs pitch and yaw without roll.
+fn set_generated_heading(base: Quaternion, degrees: f32) -> Quaternion {
+    let forward_z = base.rotate_vector(Vector3::new(0.0, 1.0, 0.0)).z;
+    // asin(z / sqrt(1 + z*z)) simplifies to atan(z); the XY heading is unit length.
+    let pitch = forward_z.atan();
+    let (sin_pitch, cos_pitch) = (pitch * 0.5).sin_cos();
+    let (sin_yaw, cos_yaw) = (-degrees.to_radians() * 0.5).sin_cos();
+    Quaternion {
+        w: cos_yaw * cos_pitch,
+        x: cos_yaw * sin_pitch,
+        y: sin_yaw * sin_pitch,
+        z: sin_yaw * cos_pitch,
     }
 }
 
@@ -494,22 +510,11 @@ fn placed_circle_within_landblock(
     local_center: Vector3,
     radius: f32,
 ) -> bool {
-    let center = transform_unscaled_local_point(frame, local_center);
+    let center = frame.origin + frame.orientation.rotate_vector(local_center);
     center.x >= radius
         && center.y >= radius
         && center.x < GENERATED_SCENERY_BLOCK_SIZE - radius
         && center.y < GENERATED_SCENERY_BLOCK_SIZE - radius
-}
-
-fn transform_unscaled_local_point(frame: &LandblockPlacement, point: Vector3) -> Vector3 {
-    let heading = frame.orientation.to_heading();
-    let theta = (450.0f32).to_radians() - heading;
-    let (sin_theta, cos_theta) = theta.sin_cos();
-    Vector3::new(
-        frame.origin.x + point.x * cos_theta - point.y * sin_theta,
-        frame.origin.y + point.x * sin_theta + point.y * cos_theta,
-        frame.origin.z + point.z,
-    )
 }
 
 fn point_inside_landblock(x: f32, y: f32) -> bool {
@@ -584,12 +589,14 @@ fn get_road(terrain: &LandblockTerrain, x: i32, y: i32) -> u16 {
 }
 
 fn sample_landblock_terrain(terrain: &LandblockTerrain, x: f32, y: f32) -> Result<TerrainSample> {
-    let cell_x = (x / GENERATED_SCENERY_CELL_SIZE).floor().clamp(0.0, 7.0) as usize;
-    let cell_y = (y / GENERATED_SCENERY_CELL_SIZE).floor().clamp(0.0, 7.0) as usize;
-    let local_x = (x - cell_x as f32 * GENERATED_SCENERY_CELL_SIZE) / GENERATED_SCENERY_CELL_SIZE;
-    let local_y = (y - cell_y as f32 * GENERATED_SCENERY_CELL_SIZE) / GENERATED_SCENERY_CELL_SIZE;
-    let height_at = |vertex_x, vertex_y| {
-        terrain
+    // Candidates have already passed the half-open landblock bounds check. Use the foundation's
+    // authored vertices, not the water-adjusted collision surface (acclient.c:338228-338237).
+    let cell_x = (x / terrain.tile_size).floor() as usize;
+    let cell_y = (y / terrain.tile_size).floor() as usize;
+    let local_x = (x - cell_x as f32 * terrain.tile_size) / terrain.tile_size;
+    let local_y = (y - cell_y as f32 * terrain.tile_size) / terrain.tile_size;
+    let vertex_at = |vertex_x, vertex_y| -> Result<Vector3> {
+        let height = terrain
             .heights
             .get(vertex_y * terrain.grid_size + vertex_x)
             .copied()
@@ -597,24 +604,34 @@ fn sample_landblock_terrain(terrain: &LandblockTerrain, x: f32, y: f32) -> Resul
                 anyhow::anyhow!(
                     "Landblock terrain is missing resolved height at ({vertex_x}, {vertex_y})"
                 )
-            })
+            })?;
+        Ok(Vector3::new(
+            vertex_x as f32 * terrain.tile_size,
+            vertex_y as f32 * terrain.tile_size,
+            height,
+        ))
     };
-    let h00 = height_at(cell_x, cell_y)?;
-    let h10 = height_at(cell_x + 1, cell_y)?;
-    let h01 = height_at(cell_x, cell_y + 1)?;
-    let h11 = height_at(cell_x + 1, cell_y + 1)?;
-    let west = h00 + (h01 - h00) * local_y;
-    let east = h10 + (h11 - h10) * local_y;
-    let height = west + (east - west) * local_x;
-    let dz_dx = (east - west) / GENERATED_SCENERY_CELL_SIZE;
-    let south = h00 + (h10 - h00) * local_x;
-    let north = h01 + (h11 - h01) * local_x;
-    let dz_dy = (north - south) / GENERATED_SCENERY_CELL_SIZE;
-    let normal = Vector3::new(-dz_dx, -dz_dy, 1.0).normalize();
+    let triangles = terrain.cell_diagonals.cell_triangles(
+        cell_x,
+        cell_y,
+        [
+            vertex_at(cell_x, cell_y)?,
+            vertex_at(cell_x + 1, cell_y)?,
+            vertex_at(cell_x, cell_y + 1)?,
+            vertex_at(cell_x + 1, cell_y + 1)?,
+        ],
+    );
+    let index = terrain
+        .cell_diagonals
+        .triangle_index_at(cell_x, cell_y, local_x, local_y);
+    let [a, b, c] = triangles[index];
+    let normal = (b - a).cross(&(c - a)).normalize();
+    let height = a.z - ((x - a.x) * normal.x + (y - a.y) * normal.y) / normal.z;
+    // Retail's Plane::set_height replaces Z; template Z is not an additive offset
+    // (acclient.c:338233, 337037-337044).
     Ok(TerrainSample {
-        height,
+        origin: Vector3::new(x, y, height),
         normal,
-        normal_z: normal.z,
     })
 }
 
@@ -729,12 +746,247 @@ mod tests {
     }
 
     #[test]
-    fn terrain_alignment_uses_downhill_heading() {
-        let normal = Vector3::new(-0.5, 0.0, 0.866_025_4).normalize();
-        let orientation = terrain_normal_alignment(normal);
-        let heading_degrees = orientation.to_heading().to_degrees();
+    fn terrain_sampling_uses_each_authored_triangle_and_first_polygon_at_diagonal() {
+        for southwest_to_northeast in [false, true] {
+            let (terrain, column, row) = test_terrain(southwest_to_northeast);
+            let cases = if southwest_to_northeast {
+                [
+                    (0.75, 0.25, 23.0, Vector3::new(-0.25, 0.25, 1.0)),
+                    (0.25, 0.75, 20.0, Vector3::new(0.0, 0.0, 1.0)),
+                    (0.5, 0.5, 20.0, Vector3::new(-0.25, 0.25, 1.0)),
+                ]
+            } else {
+                [
+                    (0.25, 0.25, 21.5, Vector3::new(-0.25, 0.0, 1.0)),
+                    (0.75, 0.75, 21.5, Vector3::new(0.0, 0.25, 1.0)),
+                    (0.5, 0.5, 23.0, Vector3::new(-0.25, 0.0, 1.0)),
+                ]
+            };
+            for (x, y, height, normal) in cases {
+                let sample = sample_landblock_terrain(
+                    &terrain,
+                    (column as f32 + x) * terrain.tile_size,
+                    (row as f32 + y) * terrain.tile_size,
+                )
+                .expect("synthetic terrain should sample");
+                assert!((sample.origin.z - height).abs() < 1e-5);
+                assert_vector_near(sample.normal, normal.normalize());
+            }
+        }
+    }
 
-        assert!((heading_degrees - 180.0).abs() < 0.01);
+    #[test]
+    fn triangle_normal_drives_slope_acceptance_and_flat_alignment() {
+        let (terrain, column, row) = test_terrain(true);
+        let mut template = test_template();
+        template.align = 1;
+        template.min_slope = 0.99;
+        template.base_frame.origin.z = 123.0;
+        let sample = |x, y| {
+            sample_landblock_terrain(
+                &terrain,
+                (column as f32 + x) * terrain.tile_size,
+                (row as f32 + y) * terrain.tile_size,
+            )
+            .expect("synthetic terrain should sample")
+        };
+        let flat = sample(0.25, 0.75);
+        let slope = sample(0.75, 0.25);
+        assert!(generated_template_matches_slope(&template, flat.normal.z));
+        assert!(!generated_template_matches_slope(&template, slope.normal.z));
+        let expected_origin = Vector3::new(
+            (column as f32 + 0.25) * terrain.tile_size,
+            (row as f32 + 0.75) * terrain.tile_size,
+            20.0,
+        );
+        let frame = build_generated_template_frame(&template, 0, 0, 0, flat);
+        assert_eq!(frame.origin, expected_origin);
+        assert_vector_near(
+            frame.orientation.rotate_vector(Vector3::new(0.0, 1.0, 0.0)),
+            Vector3::new(0.0, 1.0, 0.0),
+        );
+    }
+
+    #[test]
+    fn aligned_scenery_faces_downhill_in_authored_axes() {
+        let mut template = test_template();
+        template.align = 1;
+        for downhill in [
+            Vector3::new(1.0, 0.0, 0.0),
+            Vector3::new(0.0, -1.0, 0.0),
+            Vector3::new(-1.0, 1.0, 0.0),
+        ] {
+            let frame = build_generated_template_frame(
+                &template,
+                0,
+                0,
+                0,
+                TerrainSample {
+                    origin: Vector3::zero(),
+                    normal: Vector3::new(-downhill.x, -downhill.y, 1.0).normalize(),
+                },
+            );
+            assert_vector_near(
+                frame.orientation.rotate_vector(Vector3::new(0.0, 1.0, 0.0)),
+                downhill.normalize(),
+            );
+        }
+    }
+
+    #[test]
+    fn scenery_uses_authored_heights_on_water() {
+        let (mut terrain, column, row) = test_terrain(true);
+        terrain.terrain_samples.fill(0x10 << 2);
+        let sample = sample_landblock_terrain(
+            &terrain,
+            (column as f32 + 0.25) * terrain.tile_size,
+            (row as f32 + 0.75) * terrain.tile_size,
+        )
+        .expect("authored water terrain should sample");
+        assert_eq!(sample.origin.z, 20.0);
+        assert_vector_near(sample.normal, Vector3::new(0.0, 0.0, 1.0));
+    }
+
+    #[test]
+    fn random_rotation_uses_retail_clockwise_heading() {
+        let frame = build_generated_template_frame(
+            &test_template(),
+            0,
+            0,
+            0,
+            TerrainSample {
+                origin: Vector3::zero(),
+                normal: Vector3::new(0.0, 0.0, 1.0),
+            },
+        );
+        // Retail ObjectDesc::GetObjFrame for x=y=k=0 and max_rot=360.
+        let radians = 285.792_88_f32.to_radians();
+        assert_vector_near(
+            frame.orientation.rotate_vector(Vector3::new(0.0, 1.0, 0.0)),
+            Vector3::new(radians.sin(), radians.cos(), 0.0),
+        );
+    }
+
+    #[test]
+    fn heading_reconstruction_retains_normalized_forward_pitch_and_removes_roll() {
+        let (sin, cos) = (std::f32::consts::FRAC_PI_4).sin_cos();
+        let base = Quaternion {
+            w: cos,
+            x: sin,
+            y: 0.0,
+            z: 0.0,
+        };
+        let pitched = set_generated_heading(base, 90.0);
+        let diagonal = std::f32::consts::FRAC_1_SQRT_2;
+        assert_vector_near(
+            pitched.rotate_vector(Vector3::new(0.0, 1.0, 0.0)),
+            Vector3::new(diagonal, 0.0, diagonal),
+        );
+        let rolled = Quaternion {
+            w: cos,
+            x: 0.0,
+            y: sin,
+            z: 0.0,
+        };
+        assert_vector_near(
+            set_generated_heading(rolled, 0.0).rotate_vector(Vector3::new(0.0, 0.0, 1.0)),
+            Vector3::new(0.0, 0.0, 1.0),
+        );
+    }
+
+    #[test]
+    fn unrotated_template_preserves_authored_orientation() {
+        let mut template = test_template();
+        template.max_rotation_degrees = 0.0;
+        template.base_frame.orientation = Quaternion {
+            w: 0.5,
+            x: 0.5,
+            y: 0.5,
+            z: 0.5,
+        };
+        let frame = build_generated_template_frame(
+            &template,
+            0,
+            0,
+            0,
+            TerrainSample {
+                origin: Vector3::zero(),
+                normal: Vector3::new(0.0, 0.0, 1.0),
+            },
+        );
+        assert_eq!(frame.orientation, template.base_frame.orientation);
+    }
+
+    #[test]
+    fn boundary_acceptance_rotates_sphere_center_with_pitch() {
+        let frame = LandblockPlacement {
+            origin: Vector3::new(10.0, 1.0, 0.0),
+            orientation: Quaternion {
+                w: std::f32::consts::FRAC_1_SQRT_2,
+                x: std::f32::consts::FRAC_1_SQRT_2,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+        // Pitch rotates the elevated local center south across the block edge.
+        assert!(!placed_circle_within_landblock(
+            &frame,
+            Vector3::new(0.0, 0.0, 3.0),
+            0.5
+        ));
+    }
+
+    fn assert_vector_near(actual: Vector3, expected: Vector3) {
+        assert!(
+            (actual - expected).length() < 1e-5,
+            "actual {actual:?}, expected {expected:?}"
+        );
+    }
+
+    fn test_template() -> SceneObjectTemplate {
+        SceneObjectTemplate {
+            object_id: 0x01000001,
+            base_frame: holtburger_dat::file_type::scene::SceneFrame {
+                origin: Vector3::zero(),
+                orientation: Quaternion::identity(),
+            },
+            frequency: 1.0,
+            displace_x: 0.0,
+            displace_y: 0.0,
+            min_scale: 1.0,
+            max_scale: 1.0,
+            max_rotation_degrees: 360.0,
+            min_slope: 0.0,
+            max_slope: 1.0,
+            align: 0,
+            orient: 0,
+            weenie_object_id: 0,
+        }
+    }
+
+    fn test_terrain(southwest_to_northeast: bool) -> (LandblockTerrain, usize, usize) {
+        let grid_size = crate::TERRAIN_GRID_CELLS + 1;
+        let mut terrain = LandblockTerrain {
+            grid_size,
+            tile_size: GENERATED_SCENERY_CELL_SIZE,
+            height_indices: vec![0; grid_size * grid_size],
+            heights: vec![20.0; grid_size * grid_size],
+            terrain_samples: vec![0; grid_size * grid_size],
+            cell_diagonals: crate::TerrainCellDiagonals::for_landblock(0xa25fffff),
+        };
+        for row in 0..crate::TERRAIN_GRID_CELLS {
+            for column in 0..crate::TERRAIN_GRID_CELLS {
+                if terrain
+                    .cell_diagonals
+                    .uses_southwest_to_northeast_cut(column, row)
+                    == southwest_to_northeast
+                {
+                    terrain.heights[row * grid_size + column + 1] = 26.0;
+                    return (terrain, column, row);
+                }
+            }
+        }
+        panic!("fixture landblock must have both diagonal directions");
     }
 
     fn test_setup_model() -> SetupModel {

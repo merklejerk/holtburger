@@ -58,6 +58,12 @@ nonzero, missing or corrupt LandblockInfo is an error.
 construction facts needed for retail boundary acceptance. The output remains shallow: stable
 provenance, source DID/family, placement, and scale.
 
+Scenery samples height and slope from the authored terrain triangle selected by the foundation's
+diagonal topology, independently of collision-only water immersion. That polygon's normal owns
+both slope acceptance and downhill heading. Frame construction matches retail's heading convention
+and template pitch handling; the terrain height replaces template Z before unscaled boundary
+acceptance. Scale is applied only after acceptance.
+
 ### Interior System ([src/interior.rs](src/interior.rs))
 
 `LandblockInteriorSystemAssembler` resolves every EnvCell referenced by the foundation and retains

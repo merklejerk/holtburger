@@ -5,6 +5,8 @@
 //! (`acclient.c:339448`, `acclient.c:340235`). This module owns that choice so consumers cannot
 //! independently reproduce the hash and drift apart.
 
+use holtburger_common::math::Vector3;
+
 /// Terrain cells on each axis of an outdoor landblock.
 pub const TERRAIN_GRID_CELLS: usize = 8;
 
@@ -38,6 +40,38 @@ impl TerrainCellDiagonals {
             "terrain cell ({column}, {row}) is outside the {TERRAIN_GRID_CELLS}x{TERRAIN_GRID_CELLS} authored grid"
         );
         self.southwest_to_northeast[row * TERRAIN_GRID_CELLS + column]
+    }
+
+    /// Triangulates `[southwest, southeast, northwest, northeast]` in retail polygon order.
+    /// Callers supply authored or collision-adjusted vertices; topology does not own heights.
+    pub(crate) fn cell_triangles(
+        &self,
+        column: usize,
+        row: usize,
+        [southwest, southeast, northwest, northeast]: [Vector3; 4],
+    ) -> [[Vector3; 3]; 2] {
+        if self.uses_southwest_to_northeast_cut(column, row) {
+            [
+                [southwest, southeast, northeast],
+                [southwest, northeast, northwest],
+            ]
+        } else {
+            [
+                [southwest, southeast, northwest],
+                [northeast, northwest, southeast],
+            ]
+        }
+    }
+
+    /// Selects a polygon at cell-normalized XY, including retail's first-polygon diagonal tie.
+    /// `CLandCell::find_terrain_poly` tests polygon zero first (`acclient.c:340235-340251`).
+    pub(crate) fn triangle_index_at(&self, column: usize, row: usize, x: f32, y: f32) -> usize {
+        let in_first = if self.uses_southwest_to_northeast_cut(column, row) {
+            x >= y
+        } else {
+            x + y <= 1.0
+        };
+        usize::from(!in_first)
     }
 
     /// Returns row-major diagonal bits, one byte per cell, for frontend transport.

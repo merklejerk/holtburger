@@ -153,9 +153,18 @@
 <style>
 	@layer components {
 		.party-hud {
+			/* Fit both name text and leader artwork; vital bars retain their own sizing policy. */
+			--_ui-party-name-font-size: calc(
+				var(--ui-party-name-font-size) * var(--ui-text-scale)
+			);
+			--_ui-party-name-height: max(
+				var(--ui-party-name-height),
+				calc(var(--_ui-party-name-font-size) * var(--ui-line-height-body)),
+				calc(var(--ui-party-leader-icon-size) * var(--ui-icon-scale))
+			);
 			/* Resolve dependent row dimensions at the consumer so scoped theme overrides work. */
 			--_ui-party-cell-height: calc(
-				var(--ui-party-name-height) + var(--ui-party-health-height) +
+				var(--_ui-party-name-height) + var(--ui-party-health-height) +
 					var(--ui-party-stamina-height) + var(--ui-party-mana-height) + 3 *
 					var(--ui-party-vital-gap)
 			);
@@ -204,7 +213,7 @@
 			text-align: start;
 			min-width: 0;
 			display: grid;
-			grid-template-rows: var(--ui-party-name-height);
+			grid-template-rows: var(--_ui-party-name-height);
 			gap: var(--ui-party-vital-gap);
 		}
 		.party-member::before {
@@ -216,8 +225,8 @@
 			align-items: center;
 			gap: var(--ui-party-name-gap);
 			min-width: 0;
-			font-size: var(--ui-party-name-font-size);
-			line-height: var(--ui-party-name-height);
+			font-size: var(--_ui-party-name-font-size);
+			line-height: var(--_ui-party-name-height);
 		}
 		.party-member__name strong {
 			overflow: hidden;
@@ -225,8 +234,8 @@
 			white-space: nowrap;
 		}
 		.party-member__leader {
-			width: var(--ui-party-leader-icon-size);
-			height: var(--ui-party-leader-icon-size);
+			width: calc(var(--ui-party-leader-icon-size) * var(--ui-icon-scale));
+			height: calc(var(--ui-party-leader-icon-size) * var(--ui-icon-scale));
 			flex: none;
 		}
 		.party-member__leader :global(svg) {

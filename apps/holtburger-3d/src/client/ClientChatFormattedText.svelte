@@ -31,16 +31,18 @@
 {/each}
 
 <style>
-	.chat-row {
-		display: block;
-	}
-	.chat-row:first-child:not(.indented) {
-		display: inline;
-	}
-	.indented {
-		padding-inline-start: 1.25em;
-	}
-	code {
-		font-size: inherit;
+	@layer components {
+		.chat-row {
+			display: block;
+		}
+		.chat-row:first-child:not(.indented) {
+			display: inline;
+		}
+		.indented {
+			padding-inline-start: 1.25em;
+		}
+		code {
+			font-size: inherit;
+		}
 	}
 </style>

@@ -358,8 +358,8 @@
 			border-top: var(--trade-track-width) solid currentColor;
 		}
 		.trade-connection svg {
-			width: var(--ui-trade-icon-size);
-			height: var(--ui-trade-icon-size);
+			width: calc(var(--ui-trade-icon-size) * var(--ui-icon-scale));
+			height: calc(var(--ui-trade-icon-size) * var(--ui-icon-scale));
 			flex-shrink: 0;
 		}
 		.trade-connection.inward-left {
@@ -401,7 +401,7 @@
 		.trade-cell {
 			aspect-ratio: 1;
 			min-width: 0;
-			padding: var(--ui-item-cell-padding);
+			padding: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
 			position: relative;
 			overflow: hidden;
 		}
@@ -416,18 +416,18 @@
 			justify-content: center;
 			gap: var(--ui-trade-control-gap);
 			padding: var(--ui-trade-content-inset);
-			min-height: var(--ui-trade-reset-size);
+			min-height: calc(var(--ui-trade-reset-size) * var(--ui-icon-scale));
 			flex: 0 1 auto;
 			min-width: calc(
-				8ch + var(--ui-trade-icon-size) + var(--ui-trade-control-gap) + 2 *
-					var(--ui-trade-content-inset)
+				8ch + calc(var(--ui-trade-icon-size) * var(--ui-icon-scale)) +
+					var(--ui-trade-control-gap) + 2 * var(--ui-trade-content-inset)
 			);
 			font-size: var(--ui-trade-status-font-size);
 			white-space: nowrap;
 		}
 		.trade-status-control svg {
-			width: var(--ui-trade-icon-size);
-			height: var(--ui-trade-icon-size);
+			width: calc(var(--ui-trade-icon-size) * var(--ui-icon-scale));
+			height: calc(var(--ui-trade-icon-size) * var(--ui-icon-scale));
 		}
 		.trade-confirm.confirmed {
 			color: var(--ui-button-color, var(--ui-trade-accepted-color));
@@ -437,25 +437,29 @@
 			);
 		}
 		.trade-reset-control {
-			width: calc(var(--ui-trade-reset-size) + 2 * var(--ui-trade-reset-inset));
-			height: calc(
-				var(--ui-trade-reset-size) + 2 * var(--ui-trade-reset-inset)
+			width: calc(
+				calc(var(--ui-trade-reset-size) * var(--ui-icon-scale)) + 2 *
+					calc(var(--ui-trade-reset-inset) * var(--ui-icon-scale))
 			);
-			padding: var(--ui-trade-reset-inset);
+			height: calc(
+				calc(var(--ui-trade-reset-size) * var(--ui-icon-scale)) + 2 *
+					calc(var(--ui-trade-reset-inset) * var(--ui-icon-scale))
+			);
+			padding: calc(var(--ui-trade-reset-inset) * var(--ui-icon-scale));
 		}
 		.trade-reset {
 			display: grid;
 			place-items: center;
-			width: var(--ui-trade-reset-size);
-			height: var(--ui-trade-reset-size);
-			min-height: var(--ui-trade-reset-size);
-			padding: 4px;
+			width: calc(var(--ui-trade-reset-size) * var(--ui-icon-scale));
+			height: calc(var(--ui-trade-reset-size) * var(--ui-icon-scale));
+			min-height: calc(var(--ui-trade-reset-size) * var(--ui-icon-scale));
+			padding: calc(4px * var(--ui-icon-scale));
 			border-radius: 50%;
 		}
 
 		.trade-reset svg {
-			width: var(--ui-trade-icon-size);
-			height: var(--ui-trade-icon-size);
+			width: calc(var(--ui-trade-icon-size) * var(--ui-icon-scale));
+			height: calc(var(--ui-trade-icon-size) * var(--ui-icon-scale));
 		}
 		.trade-spinner {
 			stroke-dasharray: 44 19;

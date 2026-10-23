@@ -128,9 +128,9 @@
 			gap: var(--ui-spell-component-label-gap);
 		}
 		.component-icon {
-			flex: 0 0 var(--ui-spell-component-icon-size);
-			width: var(--ui-spell-component-icon-size);
-			height: var(--ui-spell-component-icon-size);
+			flex: 0 0 calc(var(--ui-spell-component-icon-size) * var(--ui-icon-scale));
+			width: calc(var(--ui-spell-component-icon-size) * var(--ui-icon-scale));
+			height: calc(var(--ui-spell-component-icon-size) * var(--ui-icon-scale));
 			display: grid;
 			place-items: center;
 		}

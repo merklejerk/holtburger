@@ -244,6 +244,8 @@
 		}
 		.hud-window-title {
 			display: inline-flex;
+			min-width: 0;
+			overflow-wrap: anywhere;
 			align-items: center;
 			gap: 6px;
 		}
@@ -254,9 +256,10 @@
 		}
 
 		.hud-window-close {
-			width: 28px;
-			height: 26px;
+			width: max(28px, calc(1em + 10px));
+			height: max(26px, calc(1.35em + 6px));
 			min-height: 26px;
+			flex: none;
 			margin-right: 2px;
 			cursor: pointer;
 		}

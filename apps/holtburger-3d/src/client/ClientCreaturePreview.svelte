@@ -170,48 +170,50 @@
 </div>
 
 <style>
-	.creature-preview {
-		position: relative;
-		width: 100%;
-		height: 100%;
-		min-height: 0;
-		overflow: hidden;
-		background: transparent;
-		cursor: grab;
-		outline: none;
-		touch-action: none;
-		user-select: none;
-	}
-	.creature-preview:active {
-		cursor: grabbing;
-	}
-	.creature-preview:focus-visible {
-		box-shadow: inset 0 0 0 1px var(--ui-color-highlight);
-	}
-	canvas {
-		display: block;
-		width: 100%;
-		height: 100%;
-		image-rendering: auto;
-	}
-	.creature-preview-status {
-		position: absolute;
-		inset: 0;
-		display: grid;
-		place-content: center;
-		justify-items: center;
-		gap: 6px;
-		padding: 12px;
-		text-align: center;
-		color: var(--ui-color-muted);
-		background: color-mix(in srgb, var(--ui-color-well) 88%, transparent);
-	}
-	.creature-preview-status > span {
-		font-size: 1.6rem;
-		color: var(--ui-color-danger);
-	}
-	.creature-preview-status small {
-		max-width: 30em;
-		font-size: 0.72rem;
+	@layer components {
+		.creature-preview {
+			position: relative;
+			width: 100%;
+			height: 100%;
+			min-height: 0;
+			overflow: hidden;
+			background: transparent;
+			cursor: grab;
+			outline: none;
+			touch-action: none;
+			user-select: none;
+		}
+		.creature-preview:active {
+			cursor: grabbing;
+		}
+		.creature-preview:focus-visible {
+			box-shadow: inset 0 0 0 1px var(--ui-color-highlight);
+		}
+		canvas {
+			display: block;
+			width: 100%;
+			height: 100%;
+			image-rendering: auto;
+		}
+		.creature-preview-status {
+			position: absolute;
+			inset: 0;
+			display: grid;
+			place-content: center;
+			justify-items: center;
+			gap: 6px;
+			padding: 12px;
+			text-align: center;
+			color: var(--ui-color-muted);
+			background: color-mix(in srgb, var(--ui-color-well) 88%, transparent);
+		}
+		.creature-preview-status > span {
+			font-size: 1.6rem;
+			color: var(--ui-color-danger);
+		}
+		.creature-preview-status small {
+			max-width: 30em;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+		}
 	}
 </style>

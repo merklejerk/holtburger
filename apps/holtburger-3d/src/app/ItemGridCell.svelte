@@ -127,7 +127,7 @@
 			width: 100%;
 			min-width: 0;
 			min-height: 0;
-			padding: var(--ui-item-cell-padding);
+			padding: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
 			overflow: hidden;
 		}
 	}

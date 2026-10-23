@@ -135,7 +135,7 @@
 		.jump-power {
 			/* Reserve the readout and caption outside the shared bar/label row. */
 			--_jump-caption-space: calc(1em + 3px);
-			font-size: var(--ui-font-size-caption);
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 			pointer-events: none;
 			width: 100%;
 			height: 100%;
@@ -154,7 +154,7 @@
 			writing-mode: vertical-rl;
 			transform: rotate(180deg);
 			text-align: start;
-			font-size: var(--ui-font-size-caption);
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 			letter-spacing: 0.12em;
 			white-space: nowrap;
 			color: var(--ui-color-muted);
@@ -184,7 +184,7 @@
 			position: absolute;
 			left: 0;
 			right: calc(-1 * (var(--ui-jump-gap) + 4ch));
-			font-size: var(--ui-jump-readout-font-size);
+			font-size: calc(var(--ui-jump-readout-font-size) * var(--ui-text-scale));
 			height: 0;
 			border-top: 1px solid var(--ui-color-text);
 			pointer-events: none;
@@ -196,7 +196,7 @@
 		}
 		.jump-power-readout {
 			bottom: 1px;
-			font-size: var(--ui-jump-readout-font-size);
+			font-size: calc(var(--ui-jump-readout-font-size) * var(--ui-text-scale));
 			font-weight: 700;
 			font-variant-numeric: tabular-nums;
 			line-height: 1;
@@ -209,7 +209,7 @@
 			gap: 4px;
 			white-space: nowrap;
 			top: 2px;
-			font-size: var(--ui-font-size-caption);
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 			font-weight: 600;
 			line-height: 1;
 			letter-spacing: 0.08em;

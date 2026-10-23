@@ -22,7 +22,6 @@ export const clientUserSectionSchemas = {
 	graphics: userShape.graphics,
 	audio: userShape.audio,
 	ui: userShape.ui,
-	combatIndicators: userShape.combatIndicators,
 	clockFormat: userShape.clockFormat,
 	environmentOverrides: userShape.environmentOverrides,
 	input: userShape.input,

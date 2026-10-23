@@ -278,13 +278,13 @@
 			margin: 0;
 		}
 		.inspection-preview-identity h2 {
-			font-size: 1.18rem;
+			font-size: calc(var(--ui-font-size-heading-1) * var(--ui-text-scale));
 			color: var(--ui-color-text);
 			overflow-wrap: anywhere;
 		}
 		.inspection-preview-identity p {
 			color: var(--ui-color-muted);
-			font-size: 0.78rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 		.inspection-preview-identity .inspection-preview-level {
 			margin-top: 2px;
@@ -340,7 +340,7 @@
 			margin: 0;
 		}
 		.inspection-scroll :global(h2) {
-			font-size: 1.18rem;
+			font-size: calc(var(--ui-font-size-heading-1) * var(--ui-text-scale));
 			color: var(--ui-color-highlight);
 		}
 		.inspection-scroll :global(.inspection-name) {
@@ -351,7 +351,7 @@
 			padding-bottom: 3px;
 			border-bottom: 1px solid
 				color-mix(in srgb, var(--ui-color-border) 55%, transparent);
-			font-size: 0.86rem;
+			font-size: calc(var(--ui-font-size-heading-3) * var(--ui-text-scale));
 			letter-spacing: 0.06em;
 			text-transform: uppercase;
 			color: var(--ui-color-accent);
@@ -366,7 +366,7 @@
 		.inspection-scroll :global(.inspection-diagnostic),
 		.inspection-scroll :global(.inspection-scribe) {
 			color: var(--ui-color-muted);
-			font-size: 0.78rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 		.inspection-scroll :global(.inspection-description) {
 			margin-top: 5px;
@@ -414,7 +414,7 @@
 				var(--ui-color-well)
 			);
 			color: var(--cantrip-tier-color);
-			font-size: 0.64rem;
+			font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
 			font-weight: 650;
 			line-height: 1.15;
 			white-space: nowrap;

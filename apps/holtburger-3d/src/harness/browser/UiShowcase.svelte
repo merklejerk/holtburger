@@ -41,6 +41,8 @@
 	/** Showcase geometry follows the available stage, independently of client placement defaults. */
 	let stageWidth = $state(960);
 	let windowHeight = $state(720);
+	/** Use the same measured text minimum as the client layout owner. */
+	let characterMinimumHeight = $state(0);
 	const columns = $derived(stageWidth >= 728 ? 2 : 1);
 	const viewport = $derived({
 		width: stageWidth,
@@ -379,7 +381,10 @@
 					placement={layout[name]}
 					{viewport}
 					minWidth={CLIENT_UI_DEFAULTS[name].minSize.width}
-					minHeight={CLIENT_UI_DEFAULTS[name].minSize.height}
+					minHeight={Math.max(
+						CLIENT_UI_DEFAULTS[name].minSize.height,
+						name === "character" ? characterMinimumHeight : 0,
+					)}
 					resizable={CLIENT_UI_DEFAULTS[name].resizable}
 					contentHitTesting={name === "character" ? "surface" : "descendants"}
 					onPlacementChange={(placement) =>
@@ -387,6 +392,7 @@
 				/>
 			{/snippet}
 			{#snippet character()}<ClientCharacterHud
+					onMinimumHeightChange={(height) => (characterMinimumHeight = height)}
 					characterSheet={null}
 					playerName="Wayfarer"
 					readConnection={() => ({

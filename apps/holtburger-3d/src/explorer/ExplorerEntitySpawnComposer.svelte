@@ -352,7 +352,7 @@
 		.picker-message,
 		.picker-receipt {
 			color: var(--ui-color-muted);
-			font-size: 0.73rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 
 		.picker-message,

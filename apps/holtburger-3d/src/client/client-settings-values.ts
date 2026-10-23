@@ -5,6 +5,22 @@ export const CLIENT_GRAPHICS_RANGES = {
 	renderScale: { minimum: 0.5, maximum: 2 },
 } as const;
 
+/** Client text multiplier; artwork and independently sized world labels keep their own policy. */
+export const CLIENT_TEXT_SCALE = {
+	initial: 1,
+	minimum: 0.75,
+	maximum: 2,
+	step: 0.05,
+} as const;
+
+/** Client artwork multiplier; cell geometry and attached badges scale with their artwork. */
+export const CLIENT_ICON_SCALE = {
+	initial: 1,
+	minimum: 0.75,
+	maximum: 2,
+	step: 0.05,
+} as const;
+
 /** Closed font choices for each client UI role; Theme default inherits the active theme. */
 export const CLIENT_FONT_FAMILY_OPTIONS = [
 	"theme",

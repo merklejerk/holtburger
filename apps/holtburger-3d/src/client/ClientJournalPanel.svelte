@@ -295,106 +295,108 @@
 </div>
 
 <style>
-	.journal-panel {
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-		height: 100%;
-		min-height: 0;
-	}
-	.journal-controls {
-		display: flex;
-		flex-direction: column;
-		flex-shrink: 0;
-		gap: 8px;
-	}
-	.journal-filters {
-		max-height: var(--ui-filter-max-height);
-		overflow: auto;
-	}
-	.journal-filters summary {
-		cursor: pointer;
-		padding-block: var(--ui-filter-gap);
-	}
-	.filter-pills {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--ui-filter-gap);
-	}
-	[data-status="available"] {
-		--filter-color: var(--ui-color-text);
-	}
-	[data-status="inProgress"] {
-		--filter-color: var(--ui-color-accent);
-	}
-	[data-status="completed"] {
-		--filter-color: var(--ui-color-success);
-	}
-	[data-status="waitingToRepeat"],
-	[data-status="unresolved"] {
-		--filter-color: var(--ui-color-warning);
-	}
+	@layer components {
+		.journal-panel {
+			display: flex;
+			flex-direction: column;
+			gap: 10px;
+			height: 100%;
+			min-height: 0;
+		}
+		.journal-controls {
+			display: flex;
+			flex-direction: column;
+			flex-shrink: 0;
+			gap: 8px;
+		}
+		.journal-filters {
+			max-height: var(--ui-filter-max-height);
+			overflow: auto;
+		}
+		.journal-filters summary {
+			cursor: pointer;
+			padding-block: var(--ui-filter-gap);
+		}
+		.filter-pills {
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--ui-filter-gap);
+		}
+		[data-status="available"] {
+			--filter-color: var(--ui-color-text);
+		}
+		[data-status="inProgress"] {
+			--filter-color: var(--ui-color-accent);
+		}
+		[data-status="completed"] {
+			--filter-color: var(--ui-color-success);
+		}
+		[data-status="waitingToRepeat"],
+		[data-status="unresolved"] {
+			--filter-color: var(--ui-color-warning);
+		}
 
-	.journal-list {
-		overflow: auto;
-		min-height: 0;
-		flex: 1;
-	}
-	.contract-row > summary {
-		padding: 8px 0;
-	}
-	.contract-summary {
-		display: inline-flex;
-		align-items: center;
-		gap: 8px;
-		width: calc(100% - 20px);
-		vertical-align: middle;
-	}
-	.contract-status {
-		display: inline-flex;
-		flex: 0 0 18px;
-		width: 18px;
-		height: 18px;
-	}
-	.contract-status[data-status="inProgress"] {
-		color: var(--ui-color-accent);
-	}
-	.contract-status[data-status="completed"] {
-		color: var(--ui-color-success);
-	}
-	.contract-status[data-status="waitingToRepeat"],
-	.contract-status[data-status="unresolved"] {
-		color: var(--ui-color-warning);
-	}
-	.contract-status :global(svg) {
-		width: 100%;
-		height: 100%;
-	}
-	.contract-name {
-		flex: 1;
-		min-width: 0;
-		overflow-wrap: anywhere;
-	}
-	.contract-progress,
-	.deadline-badge {
-		font-size: 0.85em;
-	}
-	.deadline-badge {
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-	}
-	.contract-details p {
-		margin: 0 0 8px;
-	}
-	.contract-details dl {
-		display: grid;
-		grid-template-columns: auto 1fr;
-		gap: 4px 12px;
-		margin: 0 0 12px;
-	}
-	.contract-details dd {
-		margin: 0;
-		overflow-wrap: anywhere;
+		.journal-list {
+			overflow: auto;
+			min-height: 0;
+			flex: 1;
+		}
+		.contract-row > summary {
+			padding: 8px 0;
+		}
+		.contract-summary {
+			display: inline-flex;
+			align-items: center;
+			gap: 8px;
+			width: calc(100% - 20px);
+			vertical-align: middle;
+		}
+		.contract-status {
+			display: inline-flex;
+			flex: 0 0 18px;
+			width: 18px;
+			height: 18px;
+		}
+		.contract-status[data-status="inProgress"] {
+			color: var(--ui-color-accent);
+		}
+		.contract-status[data-status="completed"] {
+			color: var(--ui-color-success);
+		}
+		.contract-status[data-status="waitingToRepeat"],
+		.contract-status[data-status="unresolved"] {
+			color: var(--ui-color-warning);
+		}
+		.contract-status :global(svg) {
+			width: 100%;
+			height: 100%;
+		}
+		.contract-name {
+			flex: 1;
+			min-width: 0;
+			overflow-wrap: anywhere;
+		}
+		.contract-progress,
+		.deadline-badge {
+			font-size: 0.85em;
+		}
+		.deadline-badge {
+			display: inline-flex;
+			align-items: center;
+			gap: 4px;
+		}
+		.contract-details p {
+			margin: 0 0 8px;
+		}
+		.contract-details dl {
+			display: grid;
+			grid-template-columns: auto 1fr;
+			gap: 4px 12px;
+			margin: 0 0 12px;
+		}
+		.contract-details dd {
+			margin: 0;
+			overflow-wrap: anywhere;
+		}
 	}
 </style>

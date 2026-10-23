@@ -1,12 +1,10 @@
 <script lang="ts">
-	import type { ClientCombatIndicatorSettings } from "./client-combat-indicator-settings";
 	import {
 		readClientBinding,
 		replaceClientBinding,
 	} from "../lib/input/client-keyboard-bindings";
 
 	import UiTabs from "../app/UiTabs.svelte";
-	import ClientCombatIndicatorSettingsPanel from "./ClientCombatIndicatorSettings.svelte";
 	import ClientEnvironmentSettings from "./ClientEnvironmentSettings.svelte";
 	import type {
 		ClientClockFormat,
@@ -42,6 +40,8 @@
 		CLIENT_VITAL_WARNING_PERCENT,
 		CLIENT_VITAL_WARNING_KINDS,
 		CLIENT_GRAPHICS_RANGES,
+		CLIENT_TEXT_SCALE,
+		CLIENT_ICON_SCALE,
 		type ClientFontFamily,
 	} from "./client-settings-values";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
@@ -64,10 +64,6 @@
 		readonly onAudioChange: (audio: ClientAudioSettings) => void;
 		readonly graphics: ClientGraphicsSettings;
 		readonly ui: ClientUiSettings;
-		readonly combatIndicators: ClientCombatIndicatorSettings;
-		readonly onCombatIndicatorsChange: (
-			settings: ClientCombatIndicatorSettings,
-		) => void;
 		/** User-owned environment presentation choices and cold content catalog. */
 		readonly clockFormat: ClientClockFormat;
 		readonly environmentOverrides: ClientEnvironmentOverrides;
@@ -106,8 +102,6 @@
 		onSelectTab,
 		onGraphicsChange,
 		onUiChange,
-		combatIndicators,
-		onCombatIndicatorsChange,
 		onInputChange,
 		canResetHudPlacements,
 		onResetHudPlacements,
@@ -597,19 +591,47 @@
 						class="settings-section ui-disclosure-body"
 					>
 						<label
-							>Text scaling (planned)
-							<input type="range" min="50" max="200" value="100" disabled />
+							>Text scaling: {Math.round(ui.textScale * 100)}%
+							<input
+								type="range"
+								aria-label="Text scaling"
+								min={CLIENT_TEXT_SCALE.minimum}
+								max={CLIENT_TEXT_SCALE.maximum}
+								step={CLIENT_TEXT_SCALE.step}
+								value={ui.textScale}
+								oninput={(event) =>
+									onUiChange({
+										...ui,
+										textScale: event.currentTarget.valueAsNumber,
+									})}
+							/>
 						</label>
+						<p class="ui-muted">
+							Scales client text. Icon labels, map labels, nameplates, and
+							combat text keep their own sizes.
+						</p>
 						<label
-							>Icon scaling (planned)
-							<input type="range" min="50" max="200" value="100" disabled />
+							>Icon scaling: {Math.round(ui.iconScale * 100)}%
+							<input
+								type="range"
+								aria-label="Icon scaling"
+								min={CLIENT_ICON_SCALE.minimum}
+								max={CLIENT_ICON_SCALE.maximum}
+								step={CLIENT_ICON_SCALE.step}
+								value={ui.iconScale}
+								oninput={(event) =>
+									onUiChange({
+										...ui,
+										iconScale: event.currentTarget.valueAsNumber,
+									})}
+							/>
 						</label>
+						<p class="ui-muted">
+							Scales UI artwork, cells, and their badges. Inline symbols follow
+							text; world markers keep their own sizes.
+						</p>
 					</div>
 				</details>
-				<ClientCombatIndicatorSettingsPanel
-					settings={combatIndicators}
-					onChange={onCombatIndicatorsChange}
-				/>
 				<details class="ui-disclosure ui-disclosure-section" open>
 					<summary>HUD layout</summary>
 					<div class="settings-section ui-disclosure-body">
@@ -761,7 +783,7 @@
 		}
 		.settings-section label:not(.ui-checkbox) {
 			display: grid;
-			gap: 4px;
+			gap: var(--ui-label-gap);
 		}
 		.settings-section input[type="range"],
 		.settings-section select {

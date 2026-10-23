@@ -601,9 +601,9 @@
 		}
 		.category-icon {
 			display: inline-flex;
-			width: var(--ui-entity-category-icon-size);
-			height: var(--ui-entity-category-icon-size);
-			flex: 0 0 var(--ui-entity-category-icon-size);
+			width: calc(var(--ui-entity-category-icon-size) * var(--ui-icon-scale));
+			height: calc(var(--ui-entity-category-icon-size) * var(--ui-icon-scale));
+			flex: 0 0 calc(var(--ui-entity-category-icon-size) * var(--ui-icon-scale));
 			margin-right: var(--ui-list-icon-gap);
 		}
 		.selected {

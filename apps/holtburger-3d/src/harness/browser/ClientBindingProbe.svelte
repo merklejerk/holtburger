@@ -4,7 +4,7 @@
 	import { compactInputHint } from "../../lib/input/input-presentation";
 	import ClientSettingsPanel from "../../client/ClientSettingsPanel.svelte";
 	import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
-	import type { ClientKeyboardConfiguration } from "../../lib/input/input-contract";
+	import type { ClientInputConfiguration } from "../../lib/input/input-contract";
 	import { createDefaultClientUserSettings } from "../../client/client-settings-defaults";
 	import { EMPTY_CLIENT_SELECTED_DISPLAY } from "../../client/client-selected-entity-tracking";
 	const {
@@ -12,8 +12,8 @@
 		accept,
 		interact,
 	}: {
-		initial: ClientKeyboardConfiguration;
-		accept: (input: ClientKeyboardConfiguration) => ClientKeyboardConfiguration;
+		initial: ClientInputConfiguration;
+		accept: (input: ClientInputConfiguration) => ClientInputConfiguration;
 		interact: () => void;
 	} = $props();
 	const defaults = createDefaultClientUserSettings(

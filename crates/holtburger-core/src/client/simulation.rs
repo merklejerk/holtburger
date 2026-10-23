@@ -12,7 +12,6 @@ use crate::client::{
     PreciseJumpTransactionFeedback, PreciseJumpTransactionOutcome, PreciseJumpTransactionRejection,
 };
 use anyhow::{Context, Result};
-#[cfg(test)]
 use holtburger_common::Quaternion;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, RigidTransform, Vector3};
@@ -41,6 +40,8 @@ const ACTIVE_SOLVE_RADIUS_M: f32 = 96.0;
 pub(super) struct ClientSimulationTick {
     /// World mutations emitted by ordinary physical and pose-only advancement.
     pub events: Vec<WorldEvent>,
+    /// A relative manual turn changed accepted facing and requires immediate position publication.
+    pub relative_facing_changed: bool,
     /// Committed local collision scripts consumed by core's common entity-cue dispatcher.
     pub collision_script_cues: Vec<crate::ClientDynamicScriptCue>,
     /// Explicit placement consequences consumed by dynamic publication.
@@ -62,6 +63,16 @@ pub(super) enum ClientBodyMotion {
     PoseOnly,
     /// Discontinuous placement, with no interpolated transit.
     CorrectionSnap,
+}
+
+/// Local-player contributions admitted once for the current physical interval.
+struct LocalPlayerPhysicalInput {
+    /// Selected authored root motion, independent from controller-owned velocity.
+    authored_offset: Option<RigidTransform>,
+    /// Relative manual yaw composed with the physical reference after choosing linear input.
+    facing_rotation: Option<Quaternion>,
+    /// One-shot resolved grounded release, never replayed on later intervals.
+    launch: Option<GroundedLaunch>,
 }
 
 /// Physical advancement and its immediate client consequences.
@@ -135,6 +146,7 @@ pub(super) fn tick_with_precise_jump(
             events: Vec::new(),
             collision_script_cues: Vec::new(),
             body_motions: HashMap::new(),
+            relative_facing_changed: false,
             committed_jump: None,
             character_motion_feedback: None,
             precise_jump_feedback: None,
@@ -169,6 +181,27 @@ pub(super) fn tick_with_precise_jump(
             None
         };
     let authored_offset = authored_tick.as_ref().map(|tick| tick.offset);
+    // Mouse yaw shares the root-motion integration path. Rewriting the pose before this solve
+    // would reset physical support and break the boom camera's preceding target endpoint.
+    let facing_delta = if collision.is_some() {
+        movement.take_relative_facing_delta()
+    } else {
+        0.0
+    };
+    let facing_start = (facing_delta != 0.0 && !local_dead)
+        .then(|| world.local_player_runtime_pose())
+        .flatten();
+    let facing_rotation = if facing_start.is_some() {
+        world
+            .scene
+            .wake_dynamic_body(SpatialBodyId::LocalPlayer(local_guid));
+        Some(
+            Quaternion::from_axis_angle(Vector3::new(0.0, 0.0, 1.0), -facing_delta)
+                .context("relative facing displacement must produce a finite rotation")?,
+        )
+    } else {
+        None
+    };
     if let Some(tick) = authored_tick {
         authored_ticks.push(AuthoredBodyMotionTick {
             guid: local_guid,
@@ -219,8 +252,11 @@ pub(super) fn tick_with_precise_jump(
             world,
             movement,
             collision,
-            authored_offset,
-            prepared_jump.map(|jump| jump.launch),
+            LocalPlayerPhysicalInput {
+                authored_offset,
+                facing_rotation,
+                launch: prepared_jump.map(|jump| jump.launch),
+            },
         )?;
         events.extend(physical_tick.events);
         collision_script_cues = physical_tick.collision_script_cues;
@@ -261,7 +297,13 @@ pub(super) fn tick_with_precise_jump(
         world.entities.len(),
         body_motions.len(),
     ));
+    let relative_facing_changed = facing_start.is_some_and(|start| {
+        world
+            .local_player_runtime_pose()
+            .is_some_and(|end| end.rotation != start.rotation)
+    });
     Ok(ClientSimulationTick {
+        relative_facing_changed,
         events,
         collision_script_cues,
         body_motions,
@@ -493,13 +535,12 @@ fn tick_physical_entities(
     world: &mut WorldState,
     movement: &mut MovementSystem,
     collision: &SimulationSceneSnapshot,
-    local_authored_offset: Option<RigidTransform>,
-    player_launch: Option<GroundedLaunch>,
+    local: LocalPlayerPhysicalInput,
 ) -> Result<PhysicalSimulationTick> {
     let local_body_id = SpatialBodyId::LocalPlayer(world.player.guid);
     // Settled bodies are normally absent from the collection schedule. A one-shot launch is fresh
     // integration work, so wake it before the scheduler takes its active-body snapshot.
-    if player_launch.is_some() {
+    if local.launch.is_some() {
         world.scene.wake_dynamic_body(local_body_id);
     }
     let local_drive = movement.current_local_drive_control(world, dt);
@@ -561,7 +602,7 @@ fn tick_physical_entities(
                 {
                     None
                 } else {
-                    local_authored_offset
+                    local.authored_offset
                 }
             } else {
                 remote_sample.and_then(|sample| sample.offset)
@@ -574,10 +615,25 @@ fn tick_physical_entities(
                     dt,
                     authored_offset,
                     local_drive,
-                    player_launch,
+                    local.launch,
                 )?
             } else {
                 remote_entity_actuation(body, definition)?
+            };
+            // Select linear actuation from its original owner before adding manual yaw.
+            // A rotation-only reference must not replace a client-directed velocity drive.
+            let authored_offset = match local.facing_rotation {
+                Some(rotation) if body.id == local_body_id => {
+                    let yaw = RigidTransform {
+                        translation: Vector3::zero(),
+                        rotation,
+                    };
+                    Some(match authored_offset {
+                        Some(offset) => yaw.combine(&offset),
+                        None => yaw,
+                    })
+                }
+                _ => authored_offset,
             };
             let authored_offset = authored_offset.map(|offset| {
                 if matches!(definition, PhysicalBodyDefinition::Grounded { .. }) {
@@ -594,7 +650,7 @@ fn tick_physical_entities(
                 match sticky_targets.get(&guid) {
                     Some(target)
                         if body.id != local_body_id
-                            || (player_launch.is_none()
+                            || (local.launch.is_none()
                                 && !motion_runtimes
                                     .get(guid)
                                     .is_some_and(|runtime| runtime.manual_displacement())) =>

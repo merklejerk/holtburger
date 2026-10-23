@@ -793,6 +793,12 @@ impl ClientHostRuntime {
         &self,
         request: crate::client_host::ClientDriveRequest,
     ) -> Result<()> {
+        if let crate::client_host::ClientDriveRequest::RotateFacing { delta_radians } = &request {
+            anyhow::ensure!(
+                delta_radians.is_finite(),
+                "Facing displacement must be finite."
+            );
+        }
         self.send_command(ClientCommand::DriveSelf(request.into_intent()))
             .await
     }

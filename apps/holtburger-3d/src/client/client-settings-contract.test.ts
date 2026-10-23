@@ -15,6 +15,8 @@ import {
 import { hudTrayOrientation, rotateHudTray } from "./client-hud-tray-layout";
 import {
 	CLIENT_KEYBOARD_DEFAULTS,
+	clientInputSettingsSchema,
+	CLIENT_MOUSE_DEFAULTS,
 	clientKeyboardSettingsSchema,
 } from "./client-input-settings";
 
@@ -217,7 +219,7 @@ describe("current client settings values", () => {
 				preciseJumpPowerDown: [{ key: "[" }],
 			},
 		};
-		const loaded = clientKeyboardSettingsSchema.parse(saved);
+		const loaded = clientInputSettingsSchema.parse(saved);
 		expect(loaded.client).toEqual({ ...current.client, examine });
 		expect(loaded.character).toEqual({ ...current.character, forward });
 	});
@@ -320,4 +322,34 @@ describe("current client settings values", () => {
 			null,
 		]);
 	});
+});
+
+it("loads old keyboard preferences with mouse defaults and persists independent switches", () => {
+	const keyboard = {
+		...CLIENT_KEYBOARD_DEFAULTS,
+		character: {
+			...CLIENT_KEYBOARD_DEFAULTS.character,
+			forward: [{ key: "F8" }],
+		},
+	};
+	const migrated = clientInputSettingsSchema.parse(keyboard);
+	expect(migrated.mouse).toEqual(CLIENT_MOUSE_DEFAULTS);
+	expect(migrated.character.forward).toEqual(keyboard.character.forward);
+	const changed = {
+		...migrated,
+		mouse: {
+			rightButtonSteering: false,
+			middleButtonForward: true,
+			bothButtonsForward: false,
+		},
+	};
+	expect(
+		clientInputSettingsSchema.parse(JSON.parse(JSON.stringify(changed))),
+	).toEqual(changed);
+	expect(() =>
+		clientInputSettingsSchema.parse({
+			...changed,
+			mouse: { ...changed.mouse, middleButtonForward: "yes" },
+		}),
+	).toThrow();
 });

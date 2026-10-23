@@ -24,13 +24,14 @@ use super::bsp_query::{
     placed_solid_contacts,
 };
 
-/// Shares dispatch and broad-phase admission between footing and finite stair probes.
-pub(super) fn placed_shape_supports(
+/// Emits supports directly to the consumer under shared footing and stair admission rules.
+pub(super) fn visit_placed_shape_supports(
     shape: &PlacedCollisionShape,
     center: Vector3,
     radius: f32,
     probe: SupportProbe,
-) -> Vec<ShapeSupport> {
+    found: &mut impl FnMut(ShapeSupport),
+) {
     // Footing is a vertical column. The shape query owns height admission; sphere/box
     // distance would incorrectly reject sloped rims and expanded cap corners.
     let minimum = shape.bounds.minimum();
@@ -41,22 +42,26 @@ pub(super) fn placed_shape_supports(
         || center.y + reach < minimum.y
         || center.y - reach > maximum.y
     {
-        return Vec::new();
+        return;
     }
     let (maximum_drop, maximum_rise) = probe.column_limits();
     match &*shape.shape {
         CollisionShape::Bsp(solid) => {
-            super::bsp_query::placed_supports(shape, solid, center, radius, probe)
+            super::bsp_query::visit_placed_supports(shape, solid, center, radius, probe, found);
         }
         CollisionShape::Cylinder(cylinder) => {
-            placed_cylinder_support(shape, cylinder, center, radius, maximum_drop, maximum_rise)
-                .into_iter()
-                .collect()
+            if let Some(support) =
+                placed_cylinder_support(shape, cylinder, center, radius, maximum_drop, maximum_rise)
+            {
+                found(support);
+            }
         }
         CollisionShape::Ball(ball) => {
-            placed_ball_support(shape, ball, center, radius, maximum_drop, maximum_rise)
-                .into_iter()
-                .collect()
+            if let Some(support) =
+                placed_ball_support(shape, ball, center, radius, maximum_drop, maximum_rise)
+            {
+                found(support);
+            }
         }
     }
 }

@@ -12,10 +12,6 @@
 		inputDisplayPlatform,
 	} from "../lib/input/input-presentation";
 	import { presentPartyHud } from "./client-party-hud";
-	import {
-		clientCombatIndicatorSettingsSchema,
-		type ClientCombatIndicatorSettings,
-	} from "./client-combat-indicator-settings";
 	import { observeCombatEffectsAppearance } from "./client-combat-effects-appearance";
 	import type { CombatEffectsAppearance } from "../lib/game/systems/combat-effects-system";
 	import { ClientPartyState } from "./client-party-state";
@@ -557,26 +553,14 @@
 	}
 	// Cold appearance snapshot seeds replacement presentations; updates never recreate their owners.
 	let combatAppearance: CombatEffectsAppearance | null = null;
-	function observeCombatAppearance(
-		element: HTMLElement,
-		settings: ClientCombatIndicatorSettings,
-	) {
+	function observeCombatAppearance(element: HTMLElement) {
 		return observeCombatEffectsAppearance(
 			element,
-			settings,
 			(appearance) => {
 				combatAppearance = appearance;
 				presentationSession?.setCombatEffectsAppearance(appearance);
 			},
 			() => presentationSession?.refreshCombatEffectsFontAtlas(),
-		);
-	}
-	function changeCombatIndicators(
-		settings: ClientCombatIndicatorSettings,
-	): void {
-		changeUserSection(
-			"combatIndicators",
-			clientCombatIndicatorSettingsSchema.parse(settings),
 		);
 	}
 
@@ -1998,8 +1982,10 @@
 </script>
 
 <div
-	class="client-font-scope"
-	use:observeCombatAppearance={userSettings.combatIndicators}
+	class="client-appearance-scope ui-theme"
+	use:observeCombatAppearance
+	style:--ui-text-scale={userSettings.ui.textScale}
+	style:--ui-icon-scale={userSettings.ui.iconScale}
 	style:--ui-font-body={fontCss(userSettings.ui.fonts.body)}
 	style:--ui-font-heading={fontCss(userSettings.ui.fonts.heading)}
 	style:--ui-font-mono={fontCss(userSettings.ui.fonts.mono)}
@@ -2050,8 +2036,6 @@
 			onAudioChange={changeAudio}
 			graphics={userSettings.graphics}
 			ui={userSettings.ui}
-			combatIndicators={userSettings.combatIndicators}
-			onCombatIndicatorsChange={changeCombatIndicators}
 			clockFormat={userSettings.clockFormat}
 			environmentOverrides={userSettings.environmentOverrides}
 			{weatherPresets}
@@ -2329,9 +2313,8 @@
 
 <style>
 	@layer components {
-		.client-font-scope {
+		.client-appearance-scope {
 			display: contents;
-			font-family: var(--ui-font-body);
 		}
 		.client-screen {
 			display: grid;

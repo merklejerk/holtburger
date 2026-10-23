@@ -360,7 +360,10 @@ export async function probeClientChat(client, evaluateExpression) {
 		await click('input[aria-label="Chat message"]');
 		const scrollbar = await evaluate(`(() => {
 			const buffer = document.querySelector('.chat-buffer'), r = buffer.getBoundingClientRect();
-			return { x: r.right - 2, y: r.bottom - 12, end: r.top + r.height / 2, top: buffer.scrollTop };
+			// Start inside the thumb, rather than assuming a fixed inset from the track end.
+			const x = r.right - 2, y = r.bottom - r.height * buffer.clientHeight / buffer.scrollHeight / 2;
+			return { x, y, end: r.top + r.height / 2, top: buffer.scrollTop, height: r.height, scrollHeight: buffer.scrollHeight,
+				hit: document.elementFromPoint(x, y)?.outerHTML.slice(0, 250), font: getComputedStyle(buffer).fontSize };
 		})()`);
 		await client.send("Input.dispatchMouseEvent", {
 			type: "mouseMoved",
@@ -394,7 +397,7 @@ export async function probeClientChat(client, evaluateExpression) {
 			await evaluate(
 				`document.querySelector('.chat-buffer').scrollTop < ${scrollbar.top}`,
 			),
-			"Native scrollbar dragging must scroll the history",
+			`Native scrollbar dragging must scroll the history: ${JSON.stringify(scrollbar)}`,
 		);
 		await click("canvas[data-game-viewport]");
 		assert.equal(

@@ -15,14 +15,14 @@ import {
 	CLIENT_VITAL_WARNING_PERCENT,
 	CLIENT_VITAL_WARNING_THRESHOLDS,
 	CLIENT_GRAPHICS_RANGES,
+	CLIENT_TEXT_SCALE,
+	CLIENT_ICON_SCALE,
 } from "./client-settings-values.js";
 import { clientKeyboardSettingsSchema } from "./client-input-settings.js";
 import {
 	clientClockFormatSchema,
 	clientEnvironmentOverridesSchema,
 } from "./client-environment-settings.js";
-
-import { clientCombatIndicatorSettingsSchema } from "./client-combat-indicator-settings.js";
 
 const unsigned = z.number().int().nonnegative().max(0xffff_ffff);
 const positiveSafeInteger = z
@@ -150,9 +150,19 @@ export type ClientVitalWarningThresholds = z.infer<
 	typeof clientVitalWarningThresholdsSchema
 >;
 
-/** User-scoped fonts and vital warning thresholds; scaling remains planned. */
+/** User-scoped typography, artwork sizing, and vital warning thresholds. */
 export const clientUiSettingsSchema = z
 	.object({
+		/** Older sections inherit neutral scaling without losing fonts or warning thresholds. */
+		textScale: finiteNumber
+			.min(CLIENT_TEXT_SCALE.minimum)
+			.max(CLIENT_TEXT_SCALE.maximum)
+			.default(CLIENT_TEXT_SCALE.initial),
+		/** Artwork remains at its authored size when older sections omit this preference. */
+		iconScale: finiteNumber
+			.min(CLIENT_ICON_SCALE.minimum)
+			.max(CLIENT_ICON_SCALE.maximum)
+			.default(CLIENT_ICON_SCALE.initial),
 		/** Profiles without warnings get the same thresholds as first-run settings. */
 		vitalWarningThresholds: clientVitalWarningThresholdsSchema.default(
 			CLIENT_VITAL_WARNING_THRESHOLDS,
@@ -204,7 +214,6 @@ export const clientUserSettingsSchema = z
 		graphics: clientGraphicsSettingsSchema,
 		audio: clientAudioSettingsSchema,
 		ui: clientUiSettingsSchema,
-		combatIndicators: clientCombatIndicatorSettingsSchema,
 		clockFormat: clientClockFormatSchema,
 		environmentOverrides: clientEnvironmentOverridesSchema,
 		input: clientKeyboardSettingsSchema,

@@ -121,7 +121,7 @@ export async function probeClientPreciseJump() {
 			outcome: { kind: "committed" },
 		});
 		precise.enter();
-		precise.adjustPower(precise.power()<=0.5?2:-2);
+		precise.adjustPower(precise.power() <= 0.5 ? 2 : -2);
 		precise.aim(ray);
 		await waitForRequests(3);
 		const early = requests[2].request;

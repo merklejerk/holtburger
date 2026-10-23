@@ -105,7 +105,7 @@
 		.entity-note {
 			margin: 0;
 			color: var(--ui-color-muted);
-			font-size: 0.76rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 
 		.invalid {
@@ -197,7 +197,7 @@
 
 		.explorer-selectable-row > span {
 			color: var(--ui-color-muted);
-			font-size: 0.73rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 
 		.orphan .explorer-selectable-row {

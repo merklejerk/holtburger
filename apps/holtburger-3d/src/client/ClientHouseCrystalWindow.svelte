@@ -376,7 +376,9 @@
 		}
 		.housing-requirement-row {
 			display: grid;
-			grid-template-columns: var(--ui-item-cell-min-size) minmax(0, 1fr) auto;
+			grid-template-columns:
+				calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale))
+				minmax(0, 1fr) auto;
 			align-items: start;
 			gap: 8px;
 			margin: 12px 0;

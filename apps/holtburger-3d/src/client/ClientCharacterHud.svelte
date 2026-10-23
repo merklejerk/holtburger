@@ -8,6 +8,7 @@
 	import type { ClientConnectionObservation } from "./client-lifecycle-session";
 	import type { ClientVital } from "./client-host-contract";
 	import { formatQuantity, progressPercent } from "../app/quantity-format";
+	import { observeUiTheme } from "../app/ui-theme";
 
 	interface Props {
 		/** Reader for the browser session-owned transport observation. */
@@ -17,6 +18,8 @@
 		readonly vitals: readonly ClientVital[];
 		/** Session-owned progression; sampled at the character sheet's display cadence. */
 		readonly characterSheet: ClientCharacterSheetState | null;
+		/** Natural text/bar height lets the viewport fit the HUD without rewriting saved placement. */
+		readonly onMinimumHeightChange: (height: number) => void;
 	}
 
 	const {
@@ -25,10 +28,35 @@
 		vitals,
 		readConnection,
 		characterSheet,
+		onMinimumHeightChange,
 	}: Props = $props();
 	let focusedKind = $state<ClientVital["kind"]>("health");
 	/** Only the level facts used by the bar enter the bounded HUD display graph. */
 	let level = $state.raw<CharacterSheet["level"] | null>(null);
+	/** Measure intrinsic rows, independent of the preferred height, so shrinking text can shrink the minimum. */
+	function measureMinimumHeight(node: HTMLElement) {
+		const rows = Array.from(node.children);
+		const update = () => {
+			const gap = Number.parseFloat(getComputedStyle(node).rowGap);
+			if (!Number.isFinite(gap))
+				throw new Error("Character HUD row gap must resolve to a CSS length");
+			onMinimumHeightChange(
+				rows.reduce(
+					(height, row) => height + row.getBoundingClientRect().height,
+					gap,
+				),
+			);
+		};
+		const stopTheme = observeUiTheme(node, update);
+		const observer = new ResizeObserver(update);
+		for (const row of rows) observer.observe(row);
+		return {
+			destroy: () => {
+				observer.disconnect();
+				stopTheme();
+			},
+		};
+	}
 
 	$effect(() => {
 		const owner = characterSheet;
@@ -78,7 +106,7 @@
 	}
 </script>
 
-<section class="character-hud">
+<section class="character-hud" use:measureMinimumHeight>
 	<div class="identity-block">
 		<header class="ui-readout">
 			<span class="identity">{playerName ?? "Awaiting character"}</span>
@@ -128,7 +156,8 @@
 			display: grid;
 			box-sizing: border-box;
 			height: 100%;
-			grid-template-rows: auto auto;
+			grid-template-rows: min-content min-content;
+			align-content: space-between;
 			gap: var(--ui-character-hud-gap);
 		}
 		.identity-block {
@@ -174,8 +203,14 @@
 			display: flex;
 			flex-direction: column;
 			gap: 2px;
-			/* One 16px focused bar, two 8px unfocused bars, and two 2px gaps. */
-			block-size: 36px;
+			/* The focused row gets half the bar area; reserve its scaled text line plus both gaps. */
+			block-size: max(
+				36px,
+				calc(
+					2 * var(--ui-font-size-micro) * var(--ui-text-scale) *
+						var(--ui-line-height-body) + 4px
+				)
+			);
 		}
 		.vital {
 			position: relative;
@@ -195,8 +230,8 @@
 			top: 0;
 			left: 50%;
 			transform: translateX(-50%);
-			font-size: var(--ui-font-size-micro);
-			line-height: 16px;
+			font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
+			line-height: var(--ui-line-height-body);
 			padding-block: 0;
 			padding-inline: calc(14px + 3px);
 			white-space: nowrap;

@@ -812,291 +812,293 @@
 </section>
 
 <style>
-	.character-sheet {
-		overflow: hidden;
-	}
-	.progression-page {
-		display: grid;
-		grid-template-rows: minmax(0, 1fr) auto;
-		height: 100%;
-		min-height: 0;
-	}
-	.progression-scroll {
-		min-height: 0;
-		overflow: auto;
-	}
-	.progression-summary {
-		display: grid;
-		gap: 0.75rem;
-		padding: 0.85rem;
-		margin-bottom: 1rem;
-		border: 1px solid var(--ui-panel-border-color, var(--ui-color-border));
-		border-top: 2px solid var(--ui-color-accent);
-		border-radius: 0.35rem;
-		background: linear-gradient(
-			135deg,
-			color-mix(in srgb, var(--ui-color-accent) 14%, transparent),
-			transparent
-		);
-	}
-	.character-identity {
-		display: flex;
-		align-items: center;
-		gap: 0.8rem;
-	}
-	.level-emblem {
-		display: grid;
-		flex-shrink: 0;
-		place-items: center;
-		width: 3.3rem;
-		height: 3.3rem;
-		border: 1px solid var(--ui-color-accent);
-		border-radius: 50%;
-		color: var(--ui-color-accent);
-	}
-	.level-emblem small {
-		font-size: 0.6rem;
-		text-transform: uppercase;
-		align-self: end;
-	}
-	.level-emblem strong {
-		font-size: 1.4rem;
-		line-height: 1.2;
-		align-self: start;
-	}
-	.identity-text {
-		display: grid;
-		flex: 1;
-		gap: 0.2rem;
-		min-width: 0;
-	}
-	.identity-text label {
-		display: grid;
-		grid-template-columns: auto minmax(0, 1fr);
-		align-items: center;
-		gap: 0.4rem;
-	}
-	.identity-text select {
-		min-width: 0;
-		width: 100%;
-	}
-	.character-name {
-		font-size: 1.3rem;
-		overflow-wrap: anywhere;
-	}
-	.character-title {
-		color: var(--ui-color-accent);
-		font-size: 0.8rem;
-	}
-	.progress-track {
-		display: grid;
-		gap: 0.3rem;
-	}
-	.track-label {
-		display: flex;
-		flex-wrap: wrap;
-		justify-content: space-between;
-		gap: 0.2rem 0.5rem;
-		font-size: 0.7rem;
-		font-variant-numeric: tabular-nums;
-	}
-	.track-label span:first-child {
-		font-weight: 600;
-	}
-	.luminance-track progress {
-		color: var(--ui-character-luminance-color, var(--ui-color-success));
-	}
-	.progression-balances {
-		padding-top: 0.6rem;
-		border-top: 1px solid var(--ui-panel-border-color, var(--ui-color-border));
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		gap: 0.6rem;
-	}
-	.progression-balances > div {
-		display: grid;
-		gap: 0.2rem;
-	}
-	.progression-balances small {
-		font-size: 0.65rem;
-		opacity: 0.75;
-	}
-	.progression-balances strong {
-		font-size: 0.85rem;
-		font-variant-numeric: tabular-nums;
-		overflow-wrap: anywhere;
-	}
-	h2 {
-		margin: 0.9rem 0 0.3rem;
-		font-size: 0.9rem;
-		text-transform: uppercase;
-	}
-	.stat-row {
-		border-top: 1px solid var(--ui-panel-border-color, var(--ui-color-border));
-		interpolate-size: allow-keywords;
-	}
-	.skill-group > summary {
-		grid-template-columns: minmax(0, 1fr) auto;
-		margin: 0.9rem 0 0.3rem;
-		padding: 0;
-	}
-	.skill-group > summary h2 {
-		margin: 0;
-	}
-	.stat-row::details-content {
-		block-size: 0;
-		overflow: hidden;
-		transition:
-			block-size 180ms ease,
-			content-visibility 180ms allow-discrete;
-	}
-	.stat-row[open]::details-content {
-		block-size: auto;
-	}
-	summary {
-		display: grid;
-		grid-template-columns: minmax(6rem, 1fr) auto 1rem;
-		gap: 0.4rem;
-		align-items: center;
-		padding: 0.45rem 0.35rem;
-		cursor: pointer;
-	}
-	summary:hover,
-	.stat-row[open] summary {
-		background: color-mix(in srgb, var(--ui-color-text) 6%, transparent);
-	}
-	summary::marker {
-		content: "";
-	}
-	summary::after {
-		content: "⌄";
-		font-size: 1rem;
-		line-height: 1;
-		opacity: 0.7;
-		transition: transform 180ms ease;
-	}
-	.stat-row[open] summary::after,
-	.skill-group[open] > summary::after {
-		transform: rotate(180deg);
-	}
-	summary:focus-visible {
-		outline: 2px solid var(--ui-color-focus);
-		outline-offset: -2px;
-	}
-	summary strong {
-		text-align: right;
-	}
-	summary small {
-		font-weight: normal;
-		opacity: 0.7;
-	}
-	.stat-row summary small {
-		margin-left: 0.3rem;
-	}
-	.stat-effect.increased {
-		color: var(--ui-character-buff-color, var(--ui-color-success));
-	}
-	.stat-effect.decreased {
-		color: var(--ui-character-debuff-color, var(--ui-color-danger));
-	}
-	.upgrade-indicator {
-		margin-left: 0.3rem;
-		color: var(--ui-character-upgrade-color, var(--ui-color-success));
-		font-size: 0.7rem;
-		line-height: 1;
-		text-shadow:
-			0 0 0.3rem currentColor,
-			0 0 0.7rem currentColor;
-		vertical-align: 0.1em;
-	}
-	.actions {
-		display: flex;
-		align-items: center;
-		gap: 0.25rem;
-		margin: 0.15rem 0.35rem 0.55rem;
-	}
-	.action-status {
-		display: block;
-		margin: 0.15rem 0.35rem 0.55rem;
-		font-size: 0.75rem;
-		opacity: 0.7;
-	}
-	.actions button {
-		position: relative;
-		flex-shrink: 0;
-		min-width: 1.6rem;
-		height: 1.35rem;
-		padding: 0.15rem 0.2rem 0;
-		border: 0;
-		background: transparent;
-		color: inherit;
-		font: inherit;
-		font-size: 0.75rem;
-		white-space: nowrap;
-		cursor: pointer;
-	}
-	.action-shape {
-		position: absolute;
-		top: 0;
-		left: 50%;
-		width: 1.6rem;
-		height: 100%;
-		transform: translateX(-50%);
-		color: var(--ui-panel-border-color, var(--ui-color-border));
-		fill: none;
-	}
-	.actions button.active:not(:disabled) .action-shape {
-		color: var(--ui-character-upgrade-color, var(--ui-color-success));
-	}
-	.actions button:hover:not(:disabled) .action-shape {
-		fill: color-mix(in srgb, currentColor 65%, transparent);
-	}
-	.actions button:focus-visible {
-		outline: 2px solid var(--ui-color-focus);
-		outline-offset: 1px;
-	}
-	.action-label {
-		position: relative;
-		isolation: isolate;
-		font-weight: 600;
-	}
-	/* Blur the black backing without blurring the label or clipping its overhang. */
-	.action-label::before {
-		content: "";
-		position: absolute;
-		inset: -1px -2px;
-		z-index: -1;
-		background: rgb(0 0 0 / 40%);
-		filter: blur(2px);
-	}
-	.action-cost {
-		min-width: 0;
-		margin-left: auto;
-		font-size: 0.7rem;
-		font-variant-numeric: tabular-nums;
-		line-height: 1.1;
-		opacity: 0.9;
-		overflow-wrap: anywhere;
-	}
-	.actions button:disabled {
-		cursor: not-allowed;
-		opacity: 0.75;
-	}
-	ul {
-		margin: 0.2rem 0 0.7rem;
-		padding-left: 1.4rem;
-		font-size: 0.84rem;
-	}
-	li {
-		margin: 0.2rem 0;
-	}
-	.feedback {
-		color: var(--ui-color-warning);
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.stat-row::details-content,
+	@layer components {
+		.character-sheet {
+			overflow: hidden;
+		}
+		.progression-page {
+			display: grid;
+			grid-template-rows: minmax(0, 1fr) auto;
+			height: 100%;
+			min-height: 0;
+		}
+		.progression-scroll {
+			min-height: 0;
+			overflow: auto;
+		}
+		.progression-summary {
+			display: grid;
+			gap: 0.75rem;
+			padding: 0.85rem;
+			margin-bottom: 1rem;
+			border: 1px solid var(--ui-panel-border-color, var(--ui-color-border));
+			border-top: 2px solid var(--ui-color-accent);
+			border-radius: 0.35rem;
+			background: linear-gradient(
+				135deg,
+				color-mix(in srgb, var(--ui-color-accent) 14%, transparent),
+				transparent
+			);
+		}
+		.character-identity {
+			display: flex;
+			align-items: center;
+			gap: 0.8rem;
+		}
+		.level-emblem {
+			display: grid;
+			flex-shrink: 0;
+			place-items: center;
+			width: max(3.3rem, 4em);
+			min-height: max(3.3rem, 4em);
+			border: 1px solid var(--ui-color-accent);
+			border-radius: 50%;
+			color: var(--ui-color-accent);
+		}
+		.level-emblem small {
+			font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
+			text-transform: uppercase;
+			align-self: end;
+		}
+		.level-emblem strong {
+			font-size: calc(var(--ui-font-size-heading-1) * var(--ui-text-scale));
+			line-height: 1.2;
+			align-self: start;
+		}
+		.identity-text {
+			display: grid;
+			flex: 1;
+			gap: 0.2rem;
+			min-width: 0;
+		}
+		.identity-text label {
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			align-items: center;
+			gap: 0.4rem;
+		}
+		.identity-text select {
+			min-width: 0;
+			width: 100%;
+		}
+		.character-name {
+			font-size: calc(var(--ui-font-size-heading-1) * var(--ui-text-scale));
+			overflow-wrap: anywhere;
+		}
+		.character-title {
+			color: var(--ui-color-accent);
+			font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
+		}
+		.progress-track {
+			display: grid;
+			gap: 0.3rem;
+		}
+		.track-label {
+			display: flex;
+			flex-wrap: wrap;
+			justify-content: space-between;
+			gap: 0.2rem 0.5rem;
+			font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
+			font-variant-numeric: tabular-nums;
+		}
+		.track-label span:first-child {
+			font-weight: 600;
+		}
+		.luminance-track progress {
+			color: var(--ui-character-luminance-color, var(--ui-color-success));
+		}
+		.progression-balances {
+			padding-top: 0.6rem;
+			border-top: 1px solid var(--ui-panel-border-color, var(--ui-color-border));
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 0.6rem;
+		}
+		.progression-balances > div {
+			display: grid;
+			gap: 0.2rem;
+		}
+		.progression-balances small {
+			font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
+			opacity: 0.75;
+		}
+		.progression-balances strong {
+			font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
+			font-variant-numeric: tabular-nums;
+			overflow-wrap: anywhere;
+		}
+		h2 {
+			margin: 0.9rem 0 0.3rem;
+			font-size: calc(var(--ui-font-size-heading-3) * var(--ui-text-scale));
+			text-transform: uppercase;
+		}
+		.stat-row {
+			border-top: 1px solid var(--ui-panel-border-color, var(--ui-color-border));
+			interpolate-size: allow-keywords;
+		}
+		.skill-group > summary {
+			grid-template-columns: minmax(0, 1fr) auto;
+			margin: 0.9rem 0 0.3rem;
+			padding: 0;
+		}
+		.skill-group > summary h2 {
+			margin: 0;
+		}
+		.stat-row::details-content {
+			block-size: 0;
+			overflow: hidden;
+			transition:
+				block-size 180ms ease,
+				content-visibility 180ms allow-discrete;
+		}
+		.stat-row[open]::details-content {
+			block-size: auto;
+		}
+		summary {
+			display: grid;
+			grid-template-columns: minmax(6rem, 1fr) auto 1rem;
+			gap: 0.4rem;
+			align-items: center;
+			padding: 0.45rem 0.35rem;
+			cursor: pointer;
+		}
+		summary:hover,
+		.stat-row[open] summary {
+			background: color-mix(in srgb, var(--ui-color-text) 6%, transparent);
+		}
+		summary::marker {
+			content: "";
+		}
 		summary::after {
-			transition: none;
+			content: "⌄";
+			font-size: 1rem;
+			line-height: 1;
+			opacity: 0.7;
+			transition: transform 180ms ease;
+		}
+		.stat-row[open] summary::after,
+		.skill-group[open] > summary::after {
+			transform: rotate(180deg);
+		}
+		summary:focus-visible {
+			outline: 2px solid var(--ui-color-focus);
+			outline-offset: -2px;
+		}
+		summary strong {
+			text-align: right;
+		}
+		summary small {
+			font-weight: normal;
+			opacity: 0.7;
+		}
+		.stat-row summary small {
+			margin-left: 0.3rem;
+		}
+		.stat-effect.increased {
+			color: var(--ui-character-buff-color, var(--ui-color-success));
+		}
+		.stat-effect.decreased {
+			color: var(--ui-character-debuff-color, var(--ui-color-danger));
+		}
+		.upgrade-indicator {
+			margin-left: 0.3rem;
+			color: var(--ui-character-upgrade-color, var(--ui-color-success));
+			font-size: 0.7rem;
+			line-height: 1;
+			text-shadow:
+				0 0 0.3rem currentColor,
+				0 0 0.7rem currentColor;
+			vertical-align: 0.1em;
+		}
+		.actions {
+			display: flex;
+			align-items: center;
+			gap: 0.25rem;
+			margin: 0.15rem 0.35rem 0.55rem;
+		}
+		.action-status {
+			display: block;
+			margin: 0.15rem 0.35rem 0.55rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+			opacity: 0.7;
+		}
+		.actions button {
+			position: relative;
+			flex-shrink: 0;
+			min-width: 1.6rem;
+			min-height: max(1.35rem, 1.5em);
+			padding: 0.15rem 0.2rem 0;
+			border: 0;
+			background: transparent;
+			color: inherit;
+			font: inherit;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+			white-space: nowrap;
+			cursor: pointer;
+		}
+		.action-shape {
+			position: absolute;
+			top: 0;
+			left: 50%;
+			width: 1.6rem;
+			height: 100%;
+			transform: translateX(-50%);
+			color: var(--ui-panel-border-color, var(--ui-color-border));
+			fill: none;
+		}
+		.actions button.active:not(:disabled) .action-shape {
+			color: var(--ui-character-upgrade-color, var(--ui-color-success));
+		}
+		.actions button:hover:not(:disabled) .action-shape {
+			fill: color-mix(in srgb, currentColor 65%, transparent);
+		}
+		.actions button:focus-visible {
+			outline: 2px solid var(--ui-color-focus);
+			outline-offset: 1px;
+		}
+		.action-label {
+			position: relative;
+			isolation: isolate;
+			font-weight: 600;
+		}
+		/* Blur the black backing without blurring the label or clipping its overhang. */
+		.action-label::before {
+			content: "";
+			position: absolute;
+			inset: -1px -2px;
+			z-index: -1;
+			background: color-mix(in srgb, var(--ui-color-shadow) 40%, transparent);
+			filter: blur(2px);
+		}
+		.action-cost {
+			min-width: 0;
+			margin-left: auto;
+			font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
+			font-variant-numeric: tabular-nums;
+			line-height: 1.1;
+			opacity: 0.9;
+			overflow-wrap: anywhere;
+		}
+		.actions button:disabled {
+			cursor: not-allowed;
+			opacity: 0.75;
+		}
+		ul {
+			margin: 0.2rem 0 0.7rem;
+			padding-left: 1.4rem;
+			font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
+		}
+		li {
+			margin: 0.2rem 0;
+		}
+		.feedback {
+			color: var(--ui-color-warning);
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.stat-row::details-content,
+			summary::after {
+				transition: none;
+			}
 		}
 	}
 </style>

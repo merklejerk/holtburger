@@ -407,7 +407,7 @@
 			margin: 0;
 			overflow: hidden;
 			color: var(--ui-color-text);
-			font-size: 0.95rem;
+			font-size: calc(var(--ui-font-size-heading-2) * var(--ui-text-scale));
 			text-overflow: ellipsis;
 			white-space: nowrap;
 		}
@@ -417,7 +417,7 @@
 		.wearer-context,
 		.inspector-error {
 			color: var(--ui-color-muted);
-			font-size: 0.75rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 
 		.selected-actions,
@@ -456,13 +456,13 @@
 		.entity-facts span,
 		.diagnostics span {
 			color: var(--ui-color-muted);
-			font-size: 0.69rem;
+			font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
 		}
 
 		.entity-facts strong {
 			overflow: hidden;
 			color: var(--ui-color-text);
-			font-size: 0.75rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 			font-weight: 400;
 			text-overflow: ellipsis;
 			white-space: nowrap;
@@ -476,7 +476,7 @@
 		.inspector-disclosure summary {
 			color: var(--ui-color-text);
 			cursor: pointer;
-			font-size: 0.76rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 
 		.inspector-disclosure > :not(summary) {
@@ -497,7 +497,7 @@
 			overflow-wrap: anywhere;
 			color: var(--ui-color-text);
 			font-family: inherit;
-			font-size: 0.72rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 
 		@media (max-width: 370px) {

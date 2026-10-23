@@ -361,7 +361,7 @@
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;
 			gap: 8px;
-			font-size: 0.75rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 
 		.explorer-texture-page-content {

@@ -36,7 +36,9 @@
 >
 
 <style>
-	.waypoint-link {
-		user-select: text;
+	@layer components {
+		.waypoint-link {
+			user-select: text;
+		}
 	}
 </style>

@@ -1,12 +1,9 @@
 import { observeUiTheme } from "../app/ui-theme";
-import { hexRgb, normalizedRgbColor } from "../lib/frontend-color";
 import type { CombatEffectsAppearance } from "../lib/game/systems/combat-effects-system";
-import type { ClientCombatIndicatorSettings } from "./client-combat-indicator-settings";
 
-/** Resolve theme CSS at the font scope; renderer and Settings share this one appearance contract. */
+/** Resolve theme-owned combat typography and colors at the client's appearance scope. */
 export function readCombatEffectsAppearance(
 	element: HTMLElement,
-	settings: ClientCombatIndicatorSettings,
 ): CombatEffectsAppearance {
 	const style = getComputedStyle(element);
 	const canvas = element.ownerDocument.createElement("canvas");
@@ -15,13 +12,8 @@ export function readCombatEffectsAppearance(
 	if (!context)
 		throw new Error("Canvas2D unavailable for combat theme colors.");
 	const color = (
-		profile: keyof ClientCombatIndicatorSettings["colors"],
+		profile: keyof CombatEffectsAppearance["colors"],
 	): readonly [number, number, number] => {
-		const override = settings.colors[profile];
-		if (override !== null) {
-			const { red, green, blue } = normalizedRgbColor(hexRgb(override));
-			return [red, green, blue];
-		}
 		const property = `--ui-combat-text-${profile}-color`;
 		const value = style.getPropertyValue(property).trim();
 		if (!CSS.supports("color", value))
@@ -51,7 +43,7 @@ export function readCombatEffectsAppearance(
 		throw new Error("Combat theme requires a valid font family.");
 	return {
 		font,
-		fontSize: settings.fontSize ?? Number.parseFloat(size),
+		fontSize: Number.parseFloat(size),
 		colors: {
 			damage: color("damage"),
 			critical: color("critical"),
@@ -60,17 +52,15 @@ export function readCombatEffectsAppearance(
 	};
 }
 
-/** Cold theme/preferences/font notifications never drive presentation-owner lifetime or frame reads. */
+/** Cold theme/font notifications update appearance without owning presentation lifetime or frame reads. */
 export function observeCombatEffectsAppearance(
 	element: HTMLElement,
-	initial: ClientCombatIndicatorSettings,
 	publish: (appearance: CombatEffectsAppearance) => void,
 	fontsChanged: () => void,
 ) {
-	let settings = initial;
 	const document = element.ownerDocument;
 	const refresh = () => {
-		const appearance = readCombatEffectsAppearance(element, settings);
+		const appearance = readCombatEffectsAppearance(element);
 		publish(appearance);
 		// Canvas text is not a DOM font consumer; explicitly request theme font faces.
 		// loadingdone invalidates any glyphs rasterized before that request completed.
@@ -85,26 +75,9 @@ export function observeCombatEffectsAppearance(
 	const stopTheme = observeUiTheme(element, refresh);
 	document.fonts.addEventListener("loadingdone", refreshFonts);
 	return {
-		update(next: ClientCombatIndicatorSettings) {
-			settings = next;
-			refresh();
-		},
 		destroy() {
 			stopTheme();
 			document.fonts.removeEventListener("loadingdone", refreshFonts);
 		},
 	};
-}
-
-/** The color picker consumes the same resolved opaque RGB values used by WebGL. */
-export function combatEffectColorHex(
-	color: readonly [number, number, number],
-): string {
-	return `#${color
-		.map((channel) =>
-			Math.round(channel * 255)
-				.toString(16)
-				.padStart(2, "0"),
-		)
-		.join("")}`;
 }

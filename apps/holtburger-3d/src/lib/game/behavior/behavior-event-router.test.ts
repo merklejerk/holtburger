@@ -44,8 +44,8 @@ function build(isLive = true) {
 		stop: vi.fn(),
 	};
 	const scheduler = { scheduleActivation: vi.fn() };
-	const scale = {
-		applyScale: vi.fn(
+	const objectState = {
+		applyObjectState: vi.fn(
 			(
 				_target,
 				_values,
@@ -59,13 +59,13 @@ function build(isLive = true) {
 			audio,
 			effects,
 			particles,
-			scale,
+			objectState,
 			scheduler,
 			targets: { isLive: () => isLive },
 		},
 		4,
 	);
-	return { audio, effects, particles, router, scale, scheduler };
+	return { audio, effects, particles, router, objectState, scheduler };
 }
 
 const SET_OMEGA: PreparedBehaviorCommand = {
@@ -97,21 +97,23 @@ describe("BehaviorEventRouter", () => {
 		expect(effects.applySetOmega).toHaveBeenCalledTimes(2);
 	});
 
-	it("consumes world-owned scale without touching the browser effect scalar", () => {
-		const { effects, router, scale } = build();
-		scale.applyScale.mockReturnValue("owned-by-world");
+	it.each<PreparedBehaviorCommand>([
+		{ durationSeconds: 2, end: 3, kind: "scale" },
+		{ kind: "no-draw", noDraw: true },
+		{ kind: "set-light", lightsOn: false },
+	])(
+		"consumes world-owned $kind without mutating browser effect state",
+		(command) => {
+			const { effects, router, objectState } = build();
+			objectState.applyObjectState.mockReturnValue("owned-by-world");
 
-		expect(
-			router.dispatch(
-				{ durationSeconds: 2, end: 3, kind: "scale" },
-				TARGET,
-				PROVENANCE,
-				"live",
-			),
-		).toBe("owned-by-world");
-		expect(scale.applyScale).toHaveBeenCalledOnce();
-		expect(effects.applyScale).not.toHaveBeenCalled();
-	});
+			expect(router.dispatch(command, TARGET, PROVENANCE, "live")).toBe(
+				"owned-by-world",
+			);
+			expect(objectState.applyObjectState).toHaveBeenCalledOnce();
+			expect(effects.applyScale).not.toHaveBeenCalled();
+		},
+	);
 
 	it("hands a chained activation to the scheduler instead of running it inline", () => {
 		const { router, scheduler } = build();

@@ -214,6 +214,15 @@ pub struct EntityPhysicsPresentation {
     pub default_script: bool,
 }
 
+/// Authored object presentation flags, reconciled by the next complete server physics state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityPresentationChange {
+    /// Suppress object geometry while preserving physics and independently running effects.
+    NoDraw(bool),
+    /// Enable or disable the object's emitted lights.
+    Lighting(bool),
+}
+
 /// One complete semantic state plus every state-only decision consumed by later layers.
 ///
 /// Geometry, authored response coefficients, category filters, and producer body intent are joined
@@ -226,8 +235,8 @@ pub struct EffectiveEntityPhysicsState {
     pub unknown_bits: u32,
     /// Known state bits whose local physical behavior is deliberately unsupported.
     pub unsupported_local_simulation: PhysicsState,
-    /// Known gameplay marker preserved without changing the proven physical contact path.
-    pub unsupported_gameplay: PhysicsState,
+    /// Collision callbacks invoke the default script; contact reporting gates callback delivery.
+    pub collision_script_enabled: bool,
     /// Integration eligibility derived from the semantic mask.
     pub integration_eligibility: EntityIntegrationEligibility,
     /// Directional peer collision decisions derived from the semantic mask.
@@ -252,7 +261,7 @@ impl EffectiveEntityPhysicsState {
 /// Host-authored collision transition layered over the latest admitted server state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuthoredEtherealTransition {
-    /// Effective physics is exactly the latest admitted server state.
+    /// The Ethereal bit matches the latest admitted server state.
     Reconciled,
     /// An authored hook temporarily overrides the server's `Ethereal` bit.
     Predicted { ethereal: bool },
@@ -263,6 +272,8 @@ pub(crate) enum AuthoredEtherealTransition {
 /// One invariant-bearing entity physics state with explicit server and prediction ownership.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EntityPhysicsRuntimeState {
+    /// Complete authoritative replacements invalidate pending asynchronous presentation commands.
+    authoritative_revision: u64,
     authoritative: EffectiveEntityPhysicsState,
     effective: EffectiveEntityPhysicsState,
     authored_transition: AuthoredEtherealTransition,
@@ -272,6 +283,7 @@ impl EntityPhysicsRuntimeState {
     /// Starts reconciled from one complete create or `SetState` value.
     pub const fn reconciled(authoritative: EffectiveEntityPhysicsState) -> Self {
         Self {
+            authoritative_revision: 0,
             authoritative,
             effective: authoritative,
             authored_transition: AuthoredEtherealTransition::Reconciled,
@@ -287,6 +299,28 @@ impl EntityPhysicsRuntimeState {
     /// Latest server classification survives local impact retirement until a complete state update.
     pub const fn is_authoritative_projectile(self) -> bool {
         self.authoritative.dynamic_collision.missile
+    }
+
+    /// Authority epoch captured when a script is requested, not when asset preparation finishes.
+    pub const fn authoritative_revision(self) -> u64 {
+        self.authoritative_revision
+    }
+
+    /// Apply a predicted script flag without changing the last complete server state.
+    pub fn apply_authored_presentation(&mut self, change: EntityPresentationChange) -> bool {
+        let mut semantic = self.effective.semantic;
+        match change {
+            EntityPresentationChange::NoDraw(enabled) => {
+                semantic.set(PhysicsState::NO_DRAW, enabled)
+            }
+            EntityPresentationChange::Lighting(enabled) => {
+                semantic.set(PhysicsState::LIGHTING_ON, enabled)
+            }
+        }
+        let next = resolve_effective_entity_physics_state(semantic);
+        let changed = next != self.effective;
+        self.effective = next;
+        changed
     }
 
     /// Publishes a local collision consequence without rewriting the last server state.
@@ -309,7 +343,14 @@ impl EntityPhysicsRuntimeState {
 
     /// Replaces server authority and retires any obsolete authored transition.
     pub fn reconcile(&mut self, authoritative: EffectiveEntityPhysicsState) {
-        *self = Self::reconciled(authoritative);
+        let authoritative_revision = self
+            .authoritative_revision
+            .checked_add(1)
+            .expect("entity physics authority revision exhausted");
+        *self = Self {
+            authoritative_revision,
+            ..Self::reconciled(authoritative)
+        };
     }
 
     /// Applies an unobstructed authored replacement for the `Ethereal` bit.
@@ -470,7 +511,7 @@ pub fn resolve_effective_entity_physics_state(
         semantic,
         unknown_bits,
         unsupported_local_simulation,
-        unsupported_gameplay: semantic & PhysicsState::SCRIPTED_COLLISION,
+        collision_script_enabled: semantic.contains(PhysicsState::SCRIPTED_COLLISION),
         integration_eligibility,
         dynamic_collision: EntityDynamicCollisionPolicy {
             is_static: semantic.contains(PhysicsState::STATIC),
@@ -507,12 +548,39 @@ mod tests {
     use super::*;
 
     #[test]
+    fn script_presentation_flags_preserve_physics_and_reconcile_with_server_state() {
+        let authoritative = resolve_effective_entity_physics_state(
+            PhysicsState::MISSILE | PhysicsState::REPORT_COLLISIONS | PhysicsState::LIGHTING_ON,
+        );
+        let mut state = EntityPhysicsRuntimeState::reconciled(authoritative);
+        assert!(state.apply_authored_presentation(EntityPresentationChange::NoDraw(true)));
+        assert!(state.apply_authored_presentation(EntityPresentationChange::Lighting(false)));
+        assert!(!state.apply_authored_presentation(EntityPresentationChange::NoDraw(true)));
+        assert!(!state.apply_authored_presentation(EntityPresentationChange::Lighting(false)));
+        assert!(state.effective().presentation.no_draw);
+        assert!(!state.effective().presentation.lighting);
+        assert_eq!(
+            state.effective().dynamic_collision,
+            authoritative.dynamic_collision
+        );
+        assert_eq!(state.authoritative(), authoritative);
+        state.reconcile(authoritative);
+        assert_eq!(state.effective(), authoritative);
+        assert!(state.apply_authored_presentation(EntityPresentationChange::NoDraw(true)));
+        assert!(state.apply_authored_presentation(EntityPresentationChange::NoDraw(false)));
+        assert!(state.apply_authored_presentation(EntityPresentationChange::Lighting(false)));
+        assert!(state.apply_authored_presentation(EntityPresentationChange::Lighting(true)));
+        assert_eq!(state.effective(), authoritative);
+    }
+
+    #[test]
     fn impact_retirement_survives_authored_ethereal_changes_until_server_reconciliation() {
         let flags = PhysicsState::MISSILE | PhysicsState::ALIGN_PATH | PhysicsState::PATH_CLIPPED;
         let authoritative = resolve_effective_entity_physics_state(flags);
         let mut state = EntityPhysicsRuntimeState::reconciled(authoritative);
         state.clear_after_collision(flags);
         assert_eq!(state.authoritative(), authoritative);
+        assert!(state.is_authoritative_projectile());
         for ethereal in [true, false] {
             state.apply_authored_ethereal(ethereal);
             assert!(!state.effective().dynamic_collision.missile);
@@ -531,6 +599,8 @@ mod tests {
         state.reconcile(authoritative);
         assert_eq!(state.effective(), authoritative);
         assert!(!state.has_pending_solidification());
+        state.reconcile(resolve_effective_entity_physics_state(PhysicsState::empty()));
+        assert!(!state.is_authoritative_projectile());
     }
 
     #[test]
@@ -695,10 +765,7 @@ mod tests {
         assert_eq!(resolved.semantic.bits(), semantic.bits());
         assert_eq!(resolved.unknown_bits, unknown);
         assert_eq!(resolved.unsupported_local_simulation, unsupported);
-        assert_eq!(
-            resolved.unsupported_gameplay,
-            PhysicsState::SCRIPTED_COLLISION
-        );
+        assert!(resolved.collision_script_enabled);
         assert!(!resolved.supports_local_simulation());
     }
 

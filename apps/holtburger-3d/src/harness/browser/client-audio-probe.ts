@@ -74,7 +74,7 @@ export async function probeClientAudio() {
 					applyTransparentPart() {},
 					applyTextureVelocity() {},
 				},
-				scale: { applyScale: () => "executed" },
+				objectState: { applyObjectState: () => "executed" },
 				particles: {
 					createEmitter: () => "unprepared",
 					destroy() {},

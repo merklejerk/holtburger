@@ -919,7 +919,9 @@ fn advance_camera(
         &holtburger_world::spatial::CameraCollisionQuery {
             environment: collision.as_ref(),
             entities: entities.as_ref(),
-            target: holtburger_world::SpatialBodyId::Entity(active.identity.guid),
+            excluded: &std::collections::BTreeSet::from([holtburger_world::SpatialBodyId::Entity(
+                active.identity.guid,
+            )]),
         },
         duration_seconds,
         &samples.samples,

@@ -30,6 +30,49 @@ function fixture() {
 }
 
 describe("CharacterInputController", () => {
+	it.each([false, true])(
+		"releases held controls with charge=%s while preserving autorun",
+		(charging) => {
+			const { input, drives, intents, edges } = fixture();
+			input.setPersistentForward(true, "acquire");
+			input.applyAction("turnLeft", true);
+			input.applyAction("strafeRight", true);
+			input.applyAction("walk", true);
+			if (charging) input.applyAction("jump", true);
+			drives.length = 0;
+			intents.length = 0;
+			edges.length = 0;
+
+			input.releaseHeldActions(true);
+			input.applyAction("jump", false);
+			input.applyAction("turnLeft", false);
+
+			expect(drives).toEqual([
+				{ gait: "run", longitudinal: "forward", lateral: null, turn: null },
+			]);
+			expect(intents).toEqual([charging ? "acquire" : "synchronize"]);
+			expect(edges.map((edge) => edge.kind)).toEqual(charging ? ["reset"] : []);
+			expect(input.chargeExtent()).toBeNull();
+		},
+	);
+
+	it("reacquires autorun when it was paused by another input mode", () => {
+		const { input, intents } = fixture();
+		input.reset();
+		input.releaseHeldActions(true);
+		expect(intents).toEqual(["acquire"]);
+		expect(input.drive().longitudinal).toBe("forward");
+	});
+
+	it("releases manual ownership when focus leaves ordinary held movement", () => {
+		const { input, intents, edges } = fixture();
+		input.applyAction("forward", true);
+		input.releaseHeldActions(false);
+		expect(intents).toEqual(["acquire", "release"]);
+		expect(edges).toEqual([]);
+		expect(input.drive().longitudinal).toBeNull();
+	});
+
 	it("preserves acquisition versus synchronization independently of drive contents", () => {
 		const { input, drives, intents, edges } = fixture();
 		input.applyAction("forward", true);

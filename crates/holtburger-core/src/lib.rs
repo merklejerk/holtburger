@@ -3,7 +3,7 @@ pub mod client;
 pub mod content_assets;
 pub mod dynamic_entity;
 pub mod dynamic_entity_view;
-pub mod dynamic_scale_scripts;
+pub mod dynamic_scripts;
 pub mod errors;
 pub mod kinematic_boom;
 pub mod physical_body_definition;
@@ -40,9 +40,9 @@ pub use client::combat_feedback::combat_feedback_message;
 pub use client::combat_tuning::{
     ClientCombatTuning, ClientCombatTuningError, DEFAULT_MELEE_MAX_CHASE_DISTANCE,
 };
-pub use client::dynamic_scale::{
-    ClientDynamicScaleFacts, ClientDynamicScaleSource, ContentClientDynamicScaleSource,
-    PreparedClientDynamicScale,
+pub use client::dynamic_script::{
+    ClientDynamicScriptFacts, ClientDynamicScriptSource, ContentClientDynamicScriptSource,
+    PreparedClientDynamicScript,
 };
 pub use client::entity_facts::{ClientEntityDelta, ClientEntitySnapshot};
 pub use client::precise_jump::{
@@ -122,9 +122,10 @@ pub use dynamic_entity_view::{
     DynamicEntityTickBatch, DynamicEntityView, DynamicEntityViewSource,
     PhysicalBodyParticipationView, dynamic_entity_display_view, project_dynamic_entity_view,
 };
-pub use dynamic_scale_scripts::{
-    DueDynamicScale, DynamicScaleScriptController, DynamicScaleScriptError, DynamicScaleTarget,
-    PreparedDynamicScaleTimeline, PreparedScaleRecord, prepare_dynamic_scale_timeline,
+pub use dynamic_scripts::{
+    DueDynamicScriptCommand, DynamicScriptActivation, DynamicScriptCommand,
+    DynamicScriptController, DynamicScriptError, DynamicScriptTarget,
+    PreparedDynamicScriptTimeline, PreparedScriptRecord, prepare_dynamic_script_timeline,
 };
 pub use holtburger_content::LandblockCollisionAsset;
 pub use holtburger_world::player::PlayerCharacterOptions;

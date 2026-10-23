@@ -35,6 +35,11 @@ class FakeOrdinaryInput {
 		this.calls.push("reset");
 		this.#persistentForward = false;
 	}
+
+	releaseHeldActions(persistentForward: boolean): void {
+		this.calls.push(`release-held:${persistentForward}`);
+		this.#persistentForward = persistentForward;
+	}
 }
 
 function fixture() {
@@ -53,6 +58,25 @@ function fixture() {
 }
 
 describe("ClientInputArbiter", () => {
+	it("preserves autorun across editor handoffs and still hard-cancels afterward", () => {
+		const { arbiter, ordinary, autoRunChanges, edges } = fixture();
+		arbiter.toggleAutoRun();
+		arbiter.applyAction("turnLeft", true);
+		arbiter.enterPrecise();
+		ordinary.calls.length = 0;
+		arbiter.releaseHeldActions();
+		arbiter.releaseHeldActions();
+		expect(ordinary.calls).toEqual(["release-held:true", "release-held:true"]);
+		expect(autoRunChanges).toEqual([true]);
+		expect(edges).toEqual(["enter", "cancel"]);
+		expect(arbiter.preciseActive).toBe(false);
+		arbiter.enterPrecise();
+		arbiter.deactivate();
+		expect(ordinary.calls).not.toContain("turnLeft:restore");
+		arbiter.reset();
+		expect(autoRunChanges).toEqual([true, false]);
+	});
+
 	it("uses independent held power controls only during precise mode", () => {
 		const { arbiter, ordinary } = fixture();
 		const up = { key: "i", code: "KeyI", shiftKey: false };

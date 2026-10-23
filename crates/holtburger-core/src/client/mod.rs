@@ -34,7 +34,7 @@ pub mod connection;
 mod contracts;
 pub mod corpse;
 mod dynamic_entity_view;
-pub mod dynamic_scale;
+pub mod dynamic_script;
 mod entity_cues;
 pub mod entity_facts;
 mod entity_visual_facts;
@@ -242,8 +242,8 @@ pub struct ClientRuntime {
     melee_approach_state: Option<combat_runtime::MeleeApproachState>,
     /// Stages static collision and local-player body products outside the simulation turn.
     collision_coordinator: Option<collision::ClientCollisionCoordinator>,
-    /// Prepares direct scale timelines off-turn and joins them to exact entity instances.
-    dynamic_scale_coordinator: Option<dynamic_scale::ClientDynamicScaleCoordinator>,
+    /// Prepares object-state script timelines off-turn and joins them to exact entity instances.
+    dynamic_script_coordinator: Option<dynamic_script::ClientDynamicScriptCoordinator>,
     /// Retains ordered script and sound cues that precede entity creation.
     entity_cue_inbox: entity_cues::ClientEntityCueInbox,
     /// Resolves immutable visual profiles off-turn and publishes exact-generation envelopes.
@@ -1061,7 +1061,7 @@ impl ClientRuntime {
                         entity: data.entity.clone(),
                     });
                 self.emit_dynamic_entity_upsert(data.entity.guid);
-                self.observe_dynamic_scale_entity(data.entity.guid);
+                self.observe_dynamic_script_entity(data.entity.guid);
                 self.observe_selection_envelope_entity(data.entity.guid);
                 self.emit_self_movement_kinematics_updated();
             }
@@ -1079,7 +1079,7 @@ impl ClientRuntime {
                         entity: entity.clone(),
                     });
                 self.emit_dynamic_entity_upsert(entity.guid);
-                self.observe_dynamic_scale_entity(entity.guid);
+                self.observe_dynamic_script_entity(entity.guid);
                 self.observe_selection_envelope_entity(entity.guid);
                 if entity.guid == self.world.player.guid {
                     self.emit_self_movement_kinematics_updated();
@@ -1092,7 +1092,7 @@ impl ClientRuntime {
                         entity: entity.clone(),
                     });
                 self.emit_dynamic_entity_upsert(entity.guid);
-                self.observe_dynamic_scale_entity(entity.guid);
+                self.observe_dynamic_script_entity(entity.guid);
                 self.observe_selection_envelope_entity(entity.guid);
                 if entity.guid == self.world.player.guid {
                     self.emit_self_movement_kinematics_updated();
@@ -1133,7 +1133,7 @@ impl ClientRuntime {
                         entity: entity.clone(),
                     });
                 self.emit_dynamic_entity_upsert(entity.guid);
-                self.observe_dynamic_scale_entity(entity.guid);
+                self.observe_dynamic_script_entity(entity.guid);
                 self.observe_selection_envelope_entity(entity.guid);
             }
             WorldEvent::ObjectInspectionResult(result) => {
@@ -1164,7 +1164,7 @@ impl ClientRuntime {
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityDespawned { guid: *guid });
                 self.emit_dynamic_entity_removed(*guid, *generation);
-                self.remove_dynamic_scale_entity(crate::DynamicScaleTarget {
+                self.remove_dynamic_script_entity(crate::DynamicScriptTarget {
                     guid: *guid,
                     instance_sequence: u16::try_from(*generation)
                         .expect("world entity generation is the protocol instance sequence"),
@@ -1181,7 +1181,7 @@ impl ClientRuntime {
                         updates: updates.clone(),
                     });
                 self.emit_dynamic_entity_upsert(*guid);
-                self.observe_dynamic_scale_entity(*guid);
+                self.observe_dynamic_script_entity(*guid);
                 self.observe_selection_envelope_entity(*guid);
                 if *guid == self.world.player.guid
                     && Self::updates_affect_self_movement_kinematics(updates.as_slice())
@@ -1269,7 +1269,7 @@ impl ClientRuntime {
                 placement,
             } => {
                 if generation != previous_generation {
-                    self.remove_dynamic_scale_entity(crate::DynamicScaleTarget {
+                    self.remove_dynamic_script_entity(crate::DynamicScriptTarget {
                         guid: *guid,
                         instance_sequence: *previous_generation,
                     });
@@ -1280,7 +1280,7 @@ impl ClientRuntime {
                     }
                     _ => {
                         self.emit_dynamic_entity_upsert(*guid);
-                        self.observe_dynamic_scale_entity(*guid);
+                        self.observe_dynamic_script_entity(*guid);
                         self.observe_selection_envelope_entity(*guid);
                     }
                 }

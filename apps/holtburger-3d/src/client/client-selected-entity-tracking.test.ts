@@ -1,4 +1,5 @@
 import { emptyHousing } from "./client-housing-contract";
+import { CASTER_EQUIP_MASK } from "./client-inventory-equipment";
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { describe, expect, it, vi } from "vitest";
 import { entityFacts } from "./client-entity-mirror.test-support";
@@ -141,6 +142,44 @@ async function fixture() {
 }
 
 describe("ClientSelectedEntityTracking", () => {
+	it("keeps ordinary equipment interaction available across equip and unequip confirmations", async () => {
+		const f = await fixture();
+		const item = entityFacts(11);
+		if (item.description.kind !== "known")
+			throw new Error("Expected known item");
+		f.selection.select(11);
+		for (const ownedByPlayer of [true, false]) {
+			for (const location of [
+				{
+					kind: "equipped",
+					wearerGuid: ownedByPlayer ? 1 : 9,
+					mask: CASTER_EQUIP_MASK,
+				},
+				{ kind: "contained", parentGuid: 1, slot: { kind: "item", index: 0 } },
+			] as const) {
+				f.emit("client-entity-facts-changed", {
+					projectileSupply: null,
+					worldContainer: null,
+					upserts: [
+						{
+							...item,
+							ownedByPlayer,
+							location,
+							description: {
+								...item.description,
+								equipLocations: CASTER_EQUIP_MASK,
+								useCapability: "unsupported",
+							},
+						},
+					],
+					removed: [],
+				});
+				expect(f.interactions.display(false).canInteract).toBe(ownedByPlayer);
+			}
+		}
+		f.destroy();
+	});
+
 	it("honors unrestricted use for an explicit NO without enabling unavailable descriptions", async () => {
 		const f = await fixture();
 		const item = entityFacts(11);

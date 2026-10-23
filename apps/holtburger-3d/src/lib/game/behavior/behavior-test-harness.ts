@@ -23,8 +23,9 @@ export function buildEffectRouter(effects: EffectSystem = new EffectSystem()): {
 				playSoundTableKey: () => "unprepared",
 			},
 			effects,
-			scale: {
-				applyScale: (target, values, mode) => {
+			objectState: {
+				applyObjectState: (target, values, mode) => {
+					if (values.kind !== "scale") return "no-consumer";
 					effects.applyScale(target, values);
 					return mode === "initial-state" ? "folded-initial-state" : "executed";
 				},

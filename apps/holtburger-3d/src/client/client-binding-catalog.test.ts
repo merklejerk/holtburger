@@ -31,6 +31,49 @@ const ctrlDigitTwo = {
 };
 
 describe("client binding catalog", () => {
+	it("checks panel toggles against every overlapping keyboard context", () => {
+		const panel = row("client.toggleInventory");
+		for (const id of [
+			"character.forward",
+			"client.toggleCombat",
+			"client.toggleCharacter",
+			"preciseJump.increasePower",
+			"actionBars.commands.up",
+		]) {
+			const binding = {
+				key: "F8",
+				shift: false,
+				ctrl: false,
+				alt: false,
+				meta: false,
+			};
+			const settings = replaceClientBinding(
+				CLIENT_KEYBOARD_DEFAULTS,
+				row(id).reference,
+				[binding],
+			);
+			expect(
+				conflictingClientBindings(settings, panel, binding, null).map(
+					(entry) => entry.id,
+				),
+			).toContain(id);
+		}
+	});
+	it("distinguishes a panel toggle from a shifted precise-jump binding", () => {
+		const settings = replaceClientBinding(
+			CLIENT_KEYBOARD_DEFAULTS,
+			row("client.preciseJump").reference,
+			[{ key: "j", shift: true }],
+		);
+		expect(
+			conflictingClientBindings(
+				settings,
+				row("client.toggleJournal"),
+				{ key: "j", shift: false },
+				null,
+			).map((entry) => entry.id),
+		).not.toContain("client.preciseJump");
+	});
 	it("keeps chat activation ahead of movement but detects competing activations", () => {
 		const toggle = row("client.toggleChatHistory");
 		expect(

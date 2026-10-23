@@ -65,6 +65,36 @@ const CALL_RECORD = {
 };
 
 describe("decodePhysicsScriptRecord", () => {
+	it("decodes collision visibility and emitted-light commands without raw payload reconstruction", () => {
+		const decoded = decodePhysicsScriptRecord(
+			encode(
+				manifest(
+					[
+						{
+							authoredOrder: 0,
+							hookName: "no-draw",
+							hookType: 16,
+							startTime: 0,
+							payload: { kind: "no-draw", noDraw: true },
+						},
+						{
+							authoredOrder: 1,
+							hookName: "set-light",
+							hookType: 25,
+							startTime: 0,
+							payload: { kind: "set-light", lightsOn: false },
+						},
+					],
+					0,
+				),
+			),
+			"0x33000863",
+		);
+		expect(decoded.records).toMatchObject([
+			{ kind: "no-draw", noDraw: true },
+			{ kind: "set-light", lightsOn: false },
+		]);
+	});
 	it("decodes the representative self-cycling script into semantic commands", () => {
 		const decoded = decodePhysicsScriptRecord(
 			encode(manifest([SOUND_RECORD, CALL_RECORD], 2)),

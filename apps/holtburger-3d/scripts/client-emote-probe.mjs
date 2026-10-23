@@ -70,6 +70,43 @@ export async function probeClientEmotes(client, evaluateExpression) {
 	};
 	try {
 		await reset();
+		await press("Escape", "Escape", 27);
+		await holdWheel();
+		await press("Home", "Home", 36);
+		const emptyRecent = await evaluate(`(() => {
+			const wheel = document.querySelector('.emote-wheel');
+			const wedge = [...wheel.querySelectorAll('button')].find(e => e.textContent.trim() === 'Recent');
+			if (!wedge?.disabled) throw new Error('Empty Recent must be disabled');
+			const rect = wedge.querySelector('.emote-label').getBoundingClientRect();
+			return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, active: wheel.getAttribute('aria-activedescendant') };
+		})()`);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: emptyRecent.x,
+			y: emptyRecent.y,
+		});
+		await settle();
+		assert.equal(
+			await evaluate(
+				"document.querySelector('.emote-wheel').getAttribute('aria-activedescendant')",
+			),
+			emptyRecent.active,
+			"Hovering disabled Recent cannot select it",
+		);
+		await click(".emote-wheel [role=menuitem]", "Recent");
+		assert.equal(
+			await open(),
+			true,
+			"Disabled wedge clicks must not dismiss the wheel",
+		);
+		assert.equal(
+			await evaluate(
+				"document.querySelector('.emote-wheel').getAttribute('aria-label')",
+			),
+			"Emotes · Choose a category",
+		);
+		assert.equal((await read()).requests.length, 0);
+		await key("keyUp", "t", "KeyT", 84);
 		await draft("/lo");
 		await press("Tab", "Tab", 9);
 		assert.equal(
@@ -291,7 +328,7 @@ export async function probeClientEmotes(client, evaluateExpression) {
 			await settle();
 		}
 
-		await click(".emote-center");
+		await click(".emote-center-label");
 		assert.equal(
 			await open(),
 			true,
@@ -313,7 +350,7 @@ export async function probeClientEmotes(client, evaluateExpression) {
 			true,
 		);
 		assert.equal((await read()).requests.length, count);
-		await click(".emote-center");
+		await click(".emote-center-label");
 		assert.equal(
 			await evaluate(
 				"document.querySelector('.emote-wheel').getAttribute('aria-label')",
@@ -321,6 +358,43 @@ export async function probeClientEmotes(client, evaluateExpression) {
 			"Emotes · Greetings",
 			"The section label is passive inside a subwheel",
 		);
+		await click(".emote-back");
+		assert.equal(await open(), true, "Center Back retains the open wheel");
+		assert.equal(
+			await evaluate(
+				"document.querySelector('.emote-wheel').getAttribute('aria-label')",
+			),
+			"Emotes · Choose a category",
+		);
+		assert.equal((await read()).requests.length, count);
+		// Every curated category and Recent uses the center action, leaving every wedge for emotes.
+		const categories = await evaluate(
+			"[...document.querySelectorAll('.emote-wedge:not(:disabled)')].map(e => e.textContent.trim())",
+		);
+		for (const category of categories) {
+			await click(".emote-wheel [role=menuitem]", category);
+			assert.equal(
+				await evaluate(
+					"document.querySelector('.emote-back').getAttribute('aria-label')",
+				),
+				"Back to emote categories",
+			);
+			if (category === "Recent")
+				assert.equal(
+					await evaluate("document.querySelectorAll('.emote-wedge').length"),
+					(await read()).recentEmotes.length,
+					"Recent dedicates one wedge to each saved emote",
+				);
+			await click(".emote-back");
+			assert.equal(
+				await evaluate(
+					"document.querySelector('.emote-wheel').getAttribute('aria-label')",
+				),
+				"Emotes · Choose a category",
+			);
+		}
+		assert.equal((await read()).requests.length, count);
+		await click(".emote-wheel [role=menuitem]", "Greetings");
 		await click(".emote-wheel [role=menuitem]", "Wave");
 		assert.equal(await open(), false);
 		assert.equal((await read()).inputAllowed, true);

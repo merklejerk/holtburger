@@ -2229,6 +2229,70 @@ fn passive_input_preserves_server_approach() {
 }
 
 #[test]
+fn passive_drive_commands_preserve_local_emote_playback() {
+    let bow = MotionCommand(0x4300_00ec);
+    let drive = AutonomousDriveIntent {
+        desired_world_delta: Vector3::new(1.0, 0.0, 0.0),
+        desired_heading: None,
+        target_hint: None,
+        gait: Gait::Run,
+        force_grounded: true,
+    };
+    for intent in [
+        PlayerDriveIntent::ReleaseManual,
+        PlayerDriveIntent::SynchronizeHeld(CharacterDrive::default()),
+        PlayerDriveIntent::SynchronizeHeld(CharacterDrive::builder().run().forward().build()),
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Update(drive)),
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle { pose: None }),
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Release),
+    ] {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_0304);
+        seed_local_player(&mut world, guid, WorldPosition::default());
+        world.set_motion_sequences(explicit_motion_catalog(
+            FIXTURE_MOTION_TABLE_ID,
+            MotionStance::NonCombat as u32,
+            [FixtureCycle::moving(bow.raw(), Vector3::zero())],
+            [],
+        ));
+        world
+            .player_entity_mut()
+            .unwrap()
+            .set_did_prop(PropertyDataId::MotionTable, Guid(FIXTURE_MOTION_TABLE_ID));
+        world
+            .submit_local_authored_motion_command(
+                InterpretedMotionCommand::from(bow.raw() as u16),
+                1.0,
+                1,
+            )
+            .unwrap();
+        let mut movement = MovementSystem::new();
+        let now = Instant::now();
+        movement.enqueue_drive_intent(intent, now);
+        movement.process_control_commands(now, &mut world, false);
+
+        assert!(world.has_local_authored_motion(guid), "{intent:?}");
+        movement
+            .advance_local_authored_motion(&mut world, Duration::from_millis(30))
+            .unwrap()
+            .expect("emote must keep advancing after passive input");
+        assert_eq!(
+            world.motion_runtimes.get(guid).unwrap().state().substate,
+            bow
+        );
+
+        // A new movement acquisition must still supersede the emote retained by passive input.
+        movement.enqueue_drive_intent(
+            PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
+            now,
+        );
+        movement.process_control_commands(now, &mut world, false);
+        assert!(!world.has_local_authored_motion(guid));
+        assert!(movement.has_active_manual_drive());
+    }
+}
+
+#[test]
 fn manual_release_retires_only_the_manual_owner() {
     let mut world = WorldState::synthetic();
     let mut movement = MovementSystem::new();

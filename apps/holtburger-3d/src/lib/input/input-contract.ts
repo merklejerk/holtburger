@@ -74,8 +74,22 @@ export type FlyAction =
 	| "descend"
 	| "precision";
 
+/** Rebindable main-panel toggles; diagnostics stay dock-only. */
+export const CLIENT_PANEL_SHORTCUT_ACTIONS = [
+	"toggleInventory",
+	"toggleCharacter",
+	"toggleSocial",
+	"toggleWorld",
+	"toggleJournal",
+	"toggleSettings",
+] as const;
+/** A configurable toggle action for a main system panel. */
+export type ClientPanelShortcut =
+	(typeof CLIENT_PANEL_SHORTCUT_ACTIONS)[number];
+
 /** Client commands whose bindings are resolved by their active UI owner. */
 export const CLIENT_SHORTCUT_ACTIONS = [
+	...CLIENT_PANEL_SHORTCUT_ACTIONS,
 	"selectSelf",
 	"nextCreature",
 	"previousCreature",

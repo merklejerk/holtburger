@@ -94,48 +94,51 @@
 					refresh();
 				}}
 			/>
-			<div
-				class="journal-filters"
-				role="group"
-				aria-label="Contract status filters"
-			>
-				<button
-					type="button"
-					class="ui-filter-pill"
-					aria-label="All statuses"
-					title="All statuses"
-					aria-pressed={view.filters.length === 0}
-					onclick={() => {
-						owner.setFilters([]);
-						refresh();
-					}}>All</button
+			<details class="journal-filters">
+				<summary
+					>Filters{view.filters.length > 0
+						? ` · ${view.filters.length} selected`
+						: ""}</summary
 				>
-				{#each filters as filter}
+				<div
+					class="filter-pills"
+					role="group"
+					aria-label="Contract status filters"
+				>
 					<button
 						type="button"
-						class="ui-filter-pill status-filter"
-						data-status={filter.value}
-						aria-label={filter.label}
-						title={filter.label}
-						aria-pressed={view.filters.includes(filter.value)}
+						class="ui-filter-pill"
+						aria-label="All statuses"
+						title="All statuses"
+						aria-pressed={view.filters.length === 0}
 						onclick={() => {
-							const selected = owner.read().filters;
-							owner.setFilters(
-								selected.includes(filter.value)
-									? selected.filter((value) => value !== filter.value)
-									: [...selected, filter.value],
-							);
+							owner.setFilters([]);
 							refresh();
-						}}
+						}}>All</button
 					>
-						{#if filter.value === "available"}<AvailableIcon />
-						{:else if filter.value === "inProgress"}<ProgressIcon />
-						{:else if filter.value === "completed"}<CompletedIcon />
-						{:else if filter.value === "waitingToRepeat"}<ClockIcon />
-						{:else}<UnresolvedIcon />{/if}
-					</button>
-				{/each}
-			</div>
+					{#each filters as filter}
+						<button
+							type="button"
+							class="ui-filter-pill"
+							data-status={filter.value}
+							aria-label={filter.label}
+							title={filter.label}
+							aria-pressed={view.filters.includes(filter.value)}
+							onclick={() => {
+								const selected = owner.read().filters;
+								owner.setFilters(
+									selected.includes(filter.value)
+										? selected.filter((value) => value !== filter.value)
+										: [...selected, filter.value],
+								);
+								refresh();
+							}}
+						>
+							{filter.label}
+						</button>
+					{/each}
+				</div>
+			</details>
 		</div>
 
 		{#key view.character}
@@ -302,26 +305,22 @@
 		}
 		.journal-controls {
 			display: flex;
+			flex-direction: column;
+			flex-shrink: 0;
 			gap: 8px;
-			flex-wrap: wrap;
-		}
-		.journal-controls input {
-			flex: 1;
-			min-width: 140px;
 		}
 		.journal-filters {
+			max-height: var(--ui-filter-max-height);
+			overflow: auto;
+		}
+		.journal-filters summary {
+			cursor: pointer;
+			padding-block: var(--ui-filter-gap);
+		}
+		.filter-pills {
 			display: flex;
 			flex-wrap: wrap;
 			gap: var(--ui-filter-gap);
-		}
-		.status-filter {
-			display: inline-flex;
-			align-items: center;
-			justify-content: center;
-		}
-		.status-filter :global(svg) {
-			width: 18px;
-			height: 18px;
 		}
 		[data-status="available"] {
 			--filter-color: var(--ui-color-text);

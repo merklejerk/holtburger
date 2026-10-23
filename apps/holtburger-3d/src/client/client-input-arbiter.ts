@@ -8,12 +8,19 @@ import type {
 } from "../lib/input/input-contract";
 import { InputContext } from "../lib/input/input-context";
 
+/** Ordinary movement operations used by the client mode arbiter. */
+type OrdinaryCharacterInput = Pick<
+	CharacterInputController,
+	| "applyAction"
+	| "restoreHeldAction"
+	| "reset"
+	| "setPersistentForward"
+	| "releaseHeldActions"
+>;
+
 /** Owns client-local auto-run and the handoff between ordinary and precise-jump input. */
 export class ClientInputArbiter {
-	readonly #ordinary: Pick<
-		CharacterInputController,
-		"applyAction" | "restoreHeldAction" | "reset" | "setPersistentForward"
-	>;
+	readonly #ordinary: OrdinaryCharacterInput;
 	readonly #onEnter: () => void;
 	readonly #onActivate: () => void;
 	readonly #onCancel: () => void;
@@ -28,10 +35,7 @@ export class ClientInputArbiter {
 
 	constructor(options: {
 		readonly powerBindings: InputBindings<PreciseJumpAction>;
-		readonly ordinary: Pick<
-			CharacterInputController,
-			"applyAction" | "restoreHeldAction" | "reset" | "setPersistentForward"
-		>;
+		readonly ordinary: OrdinaryCharacterInput;
 		readonly onEnter: () => void;
 		readonly onActivate: () => void;
 		readonly onCancel: () => void;
@@ -167,16 +171,26 @@ export class ClientInputArbiter {
 		if (this.#autoRun) this.#ordinary.setPersistentForward(true, "synchronize");
 	}
 
-	/** Focus/lifecycle loss owns a hard cancellation and never restores stale held actions. */
+	/** Editor handoff drops physical controls and precise targeting while preserving autorun. */
+	releaseHeldActions(): void {
+		this.#clearHeldActions();
+		this.#ordinary.releaseHeldActions(this.#autoRun);
+	}
+
+	/** Lifecycle loss owns a hard cancellation and never restores stale held actions. */
 	reset(): void {
+		this.#clearHeldActions();
+		this.#ordinary.reset();
+		this.#retireAutoRun(true);
+	}
+
+	#clearHeldActions(): void {
 		const cancel = this.#precise;
 		this.#precise = false;
 		this.#held.clear();
 		this.#powerHeld.clear();
 		this.#powerInput.reset();
 		this.#suppressJumpUntilRelease = false;
-		this.#ordinary.reset();
-		this.#retireAutoRun(true);
 		if (cancel) this.#onCancel();
 	}
 

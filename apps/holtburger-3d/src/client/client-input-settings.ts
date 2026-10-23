@@ -49,6 +49,13 @@ const keyboardSettingsBaseSchema = z
 				if (typeof value !== "object" || value === null || Array.isArray(value))
 					return value;
 				const current = {
+					toggleInventory: INPUT_DEFAULTS.client.toggleInventory,
+					toggleCharacter: INPUT_DEFAULTS.client.toggleCharacter,
+					toggleSocial: INPUT_DEFAULTS.client.toggleSocial,
+					toggleWorld: INPUT_DEFAULTS.client.toggleWorld,
+					toggleJournal: INPUT_DEFAULTS.client.toggleJournal,
+					toggleSettings: INPUT_DEFAULTS.client.toggleSettings,
+
 					splitStack: INPUT_DEFAULTS.client.splitStack,
 					toggleChatHistory: INPUT_DEFAULTS.client.toggleChatHistory,
 					...value,

@@ -156,20 +156,10 @@ export type ClientKeyboardConfiguration = Pick<
 	| "actionBars"
 >;
 
-/** Client-only held mouse gestures; keyboard maps remain independently addressable. */
-export interface ClientMouseConfiguration {
-	/** Hold the right button to steer character facing with a rear-follow camera. */
-	readonly rightButtonSteering: boolean;
-	/** Hold the middle button to supply forward movement. */
-	readonly middleButtonForward: boolean;
-	/** Hold left and right together to supply forward movement. */
-	readonly bothButtonsForward: boolean;
-}
-
 /** Persisted client input policy, including keyboard bindings and fixed mouse gestures. */
 export type ClientInputConfiguration = ClientKeyboardConfiguration & {
-	/** Independently enabled client mouse movement gestures. */
-	readonly mouse: ClientMouseConfiguration;
+	/** Enable held mouse steering and forward movement; clicks and left-drag orbit remain available. */
+	readonly mouseMovement: boolean;
 };
 
 /** Zero-based positions of the ten numbered bars and cells. */

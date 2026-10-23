@@ -70,6 +70,14 @@ world blocking cancel held actions without releasing charged jumps. Repeats and 
 cancelled press cannot activate the replacement owner. Precise jump remains a client-owned
 interaction within the viewport. Host movement contracts do not contain browser bindings.
 
+Settings → Input → Mouse exposes one **Use mouse movement/steering** switch. When enabled,
+right-button holds steer the character and adjust camera pitch; middle-button or left-and-right
+holds also run forward. Left-button drags orbit the camera independently of that switch. Camera
+holds capture the pointer and hide the cursor until release, retaining capture when switching
+between steering and orbit. The viewport input owner applies the ordinary click/drag threshold
+to captured movement. **Restore default input settings** resets both keyboard bindings and mouse
+movement policy.
+
 The asset-free `npm run harness:browser -- --client-hud` suite drives real browser keyboard and
 pointer events through the policy, production Explorer controls, chat, and modal integration.
 

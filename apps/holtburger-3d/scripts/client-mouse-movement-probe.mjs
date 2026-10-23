@@ -20,6 +20,11 @@ export async function probeClientMouseMovement(client, evaluate) {
 			await new Promise((resolve) => setTimeout(resolve, 20));
 		}
 	};
+	const waitForLock = async (locked) => {
+		await wait(`(document.pointerLockElement !== null) === ${locked}`);
+		// Chrome changes the property before dispatching the owner's pointerlockchange event.
+		await settle();
+	};
 	const point = await read(`(() => {
 		const canvas = document.querySelector('.client-canvas'); const b = canvas.getBoundingClientRect();
 		for (const fx of [0.6,0.4,0.7,0.3]) for (const fy of [0.4,0.6,0.3]) {
@@ -27,8 +32,20 @@ export async function probeClientMouseMovement(client, evaluate) {
 			if(document.elementFromPoint(x,y)===canvas)return {x,y};
 		} throw new Error('No exposed viewport point');
 	})()`);
-	const mouse = (type, button, buttons, x = point.x, y = point.y) =>
-		client.send("Input.dispatchMouseEvent", {
+	let lastHoldAt = -Infinity;
+	const mouse = async (type, button, buttons, x = point.x, y = point.y) => {
+		if (type === "mousePressed" && [1, 2, 4].includes(buttons)) {
+			// Chromium rate-limits capture requests; independent gestures must not become an automated burst.
+			const gestureIntervalMs = 300;
+			await new Promise((resolve) =>
+				setTimeout(
+					resolve,
+					Math.max(0, gestureIntervalMs - (Date.now() - lastHoldAt)),
+				),
+			);
+			lastHoldAt = Date.now();
+		}
+		await client.send("Input.dispatchMouseEvent", {
 			type,
 			button,
 			buttons,
@@ -36,6 +53,8 @@ export async function probeClientMouseMovement(client, evaluate) {
 			y,
 			clickCount: 1,
 		});
+		if (type === "mouseReleased" && buttons === 0) await settle();
+	};
 	const key = async (value, down) => {
 		await client.send("Input.dispatchKeyEvent", {
 			type: down ? "keyDown" : "keyUp",
@@ -50,29 +69,92 @@ export async function probeClientMouseMovement(client, evaluate) {
 	await settle();
 	await read(`document.querySelector('#settings-tab-input').click()`);
 	await settle();
-	for (const [key, label] of [
-		["rightButtonSteering", "Hold right mouse button to steer"],
-		["middleButtonForward", "Hold middle mouse button to move forward"],
-		["bothButtonsForward", "Hold left and right mouse buttons to move forward"],
-	]) {
-		const control = `[...document.querySelectorAll('#settings-section-input label')].find(label => label.textContent.includes(${JSON.stringify(label)})).querySelector('input')`;
-		await read(`${control}.click()`);
-		await settle();
-		assert.equal(
-			await read(`${api}.bindingSettings.read().mouse.${key}`),
-			!initial.mouse[key],
-		);
-		await read(`${control}.click()`);
-		await settle();
-		assert.equal(
-			await read(`${api}.bindingSettings.read().mouse.${key}`),
-			initial.mouse[key],
-		);
-	}
+	const control = `[...document.querySelectorAll('#settings-section-input label')].find(label => label.textContent.includes('Use mouse movement/steering')).querySelector('input')`;
+	await read(`${control}.click()`);
+	await settle();
+	assert.equal(
+		await read(`${api}.bindingSettings.read().mouseMovement`),
+		!initial.mouseMovement,
+	);
+	await read(`${control}.click()`);
+	await settle();
+	assert.equal(
+		await read(`${api}.bindingSettings.read().mouseMovement`),
+		initial.mouseMovement,
+	);
+	const defaults = await read(
+		`import('/src/client/client-input-settings.ts').then(module => module.CLIENT_INPUT_DEFAULTS)`,
+	);
+	await read(
+		`${api}.bindingSettings.replace({...${api}.bindingSettings.read(), mouseMovement:${!defaults.mouseMovement}, character:{...${api}.bindingSettings.read().character,forward:[{key:'F8'}]}})`,
+	);
+	await settle();
+	await read(
+		`[...document.querySelectorAll('#settings-section-input button')].find(button => button.textContent === 'Restore default input settings').click()`,
+	);
+	await settle();
+	assert.deepEqual(await read(`${api}.bindingSettings.read()`), defaults);
+	await read(`${api}.bindingSettings.replace(${JSON.stringify(initial)})`);
+	await settle();
 	await read(`document.querySelector('button[aria-label="Settings"]').click()`);
 	await settle();
 	await read(`globalThis.__releaseMouseKeys = ${fixture}.bindKeyboard()`);
 	try {
+		const panPixels = await read(
+			`import('/src/client/client-viewport-pointer-gesture.ts').then(module => module.CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS + 1)`,
+		);
+		for (const cursorJump of [false, true]) {
+			await mouse("mouseMoved", "none", 0);
+			await mouse("mousePressed", "right", 2);
+			await waitForLock(true);
+			await mouse("mouseMoved", "none", 2, point.x + 20);
+			await mouse("mouseReleased", "right", 0, point.x + 20);
+			await waitForLock(false);
+			const handoffOrbits = await read(`${api}.capture().orbitDeltas.length`);
+			const handoffClicks = await read(
+				`${api}.capture().viewportSelectionPoints.length`,
+			);
+			if (cursorJump) {
+				// Delay acquisition so the captured unlocked zero/jump sequence arrives before the pan lock.
+				await read(`(() => {
+					const canvas=document.querySelector('.client-canvas'); const original=canvas.requestPointerLock;
+					Object.defineProperty(canvas,'requestPointerLock',{configurable:true,value:()=>new Promise((resolve,reject)=>{
+						globalThis.__resumePanCapture=()=>original.call(canvas).then(resolve,reject);
+					})});
+				})()`);
+			}
+			await mouse("mousePressed", "left", 1);
+			if (cursorJump) {
+				await read(`(() => {
+					const canvas=document.querySelector('.client-canvas');
+					canvas.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,buttons:1,clientX:${point.x - 89},clientY:${point.y - 16},movementX:0,movementY:0}));
+					canvas.dispatchEvent(new MouseEvent('mousemove',{bubbles:true,buttons:1,clientX:${point.x + 468},clientY:${point.y + 13},movementX:557,movementY:29}));
+				})()`);
+				assert.equal(
+					await read(`${api}.capture().orbitDeltas.length`),
+					handoffOrbits,
+				);
+				await read("globalThis.__resumePanCapture()");
+			}
+			await waitForLock(true);
+			// A one-sample drag must rotate immediately and must not activate a click on release.
+			await mouse("mouseMoved", "none", 1, point.x + panPixels);
+			await mouse("mouseReleased", "left", 0, point.x + panPixels);
+			await waitForLock(false);
+			assert.deepEqual(
+				await read(`${api}.capture().orbitDeltas.slice(${handoffOrbits})`),
+				[{ x: panPixels, y: 0 }],
+			);
+			assert.equal(
+				await read(`${api}.capture().viewportSelectionPoints.length`),
+				handoffClicks,
+			);
+			if (cursorJump)
+				await read(
+					"delete document.querySelector('.client-canvas').requestPointerLock; delete globalThis.__resumePanCapture",
+				);
+			await read(`${fixture}.reset()`);
+		}
 		const beforeClicks = await read(
 			`${api}.capture().viewportSelectionPoints.length`,
 		);
@@ -171,40 +253,125 @@ export async function probeClientMouseMovement(client, evaluate) {
 		await read(
 			`globalThis.__releaseMouseKeys(); globalThis.__releaseMouseKeys = ${fixture}.bindKeyboard()`,
 		);
-		// Live settings cancel an already-held gesture before installing the new policy.
+		// Disabling movement cancels capture and held forward without blocking ordinary camera orbit.
 		await mouse("mousePressed", "middle", 4);
+		await waitForLock(true);
+		await mouse("mouseMoved", "none", 4, point.x + 20);
 		await read(
-			`${api}.bindingSettings.replace({...${api}.bindingSettings.read(), mouse:{rightButtonSteering:false,middleButtonForward:false,bothButtonsForward:true}})`,
+			`${api}.bindingSettings.replace({...${api}.bindingSettings.read(), mouseMovement:false})`,
 		);
 		await settle();
 		await forward(null);
+		await waitForLock(false);
 		await mouse("mouseReleased", "middle", 0);
-		await mouse("mousePressed", "middle", 4);
-		await forward(null);
-		await mouse("mouseReleased", "middle", 0);
+		const disabledTurns = (await state()).turns.length;
+		const disabledRear = await read(`${api}.mouseMovement.rearFollowEntries()`);
+		for (const [button, mask] of [
+			["middle", 4],
+			["right", 2],
+		]) {
+			await mouse("mousePressed", button, mask);
+			await mouse("mouseMoved", "none", mask, point.x + 20);
+			await forward(null);
+			await mouse("mouseReleased", button, 0, point.x + 20);
+		}
+		const disabledOrbits = await read(`${api}.capture().orbitDeltas.length`);
 		await mouse("mousePressed", "left", 1);
 		await mouse("mousePressed", "right", 3);
+		await mouse("mouseMoved", "none", 3, point.x + 20);
+		await forward(null);
+		await mouse("mouseReleased", "right", 1, point.x + 20);
+		await mouse("mouseMoved", "none", 1, point.x + 30);
+		await mouse("mouseReleased", "left", 0, point.x + 30);
+		await settle();
+		assert.equal((await state()).turns.length, disabledTurns);
+		assert.equal(
+			await read(`${api}.mouseMovement.rearFollowEntries()`),
+			disabledRear,
+		);
+		assert.equal(await read("document.pointerLockElement"), null);
+		assert.ok(
+			await read(`${api}.capture().orbitDeltas.length > ${disabledOrbits}`),
+		);
+		const disabledClicks = await read(
+			`${api}.capture().viewportSelectionPoints.length`,
+		);
+		for (const [button, mask] of [
+			["left", 1],
+			["right", 2],
+		]) {
+			await mouse("mousePressed", button, mask);
+			await mouse("mouseReleased", button, 0);
+		}
+		assert.equal(
+			await read(`${api}.capture().viewportSelectionPoints.length`),
+			disabledClicks + 2,
+		);
+		await key("w", true);
 		await forward("forward");
-		await mouse("mouseReleased", "left", 2);
-		await mouse("mouseReleased", "right", 0);
-		await read(`${api}.bindingSettings.replace(${JSON.stringify(initial)})`);
-		await settle();
-		await read(
-			`${api}.bindingSettings.replace({...${api}.bindingSettings.read(), mouse:{rightButtonSteering:true,middleButtonForward:true,bothButtonsForward:false}})`,
-		);
-		await settle();
-		await mouse("mousePressed", "left", 1);
-		await mouse("mousePressed", "right", 3);
+		await key("w", false);
 		await forward(null);
-		await mouse("mouseReleased", "left", 2);
-		await mouse("mouseReleased", "right", 0);
 		await read(`${api}.bindingSettings.replace(${JSON.stringify(initial)})`);
 		await settle();
 		await read(`${fixture}.reset()`);
+		// Middle hold supplies forward movement, rear-follow steering, and pitch together.
+		const middleRearBefore = await read(
+			`${api}.mouseMovement.rearFollowEntries()`,
+		);
+		await mouse("mousePressed", "middle", 4);
+		await forward("forward");
+		await waitForLock(true);
+		await mouse("mouseMoved", "none", 4, point.x, point.y + 20);
+		assert.equal((await state()).turns.length, 0);
+		assert.deepEqual(await read(`${api}.capture().orbitDeltas.at(-1)`), {
+			x: 0,
+			y: -20,
+		});
+		assert.equal(
+			await read(`${api}.mouseMovement.rearFollowEntries()`),
+			middleRearBefore + 1,
+		);
+		await mouse("mouseMoved", "none", 4, point.x + 30, point.y + 30);
+		assert.ok((await state()).turns.length > 0);
+		assert.ok((await state()).turns.every((delta) => delta > 0));
+		await mouse("mouseReleased", "middle", 0, point.x + 30, point.y + 30);
+		await forward(null);
+		await waitForLock(false);
+		await read(`${api}.bindingSettings.replace(${JSON.stringify(initial)})`);
+		await settle();
+		await read(`${fixture}.reset()`);
+		// Overlapping middle/chord holds preserve capture until the final steering source ends.
+		await mouse("mousePressed", "middle", 4);
+		await waitForLock(true);
+		await mouse("mouseMoved", "none", 4, point.x + 20);
+		await mouse("mousePressed", "left", 5, point.x + 20);
+		await mouse("mousePressed", "right", 7, point.x + 20);
+		await mouse("mouseReleased", "middle", 3, point.x + 20);
+		await forward("forward");
+		assert.equal(await read("document.pointerLockElement !== null"), true);
+		await mouse("mousePressed", "middle", 7, point.x + 20);
+		await mouse("mouseReleased", "right", 5, point.x + 20);
+		await forward("forward");
+		assert.equal(await read("document.pointerLockElement !== null"), true);
+		await mouse("mouseMoved", "none", 5, point.x + 30);
+		const middleTurnsBeforeOrbit = (await state()).turns.length;
+		await mouse("mouseReleased", "middle", 1, point.x + 30);
+		await forward(null);
+		await waitForLock(true);
+		const middleOrbitsBefore = await read(
+			`${api}.capture().orbitDeltas.length`,
+		);
+		await mouse("mouseMoved", "none", 1, point.x + 40, point.y + 10);
+		await mouse("mouseReleased", "left", 0, point.x + 40, point.y + 10);
+		assert.equal((await state()).turns.length, middleTurnsBeforeOrbit);
+		assert.ok(
+			await read(`${api}.capture().orbitDeltas.length > ${middleOrbitsBefore}`),
+		);
+		await read(`${fixture}.reset()`);
 		const rearBefore = await read(`${api}.mouseMovement.rearFollowEntries()`);
 		await mouse("mousePressed", "right", 2);
+		await waitForLock(true);
 		await mouse("mouseMoved", "none", 2, point.x, point.y + 20);
-		await wait("document.pointerLockElement !== null");
 		assert.equal((await state()).turns.length, 0);
 		assert.deepEqual(await read(`${api}.capture().orbitDeltas.at(-1)`), {
 			x: 0,
@@ -240,7 +407,7 @@ export async function probeClientMouseMovement(client, evaluate) {
 		const orbitsBefore = await read(`${api}.capture().orbitDeltas.length`);
 		await mouse("mouseReleased", "right", 1, point.x + 35);
 		await forward(null);
-		await wait("document.pointerLockElement === null");
+		await waitForLock(true);
 		await mouse("mouseMoved", "none", 1, point.x + 45, point.y + 10);
 		await mouse("mouseReleased", "left", 0, point.x + 45, point.y + 10);
 		assert.equal((await state()).turns.length, turnsBeforeOrbit);
@@ -250,14 +417,13 @@ export async function probeClientMouseMovement(client, evaluate) {
 		// Capture loss ends yaw; physical mouse and keyboard holds still determine movement.
 		await key("w", true);
 		await mouse("mousePressed", "right", 2);
+		await waitForLock(true);
 		await mouse("mouseMoved", "none", 2, point.x + 20);
-		await wait("document.pointerLockElement !== null");
 		await mouse("mousePressed", "left", 3, point.x + 20);
 		await mouse("mousePressed", "middle", 7, point.x + 20);
 		await forward("forward");
 		await read("document.exitPointerLock()");
-		await wait("document.pointerLockElement === null");
-		await settle();
+		await waitForLock(false);
 		const turnsAtUnlock = (await state()).turns.length;
 		const picksAtUnlock = await read(
 			`${api}.capture().viewportSelectionPoints.length`,
@@ -315,16 +481,23 @@ export async function probeClientMouseMovement(client, evaluate) {
 		);
 		return {
 			mouseSettingsUi: true,
+			restoreAllInputSettings: true,
 			chordOrders: 2,
 			overlappingSources: true,
 			keyboardPrecedence: true,
 			autorun: true,
 			preciseSuppression: true,
 			liveSettingsCancellation: true,
-			independentSwitches: true,
+			mouseMovementToggle: true,
+			disabledOrbitAndClicks: true,
 			rearFollow: true,
 			pointerLock: true,
 			steeringPitch: true,
+			middleSteeringPitch: true,
+			middleChordHandoff: true,
+			capturedCameraPan: true,
+			oneSamplePanAfterSteering: true,
+			unlockedCursorJumpExclusion: true,
 			relativeYaw: steeringYaw,
 			clickSuppression: true,
 			editorCancellation: true,

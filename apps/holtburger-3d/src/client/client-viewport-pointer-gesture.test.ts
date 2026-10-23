@@ -8,37 +8,66 @@ import {
 
 describe("client viewport pointer gesture", () => {
 	it("keeps click-scale jitter armed without emitting orbit", () => {
-		const started = beginClientViewportPointerGesture(10, 20);
+		const started = beginClientViewportPointerGesture();
 		const advanced = advanceClientViewportPointerGesture(
 			started,
-			10 + CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS / 4,
-			20 + CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS / 4,
+			CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS / 4,
+			CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS / 4,
 		);
 
-		expect(advanced.gesture.dragging).toBe(false);
+		expect(advanced.gesture.kind).toBe("pending");
 		expect(advanced.dragDelta).toBeNull();
 	});
 
 	it("emits the full threshold-crossing delta then incremental orbit", () => {
-		const started = beginClientViewportPointerGesture(10, 20);
+		const started = beginClientViewportPointerGesture();
+		const jitterDistance = CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS / 4;
 		const jitter = advanceClientViewportPointerGesture(
 			started,
-			10 + CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS / 4,
-			20 + CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS / 4,
+			jitterDistance,
+			jitterDistance,
 		);
 		const displacement = CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS + 1;
 		const crossed = advanceClientViewportPointerGesture(
 			jitter.gesture,
-			10 + displacement,
-			20 + displacement,
+			displacement - jitterDistance,
+			displacement - jitterDistance,
 		);
 		const continued = advanceClientViewportPointerGesture(
 			crossed.gesture,
-			11 + displacement,
-			18 + displacement,
+			1,
+			-2,
 		);
 
 		expect(crossed.dragDelta).toEqual({ x: displacement, y: displacement });
 		expect(continued.dragDelta).toEqual({ x: 1, y: -2 });
+	});
+
+	it("uses net jitter displacement and ignores motionless samples after dragging", () => {
+		const jitterDistance = CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS / 2;
+		const jitter = advanceClientViewportPointerGesture(
+			beginClientViewportPointerGesture(),
+			jitterDistance,
+			0,
+		);
+		const returned = advanceClientViewportPointerGesture(
+			jitter.gesture,
+			-jitterDistance,
+			0,
+		);
+		expect(returned.gesture.kind).toBe("pending");
+		expect(returned.dragDelta).toBeNull();
+		const dragged = advanceClientViewportPointerGesture(
+			returned.gesture,
+			CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS + 1,
+			0,
+		);
+		const stationary = advanceClientViewportPointerGesture(
+			dragged.gesture,
+			0,
+			0,
+		);
+		expect(stationary.gesture.kind).toBe("dragging");
+		expect(stationary.dragDelta).toBeNull();
 	});
 });

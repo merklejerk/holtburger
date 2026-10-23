@@ -1,4 +1,3 @@
-import type { ClientMouseConfiguration } from "../lib/input/input-contract";
 import type { ViewportInputGate } from "../lib/input/viewport-input-gate";
 import type { ClientForwardSource } from "./client-input-arbiter";
 import {
@@ -29,7 +28,7 @@ interface ClientViewportMouseOptions {
 	/** Shared admission and cancellation boundary. */
 	readonly gate: ViewportInputGate;
 	/** Cold policy read at event time, without reconstructing the owner. */
-	readonly settings: () => ClientMouseConfiguration;
+	readonly movementEnabled: () => boolean;
 	/** Current presentation camera, absent while presentation is unavailable. */
 	readonly camera: () => ClientViewportCameraController | null;
 	/** Precise targeting retains click activation and suppresses forward in the arbiter. */
@@ -66,8 +65,8 @@ export class ClientViewportMouseController {
 		readonly kind: "select" | "examine" | "jump";
 	} | null = null;
 	#lockGeneration = 0;
-	#lockWanted = false;
-	#lockPending = false;
+	/** Pending acquisition is distinct from held capture so a queued old unlock cannot cancel a new request. */
+	#lockState: "idle" | "pending" | "held" = "idle";
 
 	constructor(options: ClientViewportMouseOptions) {
 		this.#options = options;
@@ -103,12 +102,7 @@ export class ClientViewportMouseController {
 			event.button === 0 ? LEFT : event.button === 1 ? MIDDLE : RIGHT;
 		if ((this.#buttons & mask) !== 0) return;
 		const wasActive = this.active;
-		if (!wasActive) {
-			this.#motion = beginClientViewportPointerGesture(
-				event.clientX,
-				event.clientY,
-			);
-		}
+		if (!wasActive) this.#motion = beginClientViewportPointerGesture();
 		this.#buttons |= mask;
 		event.preventDefault();
 		this.#click =
@@ -123,16 +117,14 @@ export class ClientViewportMouseController {
 									? "jump"
 									: "select",
 					};
-		this.#update(event);
+		this.#update();
 	};
 
-	#update(event: MouseEvent): void {
-		const settings = this.#options.settings();
-		const middle =
-			settings.middleButtonForward && (this.#buttons & MIDDLE) !== 0;
+	#update(): void {
+		const movementEnabled = this.#options.movementEnabled();
+		const middle = movementEnabled && (this.#buttons & MIDDLE) !== 0;
 		const both =
-			settings.bothButtonsForward &&
-			(this.#buttons & (LEFT | RIGHT)) === (LEFT | RIGHT);
+			movementEnabled && (this.#buttons & (LEFT | RIGHT)) === (LEFT | RIGHT);
 		if (middle || both) this.#click = null;
 		if (middle !== this.#middleForward) {
 			this.#middleForward = middle;
@@ -143,19 +135,24 @@ export class ClientViewportMouseController {
 			this.#options.movement.onForward("both-buttons", both);
 		}
 		const mode =
-			settings.rightButtonSteering && (this.#buttons & RIGHT) !== 0
+			movementEnabled && (this.#buttons & (MIDDLE | RIGHT)) !== 0
 				? "steer"
 				: (this.#buttons & LEFT) !== 0
 					? "orbit"
 					: null;
 		if (mode === this.#mode) return;
-		if (this.#mode === "steer") this.#unlock();
+		const wasCameraGesture = this.#mode !== null;
 		this.#mode = mode;
-		this.#motion =
-			mode === null
-				? null
-				: beginClientViewportPointerGesture(event.clientX, event.clientY);
+		if (mode === null) {
+			this.#motion = null;
+			this.#unlock();
+			return;
+		}
+		if (!wasCameraGesture || this.#motion === null)
+			this.#motion = beginClientViewportPointerGesture();
 		if (mode === "steer") this.#options.camera()?.followRear(performance.now());
+		// Acquire on the button edge, before motion, and retain capture across steer/orbit handoffs.
+		this.#requestLock();
 	}
 
 	readonly #move = (event: MouseEvent): void => {
@@ -166,34 +163,34 @@ export class ClientViewportMouseController {
 		if ((this.#buttons & event.buttons) !== this.#buttons) {
 			this.#buttons &= event.buttons;
 			this.#click = null;
-			this.#update(event);
+			this.#update();
 		}
-		if (locked && this.#mode === "steer") {
-			this.#steer(event.movementX, event.movementY);
+		if (this.#mode !== null && !locked) {
+			// Unlocked events may include cursor restoration. Camera motion starts only after acquisition.
+			if (this.#motion !== null) this.#requestLock();
 			return;
 		}
-		this.#advanceMotion(event, true);
+		this.#advanceMotion(event);
 	};
 
-	#advanceMotion(event: MouseEvent, allowLock: boolean): void {
+	#advanceMotion(event: MouseEvent): void {
 		const motion = this.#motion;
 		if (motion === null) return;
 		const advance = advanceClientViewportPointerGesture(
 			motion,
-			event.clientX,
-			event.clientY,
+			event.movementX,
+			event.movementY,
 		);
 		this.#motion = advance.gesture;
 		this.#options.onPosition(
 			event.clientX,
 			event.clientY,
-			advance.gesture.dragging && this.#mode === "orbit",
+			advance.gesture.kind === "dragging" && this.#mode === "orbit",
 		);
 		if (advance.dragDelta === null) return;
 		this.#click = null;
 		if (this.#mode === "steer") {
 			this.#steer(advance.dragDelta.x, advance.dragDelta.y);
-			if (allowLock) this.#requestLock();
 		} else if (this.#mode === "orbit") {
 			this.#options
 				.camera()
@@ -209,13 +206,11 @@ export class ClientViewportMouseController {
 
 	readonly #up = (event: MouseEvent): void => {
 		if (!this.active) return;
-		// A release can carry displacement not previously delivered by mousemove.
-		if (this.#document.pointerLockElement !== this.#options.canvas)
-			this.#advanceMotion(event, false);
+		// Button coordinates can be stale after pointer unlock. Only movement events rotate.
 		const click = this.#click;
 		this.#buttons &= event.buttons;
 		this.#click = null;
-		this.#update(event);
+		this.#update();
 		if (click?.button !== event.button || !this.#options.gate.allowed) return;
 		if (click.kind === "examine")
 			this.#options.onExamine(event.clientX, event.clientY);
@@ -225,56 +220,52 @@ export class ClientViewportMouseController {
 
 	#requestLock(): void {
 		if (
-			this.#lockPending ||
+			this.#lockState !== "idle" ||
 			this.#document.pointerLockElement === this.#options.canvas
 		)
 			return;
-		this.#lockWanted = true;
 		const generation = this.#lockGeneration;
-		this.#lockPending = true;
+		this.#lockState = "pending";
 		this.#options.canvas
 			.requestPointerLock()
 			.then(() => {
-				if (generation !== this.#lockGeneration || !this.#lockWanted) {
+				if (generation !== this.#lockGeneration) {
+					this.#lockState = "idle";
 					if (this.#document.pointerLockElement === this.#options.canvas)
 						this.#document.exitPointerLock();
 				}
 			})
 			.catch((error: unknown) => {
 				if (generation !== this.#lockGeneration) return;
-				this.#endSteering();
+				this.#endCapture();
 				this.#options.movement.onError(
-					`Mouse steering could not capture the pointer: ${String(error)}`,
+					`Mouse camera controls could not capture the pointer: ${String(error)}`,
 				);
 			})
 			.finally(() => {
-				this.#lockPending = false;
+				if (this.#lockState === "pending") this.#lockState = "idle";
 			});
 	}
 
 	readonly #lockChanged = (): void => {
-		// Locked movement has no absolute drag origin. Keeping it would turn cursor restoration
-		// on release into another character rotation before pointerlockchange finishes cleanup.
-		if (this.#document.pointerLockElement === this.#options.canvas)
-			this.#motion = null;
-		if (
-			this.#document.pointerLockElement !== this.#options.canvas &&
-			this.#lockWanted
-		)
-			this.#endSteering();
+		if (this.#document.pointerLockElement === this.#options.canvas) {
+			this.#lockState = "held";
+			return;
+		}
+		if (this.#lockState === "held") this.#endCapture();
 	};
 
 	#unlock(): void {
-		this.#lockWanted = false;
 		this.#lockGeneration += 1;
+		if (this.#lockState === "held") this.#lockState = "idle";
 		if (this.#document.pointerLockElement === this.#options.canvas)
 			this.#document.exitPointerLock();
 	}
 
 	/** Retire capture and queued yaw while the physical forward buttons remain held.
-	 * A cleared drag origin prevents re-locking until a fresh steering hold starts.
+	 * Clearing motion prevents re-locking until a fresh camera hold starts.
 	 */
-	#endSteering(): void {
+	#endCapture(): void {
 		this.#motion = null;
 		this.#click = null;
 		this.#unlock();
@@ -291,7 +282,7 @@ export class ClientViewportMouseController {
 			this.#options.movement.onForward("both-buttons", false);
 		this.#middleForward = false;
 		this.#bothForward = false;
-		this.#endSteering();
+		this.#endCapture();
 	};
 
 	/** Release every listener and the shared viewport cancellation registration. */

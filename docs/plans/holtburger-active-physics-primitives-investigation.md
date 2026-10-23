@@ -1,6 +1,6 @@
 # Active Physics Solver Primitives Investigation
 
-Status: **Static resident support preparation retained after five clean pairs; release-profile qualification next (2026-10-23).**
+Status: **Static resident support preparation passes release replay qualification; broader residency cost is next (2026-10-23).**
 
 Identify frequently executed solver primitives and reduce unnecessary work without changing
 movement, contact, support, collision coverage, or simulation admission behavior. Start with
@@ -191,7 +191,8 @@ and user acceptance separate when a retained change warrants them.
 - [x] Evaluate temporary owner-coverage list reduction using clean executables; reject and restore.
 - [x] Census static/entity BSP placement reuse and estimate prepared bounds/plane payload.
 - [x] Evaluate and retain static resident support preparation with actual storage and five clean pairs.
-- [ ] Qualify the retained preparation change in the release profile before broadening it.
+- [x] Qualify the retained preparation change in the standard release profile.
+- [ ] Qualify prepared storage and staging overlap across broader static residency.
 - [x] Complete correctness, quality, and performance checks for the first retained change.
 - [ ] Record the final disposition and any remaining live or user acceptance work.
 
@@ -286,17 +287,20 @@ prepares bounds, polygon planes and vertices in the shared world scene layer, ti
 resident owner products. Actual extra retained storage is 1.58 MiB for this fixture, exceeding the
 partial 545 KiB bounds/plane model. Dynamic targets remain unchanged.
 
-Next qualify this same change with release-profile executables and the same workload/outcome gates.
-The current measurements use workspace optimization level zero; they do not establish release
-benefit or live cadence. Broader static residency is a separate memory qualification, and user
-movement acceptance remains outstanding. Do not broaden preparation or add lazy initialization
-before that evidence exists. Early contact-plane rejection still needs a relevant contact-heavy
-workload; conservative query admission remains a separate compatibility investigation.
+Standard release-profile qualification below also passes: five alternating pairs reduce summed
+combined work by 16.784%, and every pair improves active physics p95. Exact outcomes match a
+repeatable release baseline; both baseline and candidate differ from the development reference by
+about 0.13 mm at the simulated endpoint. This does not establish live cadence or thin-LTO `dist`
+performance.
 
-Early polygon plane rejection now requires a targeted workload showing that the contact functions
-execute often enough to matter. Fan transform reuse remains a small later candidate. The profile
-does not justify a persistent geometry cache or a rewrite of vector primitives. Exact invocation
-counts, allocation attribution, and primitive costs in the synthetic crowd remain open questions.
+Next qualify prepared storage across larger outdoor and indoor resident sets, including staging
+overlap. The existing 1.58 MiB observation covers one development-build fixture. User movement
+acceptance remains outstanding. Do not broaden preparation or add lazy initialization before
+that evidence exists. Early contact-plane rejection needs a relevant contact-heavy workload;
+conservative query admission remains a separate compatibility investigation. Fan transform reuse
+was rejected, and these results do not justify rewriting vector primitives or a general geometry
+cache. Exact invocation counts, allocation attribution, and primitive costs in the synthetic crowd
+remain open questions.
 
 ## Experiment log
 
@@ -626,7 +630,8 @@ per-query transforms and hash lookups without new invalidation state. Eager unqu
 added representation size are accepted costs, contingent on the timing gate. No blocking finding
 was identified. The pre-commit review also inspected the core residency staging caller, authored
 placement methods, shared static selection, sweep/ray source adapters, and the mobile stair-support
-consumer. It did not re-audit unrelated collision algorithms or frontend adapters. Release-profile benefit, broader residency cost, and live acceptance remain open.
+consumer. It did not re-audit unrelated collision algorithms or frontend adapters. Release-profile
+qualification is recorded below; broader residency cost and live acceptance remain open.
 
 [Sanitized prototype evidence](evidence/h3d-physics-primitives-2026-10-23/static-prepared-support.json)
 records all measurements and executable/patch identities. Private candidate and diagnostic source,
@@ -653,6 +658,57 @@ exact authoritative and simulated final poses. These outcomes supersede the cold
 for correctness. This is one scene on one CPU in the development profile, not a release or live
 performance claim. Unrelated submodule changes are excluded from this investigation.
 
+### Release-profile qualification
+
+Compared baseline `a86c99ea7` with committed preparation `9cc61a23f` using standard Cargo
+`--release` builds and only `runtime-fixture`. This profile optimizes workspace code at level
+three; it is distinct from `dist`, which adds thin LTO. No solver source changes are part of this
+qualification. Both executables are built offline from the same lockfile, with the same fixture and
+explicit content archive, into separate clean target directories. A shared-target verification
+initially reused stale baseline artifacts; this was caught before measurement and both versions
+were rebuilt in isolation. Constructor-symbol and executable-hash checks verify the final binaries.
+
+The first release baseline matches every established development-reference field except its
+simulated endpoint, which differs by about 0.13 mm with matching rotation and landblock. This
+precedes candidate measurement; the cause is unestablished. An additional baseline control replay
+repeats all eight audited fields exactly, establishing the release reference. Both preflight
+baselines are excluded from paired timing. This cross-profile difference remains explicit; the
+candidate must exactly match the release reference, with no numerical tolerance.
+
+Five alternating process-order pairs are complete. Each process performed one full untimed
+warmup followed by one measured replay. All ten measured replays match workload counts, activation
+history, population, and exact authoritative and simulated final poses against the repeatable
+release reference. Development-reference differences are also recorded. Compiler, test, profiler,
+and other benchmark work from this agent were stopped during timing; unrelated host activity
+remained uncontrolled. The prior memory observation remains a development diagnostic measurement,
+not a fresh release allocator or broader-residency measurement.
+
+[Sanitized release evidence](evidence/h3d-physics-primitives-2026-10-23/release-static-support.json)
+records source, build, content and executable identities, the two preflight controls, all individual
+timings, and exact outcome checks. Private executables, reports, runner, parser, and build logs are
+preserved in `caps/runtime-fixtures/2026-10-23-physics-primitives/release-static-support/`.
+
+| Pair | Combined work reduction | Active physics p95 reduction |
+| --- | --- | --- |
+| 1 | 19.066% | 24.270% |
+| 2 | 10.831% | 12.573% |
+| 3 | 11.520% | 17.056% |
+| 4 | 27.473% | 22.718% |
+| 5 | 12.788% | 18.292% |
+
+**Decision: release qualification passes for this scene.** Summed combined work falls by 16.784%;
+median paired work reduction is 12.788%, and median paired active physics p95 reduction is
+18.292%. All five pairs improve both metrics. Baseline combined work spans 3,744.54–4,569.81 ms;
+candidate work spans 3,313.18–3,440.62 ms. Every sample is retained, including the slower fourth
+baseline. These are standard release measurements on one CPU, not a thin-LTO distribution or
+live-performance claim. No production code changed; broader residency and live acceptance remain.
+
+The evidence-only quality review traced report fields and warmup execution through the private
+runner/parser into the published JSON and this document. All ten raw reports, reference controls,
+pair ordering, reductions, medians, and archive hashes were verified. Unused sums of p95 values
+were removed; no blocking finding remains. The review does not re-audit the unchanged solver or
+qualify the outstanding residency, distribution-profile, or live behavior questions.
+
 | Date | Work | Result | Next action |
 | --- | --- | --- | --- |
 | 2026-10-23 | Read-only source survey and ranking | Six candidates identified; no implementation or benchmark result | Obtain authorization for implementation and measurement, then establish attribution and baseline |
@@ -663,3 +719,4 @@ performance claim. Unrelated submodule changes are excluded from this investigat
 | 2026-10-23 | Required-owner streaming | Rejected: both exploratory pairs regress combined work and p95; all outcome checks match; full source rollback | Census static/moving BSP placement reuse and memory cost before preparing bounds or planes |
 | 2026-10-23 | Static/entity BSP reuse and payload census | Two identical normalized replays match clean final poses; static geometry supplies 98.136% of bounds transforms; dense static support arrays model 545.4 KiB resident or 75.6 KiB at observed support demand | Prototype static-only prepared bounds/polygon planes; measure actual memory, publication cost, correctness, and paired performance |
 | 2026-10-23 | Static resident support preparation | Retained: 9.787% less summed work over five pairs, every p95 improves, exact outcomes match; 1.58 MiB extra retained object/box storage; tests, Clippy and quality review pass | Qualify release-profile benefit and broader residency cost before broadening preparation |
+| 2026-10-23 | Standard release qualification | Passed: 16.784% less summed work, 18.292% median paired p95 reduction; all ten runs match repeatable release outcomes; 0.13 mm cross-profile baseline difference recorded | Qualify prepared storage and staging overlap across broader outdoor/indoor residency |

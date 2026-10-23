@@ -1,0 +1,266 @@
+{
+  "date": "2026-10-23",
+  "purpose": "Qualify committed static resident support preparation in the standard Cargo release profile; no solver source changes.",
+  "metadata": {
+    "source_commits": {
+      "baseline": "a86c99ea7ca7c675e3b6f93824c8a04c6fa5be7f",
+      "candidate": "9cc61a23fad48e4c4fd77859ecba7fb56ac3c179"
+    },
+    "binary_sha256": {
+      "baseline": "be5ac2a17a73110840ff78885d6cad050533451992365143db35912cc6c854a6",
+      "candidate": "c35c39ee242c5f1eb8d484fa5ea5e2251ab13f122fa4d02f178fbfcebba31114"
+    },
+    "profile": "Cargo release: workspace opt-level 3, default codegen/LTO; not dist (thin LTO) or profiling",
+    "features": [
+      "runtime-fixture"
+    ],
+    "fixture_sha256": "8166512597df25ac68cfaee7ba913493242b193f56fa77a27fae78a765a124c7",
+    "runtime_content": {
+      "file": "assets.hba",
+      "bytes": 634425693,
+      "sha256": "20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7"
+    },
+    "cargo_lock_sha256": "ba3b3c9c73736db059c5a79e9746a3bfdc101b7b2dd55509d89908edf0a157a1",
+    "cpu_model": "AMD Ryzen 9 5900X 12-Core Processor",
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "build_environment": {},
+    "build_command": [
+      "cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "--release",
+      "-p",
+      "holtburger-debug-harness",
+      "--features",
+      "runtime-fixture",
+      "--bin",
+      "runtime_scene_fixture",
+      "--target-dir",
+      "<separate directory per version>"
+    ],
+    "build_control": {
+      "separate_clean_target_directories": true,
+      "prepared_constructor_symbol_only_in_candidate": true,
+      "isolated_binary_matches_initial_shared_build": {
+        "candidate": true,
+        "baseline": false
+      },
+      "initial_shared_cache_issue": "A candidate verification build reused baseline artifacts in the shared target directory. Caught before timing; both versions rebuilt from scratch in isolated target directories. All measurements use isolated builds."
+    },
+    "reference_control": {
+      "baseline_preflight_runs": 2,
+      "all_eight_fields_repeat_exactly": true,
+      "preflight_excluded_from_paired_timing": true,
+      "development_reference_differences": [
+        "final_runtime_player_position"
+      ],
+      "simulated_endpoint_coordinate_delta_m": {
+        "x": 0.00012000000000966793,
+        "y": 3.399999999942338e-05,
+        "z": 3.0999999999892225e-05
+      },
+      "simulated_endpoint_distance_m": 0.0001285184811701197,
+      "rotation_and_landblock_match": true,
+      "cause": "Unestablished. Observed in the pre-optimization release baseline before candidate measurement. Exact comparison is within the same release profile; cross-profile equivalence is not claimed."
+    },
+    "method": "Five alternating process-order pairs. Each process performs one explicit full untimed warmup and one measured full replay. RUST_LOG=warn; CPU/phase profiling disabled. No compiler, test, profiler or other benchmark launched by this agent during timing; unrelated host activity is uncontrolled. Exact workload, activation and both final poses checked against the release baseline reference, confirmed by an extra baseline control. Both preflight baseline runs excluded from paired timing. Development-reference differences recorded separately."
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "work_reduction_percent": 19.065906748126604,
+      "p95_reduction_percent": 24.269999780731787
+    },
+    {
+      "pair": 2,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "work_reduction_percent": 10.830959300383668,
+      "p95_reduction_percent": 12.573309158282886
+    },
+    {
+      "pair": 3,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "work_reduction_percent": 11.519726325126934,
+      "p95_reduction_percent": 17.056193168273005
+    },
+    {
+      "pair": 4,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "work_reduction_percent": 27.473302418400902,
+      "p95_reduction_percent": 22.71784088112789
+    },
+    {
+      "pair": 5,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "work_reduction_percent": 12.788168572260162,
+      "p95_reduction_percent": 18.29217734750288
+    }
+  ],
+  "timings": {
+    "baseline": {
+      "combined_work_ms": {
+        "samples": [
+          4135.246917000004,
+          3858.540590999999,
+          3744.5378460000047,
+          4569.810829000001,
+          3904.5141309999995
+        ],
+        "median": 3904.5141309999995,
+        "minimum": 3744.5378460000047,
+        "maximum": 4569.810829000001,
+        "sum": 20212.65031400001
+      },
+      "active_physics_work_p95_ms": {
+        "samples": [
+          3.3748620000000003,
+          3.051631,
+          2.9363,
+          3.3079419999999997,
+          3.089911
+        ],
+        "median": 3.089911,
+        "minimum": 2.9363,
+        "maximum": 3.3748620000000003
+      }
+    },
+    "candidate": {
+      "combined_work_ms": {
+        "samples": [
+          3346.824596000003,
+          3440.6236300000055,
+          3313.1773340000013,
+          3314.332879999997,
+          3405.1982820000007
+        ],
+        "median": 3346.824596000003,
+        "minimum": 3313.1773340000013,
+        "maximum": 3440.6236300000055,
+        "sum": 16820.156722000007
+      },
+      "active_physics_work_p95_ms": {
+        "samples": [
+          2.555783,
+          2.66794,
+          2.435479,
+          2.556449,
+          2.524699
+        ],
+        "median": 2.555783,
+        "minimum": 2.435479,
+        "maximum": 2.66794
+      }
+    }
+  },
+  "summed_work_reduction_percent": 16.784011692173983,
+  "median_paired_work_reduction_percent": 12.788168572260162,
+  "median_paired_p95_reduction_percent": 18.29217734750288,
+  "validation": {
+    "measured_runs": 10,
+    "issues": [],
+    "fields": [
+      "messages",
+      "physics_ticks",
+      "active_ticks",
+      "population_mismatches",
+      "peak_entities",
+      "activation_boundaries",
+      "final_player_position",
+      "final_runtime_player_position"
+    ],
+    "workload": {
+      "messages": 5741,
+      "physics_ticks": 1519,
+      "active_ticks": 1506,
+      "population_mismatches": 0,
+      "peak_entities": 286
+    },
+    "exact_release_reference_match_in_every_run": true,
+    "development_reference_issues_by_version": {
+      "baseline": [
+        "final_runtime_player_position"
+      ],
+      "candidate": [
+        "final_runtime_player_position"
+      ]
+    }
+  },
+  "limitations": [
+    "One recorded scene on one CPU; host activity uncontrolled.",
+    "Standard release profile; distribution profile with thin LTO not measured.",
+    "Replay does not establish live cadence or movement acceptance.",
+    "No new memory measurement; prior 1.58 MiB storage observation is from the development diagnostic build. Broader residency remains unqualified."
+  ],
+  "artifact_sha256": {
+    "build-baseline-isolated.log": "73592f2d69ef7e72cacfbe71f90d52a18aa513f5baa1aaf260366514f0d6f4d6",
+    "build-baseline.log": "ff6c4d7a92e2d3b760a29b61a4fa4012cc41e13e82775300181f950e7b9d82b3",
+    "build-candidate-isolated.log": "9d1d86f7837f02dbadc10ee18c037bc3b4cd794183ef4fbc01422e54f7d3a58e",
+    "build-candidate-verification.log": "a0ffbe23d99272581b05ca69841dc16b4f7653262d31137c6b8ccfbf33d56d98",
+    "build-candidate.log": "a04543c83c9a6f3881ec8a21b6535adf35f3aab7ff6e3964ab411a3836e45b9b",
+    "build-metadata.json": "09088371124142f65f1935ab4b3ad0b8345bb1649d97a7dfa85cee9790e55cde",
+    "clean-harness.log": "63d12d0bc77f92ec6ae747c9b77059d72241c5d713f1c3a4e52a19bdeabbf42a",
+    "metadata.json": "781c5f1c19b34faf9fed40cf5eda7a622e0bc6526ecd95abfd523b31bb7f7862",
+    "pair-01-1-baseline.stderr": "7c088b3c0cd615f41c0ca8b5324d25462b96d39f8829f098a3e4d39b7f7d13bc",
+    "pair-01-1-baseline.stdout": "0478f00415fba65585b66a8676c841106e33b8b071b63e99ffea16f91122e5bf",
+    "pair-01-2-candidate.stderr": "d7ee322d4860e29e7adb103468fd74df0b860dd24e083cfb5f0b303b5ccc76e1",
+    "pair-01-2-candidate.stdout": "547a2d86a296bc41609bab7ac37830fd7a1c02b87d86daaab168bea823e15b48",
+    "pair-02-1-candidate.stderr": "c327aa8b27ec0febbe90e11146ae23886f1e2c909e30caa5e9058c7c2d13bc36",
+    "pair-02-1-candidate.stdout": "5f2b270ac7bf66fb9e6027398be71c0d182c16a1397feff58201966d80c8fe6d",
+    "pair-02-2-baseline.stderr": "0ff96c658a0b2696514e9983b90bff609c09f8ba7e1aeeac0901cd57c1cf6925",
+    "pair-02-2-baseline.stdout": "46d2537347d4ed0a33ff9d2157944dd5319811598fefa0f531134854ce56b7cc",
+    "pair-03-1-baseline.stderr": "d3b49b2b6ed7321f5d53e0111c0d35d3f4a9c48dbf4fd9a6e887c5edc80c41ac",
+    "pair-03-1-baseline.stdout": "e9cecedec8f0b6ab7be168ffdbc6f238bc56f71a3770f5e90db90c567db984a1",
+    "pair-03-2-candidate.stderr": "3814f3c877a3b51549cda1f5f2fca86b4f2019b5e073a40ee6c3a4a3332c2950",
+    "pair-03-2-candidate.stdout": "4228c989978dd0d7626496b80e7a43474bcb371698441e217041bb66893dc3d5",
+    "pair-04-1-candidate.stderr": "060c0ddec5dc39362af172a965c8a17179d47c6f1742259fec5aced336ba5719",
+    "pair-04-1-candidate.stdout": "8d5334c34e90ab44db76a70a67dea356027de65f3e2d6f69d7776a8c7f7c82a5",
+    "pair-04-2-baseline.stderr": "978cc3f173882b03fe97844827529a2a193d4fbf98e54e1f4009d0efe1820737",
+    "pair-04-2-baseline.stdout": "31d4e90dbc0b9ac3523d213a3d8dc903ca145b0e436ee08f7cd5b76869ed612a",
+    "pair-05-1-baseline.stderr": "c7e9174b75645a3aed7a38b30f4c8025570ba7a31c8d1689af3c0094f49a4842",
+    "pair-05-1-baseline.stdout": "82a05a05971376b63fc94af230ca21eef1ff6542f63f1b7580d5326f0f04fa65",
+    "pair-05-2-candidate.stderr": "6ae6f1b0b898264ade1a47aeffd06aaf9e20ff192181a6691ad704cff0879993",
+    "pair-05-2-candidate.stdout": "47250317d64554b310eb25bf8f97e5848b03de33ac964bc229e847284b2950fe",
+    "pairs.log": "f649dd2a43f9bea0776aeb753bfb0d4799600df3de934b4a10447899b7bdf843",
+    "preflight/metadata.json": "174790ac0fe265fca1a4ac957f4cebbabe9c0ece0a6fc61e5e344c2fd97980b2",
+    "preflight/pair-01-1-baseline.stderr": "c626048a0b54d461a9e49d474d2195c85bf9e7ce55580b5826247c7d298dbceb",
+    "preflight/pair-01-1-baseline.stdout": "bd2047d7c2c84a7e2ab8a6e23570d4b10396ca58a1e3ac187d1b554f83a66325",
+    "preflight/pairs.log": "3f87ea3212a807cda5e1971eaa19d9079827f026b8afdba8799f69fef6e07eee",
+    "preflight/run_pairs.py": "343289494a64bfd33c8f1d30e02c9f56a4bb78c4e4c660e2304cf9558dd5542e",
+    "preflight/samples.json": "fe4a0077287bf1bf8a25d9c8315ea603e25b240da0d8a310e2ac51f78daae460",
+    "preflight/state.json": "15df88c9f1131471dcb61930ebc1e37d32660a5e5ccc0cedc2cf3092f43ca175",
+    "release-reference-control.stderr": "6dc7d1d24f82bd5b51169a5e15ecb914113f9b60548187969b3ed5fc0a704c9f",
+    "release-reference-control.stdout": "9136ad021c0178d024b1cbbcbb940bf976da59f85f78dfcd80f48b98aba5de68",
+    "restore-root-build.log": "36d84da31c0c41562a25af9b3816c9290545de30b97b46410ac53887e88605f3",
+    "restore-root-clean.log": "3948f6997b36ab0f7ea94a9369bbaf97c778ddb6173f3ece87d3355e756a54eb",
+    "run_pairs.py": "df68c452f752b8db921dcc62f7b62c2aad0f1c870e46bb043a42b2d5dd550cd9",
+    "runtime_scene_fixture-baseline": "be5ac2a17a73110840ff78885d6cad050533451992365143db35912cc6c854a6",
+    "runtime_scene_fixture-candidate": "c35c39ee242c5f1eb8d484fa5ea5e2251ab13f122fa4d02f178fbfcebba31114",
+    "samples.json": "028a647d5cd54dd82c55a0459949608652e7c47199900f5868850cfdfd53b87a",
+    "state.json": "ca137929e2d39b3d31af5dd6617075ad068521af05704235d050837c83fb9b91",
+    "summarize.py": "aee869a26cdb53c7ba6f84c7e4131005eb4d9a38c939b1c533b7bbf217ff5da1"
+  },
+  "decision": "Standard release-profile qualification passes for this recorded scene: all five pairs reduce combined work and active physics p95, with exact within-release outcomes. Retain committed static resident preparation; broader residency, dist/thin-LTO and live acceptance remain unqualified.",
+  "housekeeping": "Clean temporary baseline worktree removed. Shared root release world/core/harness artifacts rebuilt after measurements to restore the current candidate; prepared constructor symbol verified. No solver source changes.",
+  "review": {
+    "scope": "Evidence-only diff: replay report fields and warmup driver, private runner and parser, raw reports, reference controls, release-profile configuration, published JSON and tracking document. Solver architecture is unchanged and not re-audited.",
+    "verdict": "Ready within reviewed scope; no blocking findings. Unused sums of p95 values removed.",
+    "verification": "All archived hashes checked before cleanup; all ten raw reports independently match release reference and recorded samples; alternating order, pair reductions and medians verified. Both baseline preflight controls match exactly. Cross-profile simulated endpoint difference preserved. Documentation links and whitespace checked."
+  }
+}

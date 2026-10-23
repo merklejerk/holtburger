@@ -111,7 +111,7 @@ export const clientKeyboardSettingsSchema = keyboardSettingsBaseSchema
 	.strict()
 	.readonly();
 
-/** Keyboard defaults also used by the dedicated keyboard reset action. */
+/** Keyboard defaults shared by per-action resets and complete input defaults. */
 export const CLIENT_KEYBOARD_DEFAULTS: ClientKeyboardConfiguration = {
 	character: INPUT_DEFAULTS.character,
 	preciseJump: INPUT_DEFAULTS.preciseJump,
@@ -121,35 +121,29 @@ export const CLIENT_KEYBOARD_DEFAULTS: ClientKeyboardConfiguration = {
 	actionBars: INPUT_DEFAULTS.actionBars,
 };
 
-/** Fixed gesture defaults shared by persistence, settings UI, and viewport input. */
-export const CLIENT_MOUSE_DEFAULTS = {
-	rightButtonSteering: true,
-	middleButtonForward: true,
-	bothButtonsForward: true,
-} as const;
-
-/** User-scoped input, preserving keyboard customizations when mouse settings are absent. */
-export const clientInputSettingsSchema = clientKeyboardSettingsSchema
-	.unwrap()
-	.extend({
-		mouse: z
-			.object({
-				rightButtonSteering: z.boolean(),
-				middleButtonForward: z.boolean(),
-				bothButtonsForward: z.boolean(),
-			})
-			.strict()
-			.readonly()
-			.default(CLIENT_MOUSE_DEFAULTS),
-	})
-	.strict()
-	.readonly();
-
-/** Complete client input defaults. */
+/** Complete client input defaults, shared by resets and missing-field normalization. */
 export const CLIENT_INPUT_DEFAULTS: ClientInputConfiguration = {
 	...CLIENT_KEYBOARD_DEFAULTS,
-	mouse: CLIENT_MOUSE_DEFAULTS,
+	mouseMovement: true,
 };
+
+/** User-scoped input; retiring the old mouse block must not discard saved keyboard bindings. */
+export const clientInputSettingsSchema = z.preprocess(
+	(value) => {
+		if (typeof value !== "object" || value === null || Array.isArray(value))
+			return value;
+		const current = { ...value };
+		Reflect.deleteProperty(current, "mouse");
+		return current;
+	},
+	clientKeyboardSettingsSchema
+		.unwrap()
+		.extend({
+			mouseMovement: z.boolean().default(CLIENT_INPUT_DEFAULTS.mouseMovement),
+		})
+		.strict()
+		.readonly(),
+);
 
 /** Resolve keyboard policy while retaining Explorer camera maps; client mouse policy has its own owner. */
 export function clientInputConfiguration(

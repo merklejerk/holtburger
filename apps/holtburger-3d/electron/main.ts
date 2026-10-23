@@ -371,6 +371,10 @@ function createWindow(
 			nodeIntegration: false,
 			contextIsolation: true,
 			sandbox: true,
+			// Chromium 152 counts successive camera holds until a two-second pause, rejecting normal play.
+			// Opt this application window out of that browser-page limiter; capture still ends on release.
+			// Upstream fix: https://chromium-review.googlesource.com/c/chromium/src/+/8226204
+			disableBlinkFeatures: "RateLimitPointerLockRequests",
 			devTools: true,
 		},
 	});

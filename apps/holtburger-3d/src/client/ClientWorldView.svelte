@@ -806,7 +806,7 @@
 	});
 
 	$effect(() => {
-		input.mouse;
+		input.mouseMovement;
 		untrack(cancelMouseInput);
 	});
 
@@ -886,7 +886,7 @@
 		const owner = new ClientViewportMouseController({
 			canvas,
 			gate: inputGate,
-			settings: () => input.mouse,
+			movementEnabled: () => input.mouseMovement,
 			camera: () => cameraController,
 			precise: () => preciseJumpActive,
 			yawRadiansPerPixel: CLIENT_TUNING.camera.orbit.yawRadiansPerPixel,

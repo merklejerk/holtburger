@@ -146,7 +146,7 @@ export async function probeClientBindings(options: {
 			'button[aria-label="Examine"]',
 		)?.title ===
 			"Examine (Unbound)", "Conflict replacement must remove the old Examine alternative");
-		await click("Restore default keyboard bindings");
+		await click("Restore default input settings");
 		require(target.querySelector<HTMLButtonElement>(
 			'button[aria-label="Examine"]',
 		)?.title ===

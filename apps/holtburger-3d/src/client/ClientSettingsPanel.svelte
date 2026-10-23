@@ -23,7 +23,10 @@
 		replaceConflictingClientBindings,
 		type ClientBindingRow,
 	} from "./client-binding-catalog";
-	import { CLIENT_KEYBOARD_DEFAULTS } from "./client-input-settings";
+	import {
+		CLIENT_INPUT_DEFAULTS,
+		CLIENT_KEYBOARD_DEFAULTS,
+	} from "./client-input-settings";
 	import { ENTITY_SHADOW_MODES } from "../lib/game/renderer/entity-shadow-modes";
 	import {
 		resolveTextureFilteringPolicy,
@@ -107,18 +110,6 @@
 		onResetHudPlacements,
 	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
-	/** Fixed client gestures exposed as independent preference switches. */
-	const MOUSE_GESTURES = [
-		{ key: "rightButtonSteering", label: "Hold right mouse button to steer" },
-		{
-			key: "middleButtonForward",
-			label: "Hold middle mouse button to move forward",
-		},
-		{
-			key: "bothButtonsForward",
-			label: "Hold left and right mouse buttons to move forward",
-		},
-	] as const;
 	type Capture = {
 		readonly kind: "capture";
 		readonly row: ClientBindingRow;
@@ -692,31 +683,22 @@
 				<button
 					type="button"
 					class="ui-button"
-					onclick={() => {
-						onInputChange({
-							...input,
-							...structuredClone(CLIENT_KEYBOARD_DEFAULTS),
-						});
-					}}>Restore default keyboard bindings</button
+					onclick={() => onInputChange(structuredClone(CLIENT_INPUT_DEFAULTS))}
+					>Restore default input settings</button
 				>
 				<details class="binding-group" open>
 					<summary>Mouse</summary>
-					{#each MOUSE_GESTURES as gesture}
-						<label class="ui-checkbox"
-							><input
-								type="checkbox"
-								checked={input.mouse[gesture.key]}
-								onchange={(event) =>
-									onInputChange({
-										...input,
-										mouse: {
-											...input.mouse,
-											[gesture.key]: event.currentTarget.checked,
-										},
-									})}
-							/>{gesture.label}</label
-						>
-					{/each}
+					<label class="ui-checkbox"
+						><input
+							type="checkbox"
+							checked={input.mouseMovement}
+							onchange={(event) =>
+								onInputChange({
+									...input,
+									mouseMovement: event.currentTarget.checked,
+								})}
+						/>Use mouse movement/steering</label
+					>
 				</details>
 				{#each CLIENT_BINDING_GROUPS as group}
 					<details class="binding-group" open={group.title === "Movement"}>

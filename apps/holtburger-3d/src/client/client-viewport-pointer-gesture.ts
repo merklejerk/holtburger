@@ -11,53 +11,47 @@ export interface ClientViewportCameraController {
 	readonly zoom: (displacement: number) => void;
 }
 
-/** Immutable displacement classification; the mouse owner handles DOM lifetime. */
-export interface ClientViewportPointerGesture {
-	readonly startX: number;
-	readonly startY: number;
-	readonly lastX: number;
-	readonly lastY: number;
-	readonly dragging: boolean;
-}
+/** Movement accumulated before a drag commits; button coordinates never define displacement. */
+export type ClientViewportPointerGesture =
+	| {
+			readonly kind: "pending";
+			/** Net horizontal movement since the gesture began. */
+			readonly deltaX: number;
+			/** Net vertical movement since the gesture began. */
+			readonly deltaY: number;
+	  }
+	| { readonly kind: "dragging" };
 
 export interface ClientViewportPointerAdvance {
 	readonly gesture: ClientViewportPointerGesture;
-	/** Null while the gesture remains a click candidate. */
+	/** Null before dragging commits or when the movement sample has no displacement. */
 	readonly dragDelta: { readonly x: number; readonly y: number } | null;
 }
 
-export function beginClientViewportPointerGesture(
-	x: number,
-	y: number,
-): ClientViewportPointerGesture {
-	return {
-		dragging: false,
-		lastX: x,
-		lastY: y,
-		startX: x,
-		startY: y,
-	};
+export function beginClientViewportPointerGesture(): ClientViewportPointerGesture {
+	return { kind: "pending", deltaX: 0, deltaY: 0 };
 }
 
 /** Advance once; threshold crossing emits the complete start-to-current delta exactly once. */
 export function advanceClientViewportPointerGesture(
 	gesture: ClientViewportPointerGesture,
-	x: number,
-	y: number,
+	movementX: number,
+	movementY: number,
 ): ClientViewportPointerAdvance {
-	const totalX = x - gesture.startX;
-	const totalY = y - gesture.startY;
-	const dragging =
-		gesture.dragging ||
-		Math.hypot(totalX, totalY) > CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS;
-	const deltaX = gesture.dragging ? x - gesture.lastX : totalX;
-	const deltaY = gesture.dragging ? y - gesture.lastY : totalY;
+	const deltaX =
+		gesture.kind === "pending" ? gesture.deltaX + movementX : movementX;
+	const deltaY =
+		gesture.kind === "pending" ? gesture.deltaY + movementY : movementY;
+	if (
+		gesture.kind === "pending" &&
+		Math.hypot(deltaX, deltaY) <= CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS
+	) {
+		return { gesture: { kind: "pending", deltaX, deltaY }, dragDelta: null };
+	}
 	const dragDelta =
-		dragging && (deltaX !== 0 || deltaY !== 0)
-			? { x: deltaX, y: deltaY }
-			: null;
+		deltaX !== 0 || deltaY !== 0 ? { x: deltaX, y: deltaY } : null;
 	return {
-		gesture: { ...gesture, dragging, lastX: x, lastY: y },
+		gesture: { kind: "dragging" },
 		dragDelta,
 	};
 }

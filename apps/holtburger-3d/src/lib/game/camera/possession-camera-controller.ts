@@ -166,6 +166,31 @@ export class PossessionCameraController<
 		);
 	}
 
+	/** Adjust pitch with ordinary orbit limits without releasing or restarting rear-follow. */
+	pitch(deltaY: number): CameraLook {
+		return this.#look.rotate(
+			0,
+			deltaY,
+			0,
+			this.#orbit.pitchRadiansPerPixel,
+			this.#orbit.maximumPitchRadians,
+		);
+	}
+
+	/** Enter sticky rear-follow explicitly, bypassing the translation dwell. */
+	followRear(nowMs: number): void {
+		assertFiniteTimestamp(nowMs);
+		if (this.#recenterState.kind === "pinned") return;
+		this.#recenterState =
+			this.#recenter.durationMs === 0
+				? { kind: "pinned" }
+				: {
+						kind: "transition",
+						fromYawRadians: this.#look.snapshot().yawRadians,
+						startedAtMs: nowMs,
+					};
+	}
+
 	/** Seed a new target's facing without carrying orbit or recenter state across generations. */
 	replaceLook(look: CameraLook): CameraLook {
 		this.#resetRecenter();

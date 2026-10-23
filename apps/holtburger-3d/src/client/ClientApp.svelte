@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { ClientFacingInputDispatch } from "./client-facing-input-dispatch";
+	import type { ClientMouseMovementInput } from "./client-viewport-mouse-controller";
 	import { loadSoulEmotes } from "./client-soul-emotes";
 	import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
 	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
@@ -31,7 +33,7 @@
 	import type {
 		CombatBreakpointIndex,
 		CombatHeightIndex,
-		ClientKeyboardConfiguration,
+		ClientInputConfiguration,
 		InputDigitIndex,
 	} from "../lib/input/input-contract";
 	import { handleCombatBarKeydown } from "./client-combat-bar-input";
@@ -74,7 +76,7 @@
 	import { provideClientInput } from "./client-input-context";
 	import {
 		clientInputConfiguration,
-		clientKeyboardSettingsSchema,
+		clientInputSettingsSchema,
 	} from "./client-input-settings";
 	import { onMount, untrack } from "svelte";
 	import {
@@ -574,8 +576,9 @@
 		changeUserSection("environmentOverrides", accepted);
 		presentationSession?.setEnvironmentOverrides(accepted);
 	}
-	function changeInput(input: ClientKeyboardConfiguration): void {
-		const accepted = clientKeyboardSettingsSchema.parse(input);
+	function changeInput(input: ClientInputConfiguration): void {
+		const accepted = clientInputSettingsSchema.parse(input);
+		worldView?.cancelMouseInput();
 		keyboard.cancel();
 		characterInput.replaceBindings(accepted.character);
 		inputArbiter?.replacePowerBindings(accepted.preciseJump);
@@ -697,6 +700,13 @@
 		combatStatus = status;
 		if (status.desired === null) retireCombatEscapeContext();
 	}
+	let facingInput: ClientFacingInputDispatch | null = null;
+	const mouseMovement: ClientMouseMovementInput = {
+		onForward: (source, down) => inputArbiter?.applyForward(source, down),
+		onTurn: (delta) => facingInput?.add(delta),
+		onCancelTurn: () => facingInput?.cancel(),
+		onError: (message) => toastCenter.publish({ message, tone: "warning" }),
+	};
 	let inputArbiter: ClientInputArbiter | null = null;
 	const characterInput = clientInput.characterContext((action, pressed) => {
 		if (
@@ -743,8 +753,10 @@
 		active: () => boolean,
 	): void {
 		if (edge.kind === "reset") {
+			facingInput?.cancel();
 			cameraController?.setTranslationIntent(false, performance.now());
 		}
+		if (edge.kind !== "reset") facingInput?.flush();
 		if (edge.kind === "begin-jump") {
 			activeJumpBeginSequence = edge.sequence;
 		} else {
@@ -794,6 +806,7 @@
 		intent: CharacterDriveIntent,
 		active: () => boolean,
 	): void {
+		facingInput?.flush();
 		cameraController?.setTranslationIntent(
 			drive.longitudinal !== null ||
 				drive.lateral !== null ||
@@ -1621,6 +1634,21 @@
 
 		let cancelled = false;
 		const isActive = (): boolean => !cancelled && session === currentSession;
+		const facing = new ClientFacingInputDispatch((deltaRadians, current) => {
+			inputDispatch = inputDispatch
+				.then(async () => {
+					if (isActive() && current())
+						await currentSession.replaceDrive({
+							kind: "rotate-facing",
+							deltaRadians,
+						});
+				})
+				.catch((error: unknown) => {
+					if (isActive()) commandFailure = diagnostic(error);
+				});
+			return inputDispatch;
+		});
+		facingInput = facing;
 		const initialCharacterMotion = untrack(() => characterMotion);
 		const controller = new CharacterInputController({
 			// Jump remains gated until authority supplies capability; movement can start earlier.
@@ -1667,6 +1695,8 @@
 
 		return () => {
 			cancelled = true;
+			facing.cancel();
+			if (facingInput === facing) facingInput = null;
 			activeJumpBeginSequence = null;
 			preciseEscapeContext?.release();
 			preciseEscapeContext = null;
@@ -1682,6 +1712,7 @@
 			keydown: handleGameKeydown,
 			keyup: handleGameKeyup,
 			cancel: (reason) => {
+				worldView?.cancelMouseInput();
 				itemInteractions?.cancelTargeting();
 				selectionInput?.cancel();
 				characterInput.reset();
@@ -1999,6 +2030,7 @@
 	{#if usesWorldPresentation && startupError === null && commandFailure === null}
 		<ClientWorldView
 			bind:this={worldView}
+			{mouseMovement}
 			itemSession={session}
 			{partyHudPresent}
 			readPartyHudDisplay={() =>

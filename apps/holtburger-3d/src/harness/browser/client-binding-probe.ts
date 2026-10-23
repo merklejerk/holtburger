@@ -2,17 +2,17 @@ import { CLIENT_KEYBOARD_DEFAULTS } from "../../client/client-input-settings";
 import { formatInputBindings } from "../../lib/input/input-presentation";
 import { mount, tick, unmount } from "svelte";
 import ClientBindingProbe from "./ClientBindingProbe.svelte";
-import type { ClientKeyboardConfiguration } from "../../lib/input/input-contract";
+import type { ClientInputConfiguration } from "../../lib/input/input-contract";
 import type { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
 
 /** Compose the real Settings editor with accepted settings, HUD shortcut presentation, and a feature owner. */
 export async function probeClientBindings(options: {
 	readonly context: Map<unknown, unknown>;
 	readonly keyboard: KeyboardInputPolicy;
-	readonly initial: ClientKeyboardConfiguration;
+	readonly initial: ClientInputConfiguration;
 	readonly accept: (
-		input: ClientKeyboardConfiguration,
-	) => ClientKeyboardConfiguration;
+		input: ClientInputConfiguration,
+	) => ClientInputConfiguration;
 	readonly interact: () => void;
 	readonly submissions: () => number;
 }) {
@@ -146,7 +146,7 @@ export async function probeClientBindings(options: {
 			'button[aria-label="Examine"]',
 		)?.title ===
 			"Examine (Unbound)", "Conflict replacement must remove the old Examine alternative");
-		await click("Restore all default bindings");
+		await click("Restore default keyboard bindings");
 		require(target.querySelector<HTMLButtonElement>(
 			'button[aria-label="Examine"]',
 		)?.title ===

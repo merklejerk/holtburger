@@ -222,3 +222,63 @@ describe("PossessionCameraController", () => {
 		expect(controller.desiredLook().yawRadians).toBeCloseTo(-Math.PI + 0.1);
 	});
 });
+
+it("enters sticky rear-follow without translation and releases it on free orbit", async () => {
+	const recenter = { delayMs: 1000, durationMs: 200 };
+	const controller = new PossessionCameraController({
+		initialLook: { pitchRadians: -0.4, yawRadians: 0 },
+		orbit: ORBIT,
+		recenter,
+		transport: new RecordingTransport(),
+	});
+	await controller.start(TARGET, DISTANCE, PROJECTION);
+	controller.followRear(0);
+	await controller.synchronize(PROJECTION, recenter.durationMs / 2, 1);
+	expect(controller.desiredLook().yawRadians).toBeCloseTo(0.5);
+	await controller.synchronize(PROJECTION, recenter.durationMs, 1);
+	await controller.synchronize(PROJECTION, recenter.durationMs + 1, 1.5);
+	expect(controller.desiredLook()).toEqual({
+		pitchRadians: -0.4,
+		yawRadians: 1.5,
+	});
+	controller.orbit(10, 0, recenter.durationMs + 2);
+	const free = controller.desiredLook();
+	await controller.synchronize(PROJECTION, recenter.durationMs + 3, 2);
+	expect(controller.desiredLook()).toEqual(free);
+});
+
+it("adjusts pitch during rear-follow entry and while pinned without changing yaw ownership", async () => {
+	const recenter = { delayMs: 1000, durationMs: 200 };
+	const controller = new PossessionCameraController({
+		initialLook: { pitchRadians: 0, yawRadians: 0 },
+		orbit: ORBIT,
+		recenter,
+		transport: new RecordingTransport(),
+	});
+	await controller.start(TARGET, DISTANCE, PROJECTION);
+	controller.followRear(0);
+	await controller.synchronize(PROJECTION, recenter.durationMs / 2, 1);
+	controller.pitch(5);
+	expect(controller.desiredLook()).toEqual({
+		pitchRadians: 5 * ORBIT.pitchRadiansPerPixel,
+		yawRadians: 0.5,
+	});
+	await controller.synchronize(PROJECTION, recenter.durationMs, 1);
+	expect(controller.desiredLook().yawRadians).toBe(1);
+	controller.pitch(
+		(2 * ORBIT.maximumPitchRadians) / ORBIT.pitchRadiansPerPixel,
+	);
+	await controller.synchronize(PROJECTION, recenter.durationMs + 1, 1.5);
+	expect(controller.desiredLook()).toEqual({
+		pitchRadians: ORBIT.maximumPitchRadians,
+		yawRadians: 1.5,
+	});
+	controller.pitch(
+		(-3 * ORBIT.maximumPitchRadians) / ORBIT.pitchRadiansPerPixel,
+	);
+	await controller.synchronize(PROJECTION, recenter.durationMs + 2, 2);
+	expect(controller.desiredLook()).toEqual({
+		pitchRadians: -ORBIT.maximumPitchRadians,
+		yawRadians: 2,
+	});
+});

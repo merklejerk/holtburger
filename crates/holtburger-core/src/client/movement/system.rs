@@ -186,7 +186,8 @@ pub(crate) struct MovementSystem {
     authored_motion_rejections: Vec<holtburger_protocol::errors::WeenieError>,
     pending_authored_commands: Vec<AuthoredMotionIntent>,
     pending_arrival_pose: Option<holtburger_common::position::WorldPosition>,
-    pending_snap_facing: Option<f32>,
+    /// Ordered absolute correction and subsequent relative input for physical integration.
+    pending_facing: PendingFacing,
     /// Sole selected source of local locomotion; absence leaves authoritative playback in charge.
     active_movement: Option<ActiveMovement>,
     /// Lifetime of manual input, retained independently while server playback owns movement.
@@ -199,6 +200,15 @@ pub(crate) struct MovementSystem {
     movement_publication_required: bool,
     /// Shared successful-send baseline for movement and autonomous position packets.
     position_publication: PositionPublication,
+}
+
+/// Facing composition retains relative mouse input across ordinary held-drive acquisitions.
+#[derive(Debug, Default)]
+struct PendingFacing {
+    /// Optional absolute baseline supplied by an explicit facing command.
+    absolute_heading: Option<f32>,
+    /// Subsequent relative input composed with ordinary root motion in the physical solver.
+    delta_radians: f32,
 }
 
 /// Client-only ordering retained around the actor-neutral jump attempt.
@@ -275,7 +285,7 @@ impl MovementSystem {
             authored_motion_rejections: Vec::new(),
             pending_authored_commands: Vec::new(),
             pending_arrival_pose: None,
-            pending_snap_facing: None,
+            pending_facing: PendingFacing::default(),
             active_movement: None,
             manual_input: ManualInputLifetime::None,
             pending_manual_playback_stop: false,
@@ -316,7 +326,7 @@ impl MovementSystem {
         // Publish this manual takeover once with the newly admitted server-control sequence.
         self.movement_publication_required |= self.has_active_manual_drive();
         self.pending_arrival_pose = None;
-        self.pending_snap_facing = None;
+        self.pending_facing = PendingFacing::default();
         self.pending_authored_commands.clear();
     }
 
@@ -327,7 +337,7 @@ impl MovementSystem {
         self.pending_jump_attempt = None;
         self.pending_authored_commands.clear();
         self.pending_arrival_pose = None;
-        self.pending_snap_facing = None;
+        self.pending_facing = PendingFacing::default();
         self.pending_manual_playback_stop = false;
     }
 
@@ -352,7 +362,7 @@ impl MovementSystem {
         self.authored_motion_rejections.clear();
         self.pending_authored_commands.clear();
         self.pending_arrival_pose = None;
-        self.pending_snap_facing = None;
+        self.pending_facing = PendingFacing::default();
         self.active_movement = None;
         self.pending_manual_playback_stop = false;
         self.published_motion = None;
@@ -427,7 +437,7 @@ impl MovementSystem {
         };
         self.active_movement = Some(ActiveMovement::Manual);
         self.pending_arrival_pose = None;
-        self.pending_snap_facing = None;
+        self.pending_facing.absolute_heading = None;
         self.pending_manual_playback_stop = false;
     }
 
@@ -456,12 +466,24 @@ impl MovementSystem {
             PlayerDriveIntent::ClientDirected(command) => {
                 self.ingest_client_directed_command(command)
             }
+            PlayerDriveIntent::RotateFacing { delta_radians } => {
+                if self.has_server_controlled_motion() {
+                    self.character_motion.release_input();
+                    self.acquire_manual_control(None);
+                }
+                self.pending_facing.delta_radians = normalize_heading(
+                    self.pending_facing.delta_radians + normalize_heading(delta_radians),
+                );
+            }
             PlayerDriveIntent::SnapFacing { heading } => {
                 if self.has_server_controlled_motion() {
                     self.character_motion.release_input();
                     self.acquire_manual_control(None);
                 }
-                self.pending_snap_facing = Some(heading);
+                self.pending_facing = PendingFacing {
+                    absolute_heading: Some(heading),
+                    delta_radians: 0.0,
+                };
             }
             PlayerDriveIntent::Stop => {
                 self.manual_input = ManualInputLifetime::None;
@@ -472,7 +494,7 @@ impl MovementSystem {
                 self.character_motion.release_input();
                 self.pending_jump_attempt = None;
                 self.pending_arrival_pose = None;
-                self.pending_snap_facing = None;
+                self.pending_facing = PendingFacing::default();
                 self.active_movement = None;
                 self.pending_manual_playback_stop |= had_manual_drive;
             }
@@ -485,7 +507,7 @@ impl MovementSystem {
             self.character_motion.release_input();
             self.pending_jump_attempt = None;
             self.pending_arrival_pose = None;
-            self.pending_snap_facing = None;
+            self.pending_facing = PendingFacing::default();
             self.pending_authored_commands.clear();
             self.pending_manual_playback_stop = self.has_server_controlled_motion();
         } else if !matches!(
@@ -501,7 +523,10 @@ impl MovementSystem {
             }
             ClientDirectedCommand::AcquireFacing { heading } => {
                 self.active_movement = Some(ActiveMovement::ClientDirected(None));
-                self.pending_snap_facing = Some(heading);
+                self.pending_facing = PendingFacing {
+                    absolute_heading: Some(heading),
+                    delta_radians: 0.0,
+                };
             }
             ClientDirectedCommand::Settle { pose } => {
                 self.active_movement = Some(ActiveMovement::ClientDirected(None));
@@ -511,7 +536,7 @@ impl MovementSystem {
             ClientDirectedCommand::Release => {
                 self.active_movement = None;
                 self.pending_arrival_pose = None;
-                self.pending_snap_facing = None;
+                self.pending_facing = PendingFacing::default();
                 self.movement_publication_required |= self.published_motion.is_some();
             }
         }
@@ -634,7 +659,7 @@ impl MovementSystem {
                 .await?,
             );
         }
-        if let Some(heading) = self.pending_snap_facing.take() {
+        if let Some(heading) = self.pending_facing.absolute_heading.take() {
             events.extend(
                 self.execute_snap_facing(
                     now,
@@ -713,6 +738,7 @@ impl MovementSystem {
                             | PlayerDriveIntent::ManualPulse { .. }
                             | PlayerDriveIntent::Stop
                             | PlayerDriveIntent::SnapFacing { .. }
+                            | PlayerDriveIntent::RotateFacing { .. }
                     ) || acquires_client_directed_control;
                     if supersedes_local_command {
                         world.admit_entity_sticky_target(world.player.guid, None);
@@ -767,6 +793,7 @@ impl MovementSystem {
 
         let reset = matches!(input.event, CharacterMotionEvent::Reset);
         if reset {
+            self.pending_facing.delta_radians = 0.0;
             self.manual_input = ManualInputLifetime::None;
             let had_manual_drive = matches!(self.active_movement, Some(ActiveMovement::Manual));
             if had_manual_drive {
@@ -818,6 +845,11 @@ impl MovementSystem {
                 CharacterMotionReadiness::Unsupported
             }
         }
+    }
+
+    /// Consume additive manual yaw once, when the physical solver admits this tick.
+    pub(crate) fn take_relative_facing_delta(&mut self) -> f32 {
+        std::mem::take(&mut self.pending_facing.delta_radians)
     }
 
     pub(crate) fn take_pending_jump_attempt(&mut self) -> Option<PendingJumpAttempt> {
@@ -1307,7 +1339,20 @@ impl MovementSystem {
         now: Instant,
         world: &WorldState,
         session: &mut Session,
+        relative_facing_changed: bool,
     ) -> Result<bool> {
+        if relative_facing_changed {
+            // ACE has no held turn command for relative yaw. Send its accepted facing now,
+            // rather than waiting for positional travel or the ordinary heartbeat.
+            return self
+                .send_autonomous_position_sync(
+                    now,
+                    world,
+                    session,
+                    MovementPacketMetadata::default(),
+                )
+                .await;
+        }
         let Some((pulse, sample)) =
             build_autonomous_position(world, MovementPacketMetadata::default())
         else {

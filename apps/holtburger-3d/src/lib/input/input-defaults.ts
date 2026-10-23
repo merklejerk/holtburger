@@ -299,12 +299,6 @@ export const INPUT_DEFAULTS = {
 	},
 	/** Viewport gesture activation buttons. */
 	pointer: {
-		/** Client click selection and drag orbit share one gesture. */
-		clientInteract: [0],
-		/** Select and examine a viewport entity. */
-		clientExamine: [2],
-		/** Activate the currently aimed precise jump. */
-		preciseJumpActivate: [0],
 		/** Drag to orbit the possessed Explorer character. */
 		possessionOrbit: [0],
 		/** Drag to rotate an Explorer fly camera. */

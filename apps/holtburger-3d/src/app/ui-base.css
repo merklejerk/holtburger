@@ -710,7 +710,7 @@
 	}
 	.ui-theme .ui-checkbox {
 		display: flex;
-		align-items: center;
+		align-items: baseline;
 		gap: var(--ui-checkbox-label-gap);
 	}
 	.ui-theme

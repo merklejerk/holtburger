@@ -97,6 +97,12 @@ pub enum ClientDriveRequest {
     Acquire { drive: ClientDriveSnapshot },
     /// Reconcile held controls without taking movement ownership.
     Synchronize { drive: ClientDriveSnapshot },
+    /// Add relative yaw without replacing held movement or acquiring another controller.
+    RotateFacing {
+        /// Signed AC yaw displacement accumulated by the frontend since its last submission.
+        #[serde(rename = "deltaRadians")]
+        delta_radians: f32,
+    },
     /// Release manual movement without disturbing a replacement owner.
     Release,
 }
@@ -106,6 +112,9 @@ impl ClientDriveRequest {
         match self {
             Self::Acquire { drive } => PlayerDriveIntent::ManualHeld(drive.into_drive()),
             Self::Synchronize { drive } => PlayerDriveIntent::SynchronizeHeld(drive.into_drive()),
+            Self::RotateFacing { delta_radians } => {
+                PlayerDriveIntent::RotateFacing { delta_radians }
+            }
             Self::Release => PlayerDriveIntent::ReleaseManual,
         }
     }
@@ -820,6 +829,20 @@ mod tests {
             crate::client_projection::ClientExitCauseWire::RuntimeFailure
         ));
         assert!(forwarded.recv().await.is_none());
+    }
+
+    #[test]
+    fn relative_facing_request_preserves_signed_displacement() {
+        let request: ClientDriveRequest = serde_json::from_value(serde_json::json!({
+            "kind": "rotate-facing", "deltaRadians": -0.25
+        }))
+        .expect("relative facing request should decode");
+        assert_eq!(
+            request.into_intent(),
+            PlayerDriveIntent::RotateFacing {
+                delta_radians: -0.25
+            }
+        );
     }
 
     #[test]

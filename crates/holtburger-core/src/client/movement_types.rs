@@ -221,6 +221,11 @@ pub enum PlayerDriveIntent {
     },
     /// Scoped lifecycle of client-generated steering.
     ClientDirected(ClientDirectedCommand),
+    /// Add a signed yaw displacement at the movement authority's current facing.
+    RotateFacing {
+        /// Accumulated radians; positive follows increasing clockwise AC heading.
+        delta_radians: f32,
+    },
     SnapFacing {
         heading: f32,
     },
@@ -232,7 +237,7 @@ impl PlayerDriveIntent {
     pub fn interrupts_combat(self) -> bool {
         match self {
             Self::ManualHeld(state) | Self::ManualPulse { state, .. } => !state.is_stationary(),
-            Self::SnapFacing { .. } => true,
+            Self::SnapFacing { .. } | Self::RotateFacing { .. } => true,
             Self::SynchronizeHeld(_)
             | Self::ReleaseManual
             | Self::ClientDirected(_)

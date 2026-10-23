@@ -7,7 +7,7 @@ import { CLIENT_TUNING } from "../../client/client-tuning";
 import { CLIENT_UI_DEFAULTS } from "../../client/client-ui-defaults";
 import { INVENTORY_CURRENCIES } from "../../client/client-inventory-currencies";
 import { EQUIPMENT_SLOTS } from "../../client/client-inventory-equipment";
-import type { ClientKeyboardConfiguration } from "../../lib/input/input-contract";
+import type { ClientInputConfiguration } from "../../lib/input/input-contract";
 import { formatInputBindings } from "../../lib/input/input-presentation";
 
 /** Browser-only fixture record; wire delivery still passes through the real session decoder. */
@@ -57,10 +57,10 @@ function item(
 /** A repeatable real-session inventory scenario without a content server or runtime assets. */
 export async function probeClientInventory(options: {
 	/** Accepted keyboard settings allow tooltip remapping to use the production update path. */
-	readonly readInput: () => ClientKeyboardConfiguration;
+	readonly readInput: () => ClientInputConfiguration;
 	readonly changeInput: (
-		input: ClientKeyboardConfiguration,
-	) => ClientKeyboardConfiguration;
+		input: ClientInputConfiguration,
+	) => ClientInputConfiguration;
 	readonly emit: (event: string, payload: unknown) => void;
 	readonly selection: ClientEntitySelection;
 	/** Persistent inventory maintenance, independent of producer event count. */

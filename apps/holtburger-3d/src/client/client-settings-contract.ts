@@ -18,7 +18,7 @@ import {
 	CLIENT_TEXT_SCALE,
 	CLIENT_ICON_SCALE,
 } from "./client-settings-values.js";
-import { clientKeyboardSettingsSchema } from "./client-input-settings.js";
+import { clientInputSettingsSchema } from "./client-input-settings.js";
 import {
 	clientClockFormatSchema,
 	clientEnvironmentOverridesSchema,
@@ -218,7 +218,7 @@ export const clientUserSettingsSchema = z
 		ui: clientUiSettingsSchema,
 		clockFormat: clientClockFormatSchema,
 		environmentOverrides: clientEnvironmentOverridesSchema,
-		input: clientKeyboardSettingsSchema,
+		input: clientInputSettingsSchema,
 		inspection: z
 			.object({
 				previewHeight: finiteNumber

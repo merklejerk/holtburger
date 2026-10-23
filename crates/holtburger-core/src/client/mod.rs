@@ -5071,6 +5071,200 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn mouse_turning_preserves_player_path_and_boom_reach() {
+        for drive in [
+            movement_types::CharacterDrive::default(),
+            movement_types::CharacterDrive::builder()
+                .run()
+                .forward()
+                .build(),
+            movement_types::CharacterDrive::builder()
+                .run()
+                .turn_right()
+                .build(),
+        ] {
+            let (mut client, collision, _) = floor_contact_publication();
+            let guid = client.world.player.guid;
+            const MOTION_TABLE_ID: u32 = 0x0900_0091;
+            client
+                .world
+                .set_motion_sequences(jump_presentation_motion_catalog(MOTION_TABLE_ID));
+            client
+                .world
+                .player_entity_mut()
+                .unwrap()
+                .set_did_prop(PropertyDataId::MotionTable, Guid(MOTION_TABLE_ID));
+            seed_test_self_movement_capabilities(&mut client);
+            seed_test_jump_authority(&mut client);
+            let body_id = SpatialBodyId::LocalPlayer(guid);
+            client
+                .world
+                .scene
+                .set_dynamic_physical_body(
+                    body_id,
+                    Some(stable_dynamic_body_definition()),
+                    PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+            let mut body = client.world.scene.body(body_id).unwrap().clone();
+            body.retained = Default::default();
+            client.world.scene.update_body(body).unwrap();
+            let dt = Duration::from_millis(PHYSICS_TICK_MS);
+            let mut now = Instant::now();
+            // Settle the grounded actor before measuring camera continuity.
+            for _ in 0..Duration::from_secs(1).as_nanos().div_ceil(dt.as_nanos()) {
+                simulation::tick(
+                    now,
+                    dt,
+                    &mut client.world,
+                    &mut client.movement,
+                    Some(&collision),
+                )
+                .unwrap();
+                now += dt;
+            }
+            assert_eq!(
+                client.world.scene.body(body_id).unwrap().contact,
+                holtburger_world::ContactState::Grounded
+            );
+            let mut camera = camera::ClientCameraRuntime::new().unwrap();
+            let request = ClientCameraStartRequest {
+                player_guid: guid,
+                entity_generation: u64::from(
+                    client.world.player_entity().unwrap().instance_sequence(),
+                ),
+                initial_reach: 4.5,
+                minimum_reach: 1.2,
+                maximum_reach: 8.0,
+                input_sequence: 0,
+                view_direction: [0.0, 0.0, 1.0],
+                cumulative_zoom_displacement: 0.0,
+                projection_revision: 1,
+                clearance_radius: 0.2,
+            };
+            let identity = camera.start(request, &client.world).unwrap().identity;
+            let input =
+                camera::ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+            for _ in 0..100 {
+                camera.advance(&input, dt).unwrap().unwrap();
+            }
+            if !drive.is_stationary() {
+                client.movement.enqueue_drive_intent(
+                    movement_types::PlayerDriveIntent::ManualHeld(drive),
+                    now,
+                );
+            }
+            for sequence in 1..=30 {
+                let previous = client.world.local_player_runtime_pose().unwrap();
+                client.movement.enqueue_drive_intent(
+                    movement_types::PlayerDriveIntent::RotateFacing { delta_radians: 0.1 },
+                    now,
+                );
+                let prepared = client.movement.prepare_tick(now, &mut client.world);
+                client
+                    .movement
+                    .advance_tick(prepared, now, &mut client.world, &mut client.session)
+                    .await
+                    .unwrap();
+                // Match live ordering: movement commands precede the dynamic publication baseline.
+                let before = client.capture_dynamic_entity_tick_baseline();
+                let tick = simulation::tick(
+                    now,
+                    dt,
+                    &mut client.world,
+                    &mut client.movement,
+                    Some(&collision),
+                )
+                .unwrap();
+                assert!(tick.relative_facing_changed);
+                assert!(
+                    client
+                        .movement
+                        .publish_position_after_simulation(
+                            now,
+                            &client.world,
+                            &mut client.session,
+                            tick.relative_facing_changed
+                        )
+                        .await
+                        .unwrap()
+                );
+                assert!(
+                    !client
+                        .movement
+                        .publish_position_after_simulation(
+                            now,
+                            &client.world,
+                            &mut client.session,
+                            false
+                        )
+                        .await
+                        .unwrap()
+                );
+                let batch = client
+                    .dynamic_entity_tick_batch(
+                        before,
+                        || DynamicEntityHostTime::new(sequence as f64).unwrap(),
+                        dt.as_secs_f64() * 1000.0,
+                        &tick.body_motions,
+                    )
+                    .unwrap();
+                let pose = client.world.local_player_runtime_pose().unwrap();
+                assert_ne!(pose.rotation, previous.rotation);
+                let input = camera::ClientCameraSceneInput::capture(
+                    &client.world,
+                    Some(&collision),
+                    batch.as_ref(),
+                );
+                let c = std::f32::consts::FRAC_1_SQRT_2;
+                let direction = pose.rotation.rotate_vector(Vector3::new(0.0, -c, c));
+                camera
+                    .set_intent(ClientCameraIntentRequest {
+                        camera_generation: identity.camera_generation,
+                        player_guid: guid,
+                        entity_generation: identity.entity_generation,
+                        input_sequence: sequence,
+                        view_direction: [direction.x, direction.y, direction.z],
+                        cumulative_zoom_displacement: 0.0,
+                    })
+                    .unwrap();
+                let result = camera.advance(&input, dt).unwrap().unwrap();
+                let ClientCameraTick::Advanced { rendered_reach, .. } = result else {
+                    panic!("continuous mouse turning reset the boom: {result:?}");
+                };
+                assert!(
+                    rendered_reach >= request.minimum_reach,
+                    "mouse turning collapsed the boom: {rendered_reach}"
+                );
+                let batch = batch.expect("physical turning must publish its accepted path");
+                let advance = batch
+                    .advances
+                    .iter()
+                    .find(|advance| advance.entity.identity.guid == guid)
+                    .unwrap();
+                assert_eq!(
+                    advance.kind,
+                    crate::DynamicEntityPlacementAdvanceKind::Integrated
+                );
+                assert_eq!(advance.path.initial.pose, previous);
+                let end = advance.path.legs.last().unwrap().end.pose;
+                assert_eq!(end.landblock_id, pose.landblock_id);
+                assert_eq!(end.coords, pose.coords);
+                // Path interpolation normalizes endpoint quaternions; compare orientation,
+                // not their f32 component representation.
+                let forward = Vector3::new(0.0, 1.0, 0.0);
+                assert!(
+                    (end.rotation.rotate_vector(forward) - pose.rotation.rotate_vector(forward))
+                        .length()
+                        < 1e-5
+                );
+                now += dt;
+            }
+        }
+    }
+
     /// Runs real free-body integration into a floor, producing a bent accepted route.
     pub(super) fn floor_contact_publication() -> (
         ClientRuntime,

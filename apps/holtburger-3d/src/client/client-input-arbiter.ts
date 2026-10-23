@@ -18,6 +18,9 @@ type OrdinaryCharacterInput = Pick<
 	| "releaseHeldActions"
 >;
 
+/** Physical forward holds that must release independently. */
+export type ClientForwardSource = "keyboard" | "middle-button" | "both-buttons";
+
 /** Owns client-local auto-run and the handoff between ordinary and precise-jump input. */
 export class ClientInputArbiter {
 	readonly #ordinary: OrdinaryCharacterInput;
@@ -26,6 +29,7 @@ export class ClientInputArbiter {
 	readonly #onCancel: () => void;
 	readonly #onAutoRunChanged: (enabled: boolean) => void;
 	readonly #held = new Set<CharacterAction>();
+	readonly #forwardSources = new Set<ClientForwardSource>();
 	/** Power presses have their own key lifetimes and never become movement on exit. */
 	readonly #powerHeld = new Set<PreciseJumpAction>();
 	readonly #powerInput: InputContext<PreciseJumpAction>;
@@ -100,7 +104,22 @@ export class ClientInputArbiter {
 		return this.#retireAutoRun(false);
 	}
 
+	/** Merge physical forward holds before semantic axis arbitration. */
+	applyForward(source: ClientForwardSource, down: boolean): void {
+		if (this.#precise && down) return;
+		const wasHeld = this.#forwardSources.size !== 0;
+		if (down) this.#forwardSources.add(source);
+		else this.#forwardSources.delete(source);
+		const held = this.#forwardSources.size !== 0;
+		if (wasHeld !== held) this.#applyAction("forward", held);
+	}
+
 	applyAction(action: CharacterAction, down: boolean): void {
+		if (action === "forward") this.applyForward("keyboard", down);
+		else this.#applyAction(action, down);
+	}
+
+	#applyAction(action: CharacterAction, down: boolean): void {
 		if (this.#precise && (action === "forward" || action === "backward")) {
 			this.#held.delete(action);
 			return;
@@ -188,6 +207,7 @@ export class ClientInputArbiter {
 		const cancel = this.#precise;
 		this.#precise = false;
 		this.#held.clear();
+		this.#forwardSources.clear();
 		this.#powerHeld.clear();
 		this.#powerInput.reset();
 		this.#suppressJumpUntilRelease = false;

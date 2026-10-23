@@ -113,14 +113,8 @@ export const CLIENT_SHORTCUT_ACTIONS = [
 ] as const;
 export type ClientShortcut = (typeof CLIENT_SHORTCUT_ACTIONS)[number];
 
-/** Viewport gestures with configurable activation buttons. */
-type ViewportPointerAction =
-	| "clientInteract"
-	| "clientExamine"
-	| "preciseJumpActivate"
-	| "possessionOrbit"
-	| "flyRotate"
-	| "flyPan";
+/** Explorer camera gestures with configurable activation buttons. */
+type ViewportPointerAction = "possessionOrbit" | "flyRotate" | "flyPan";
 
 /** Complete resolved input policy, independent of the selected defaults or their consumers. */
 export interface InputConfiguration {
@@ -147,11 +141,11 @@ export interface InputConfiguration {
 		/** Top-to-bottom attack-height choices interpreted in the same combat scope. */
 		readonly heights: CombatHeightInputBindings;
 	};
-	/** Browser pointer buttons assigned to each viewport gesture. */
+	/** Browser pointer buttons assigned to Explorer camera gestures. */
 	readonly pointer: Readonly<Record<ViewportPointerAction, readonly number[]>>;
 }
 
-/** User-scoped keyboard groups; Explorer-only fly and fixed pointer policy stay separate. */
+/** User-scoped keyboard groups; Explorer-only camera policy stays separate. */
 export type ClientKeyboardConfiguration = Pick<
 	InputConfiguration,
 	| "character"
@@ -161,6 +155,22 @@ export type ClientKeyboardConfiguration = Pick<
 	| "combatBar"
 	| "actionBars"
 >;
+
+/** Client-only held mouse gestures; keyboard maps remain independently addressable. */
+export interface ClientMouseConfiguration {
+	/** Hold the right button to steer character facing with a rear-follow camera. */
+	readonly rightButtonSteering: boolean;
+	/** Hold the middle button to supply forward movement. */
+	readonly middleButtonForward: boolean;
+	/** Hold left and right together to supply forward movement. */
+	readonly bothButtonsForward: boolean;
+}
+
+/** Persisted client input policy, including keyboard bindings and fixed mouse gestures. */
+export type ClientInputConfiguration = ClientKeyboardConfiguration & {
+	/** Independently enabled client mouse movement gestures. */
+	readonly mouse: ClientMouseConfiguration;
+};
 
 /** Zero-based positions of the ten numbered bars and cells. */
 export type InputDigitIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;

@@ -352,3 +352,46 @@ describe("ClientInputArbiter", () => {
 		expect(arbiter.preciseActive).toBe(false);
 	});
 });
+
+it("merges keyboard and mouse forward holds through gait, opposing axes, and precise mode", () => {
+	const ordinary = new CharacterInputController({
+		fullChargeDurationMs: 1000,
+		now: () => 0,
+		onDrive() {},
+		onEdge() {},
+	});
+	const arbiter = new ClientInputArbiter({
+		ordinary,
+		powerBindings: INPUT_DEFAULTS.preciseJump,
+		onEnter() {},
+		onActivate() {},
+		onCancel() {},
+		onAutoRunChanged() {},
+	});
+	arbiter.toggleAutoRun();
+	arbiter.applyForward("middle-button", true);
+	arbiter.applyAction("forward", true);
+	arbiter.applyForward("both-buttons", true);
+	arbiter.applyAction("forward", false);
+	arbiter.applyForward("middle-button", false);
+	expect(ordinary.drive().longitudinal).toBe("forward");
+	arbiter.applyAction("walk", true);
+	expect(ordinary.drive().gait).toBe("walk");
+	arbiter.applyAction("backward", true);
+	expect(ordinary.drive().longitudinal).toBe("backward");
+	arbiter.applyAction("backward", false);
+	expect(ordinary.drive().longitudinal).toBe("forward");
+	arbiter.applyForward("both-buttons", false);
+	expect(ordinary.drive().longitudinal).toBeNull(); // Manual forward retired autorun.
+	arbiter.enterPrecise();
+	arbiter.applyForward("both-buttons", true);
+	arbiter.deactivate();
+	expect(ordinary.drive().longitudinal).toBeNull();
+	arbiter.applyForward("both-buttons", false);
+	arbiter.applyForward("both-buttons", true);
+	expect(ordinary.drive().longitudinal).toBe("forward");
+	arbiter.releaseHeldActions();
+	expect(ordinary.drive().longitudinal).toBeNull();
+	arbiter.applyForward("both-buttons", false);
+	expect(ordinary.drive().longitudinal).toBeNull();
+});

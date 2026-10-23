@@ -1528,8 +1528,18 @@ export async function probeClientHud(
 			panel = document.querySelector('.hud-window[aria-label="Settings"]');
 			panel.querySelector('#settings-tab-input').click();
 			await frame();
-			const movement = panel.querySelector('#settings-section-input .binding-group');
+			const movement = [...panel.querySelectorAll('#settings-section-input .binding-group')].find((group) => group.querySelector('summary')?.textContent === 'Movement');
 			if (!movement || !movement.open) throw new Error('Input movement group did not open');
+			const mouse = [...panel.querySelectorAll('#settings-section-input .binding-group')].find((group) => group.querySelector('summary')?.textContent === 'Mouse');
+			const mouseSwitches = [...mouse.querySelectorAll('input[type="checkbox"]')];
+			if (mouseSwitches.length !== 3) throw new Error('Mouse movement switches are missing');
+			for (const [index, key] of ['rightButtonSteering', 'middleButtonForward', 'bothButtonsForward'].entries()) {
+				const control = mouseSwitches[index]; const before = control.checked;
+				control.click(); await frame();
+				if (globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.bindingSettings.read().mouse[key] !== !before) throw new Error('Mouse switch did not update accepted settings: ' + key);
+				control.click(); await frame();
+				if (globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.bindingSettings.read().mouse[key] !== before) throw new Error('Mouse switch did not restore accepted settings: ' + key);
+			}
 			const spellGroups = [...panel.querySelectorAll('#settings-section-input .binding-group')].filter((group) => group.querySelector('summary')?.textContent === 'Spells');
 			const spellLabels = [...(spellGroups[0]?.querySelectorAll('.binding-label') ?? [])].map((label) => label.textContent);
 			if (spellGroups.length !== 1 || spellLabels.length !== 21 || spellLabels.slice(0, 10).some((label) => !label.startsWith('Select spell tab')) || spellLabels[10] !== 'Cast wielded caster spell' || spellLabels.slice(11).some((label) => !label.startsWith('Cast spell slot'))) throw new Error('Spell binding rows are out of order');

@@ -2726,6 +2726,25 @@ export async function probeClientSettingsTabs(
 				if (destination.getAttribute('aria-selected') !== 'true' || document.activeElement !== destination)
 					throw new Error('Settings tabs failed selection/focus for ' + key);
 			}
+			window.querySelector('#settings-tab-ui').click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			const nameplateToggle = () => [...window.querySelectorAll('#settings-section-ui label')]
+				.find((label) => label.textContent.trim() === 'Always show entity nameplates')
+				?.querySelector('input[type="checkbox"]');
+			const initialNameplates = nameplateToggle()?.checked;
+			if (initialNameplates === undefined) throw new Error('UI nameplate toggle is missing');
+			nameplateToggle().click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			window.querySelector('#settings-tab-graphics').click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			window.querySelector('#settings-tab-ui').click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			if (nameplateToggle()?.checked !== !initialNameplates)
+				throw new Error('Nameplate toggle did not retain its accepted value');
+			nameplateToggle().click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			if (nameplateToggle()?.checked !== initialNameplates)
+				throw new Error('Nameplate toggle did not restore its initial value');
 			window.querySelector('#settings-tab-graphics').click();
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 			graphicsTab.focus();

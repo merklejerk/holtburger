@@ -681,15 +681,7 @@
 			);
 		if (accepted.verticalFovDegrees !== previous.verticalFovDegrees)
 			presentationSession?.setFieldOfView(accepted.verticalFovDegrees);
-		if (
-			accepted.ambientOcclusionEnabled !== previous.ambientOcclusionEnabled ||
-			accepted.entityShadowMode !== previous.entityShadowMode ||
-			accepted.textureFiltering !== previous.textureFiltering ||
-			accepted.renderScale !== previous.renderScale ||
-			accepted.weatherEnabled !== previous.weatherEnabled
-		) {
-			applyFrameGraphics(accepted);
-		}
+		applyFrameGraphics(accepted);
 	}
 	let inputController: CharacterInputController | null = null;
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();

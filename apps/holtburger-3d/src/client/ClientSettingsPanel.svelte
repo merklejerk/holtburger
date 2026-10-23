@@ -518,6 +518,22 @@
 				class="settings-section"
 			>
 				<details class="ui-disclosure ui-disclosure-section" open>
+					<summary>Display</summary>
+					<div class="settings-section ui-disclosure-body">
+						<label class="ui-checkbox"
+							><input
+								type="checkbox"
+								checked={graphics.alwaysShowEntityNameplates}
+								onchange={(event) =>
+									onGraphicsChange({
+										...graphics,
+										alwaysShowEntityNameplates: event.currentTarget.checked,
+									})}
+							/> Always show entity nameplates</label
+						>
+					</div>
+				</details>
+				<details class="ui-disclosure ui-disclosure-section" open>
 					<summary>Time and weather</summary>
 					<div class="settings-section ui-disclosure-body">
 						<ClientEnvironmentSettings

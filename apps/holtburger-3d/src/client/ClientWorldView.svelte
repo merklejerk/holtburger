@@ -34,7 +34,7 @@
 	import type { ClientSpellBarState } from "./client-spell-bar-state";
 	import {
 		CLIENT_PANEL_SHORTCUT_ACTIONS,
-		type ClientKeyboardConfiguration,
+		type ClientInputConfiguration,
 		type InputDigitIndex,
 	} from "../lib/input/input-contract";
 	import { inputDisplayPlatform } from "../lib/input/input-presentation";
@@ -148,12 +148,12 @@
 	import type { ClientChatFilterTag } from "./client-chat-policy";
 	import type { ClientPresentationDiagnostics } from "./client-presentation-session";
 	import type { ClientObjectPreviewService } from "./client-object-preview-service";
+	import type { ClientViewportCameraController } from "./client-viewport-pointer-gesture";
+
 	import {
-		advanceClientViewportPointerGesture,
-		beginClientViewportPointerGesture,
-		type ClientViewportCameraController,
-		type ClientViewportPointerGesture,
-	} from "./client-viewport-pointer-gesture";
+		ClientViewportMouseController,
+		type ClientMouseMovementInput,
+	} from "./client-viewport-mouse-controller";
 
 	interface Props {
 		/** Set the current local destination without submitting chat. */
@@ -203,11 +203,13 @@
 		readonly onEnvironmentOverridesChange: (
 			overrides: ClientEnvironmentOverrides,
 		) => void;
-		readonly input: ClientKeyboardConfiguration;
+		readonly input: ClientInputConfiguration;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		readonly onGraphicsChange: (graphics: ClientGraphicsSettings) => void;
 		readonly onUiChange: (ui: ClientUiSettings) => void;
-		readonly onInputChange: (input: ClientKeyboardConfiguration) => void;
+		/** App-owned semantic mouse movement dispatch. */
+		readonly mouseMovement: ClientMouseMovementInput;
+		readonly onInputChange: (input: ClientInputConfiguration) => void;
 		readonly onInspectionPreviewHeightChange: (height: number) => void;
 		/** App-owned layout mode also gates gameplay shortcuts. */
 		readonly hudMode: "runtime" | "layout";
@@ -412,6 +414,7 @@
 		onGraphicsChange,
 		onUiChange,
 		onInputChange,
+		mouseMovement,
 		hudMode,
 		onHudModeChange,
 		spellBar,
@@ -647,7 +650,6 @@
 		spellDrag?.cancel();
 	});
 	onMount(() => keyboard.mount(document));
-	onMount(() => inputGate.attach(cancelViewportGesture));
 	onMount(() =>
 		inputGate.attach(() => {
 			spellDrag?.cancel();
@@ -734,11 +736,7 @@
 		viewDiameters: minimapViewDiameters,
 	});
 	let canvasElement = $state<HTMLCanvasElement | null>(null);
-	// Click intent is captured with the gesture; dragging always belongs to camera orbit.
-	let viewportGesture: {
-		readonly motion: ClientViewportPointerGesture;
-		readonly click: "select" | "jump";
-	} | null = null;
+	let viewportMouse: ClientViewportMouseController | null = null;
 	let pointerX = 0;
 	let pointerY = 0;
 	let hasPointerPosition = false;
@@ -808,9 +806,14 @@
 	});
 
 	$effect(() => {
+		input.mouse;
+		untrack(cancelMouseInput);
+	});
+
+	$effect(() => {
 		const precise = preciseJumpActive;
 		untrack(() => {
-			cancelViewportGesture();
+			cancelMouseInput();
 			if (precise && inputGate.allowed && hasPointerPosition)
 				onPreciseJumpAim(pointerX, pointerY);
 		});
@@ -818,7 +821,7 @@
 
 	$effect(() => {
 		if (cameraController !== null) return;
-		untrack(cancelViewportGesture);
+		untrack(cancelMouseInput);
 	});
 
 	$effect(() => {
@@ -829,7 +832,12 @@
 		if (canvasElement === null) return;
 		const handle = window.setInterval(() => {
 			onMaintainEntitySelection();
-			if (!inputGate.allowed || !pointerInsideCanvas || !hasPointerPosition) {
+			if (
+				!inputGate.allowed ||
+				!pointerInsideCanvas ||
+				!hasPointerPosition ||
+				viewportMouse?.active
+			) {
 				onViewportHoverClear();
 				return;
 			}
@@ -872,71 +880,40 @@
 		onHudPlacementChange(surface, placement);
 	}
 
-	function handlePointerDown(event: PointerEvent): void {
-		if (!inputGate.allowed) return;
-		if (clientInput.pointer("clientExamine", event)) {
-			event.preventDefault();
-			onViewportExamine(event.clientX, event.clientY);
-			return;
-		}
-		const jump =
-			preciseJumpActive && clientInput.pointer("preciseJumpActivate", event);
-		if (jump && cameraController === null) {
-			event.preventDefault();
-			onPreciseJumpActivate();
-			return;
-		}
-		if (
-			cameraController === null ||
-			(!jump && !clientInput.pointer("clientInteract", event)) ||
-			viewportGesture !== null
-		)
-			return;
-		event.preventDefault();
-		viewportGesture = {
-			motion: beginClientViewportPointerGesture(
-				event.pointerId,
-				event.clientX,
-				event.clientY,
-			),
-			click: jump ? "jump" : "select",
+	$effect(() => {
+		const canvas = canvasElement;
+		if (canvas === null) return;
+		const owner = new ClientViewportMouseController({
+			canvas,
+			gate: inputGate,
+			settings: () => input.mouse,
+			camera: () => cameraController,
+			precise: () => preciseJumpActive,
+			yawRadiansPerPixel: CLIENT_TUNING.camera.orbit.yawRadiansPerPixel,
+			movement: mouseMovement,
+			onSelect: onViewportSelect,
+			onExamine: onViewportExamine,
+			onJump: onPreciseJumpActivate,
+			onPosition: (x, y, aiming) => {
+				pointerX = x;
+				pointerY = y;
+				hasPointerPosition = true;
+				if (preciseJumpActive && aiming) onPreciseJumpAim(x, y);
+			},
+		});
+		viewportMouse = owner;
+		return () => {
+			owner.destroy();
+			if (viewportMouse === owner) viewportMouse = null;
 		};
-		pointerX = event.clientX;
-		pointerY = event.clientY;
-		canvasElement?.setPointerCapture(event.pointerId);
-	}
+	});
 
 	function handlePointerMove(event: PointerEvent): void {
-		if (!inputGate.allowed) return;
-		const gesture = viewportGesture;
-		if (
-			gesture?.motion.pointerId !== event.pointerId ||
-			cameraController === null
-		) {
-			pointerX = event.clientX;
-			pointerY = event.clientY;
-			hasPointerPosition = true;
-			if (preciseJumpActive) onPreciseJumpAim(event.clientX, event.clientY);
-			return;
-		}
-		const advanced = advanceClientViewportPointerGesture(
-			gesture.motion,
-			event.clientX,
-			event.clientY,
-		);
-		viewportGesture = { motion: advanced.gesture, click: gesture.click };
+		if (!inputGate.allowed || viewportMouse?.active) return;
 		pointerX = event.clientX;
 		pointerY = event.clientY;
 		hasPointerPosition = true;
-		if (advanced.orbitDelta !== null)
-			cameraController.orbit(
-				advanced.orbitDelta.x,
-				-advanced.orbitDelta.y,
-				performance.now(),
-			);
-		// Keep the displayed choice stable during click jitter; orbit drags still refresh aim.
-		if (preciseJumpActive && advanced.gesture.dragging)
-			onPreciseJumpAim(event.clientX, event.clientY);
+		if (preciseJumpActive) onPreciseJumpAim(event.clientX, event.clientY);
 	}
 
 	function handlePointerEnter(event: PointerEvent): void {
@@ -951,30 +928,9 @@
 		onViewportHoverClear();
 	}
 
-	function completeViewportGesture(event: PointerEvent): void {
-		const gesture = viewportGesture;
-		if (gesture?.motion.pointerId !== event.pointerId) return;
-		handlePointerMove(event);
-		const wasClick = viewportGesture?.motion.dragging === false;
-		viewportGesture = null;
-		if (canvasElement?.hasPointerCapture(event.pointerId))
-			canvasElement.releasePointerCapture(event.pointerId);
-		if (wasClick) {
-			if (gesture.click === "jump") onPreciseJumpActivate();
-			else onViewportSelect(event.clientX, event.clientY);
-		}
-	}
-
-	function cancelViewportGesture(): void {
-		const gesture = viewportGesture;
-		viewportGesture = null;
-		if (gesture && canvasElement?.hasPointerCapture(gesture.motion.pointerId))
-			canvasElement.releasePointerCapture(gesture.motion.pointerId);
-	}
-
-	function cancelViewportPointer(event: PointerEvent): void {
-		if (viewportGesture?.motion.pointerId === event.pointerId)
-			cancelViewportGesture();
+	/** Cancel pointer ownership on keyboard/editor handoff or settings replacement. */
+	export function cancelMouseInput(): void {
+		viewportMouse?.cancel();
 	}
 
 	function handleWheel(event: WheelEvent): void {
@@ -1034,13 +990,9 @@
 		aria-label="Game world"
 		tabindex="-1"
 		data-game-viewport
-		onpointerdown={handlePointerDown}
 		onpointerenter={handlePointerEnter}
 		onpointerleave={handlePointerLeave}
 		onpointermove={handlePointerMove}
-		onpointerup={completeViewportGesture}
-		onpointercancel={cancelViewportPointer}
-		onlostpointercapture={cancelViewportPointer}
 		onwheel={handleWheel}
 	></canvas>
 	{#key characterGuid}

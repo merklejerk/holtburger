@@ -772,7 +772,7 @@ export class ClientLifecycleSession {
 		});
 	}
 
-	/** Replace the held local drive; core owns cadence, sequence numbers, and movement limits. */
+	/** Submit held drive or relative facing; core owns cadence, sequence numbers, and movement limits. */
 	async replaceDrive(request: ClientDriveRequest): Promise<void> {
 		const validated = decodeClientDriveRequest(request);
 		await this.#transport.invoke("replace_client_drive", {

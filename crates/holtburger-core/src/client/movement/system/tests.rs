@@ -1874,13 +1874,13 @@ async fn position_publication_uses_accepted_pose_and_survives_stationary_ticks()
     let now = Instant::now();
     assert!(
         movement
-            .publish_position_after_simulation(now, &world, &mut session)
+            .publish_position_after_simulation(now, &world, &mut session, false)
             .await
             .unwrap()
     );
     assert!(
         !movement
-            .publish_position_after_simulation(now, &world, &mut session)
+            .publish_position_after_simulation(now, &world, &mut session, false)
             .await
             .unwrap()
     );
@@ -1889,14 +1889,14 @@ async fn position_publication_uses_accepted_pose_and_survives_stationary_ticks()
     world.set_local_player_runtime_pose(accepted);
     assert!(
         movement
-            .publish_position_after_simulation(now, &world, &mut session)
+            .publish_position_after_simulation(now, &world, &mut session, false)
             .await
             .unwrap()
     );
     let deadline = now + super::super::position_publication::POSITION_HEARTBEAT_INTERVAL;
     assert!(
         movement
-            .publish_position_after_simulation(deadline, &world, &mut session)
+            .publish_position_after_simulation(deadline, &world, &mut session, false)
             .await
             .unwrap()
     );
@@ -1904,7 +1904,7 @@ async fn position_publication_uses_accepted_pose_and_survives_stationary_ticks()
     movement.retire_movement_epoch();
     assert!(
         movement
-            .publish_position_after_simulation(deadline, &world, &mut session)
+            .publish_position_after_simulation(deadline, &world, &mut session, false)
             .await
             .unwrap()
     );
@@ -1918,7 +1918,7 @@ async fn position_publication_requires_a_valid_player_and_resets_after_absence()
     let now = Instant::now();
     assert!(
         !movement
-            .publish_position_after_simulation(now, &world, &mut session)
+            .publish_position_after_simulation(now, &world, &mut session, false)
             .await
             .unwrap()
     );
@@ -1934,21 +1934,21 @@ async fn position_publication_requires_a_valid_player_and_resets_after_absence()
     );
     assert!(
         movement
-            .publish_position_after_simulation(now, &world, &mut session)
+            .publish_position_after_simulation(now, &world, &mut session, false)
             .await
             .unwrap()
     );
     world.player.guid = Guid::NULL;
     assert!(
         !movement
-            .publish_position_after_simulation(now, &world, &mut session)
+            .publish_position_after_simulation(now, &world, &mut session, false)
             .await
             .unwrap()
     );
     world.player.guid = guid;
     assert!(
         movement
-            .publish_position_after_simulation(now, &world, &mut session)
+            .publish_position_after_simulation(now, &world, &mut session, false)
             .await
             .unwrap()
     );
@@ -1982,7 +1982,7 @@ async fn motion_packet_and_explicit_sync_share_the_routine_publication_baseline(
     assert_eq!(session.game_action_sequence, 1);
     assert!(
         !movement
-            .publish_position_after_simulation(now, &world, &mut session)
+            .publish_position_after_simulation(now, &world, &mut session, false)
             .await
             .unwrap()
     );
@@ -1998,7 +1998,7 @@ async fn motion_packet_and_explicit_sync_share_the_routine_publication_baseline(
         .unwrap();
     assert!(
         !movement
-            .publish_position_after_simulation(later, &world, &mut session)
+            .publish_position_after_simulation(later, &world, &mut session, false)
             .await
             .unwrap()
     );
@@ -2588,7 +2588,7 @@ fn manual_acquisition_retires_pending_controller_arrival() {
         now,
     );
     assert!(movement.pending_arrival_pose.is_none());
-    assert!(movement.pending_snap_facing.is_none());
+    assert!(movement.pending_facing.absolute_heading.is_none());
     assert!(movement.has_active_manual_drive());
 }
 
@@ -2726,5 +2726,87 @@ fn gesture_admission_resumes_held_input_but_never_revives_an_expired_pulse() {
         assert!(!movement.has_active_manual_drive());
         movement.admit_server_gesture(now + Duration::from_millis(20), &mut world);
         assert_eq!(movement.has_active_manual_drive(), resumes);
+    }
+}
+
+#[tokio::test]
+async fn relative_facing_admission_preserves_jump_and_drive() {
+    let mut world = WorldState::synthetic();
+    let guid = Guid(0x0102_0304);
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1000_0001),
+        rotation: Quaternion::from_heading(0.5),
+        ..WorldPosition::default()
+    };
+    seed_local_player(&mut world, guid, pose);
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let now = Instant::now();
+    let drive = CharacterDrive::builder()
+        .run()
+        .forward()
+        .strafe_left()
+        .turn_right()
+        .build();
+    movement.enqueue_character_motion_event(SequencedCharacterMotionEvent {
+        sequence: CharacterMotionSequence(1),
+        event: CharacterMotionEvent::BeginJump { drive },
+    });
+    movement.enqueue_drive_intent(PlayerDriveIntent::RotateFacing { delta_radians: 0.2 }, now);
+    movement.enqueue_drive_intent(PlayerDriveIntent::ManualHeld(drive), now);
+    movement.enqueue_drive_intent(PlayerDriveIntent::RotateFacing { delta_radians: 0.3 }, now);
+    let prepared = movement.prepare_tick(now, &mut world);
+    assert!(movement.character_motion.is_charging());
+    assert_eq!(movement.character_motion.effective_drive(), drive);
+    movement
+        .advance_tick(prepared, now, &mut world, &mut session)
+        .await
+        .unwrap();
+    assert!((movement.take_relative_facing_delta() - 0.5).abs() < 1e-5);
+    assert_eq!(movement.take_relative_facing_delta(), 0.0);
+    assert!(movement.character_motion.is_charging());
+    assert_eq!(movement.character_motion.effective_drive(), drive);
+}
+
+#[test]
+fn relative_facing_is_retired_by_reset_server_takeover_and_world_epoch() {
+    // Each cancellation boundary must discard admitted relative input before publication.
+    enum Cancellation {
+        Reset,
+        ServerTakeover,
+        WorldEpoch,
+    }
+    for cancellation in [
+        Cancellation::Reset,
+        Cancellation::ServerTakeover,
+        Cancellation::WorldEpoch,
+    ] {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x0102_0304);
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            rotation: Quaternion::from_heading(0.5),
+            ..WorldPosition::default()
+        };
+        seed_local_player(&mut world, guid, pose);
+        let mut movement = MovementSystem::new();
+        let now = Instant::now();
+        movement.enqueue_drive_intent(PlayerDriveIntent::RotateFacing { delta_radians: 0.2 }, now);
+        match cancellation {
+            Cancellation::Reset => {
+                movement.enqueue_character_motion_event(SequencedCharacterMotionEvent {
+                    sequence: CharacterMotionSequence(1),
+                    event: CharacterMotionEvent::Reset,
+                })
+            }
+            Cancellation::ServerTakeover => movement.admit_server_controlled_motion(
+                Some(test_server_approach(pose)),
+                now,
+                &mut world,
+            ),
+            Cancellation::WorldEpoch => movement.retire_movement_epoch(),
+        }
+        movement.process_control_commands(now, &mut world, false);
+        assert_eq!(movement.take_relative_facing_delta(), 0.0);
     }
 }

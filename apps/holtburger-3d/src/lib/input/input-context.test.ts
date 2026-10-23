@@ -242,15 +242,15 @@ describe("InputContext", () => {
 		const input = new AppInput({
 			...INPUT_DEFAULTS,
 			character: { ...INPUT_DEFAULTS.character, forward: [{ key: "ArrowUp" }] },
-			pointer: { ...INPUT_DEFAULTS.pointer, clientInteract: [2] },
+			pointer: { ...INPUT_DEFAULTS.pointer, flyRotate: [2] },
 		});
 		const action = vi.fn();
 		const context = input.characterContext(action);
 		context.apply({ key: "ArrowUp", shiftKey: false }, true);
 		expect(action).toHaveBeenCalledWith("forward", true);
-		expect(input.pointer("clientInteract", { button: 2 })).toBe(true);
-		expect(input.pointer("clientInteract", { button: 0 })).toBe(false);
-		expect(input.pointer("clientExamine", { button: 2 })).toBe(true);
+		expect(input.pointer("flyRotate", { button: 2 })).toBe(true);
+		expect(input.pointer("flyRotate", { button: 0 })).toBe(false);
+		expect(input.pointer("flyPan", { button: 2 })).toBe(true);
 	});
 
 	it("replaces live client shortcuts and held movement without a release action", () => {

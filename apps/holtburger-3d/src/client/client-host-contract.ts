@@ -600,6 +600,9 @@ const clientDriveSnapshotSchema = z
 
 const clientDriveRequestSchema = z.discriminatedUnion("kind", [
 	z
+		.object({ kind: z.literal("rotate-facing"), deltaRadians: finiteNumber })
+		.strict(),
+	z
 		.object({
 			kind: z.enum(["acquire", "synchronize"]),
 			drive: clientDriveSnapshotSchema,
@@ -1193,7 +1196,7 @@ export function decodeClientExitRequested(value: unknown): ClientExitRequested {
 	return exitRequestedSchema.parse(value);
 }
 
-/** Strictly validates one renderer-held drive replacement before it crosses the host boundary. */
+/** Strictly validates manual drive or relative facing before it crosses the host boundary. */
 export function decodeClientDriveRequest(value: unknown): ClientDriveRequest {
 	return clientDriveRequestSchema.parse(value);
 }

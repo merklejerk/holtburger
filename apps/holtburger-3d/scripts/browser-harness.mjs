@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { probeClientMouseMovement } from "./client-mouse-movement-probe.mjs";
 import { probeSpellBar } from "./client-spell-bar-probe.mjs";
 import { probeClientWaypoint } from "./client-waypoint-probe.mjs";
 import { probePreciseJumpCamera } from "./client-precise-camera-probe.mjs";
@@ -114,7 +115,13 @@ try {
 		}
 	}
 	let report;
-	if (options.clientPartyScreenshotDirectory !== null) {
+	if (options.clientMouseMovement) {
+		report = {
+			suite: "client-mouse-movement",
+			evidence: result.clientMouseMovement,
+			browserErrors,
+		};
+	} else if (options.clientPartyScreenshotDirectory !== null) {
 		report = {
 			suite: "party-hud-screenshots",
 			screenshots: result.partyHudScreenshots,
@@ -614,6 +621,7 @@ function parseArgs(args) {
 		clientContracts: false,
 		clientSelectedActions: false,
 		clientBindings: false,
+		clientMouseMovement: false,
 		clientBindingControls: false,
 		clientSquelch: false,
 		clientAllegiance: false,
@@ -832,6 +840,10 @@ function parseArgs(args) {
 			case "--client-binding-controls":
 				parsed.clientHud = true;
 				parsed.clientBindingControls = true;
+				break;
+			case "--client-mouse-movement":
+				parsed.clientHud = true;
+				parsed.clientMouseMovement = true;
 				break;
 			case "--client-bindings":
 				parsed.clientHud = true;
@@ -2093,6 +2105,7 @@ Options:
   --client-precise-jump Verify phased aim feedback, cadence, stale progress, and first-success activation.
   --client-nearby       Exercise nearby catalog, name alerts, chat and minimap integration.
   --client-text-scaling Verify text/icon scaling, theme composition, native dialogs, and retained UI.
+  --client-mouse-movement Verify held mouse movement, steering, and cancellation.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --client-inventory    Verify inventory gestures, item use, give confirmations, and suppression.
@@ -4587,6 +4600,15 @@ async function runClientHudHarness({ viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		await waitForClientHudHarnessApi(client);
+		if (options.clientMouseMovement)
+			return {
+				clientMouseMovement: await probeClientMouseMovement(
+					client,
+					evaluateExpression,
+				),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
 		if (options.clientSpells) {
 			return {
 				clientSpells: {

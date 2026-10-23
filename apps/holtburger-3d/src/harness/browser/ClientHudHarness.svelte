@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { createClientMouseMovementFixture } from "./client-mouse-movement-fixture";
 	import { soulEmoteFixture } from "../../client/client-soul-emotes.test-support";
 	import { RenderSceneInterestController } from "../../lib/game/runtime/render-scene-interest-controller";
 	import { nearbySceneInterest } from "../../client/client-nearby.test-support";
@@ -37,7 +38,7 @@
 		CombatBreakpointIndex,
 		CombatHeightIndex,
 		InputDigitIndex,
-		ClientKeyboardConfiguration,
+		ClientInputConfiguration,
 	} from "../../lib/input/input-contract";
 	import {
 		COMBAT_BREAKPOINTS,
@@ -76,7 +77,7 @@
 	import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
 	import { entityFacts } from "../../client/client-entity-mirror.test-support";
 	import { probeClientBindings } from "./client-binding-probe";
-	import { clientKeyboardSettingsSchema } from "../../client/client-input-settings";
+	import { clientInputSettingsSchema } from "../../client/client-input-settings";
 	import { clientInputConfiguration } from "../../client/client-input-settings";
 	import { AppInput } from "../../lib/input/app-input";
 	import { provideClientInput } from "../../client/client-input-context";
@@ -265,8 +266,8 @@
 		environmentIssue = environmentBinding.issue;
 	}
 	const characterInput = clientInput.characterContext(() => {});
-	function changeInput(input: ClientKeyboardConfiguration) {
-		const accepted = clientKeyboardSettingsSchema.parse(input);
+	function changeInput(input: ClientInputConfiguration) {
+		const accepted = clientInputSettingsSchema.parse(input);
 		keyboard.cancel();
 		characterInput.replaceBindings(accepted.character);
 		clientInput.replaceConfiguration(clientInputConfiguration(accepted));
@@ -1147,9 +1148,14 @@
 		readonly probeBindings: typeof probeBindings;
 		/** Route real browser presses to the production main-panel owner. */
 		readonly bindSystemPanelKeys: () => () => void;
+		/** Production arbiter and semantic mouse port for real DOM movement probes. */
+		readonly mouseMovement: {
+			fixture: typeof mouseFixture;
+			rearFollowEntries: () => number;
+		};
 		/** Accepted settings seam for focused browser remapping scenarios. */
 		readonly bindingSettings: {
-			read: () => ClientKeyboardConfiguration;
+			read: () => ClientInputConfiguration;
 			replace: typeof changeInput;
 		};
 		/** Verify selected HUD direct actions and icon-labeled popup commands. */
@@ -3488,12 +3494,24 @@
 	let hoveredGuid = $state<number | null>(null);
 	let hoverHitEnabled = true;
 	let targetIndicatorFrame: ClientTargetIndicatorFrame | null = null;
+	const mouseFixture = createClientMouseMovementFixture(
+		keyboard,
+		inputGate,
+		() => worldView?.cancelMouseInput(),
+	);
+	let rearFollowEntries = 0;
 	const orbitDeltas: { x: number; y: number }[] = [];
 	const zoomDeltas: number[] = [];
 	const selectionEvents: (number | null)[] = [];
 	const viewportSelectionPoints: { x: number; y: number }[] = [];
 	const viewportHoverPoints: { x: number; y: number }[] = [];
 	const cameraController = {
+		pitch(deltaY: number): void {
+			orbitDeltas.push({ x: 0, y: deltaY });
+		},
+		followRear(): void {
+			rearFollowEntries += 1;
+		},
 		orbit(deltaX: number, deltaY: number): void {
 			orbitDeltas.push({ x: deltaX, y: deltaY });
 		},
@@ -4947,6 +4965,10 @@
 					cancel: () => {},
 				});
 			},
+			mouseMovement: {
+				fixture: mouseFixture,
+				rearFollowEntries: () => rearFollowEntries,
+			},
 			bindingSettings: { read: () => userSettings.input, replace: changeInput },
 			probeSelectedActions: () => probeSelectedActions(partyProbeContext),
 			probeContractMap: () =>
@@ -5314,6 +5336,7 @@
 			entityCollisionDisabled={false}
 			onEntityCollisionDisabledChange={() => {}}
 			cameraController={cameraEnabled ? cameraController : null}
+			mouseMovement={mouseFixture.movement}
 			{preciseJumpActive}
 			onPreciseJumpAim={() => {
 				preciseJumpAimCount += 1;

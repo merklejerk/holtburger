@@ -9,6 +9,7 @@ import {
 	COMBAT_HEIGHT_KEYS,
 	INPUT_DIGIT_KEYS,
 	type ClientKeyboardConfiguration,
+	type ClientInputConfiguration,
 	type InputConfiguration,
 } from "../lib/input/input-contract.js";
 
@@ -96,7 +97,7 @@ const keyboardSettingsBaseSchema = z
 	.strict()
 	.readonly();
 
-/** Strict, user-scoped keyboard map; Explorer camera and pointer fields are excluded. */
+/** Keyboard-only schema used as the base of persisted client input. */
 export const clientKeyboardSettingsSchema = keyboardSettingsBaseSchema
 	.unwrap()
 	.extend({
@@ -110,7 +111,7 @@ export const clientKeyboardSettingsSchema = keyboardSettingsBaseSchema
 	.strict()
 	.readonly();
 
-/** Current user keyboard defaults; Explorer and pointer policy stay outside persistence. */
+/** Keyboard defaults also used by the dedicated keyboard reset action. */
 export const CLIENT_KEYBOARD_DEFAULTS: ClientKeyboardConfiguration = {
 	character: INPUT_DEFAULTS.character,
 	preciseJump: INPUT_DEFAULTS.preciseJump,
@@ -120,7 +121,37 @@ export const CLIENT_KEYBOARD_DEFAULTS: ClientKeyboardConfiguration = {
 	actionBars: INPUT_DEFAULTS.actionBars,
 };
 
-/** Build one client-owned resolved policy while retaining fixed pointer and Explorer fly maps. */
+/** Fixed gesture defaults shared by persistence, settings UI, and viewport input. */
+export const CLIENT_MOUSE_DEFAULTS = {
+	rightButtonSteering: true,
+	middleButtonForward: true,
+	bothButtonsForward: true,
+} as const;
+
+/** User-scoped input, preserving keyboard customizations when mouse settings are absent. */
+export const clientInputSettingsSchema = clientKeyboardSettingsSchema
+	.unwrap()
+	.extend({
+		mouse: z
+			.object({
+				rightButtonSteering: z.boolean(),
+				middleButtonForward: z.boolean(),
+				bothButtonsForward: z.boolean(),
+			})
+			.strict()
+			.readonly()
+			.default(CLIENT_MOUSE_DEFAULTS),
+	})
+	.strict()
+	.readonly();
+
+/** Complete client input defaults. */
+export const CLIENT_INPUT_DEFAULTS: ClientInputConfiguration = {
+	...CLIENT_KEYBOARD_DEFAULTS,
+	mouse: CLIENT_MOUSE_DEFAULTS,
+};
+
+/** Resolve keyboard policy while retaining Explorer camera maps; client mouse policy has its own owner. */
 export function clientInputConfiguration(
 	keyboard: ClientKeyboardConfiguration,
 ): InputConfiguration {

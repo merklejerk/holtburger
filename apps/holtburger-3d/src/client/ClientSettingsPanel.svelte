@@ -46,7 +46,7 @@
 	} from "./client-settings-values";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type {
-		ClientKeyboardConfiguration,
+		ClientInputConfiguration,
 		InputKeyEvent,
 		KeyBinding,
 	} from "../lib/input/input-contract";
@@ -73,14 +73,14 @@
 		readonly onEnvironmentOverridesChange: (
 			overrides: ClientEnvironmentOverrides,
 		) => void;
-		readonly input: ClientKeyboardConfiguration;
+		readonly input: ClientInputConfiguration;
 		readonly displayPlatform: InputDisplayPlatform;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		readonly selectedTab: SettingsTab;
 		readonly onSelectTab: (tab: SettingsTab) => void;
 		readonly onGraphicsChange: (graphics: ClientGraphicsSettings) => void;
 		readonly onUiChange: (ui: ClientUiSettings) => void;
-		readonly onInputChange: (input: ClientKeyboardConfiguration) => void;
+		readonly onInputChange: (input: ClientInputConfiguration) => void;
 		readonly canResetHudPlacements: boolean;
 		readonly onResetHudPlacements: () => void;
 	}
@@ -107,6 +107,18 @@
 		onResetHudPlacements,
 	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
+	/** Fixed client gestures exposed as independent preference switches. */
+	const MOUSE_GESTURES = [
+		{ key: "rightButtonSteering", label: "Hold right mouse button to steer" },
+		{
+			key: "middleButtonForward",
+			label: "Hold middle mouse button to move forward",
+		},
+		{
+			key: "bothButtonsForward",
+			label: "Hold left and right mouse buttons to move forward",
+		},
+	] as const;
 	type Capture = {
 		readonly kind: "capture";
 		readonly row: ClientBindingRow;
@@ -174,7 +186,7 @@
 			};
 			return;
 		}
-		onInputChange(proposal);
+		onInputChange({ ...input, ...proposal });
 		if (bindingDialog !== null) closeBindingDialog();
 	}
 	function addBinding(
@@ -278,15 +290,16 @@
 	}
 	function replaceDialogConflict(): void {
 		if (bindingDialog?.kind !== "conflict") return;
-		onInputChange(
-			replaceConflictingClientBindings(
+		onInputChange({
+			...input,
+			...replaceConflictingClientBindings(
 				input,
 				bindingDialog.row,
 				bindingDialog.bindings,
 				bindingDialog.rows,
 				bindingDialog.witness,
 			),
-		);
+		});
 		closeBindingDialog();
 	}
 	let supportedFiltering = $derived(
@@ -680,9 +693,31 @@
 					type="button"
 					class="ui-button"
 					onclick={() => {
-						onInputChange(structuredClone(CLIENT_KEYBOARD_DEFAULTS));
-					}}>Restore all default bindings</button
+						onInputChange({
+							...input,
+							...structuredClone(CLIENT_KEYBOARD_DEFAULTS),
+						});
+					}}>Restore default keyboard bindings</button
 				>
+				<details class="binding-group" open>
+					<summary>Mouse</summary>
+					{#each MOUSE_GESTURES as gesture}
+						<label class="ui-checkbox"
+							><input
+								type="checkbox"
+								checked={input.mouse[gesture.key]}
+								onchange={(event) =>
+									onInputChange({
+										...input,
+										mouse: {
+											...input.mouse,
+											[gesture.key]: event.currentTarget.checked,
+										},
+									})}
+							/>{gesture.label}</label
+						>
+					{/each}
+				</details>
 				{#each CLIENT_BINDING_GROUPS as group}
 					<details class="binding-group" open={group.title === "Movement"}>
 						<summary>{group.title}</summary>
@@ -697,7 +732,7 @@
 											actionBars: {
 												...input.actionBars,
 												alternate: event.currentTarget
-													.value as ClientKeyboardConfiguration["actionBars"]["alternate"],
+													.value as ClientInputConfiguration["actionBars"]["alternate"],
 											},
 										})}
 								>

@@ -43,6 +43,40 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it("evolves older graphics preferences and persists disabled ambient nameplates", async () => {
+		const path = await temporarySettingsPath();
+		const { alwaysShowEntityNameplates, ...olderGraphics } =
+			createDefaultClientUserSettings({ width: 1440, height: 900 }, 8).graphics;
+		const savedGraphics = { ...olderGraphics, weatherEnabled: false };
+		try {
+			await writeFile(
+				path,
+				JSON.stringify({
+					formatVersion: 1,
+					user: { graphics: { version: 1, value: savedGraphics } },
+					characters: {},
+				}),
+			);
+			const store = new ClientSettingsStore(path, initialWindow);
+			await store.load();
+			expect(store.readUser("persisted")).toMatchObject({
+				sections: {
+					graphics: { ...savedGraphics, alwaysShowEntityNameplates },
+				},
+				unavailable: [],
+			});
+			const graphics = { ...savedGraphics, alwaysShowEntityNameplates: false };
+			await store.saveUserPatch({ sections: { graphics } });
+			const reloaded = new ClientSettingsStore(path, initialWindow);
+			await reloaded.load();
+			expect(reloaded.readUser("persisted").sections.graphics).toEqual(
+				graphics,
+			);
+		} finally {
+			await rm(dirname(path), { recursive: true, force: true });
+		}
+	});
+
 	it("evolves older UI sections and restores saved text scale without changing sibling preferences", async () => {
 		const path = await temporarySettingsPath();
 		const fonts = { body: "serif", heading: "mono", mono: "sans" } as const;

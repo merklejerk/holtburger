@@ -12,6 +12,7 @@ export const CLIENT_GRAPHICS_DEFAULTS = {
 	textureFiltering: SHARED_FRAME_SETTINGS.quality.textureFiltering,
 	renderScale: SHARED_FRAME_SETTINGS.quality.renderScale,
 	weatherEnabled: SHARED_FRAME_SETTINGS.weatherEnabled,
+	alwaysShowEntityNameplates: true,
 } as const satisfies ClientGraphicsSettings;
 
 const EXPLICIT_OBJECT_RADIUS_CAP = 1;
@@ -52,5 +53,12 @@ export function frameSettingsWithGraphics(
 			renderScale: graphics.renderScale,
 		},
 		weatherEnabled: graphics.weatherEnabled,
+		nameplates: {
+			...settings.nameplates,
+			// A zero ambient budget still admits hovered and selected entities.
+			maximumVisible: graphics.alwaysShowEntityNameplates
+				? SHARED_FRAME_SETTINGS.nameplates.maximumVisible
+				: 0,
+		},
 	};
 }

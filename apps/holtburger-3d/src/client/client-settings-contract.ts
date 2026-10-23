@@ -122,6 +122,8 @@ export const clientGraphicsSettingsSchema = z
 			.min(CLIENT_GRAPHICS_RANGES.renderScale.minimum)
 			.max(CLIENT_GRAPHICS_RANGES.renderScale.maximum),
 		weatherEnabled: z.boolean(),
+		/** Keep ambient labels visible; older profiles retain the existing enabled behavior. */
+		alwaysShowEntityNameplates: z.boolean().default(true),
 	})
 	.strict()
 	.readonly();

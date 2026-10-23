@@ -770,7 +770,20 @@ export async function probeClientHud(
 	);
 	await delay(100);
 	const minimapAutomaticallyReanchored = await capture();
-	await toggleMode();
+	const trayButtons = () =>
+		evaluateExpression(
+			client,
+			`JSON.stringify([...document.querySelectorAll('.shortcut-dock > button, .status-icon')].map(node => {
+		const { x, y, width, height } = node.getBoundingClientRect(); return { x, y, width, height };
+	}))`,
+		);
+	async function toggleWithoutMovingTrayButtons() {
+		const before = await trayButtons();
+		await toggleMode();
+		if ((await trayButtons()) !== before)
+			throw new Error("Layout controls changed tray button positions or sizes");
+	}
+	await toggleWithoutMovingTrayButtons();
 	const layout = await capture();
 	const wideScreenshot = await captureImage();
 	if (options.screenshotPath)
@@ -830,7 +843,12 @@ export async function probeClientHud(
 			throw new Error('Status tray rotate control escaped the panel bounds.');
 		const point = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 		if (document.elementFromPoint(point.x, point.y) !== button)
-			throw new Error('Status tray rotate control is occluded.');
+			throw new Error('Status tray rotate control is occluded: ' + JSON.stringify({
+				tray: bounds.toJSON(), control: rect.toJSON(),
+				scroll: [...tray.querySelectorAll('.tray-scroll, .hud-tray')].map(node => ({ bounds: node.getBoundingClientRect().toJSON(), client: [node.clientWidth, node.clientHeight], scroll: [node.scrollWidth, node.scrollHeight], offset: [node.scrollLeft, node.scrollTop], pointer: getComputedStyle(node).pointerEvents })),
+				hit: document.elementFromPoint(point.x, point.y)?.outerHTML.slice(0, 300),
+				character: document.querySelector('section[aria-label="Character HUD"]').getBoundingClientRect().toJSON()
+			}));
 		return point;
 	})()`,
 	);
@@ -850,6 +868,8 @@ export async function probeClientHud(
 	});
 	await delay(50);
 	const statusTrayRotated = (await capture()).surfaces["Status tray"];
+	await toggleWithoutMovingTrayButtons();
+	await toggleWithoutMovingTrayButtons();
 	if (
 		statusTrayRotated?.width !== statusTrayBefore.height ||
 		statusTrayRotated.height !== statusTrayBefore.width
@@ -1487,7 +1507,7 @@ export async function probeClientHud(
 	const settingsSections = await evaluateExpression(
 		client,
 		`(async () => {
-			const panel = document.querySelector('.hud-window[aria-label="Settings"]');
+			let panel = document.querySelector('.hud-window[aria-label="Settings"]');
 			const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
 			const beginCapture = async (row) => {
 				row.querySelector('.binding-actions button').click();
@@ -1504,7 +1524,8 @@ export async function probeClientHud(
 			fonts[0].dispatchEvent(new Event('change', { bubbles: true }));
 			await frame();
 			if (fonts[0].value !== 'serif') throw new Error('UI font edit did not stick');
-			if ([...panel.querySelectorAll('#settings-ui-scaling input[type="range"]')].some((range) => !range.disabled)) throw new Error('Planned scaling controls are active');
+			const textScaling = await globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeTextScaling();
+			panel = document.querySelector('.hud-window[aria-label="Settings"]');
 			panel.querySelector('#settings-tab-input').click();
 			await frame();
 			const movement = panel.querySelector('#settings-section-input .binding-group');
@@ -1631,7 +1652,7 @@ export async function probeClientHud(
 			panel.querySelector('#settings-section-input > button').click();
 			await frame();
 			panel.querySelector('#settings-tab-graphics').click();
-			return { fonts: fonts.length, groups: panel.querySelectorAll('#settings-section-input .binding-group').length, captured: true };
+			return { fonts: fonts.length, groups: panel.querySelectorAll('#settings-section-input .binding-group').length, captured: true, textScaling };
 		})()`,
 	);
 	const staleKey = { spellId: 2100, layer: 1 };

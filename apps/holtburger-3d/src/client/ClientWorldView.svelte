@@ -9,7 +9,6 @@
 	} from "./client-loadout";
 	import ClientPartyHud from "./ClientPartyHud.svelte";
 	import type { PartyHudDisplay } from "./client-party-hud";
-	import type { ClientCombatIndicatorSettings } from "./client-combat-indicator-settings";
 	import ClientJournalPanel from "./ClientJournalPanel.svelte";
 	import type { ClientContractsState } from "./client-contracts-state";
 	import type { ClientAllegianceState } from "./client-allegiance-state";
@@ -192,10 +191,6 @@
 		/** User graphics snapshot and focused edit operation. */
 		readonly graphics: ClientGraphicsSettings;
 		readonly ui: ClientUiSettings;
-		readonly combatIndicators: ClientCombatIndicatorSettings;
-		readonly onCombatIndicatorsChange: (
-			settings: ClientCombatIndicatorSettings,
-		) => void;
 		/** Cold environment controls; the readout pulls exclusively from the server source. */
 		readonly clockFormat: ClientClockFormat;
 		readonly environmentOverrides: ClientEnvironmentOverrides;
@@ -414,8 +409,6 @@
 		textureFilteringCapabilities,
 		onGraphicsChange,
 		onUiChange,
-		combatIndicators,
-		onCombatIndicatorsChange,
 		onInputChange,
 		hudMode,
 		onHudModeChange,
@@ -702,6 +695,8 @@
 		width: 0,
 		height: 0,
 	});
+	/** Intrinsic character text/bar height, published only when its CSS rows change size. */
+	let characterMinimumHeight = $state(0);
 	const minimapViewport = $derived({
 		...viewport,
 		height: Math.max(0, viewport.height - minimapFooterExtent.height),
@@ -1167,7 +1162,10 @@
 		placement={hudLayout.character}
 		editable={hudMode === "layout"}
 		minWidth={CLIENT_UI_DEFAULTS.character.minSize.width}
-		minHeight={CLIENT_UI_DEFAULTS.character.minSize.height}
+		minHeight={Math.max(
+			CLIENT_UI_DEFAULTS.character.minSize.height,
+			characterMinimumHeight,
+		)}
 		resizable={CLIENT_UI_DEFAULTS.character.resizable}
 		contentHitTesting="surface"
 		{viewport}
@@ -1175,6 +1173,7 @@
 			changeHudPlacement("character", placement)}
 	>
 		<ClientCharacterHud
+			onMinimumHeightChange={(height) => (characterMinimumHeight = height)}
 			{playerName}
 			{worldName}
 			{vitals}
@@ -1671,8 +1670,6 @@
 						onSelectTab={(tab) => (settingsTab = tab)}
 						{onGraphicsChange}
 						{onUiChange}
-						{combatIndicators}
-						{onCombatIndicatorsChange}
 						{clockFormat}
 						{environmentOverrides}
 						{weatherPresets}

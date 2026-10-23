@@ -43,12 +43,15 @@
 	@layer components {
 		.item-count-overlay {
 			position: absolute;
-			right: var(--ui-item-count-inset);
-			bottom: var(--ui-item-count-inset);
+			right: calc(var(--ui-item-count-inset) * var(--ui-icon-scale));
+			bottom: calc(var(--ui-item-count-inset) * var(--ui-icon-scale));
 			z-index: 1;
 			pointer-events: none;
-			max-width: calc(100% - 2 * var(--ui-item-count-inset));
-			font: var(--ui-item-count-font);
+			max-width: calc(
+				100% - 2 * calc(var(--ui-item-count-inset) * var(--ui-icon-scale))
+			);
+			font: bold calc(var(--ui-item-count-font-size) * var(--ui-icon-scale)) / 1
+				var(--ui-item-count-font-family);
 			color: var(--ui-item-count-color);
 			text-shadow: var(--ui-item-count-shadow);
 			background: var(--ui-item-count-background);
@@ -59,12 +62,14 @@
 		}
 		.item-count-overlay.beside-structure {
 			right: calc(
-				var(--ui-item-structure-inset) + var(--ui-item-structure-width) +
-					var(--ui-item-count-inset)
+				calc(var(--ui-item-structure-inset) * var(--ui-icon-scale)) +
+					calc(var(--ui-item-structure-width) * var(--ui-icon-scale)) +
+					calc(var(--ui-item-count-inset) * var(--ui-icon-scale))
 			);
 			max-width: calc(
-				100% - var(--ui-item-structure-inset) - var(--ui-item-structure-width) -
-					2 * var(--ui-item-count-inset)
+				100% - calc(var(--ui-item-structure-inset) * var(--ui-icon-scale)) -
+					calc(var(--ui-item-structure-width) * var(--ui-icon-scale)) - 2 *
+					calc(var(--ui-item-count-inset) * var(--ui-icon-scale))
 			);
 		}
 		span {

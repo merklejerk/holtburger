@@ -432,7 +432,7 @@
 		.texture-page-modal-header h2 {
 			margin: 0;
 			color: var(--ui-color-text);
-			font-size: 1rem;
+			font-size: calc(var(--ui-font-size-heading-2) * var(--ui-text-scale));
 			font-family: var(--ui-font-mono);
 			overflow-wrap: anywhere;
 		}
@@ -451,7 +451,7 @@
 		.texture-page-modal-toolbar {
 			margin-bottom: 8px;
 			color: var(--ui-color-accent);
-			font-size: 0.78rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 		.texture-page-modal-viewport {
 			height: min(68vh, 700px);
@@ -481,7 +481,7 @@
 		}
 		.texture-page-modal-entry-list button {
 			gap: 3px;
-			font-size: 0.74rem;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 		.texture-page-modal-entry-list strong {
 			color: var(--ui-color-accent);
@@ -492,7 +492,7 @@
 		}
 		.texture-page-modal-selected {
 			margin-bottom: 0;
-			font-size: 0.8rem;
+			font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
 		}
 		@media (max-width: 760px) {
 			.texture-page-modal {

@@ -96,11 +96,11 @@
 			display: flex;
 			padding: 0;
 			width: auto;
-			height: var(--ui-item-cell-min-size);
+			height: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
 			flex-shrink: 0;
 		}
 		.icon-preview {
-			width: var(--ui-item-cell-min-size);
+			width: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
 			height: 100%;
 		}
 		.icon-preview[data-draggable="true"] {
@@ -109,7 +109,7 @@
 		.icon-disclosure {
 			display: grid;
 			place-items: center;
-			width: 1.2rem;
+			width: calc(1.2rem * var(--ui-icon-scale));
 			border-left: 1px solid var(--ui-color-border);
 			cursor: pointer;
 		}

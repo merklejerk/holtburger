@@ -84,6 +84,7 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 				["#token-button", "color", "rgb(11, 22, 33)"],
 				["#token-button", "backgroundColor", "rgb(22, 33, 44)"],
 				["#token-hud", "color", "rgb(11, 22, 33)"],
+				["#token-tab", "backgroundColor", "rgba(0, 0, 0, 0)"],
 				["#token-panel", "borderTopColor", "rgb(44, 55, 66)"],
 				["#token-input", "backgroundColor", "rgb(55, 66, 77)"],
 			]);
@@ -91,11 +92,13 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 				const style = document.createElement("style");
 				// These are actual author-facing selectors, not a parallel state-token API.
 				style.textContent = `@layer overrides {
-					#theme-token-probe :is(.ui-button, .ui-tab) { color: rgb(12,23,34); --ui-button-background-color: rgb(23,34,45); }
-					#theme-token-probe :is(.ui-button, .ui-tab):where([aria-pressed="true"], [aria-selected="true"]) { --ui-button-background-color: rgb(45,56,67); }
-					#theme-token-probe :is(.ui-button, .ui-tab):where(:hover:not(:disabled)) { --ui-button-background-color: rgb(56,67,78); }
-					#theme-token-probe :is(.ui-button, .ui-tab):where(:active:not(:disabled)) { --ui-button-background-color: rgb(67,78,89); }
-					#theme-token-probe :is(.ui-button, .ui-tab):where(:disabled) { --ui-button-background-color: rgb(78,89,90); }
+					#theme-token-probe .ui-button { color: rgb(12,23,34); --ui-button-background-color: rgb(23,34,45); }
+					#theme-token-probe .ui-button:where([aria-pressed="true"], [aria-selected="true"]) { --ui-button-background-color: rgb(45,56,67); }
+					#theme-token-probe .ui-button:where(:hover:not(:disabled)) { --ui-button-background-color: rgb(56,67,78); }
+					#theme-token-probe .ui-button:where(:active:not(:disabled)) { --ui-button-background-color: rgb(67,78,89); }
+					#theme-token-probe .ui-button:where(:disabled) { --ui-button-background-color: rgb(78,89,90); }
+					#theme-token-probe .ui-tab { color: rgb(12,23,34); background: rgb(23,34,45); }
+					#theme-token-probe .ui-tab[aria-selected="true"] { background: rgb(45,56,67); }
 					#theme-token-probe .ui-option { --ui-option-background: rgb(89,90,101); }
 					#theme-token-probe .ui-hud-button { color: rgb(90,101,112); --ui-hud-button-background: rgb(101,112,123); }
 					#theme-token-probe .shortcut-dock .ui-hud-button[aria-pressed="true"] { color: rgb(112,123,134); --ui-hud-button-background: rgb(123,134,145); --ui-hud-button-indicator-color: transparent; }

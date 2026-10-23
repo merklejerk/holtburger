@@ -84,45 +84,44 @@
 	let menuOpen = $state(false);
 	let menuButton = $state<HTMLButtonElement | null>(null);
 	const grid = $derived(actionBarGrid(bar));
-	let cellSize = $state<number>(CLIENT_ACTION_BAR_TUNING.initialCellSize);
-	// Geometry follows resolved CSS lengths, including live theme changes and non-pixel units.
-	let stripGap = $state(0);
+	// Resolved CSS geometry owns both anchored extent and actual grid cells.
+	let metrics = $state<{ cell: number; gap: number; menu: number }>({
+		cell: CLIENT_ACTION_BAR_TUNING.initialCellSize,
+		gap: 0,
+		menu: CLIENT_ACTION_BAR_TUNING.menuStripSize,
+	});
 	function measureMetrics(node: HTMLElement) {
+		const menu = node.firstElementChild;
+		if (menu === null) throw new Error("Missing action bar menu metric");
 		const update = () => {
-			const { width, height } = node.getBoundingClientRect();
-			if (
-				!Number.isFinite(width) ||
-				width <= 0 ||
-				!Number.isFinite(height) ||
-				height < 0
-			)
-				throw new Error("Invalid action bar theme dimensions");
-			cellSize = width;
-			stripGap = height;
+			const { width: cell, height: gap } = node.getBoundingClientRect();
+			const menuSize = menu.getBoundingClientRect().width;
+			if (!Number.isFinite(cell) || cell <= 0)
+				throw new Error("Invalid action bar cell size");
+			if (!Number.isFinite(gap) || gap < 0)
+				throw new Error("Invalid action bar menu gap");
+			if (!Number.isFinite(menuSize) || menuSize <= 0)
+				throw new Error("Invalid action bar menu size");
+			metrics = { cell, gap, menu: menuSize };
 		};
 		update();
 		const observer = new ResizeObserver(update);
 		observer.observe(node);
+		observer.observe(menu);
 		return { destroy: () => observer.disconnect() };
 	}
 	// The menu strip is part of the anchored bar extent, not an overlay on its cells.
 	const stripInset = $derived({
-		left:
-			bar.orientation === "horizontal"
-				? CLIENT_ACTION_BAR_TUNING.menuStripSize + stripGap
-				: 0,
-		top:
-			bar.orientation === "vertical"
-				? CLIENT_ACTION_BAR_TUNING.menuStripSize + stripGap
-				: 0,
+		left: bar.orientation === "horizontal" ? metrics.menu + metrics.gap : 0,
+		top: bar.orientation === "vertical" ? metrics.menu + metrics.gap : 0,
 	});
 	const minimum = $derived({
-		width: cellSize + stripInset.left,
-		height: cellSize + stripInset.top,
+		width: metrics.cell + stripInset.left,
+		height: metrics.cell + stripInset.top,
 	});
 	const extent = $derived({
-		width: grid.columns * cellSize + stripInset.left,
-		height: grid.rows * cellSize + stripInset.top,
+		width: grid.columns * metrics.cell + stripInset.left,
+		height: grid.rows * metrics.cell + stripInset.top,
 	});
 	const placement = $derived({
 		...bar.anchor,
@@ -216,7 +215,7 @@
 	<div
 		class="action-bar"
 		class:vertical={bar.orientation === "vertical"}
-		style:--action-menu-strip-size={`${CLIENT_ACTION_BAR_TUNING.menuStripSize}px`}
+		style:--action-menu-strip-size={`calc(${CLIENT_ACTION_BAR_TUNING.menuStripSize}px * var(--ui-icon-scale))`}
 		class:action-bar-focused={focused !== null}
 		tabindex="-1"
 		role="group"
@@ -250,7 +249,8 @@
 		}}
 	>
 		<span class="action-bar-metrics" aria-hidden="true" use:measureMetrics
-		></span>
+			><span class="action-menu-metric"></span></span
+		>
 		<button
 			type="button"
 			class="action-menu-strip ui-button"
@@ -267,8 +267,8 @@
 		<div class="action-bar-scroll">
 			<div
 				class="action-grid"
-				style:grid-template-columns={`repeat(${grid.columns}, ${cellSize}px)`}
-				style:grid-template-rows={`repeat(${grid.rows}, ${cellSize}px)`}
+				style:grid-template-columns={`repeat(${grid.columns}, ${metrics.cell}px)`}
+				style:grid-template-rows={`repeat(${grid.rows}, ${metrics.cell}px)`}
 			>
 				{#each ACTION_SLOT_INDICES as slot}
 					{@const content = bar.slots[slot]}
@@ -358,7 +358,7 @@
 	@layer components {
 		.action-bar {
 			display: grid;
-			gap: var(--ui-action-bar-strip-gap);
+			gap: calc(var(--ui-action-bar-strip-gap) * var(--ui-icon-scale));
 			grid-template-columns: var(--action-menu-strip-size) minmax(0, 1fr);
 			grid-template-rows: minmax(0, 1fr);
 			position: relative;
@@ -370,8 +370,13 @@
 			position: absolute;
 			visibility: hidden;
 			pointer-events: none;
-			width: var(--ui-item-cell-min-size);
-			height: var(--ui-action-bar-strip-gap);
+			width: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
+			height: calc(var(--ui-action-bar-strip-gap) * var(--ui-icon-scale));
+		}
+		.action-menu-metric {
+			display: block;
+			width: var(--action-menu-strip-size);
+			height: 1px;
 		}
 		.action-bar.vertical {
 			grid-template-columns: minmax(0, 1fr);
@@ -390,6 +395,9 @@
 			display: grid;
 		}
 		.action-menu-strip {
+			font-size: calc(
+				var(--ui-action-bar-label-font-size) * var(--ui-icon-scale)
+			);
 			--ui-button-background-color: color-mix(
 				in srgb,
 				var(--ui-color-control) var(--ui-action-bar-strip-background-opacity),

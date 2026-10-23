@@ -53,7 +53,7 @@
 	@layer components {
 		.item-cell-art {
 			position: absolute;
-			inset: var(--ui-item-cell-padding);
+			inset: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
 			display: grid;
 			place-items: center;
 			min-width: 0;
@@ -61,10 +61,10 @@
 		}
 		.item-cell-meter {
 			position: absolute;
-			top: var(--ui-item-structure-inset);
-			right: var(--ui-item-structure-inset);
-			bottom: var(--ui-item-structure-inset);
-			width: var(--ui-item-structure-width);
+			top: calc(var(--ui-item-structure-inset) * var(--ui-icon-scale));
+			right: calc(var(--ui-item-structure-inset) * var(--ui-icon-scale));
+			bottom: calc(var(--ui-item-structure-inset) * var(--ui-icon-scale));
+			width: calc(var(--ui-item-structure-width) * var(--ui-icon-scale));
 			background: var(--ui-item-structure-background);
 			pointer-events: none;
 		}
@@ -75,22 +75,26 @@
 		}
 		.item-equipped {
 			position: absolute;
-			right: 1px;
-			bottom: 1px;
-			padding: 0 2px;
-			border-radius: 2px;
+			right: calc(1px * var(--ui-icon-scale));
+			bottom: calc(1px * var(--ui-icon-scale));
+			padding: 0 calc(2px * var(--ui-icon-scale));
+			border-radius: calc(2px * var(--ui-icon-scale));
 			background: var(--ui-item-equipped-background, #000b);
 			color: var(--ui-item-equipped-color, #4ade80);
-			font: bold var(--ui-item-equipped-font-size, 16px) / 1.2 sans-serif;
+			font: bold
+				calc(var(--ui-item-equipped-font-size, 16px) * var(--ui-icon-scale)) /
+				1.2 sans-serif;
 			pointer-events: none;
 		}
 		.item-equipped.above-count {
-			top: 1px;
+			top: calc(1px * var(--ui-icon-scale));
 			bottom: auto;
 		}
 		.item-equipped.beside-meter {
 			right: calc(
-				var(--ui-item-structure-inset) + var(--ui-item-structure-width) + 1px
+				calc(var(--ui-item-structure-inset) * var(--ui-icon-scale)) +
+					calc(var(--ui-item-structure-width) * var(--ui-icon-scale)) +
+					calc(1px * var(--ui-icon-scale))
 			);
 		}
 	}

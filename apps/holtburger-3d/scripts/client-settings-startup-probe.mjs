@@ -18,11 +18,18 @@ const savedCharacterSheet = {
 	preferredHeight: 640,
 };
 const unknownBook = { version: 2, value: { from: "future-build" } };
+/** Test-owned nondefault scale and fonts must be present on the first mounted client UI. */
+const savedUi = {
+	fonts: { body: "mono", heading: "serif", mono: "sans" },
+	textScale: 1.5,
+	iconScale: 1.75,
+};
 await writeFile(
 	settingsPath,
 	JSON.stringify({
 		formatVersion: 1,
 		user: {
+			ui: { version: 1, value: savedUi },
 			hudPlacements: {
 				book: unknownBook,
 				characterSheet: { version: 1, value: savedCharacterSheet },
@@ -99,6 +106,20 @@ try {
 			const bridge = window.holtburgerSettings;
 			if (!bridge) throw new Error("Settings preload bridge is missing");
 			const before = await bridge.loadUser();
+			const expectedUi = ${JSON.stringify(savedUi)};
+			if (before.sections.ui?.textScale !== expectedUi.textScale)
+				throw new Error("Saved text scale did not cross the preload bridge");
+			const scope = document.querySelector('.client-appearance-scope');
+			if (!scope || Number(scope.style.getPropertyValue('--ui-text-scale')) !== expectedUi.textScale)
+				throw new Error("Client mounted without the saved appearance scope");
+			if (before.sections.ui?.iconScale !== expectedUi.iconScale)
+				throw new Error('Persisted icon scale did not reach startup settings');
+			if (Number(scope.style.getPropertyValue('--ui-icon-scale')) !== expectedUi.iconScale)
+				throw new Error('Client appearance did not apply persisted icon scale');
+
+			const authoredSize = Number.parseFloat(getComputedStyle(scope).getPropertyValue('--ui-font-size-body'));
+			if (Math.abs(Number.parseFloat(getComputedStyle(scope).fontSize) - authoredSize * expectedUi.textScale) > 0.02)
+				throw new Error("Client startup did not apply the restored text scale");
 			if (!before.unavailable.some((reason) => reason.includes("hudPlacements.book")))
 				throw new Error("Future book section was not reported");
 			const { createDefaultClientUserSettings } =

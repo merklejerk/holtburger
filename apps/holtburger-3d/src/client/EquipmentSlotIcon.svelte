@@ -48,6 +48,6 @@
 
 <span role="img" aria-label={slot.label} title={slot.label}>
 	<Icon
-		style="display: inline; width: var(--ui-inventory-equipment-slot-icon-size); height: var(--ui-inventory-equipment-slot-icon-size); color: var(--ui-inventory-equipment-slot-icon-color); stroke-width: 1.5"
+		style="display: inline; width: calc(var(--ui-inventory-equipment-slot-icon-size) * var(--ui-icon-scale)); height: calc(var(--ui-inventory-equipment-slot-icon-size) * var(--ui-icon-scale)); color: var(--ui-inventory-equipment-slot-icon-color); stroke-width: 1.5"
 	/>
 </span>

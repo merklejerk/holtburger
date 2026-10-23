@@ -34,6 +34,29 @@ export async function probeTrade(client, evaluateExpression) {
 	);
 	await read(`${fixture}.register()`);
 	await wait("document.querySelector('[data-trade-panel]') !== null");
+	await read(`(async () => {
+		const panel = document.querySelector('[data-trade-panel]');
+		const reset = panel.querySelector('.trade-reset');
+		const art = reset.querySelector('svg');
+		const surround = panel.querySelector('.trade-reset-control');
+		const { CLIENT_ICON_SCALE } = await import('/src/client/client-settings-values.ts');
+		const measure = () => [reset, art, surround].map(node => node.getBoundingClientRect());
+		panel.style.setProperty('--ui-icon-scale', String(CLIENT_ICON_SCALE.initial));
+		const baseline = measure();
+		try {
+			for (const scale of [CLIENT_ICON_SCALE.minimum, CLIENT_ICON_SCALE.maximum]) {
+				panel.style.setProperty('--ui-icon-scale', String(scale));
+				const bounds = measure();
+				bounds.forEach((rect, index) => {
+					if (Math.abs(rect.width - baseline[index].width * scale) > 0.1 || Math.abs(rect.height - baseline[index].height * scale) > 0.1)
+						throw new Error('Trade reset artwork and hit geometry do not scale together');
+				});
+				if (bounds[1].left < bounds[0].left || bounds[1].right > bounds[0].right || bounds[1].top < bounds[0].top || bounds[1].bottom > bounds[0].bottom)
+					throw new Error('Trade reset artwork escapes its hit target');
+			}
+		} finally { panel.style.removeProperty('--ui-icon-scale'); }
+	})()`);
+
 	const point = (selector) =>
 		read(`(() => {
         const element = document.querySelector(${JSON.stringify(selector)});

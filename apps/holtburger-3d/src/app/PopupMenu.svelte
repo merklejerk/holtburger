@@ -393,9 +393,9 @@
 		}
 		.popup-menu.symbol-grid {
 			box-sizing: border-box;
-			width: min(18rem, 100vw);
+			width: min(calc(18rem * var(--ui-icon-scale)), 100vw);
 			min-width: 0;
-			max-height: min(18rem, 100vh);
+			max-height: min(calc(18rem * var(--ui-icon-scale)), 100vh);
 			overflow-x: hidden;
 		}
 		.popup-menu.symbol-grid:popover-open {
@@ -405,13 +405,13 @@
 		.symbol-grid .popup-menu-item {
 			justify-content: center;
 			min-width: 0;
-			font-size: 1.75rem;
+			font-size: calc(1.75rem * var(--ui-icon-scale));
 			line-height: 1;
 			aspect-ratio: 1;
 		}
 		.popup-menu-icon {
-			width: var(--ui-overlay-icon-size);
-			height: var(--ui-overlay-icon-size);
+			width: calc(var(--ui-overlay-icon-size) * var(--ui-icon-scale));
+			height: calc(var(--ui-overlay-icon-size) * var(--ui-icon-scale));
 			flex: none;
 		}
 	}

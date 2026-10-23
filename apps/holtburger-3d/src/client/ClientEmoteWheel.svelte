@@ -191,91 +191,93 @@
 </dialog>
 
 <style>
-	.client-emote-dialog {
-		padding: 0;
-		border: 0;
-		background: transparent;
-		color: var(--ui-color-text);
-		max-width: none;
-		max-height: none;
-		overflow: visible;
-		--ui-overlay-backdrop-background: transparent;
-	}
-	.emote-wheel {
-		position: relative;
-		width: min(
-			var(--ui-emote-wheel-size),
-			calc(100vw - 2rem),
-			calc(100dvh - 2rem)
-		);
-		aspect-ratio: 1;
-		outline: none;
-	}
-	.emote-glass {
-		appearance: none;
-		background: var(--ui-hud-glass-color);
-		backdrop-filter: var(--ui-hud-glass-filter);
-		color: var(--ui-color-text);
-		font: inherit;
-		cursor: pointer;
-		transition:
-			transform var(--ui-emote-wheel-transition-duration) ease-out,
-			background-color var(--ui-emote-wheel-transition-duration) ease-out,
-			color var(--ui-emote-wheel-transition-duration) ease-out;
-	}
-	.emote-wedge {
-		position: absolute;
-		inset: 0;
-		width: 100%;
-		height: 100%;
-		border: 0;
-		border-radius: 50%;
-		padding: 0;
-	}
-	.emote-label {
-		position: absolute;
-		left: var(--label-x);
-		top: var(--label-y);
-		transform: translate(-50%, -50%);
-		width: 27%;
-		text-align: center;
-		white-space: normal;
-		overflow-wrap: anywhere;
-	}
-	.emote-wedge.highlighted:not(:disabled) {
-		background: var(
-			--ui-emote-wheel-highlight-background,
-			color-mix(in srgb, var(--ui-hud-glass-color) 55%, transparent)
-		);
-		color: var(--ui-color-highlight);
-		transform: scale(var(--ui-emote-wheel-highlight-scale));
-		z-index: 1;
-	}
-	.emote-wedge:disabled {
-		color: var(--ui-color-muted);
-		cursor: not-allowed;
-	}
-	.emote-center {
-		position: absolute;
-		left: 50%;
-		top: 50%;
-		transform: translate(-50%, -50%);
-		width: max-content;
-		max-width: 38%;
-		box-sizing: border-box;
-		padding-block: 3px;
-		text-align: center;
-		line-height: 1.2;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-	@media (prefers-reduced-motion: reduce) {
-		.emote-glass {
-			transition: none;
+	@layer components {
+		.client-emote-dialog {
+			padding: 0;
+			border: 0;
+			background: transparent;
+			color: var(--ui-color-text);
+			max-width: none;
+			max-height: none;
+			overflow: visible;
+			--ui-overlay-backdrop-background: transparent;
 		}
-		.emote-wedge.highlighted {
-			transform: none;
+		.emote-wheel {
+			position: relative;
+			width: min(
+				var(--ui-emote-wheel-size),
+				calc(100vw - 2rem),
+				calc(100dvh - 2rem)
+			);
+			aspect-ratio: 1;
+			outline: none;
+		}
+		.emote-glass {
+			appearance: none;
+			background: var(--ui-hud-glass-color);
+			backdrop-filter: var(--ui-hud-glass-filter);
+			color: var(--ui-color-text);
+			font: inherit;
+			cursor: pointer;
+			transition:
+				transform var(--ui-emote-wheel-transition-duration) ease-out,
+				background-color var(--ui-emote-wheel-transition-duration) ease-out,
+				color var(--ui-emote-wheel-transition-duration) ease-out;
+		}
+		.emote-wedge {
+			position: absolute;
+			inset: 0;
+			width: 100%;
+			height: 100%;
+			border: 0;
+			border-radius: 50%;
+			padding: 0;
+		}
+		.emote-label {
+			position: absolute;
+			left: var(--label-x);
+			top: var(--label-y);
+			transform: translate(-50%, -50%);
+			width: 27%;
+			text-align: center;
+			white-space: normal;
+			overflow-wrap: anywhere;
+		}
+		.emote-wedge.highlighted:not(:disabled) {
+			background: var(
+				--ui-emote-wheel-highlight-background,
+				color-mix(in srgb, var(--ui-hud-glass-color) 55%, transparent)
+			);
+			color: var(--ui-color-highlight);
+			transform: scale(var(--ui-emote-wheel-highlight-scale));
+			z-index: 1;
+		}
+		.emote-wedge:disabled {
+			color: var(--ui-color-muted);
+			cursor: not-allowed;
+		}
+		.emote-center {
+			position: absolute;
+			left: 50%;
+			top: 50%;
+			transform: translate(-50%, -50%);
+			width: max-content;
+			max-width: 38%;
+			box-sizing: border-box;
+			padding-block: 3px;
+			text-align: center;
+			line-height: 1.2;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.emote-glass {
+				transition: none;
+			}
+			.emote-wedge.highlighted {
+				transform: none;
+			}
 		}
 	}
 </style>

@@ -137,6 +137,12 @@ try {
 			evidence: result.clientEnvironment,
 			browserErrors,
 		};
+	} else if (options.clientTextScaling) {
+		report = {
+			suite: "client-text-scaling",
+			evidence: result.clientTextScaling,
+			browserErrors,
+		};
 	} else if (options.clientSettingsTabs) {
 		report = {
 			suite: "client-settings-tabs",
@@ -590,6 +596,7 @@ function parseArgs(args) {
 		clientLoadouts: false,
 		clientPreciseJump: false,
 		clientSettingsTabs: false,
+		clientTextScaling: false,
 		clientEnvironment: false,
 		clientVitals: false,
 		clientAttention: false,
@@ -791,6 +798,10 @@ function parseArgs(args) {
 				break;
 			case "--client-hud":
 				parsed.clientHud = true;
+				break;
+			case "--client-text-scaling":
+				parsed.clientHud = true;
+				parsed.clientTextScaling = true;
 				break;
 			case "--client-loadouts":
 				parsed.clientHud = true;
@@ -2078,6 +2089,7 @@ Options:
   --client-selected-actions Exercise selected HUD action eligibility, dispatch, and menu dismissal.
   --client-precise-jump Verify phased aim feedback, cadence, stale progress, and first-success activation.
   --client-nearby       Exercise nearby catalog, name alerts, chat and minimap integration.
+  --client-text-scaling Verify text/icon scaling, theme composition, native dialogs, and retained UI.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --client-inventory    Verify inventory gestures, item use, give confirmations, and suppression.
@@ -4729,6 +4741,23 @@ async function runClientHudHarness({ viteUrl }) {
 				state: { error: null, ready: true },
 			};
 
+		if (options.clientTextScaling) {
+			await probeClientSettingsTabs(client, evaluateExpression, delay);
+			await evaluateExpression(
+				client,
+				`document.querySelector('#settings-tab-ui').click()`,
+			);
+			await delay(50);
+			return {
+				clientTextScaling: await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeTextScaling",
+					[],
+				),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
 		if (options.clientSettingsTabs)
 			return {
 				clientSettingsTabs: await probeClientSettingsTabs(

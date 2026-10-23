@@ -16,15 +16,13 @@ import {
 import { clientEnvironmentFixture } from "../src/client/client-environment.test-support";
 import { clientWeatherPresets } from "../src/client/client-environment";
 
-import {
-	CLIENT_COMBAT_INDICATOR_DEFAULTS,
-	COMBAT_INDICATOR_SIZE_RANGE,
-	clientCombatIndicatorSettingsSchema,
-} from "../src/client/client-combat-indicator-settings";
-
 import { EQUIPMENT_SLOTS } from "../src/client/client-inventory-equipment";
 import { loadoutActionContentSchema } from "../src/client/client-loadout";
 import { bindActionCell } from "../src/client/client-action-bar-state";
+import {
+	CLIENT_ICON_SCALE,
+	CLIENT_TEXT_SCALE,
+} from "../src/client/client-settings-values";
 
 const initialWindow = {
 	normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
@@ -45,6 +43,58 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it("evolves older UI sections and restores saved text scale without changing sibling preferences", async () => {
+		const path = await temporarySettingsPath();
+		const fonts = { body: "serif", heading: "mono", mono: "sans" } as const;
+		const vitalWarningThresholds = { health: 35, stamina: 15, mana: 25 };
+		const future = { version: 4, value: { future: true } };
+		try {
+			await writeFile(
+				path,
+				JSON.stringify({
+					formatVersion: 1,
+					user: {
+						ui: { version: 1, value: { fonts, vitalWarningThresholds } },
+						future,
+					},
+					characters: {},
+				}),
+			);
+			const store = new ClientSettingsStore(path, initialWindow);
+			await store.load();
+			expect(store.readUser("persisted").sections.ui).toEqual({
+				fonts,
+				vitalWarningThresholds,
+				textScale: CLIENT_TEXT_SCALE.initial,
+				iconScale: CLIENT_ICON_SCALE.initial,
+			});
+			const ui = {
+				fonts,
+				vitalWarningThresholds,
+				textScale: CLIENT_TEXT_SCALE.maximum,
+				iconScale: CLIENT_ICON_SCALE.minimum,
+			};
+			await store.saveUserPatch({ sections: { ui } });
+			await store.saveCharacterPatch("example:9000/0x50000001", {
+				lastKnownName: "First",
+			});
+			await store.saveCharacterPatch("example:9000/0x50000002", {
+				lastKnownName: "Second",
+			});
+			const reloaded = new ClientSettingsStore(path, initialWindow);
+			await reloaded.load();
+			expect(reloaded.readUser("persisted").sections.ui).toEqual(ui);
+			expect((await readCollection(path)).user.future).toEqual(future);
+			expect(() =>
+				reloaded.saveUserPatch({
+					sections: { ui: { ...ui, textScale: CLIENT_TEXT_SCALE.maximum + 1 } },
+				}),
+			).toThrow();
+			expect(reloaded.readUser("persisted").sections.ui).toEqual(ui);
+		} finally {
+			await rm(dirname(path), { recursive: true, force: true });
+		}
+	});
 	it("persists recent emotes on the user profile independently of character and server settings", async () => {
 		const path = await temporarySettingsPath();
 		try {
@@ -257,55 +307,6 @@ describe("ClientSettingsStore", () => {
 		const loaded = new ClientSettingsStore(path, initialWindow);
 		await loaded.load();
 		expect(loaded.readUser("persisted").sections.ui).toEqual(ui);
-	});
-	it("persists combat indicator overrides independently and resets to theme inheritance", async () => {
-		const path = await temporarySettingsPath();
-		const defaults = createDefaultClientUserSettings(
-			{ width: 1440, height: 900 },
-			8,
-		);
-		const store = new ClientSettingsStore(path, initialWindow);
-		await store.load();
-		await store.saveUserPatch({ sections: { ui: defaults.ui } });
-		expect(
-			store.readUser("persisted").sections.combatIndicators,
-		).toBeUndefined();
-		const combatIndicators = {
-			fontSize: COMBAT_INDICATOR_SIZE_RANGE.maximum,
-			colors: { damage: "#123456", critical: null, avoidance: "#abcdef" },
-		};
-		await store.saveUserPatch({ sections: { combatIndicators } });
-		const reloaded = new ClientSettingsStore(path, initialWindow);
-		await reloaded.load();
-		expect(reloaded.readUser("persisted").sections).toMatchObject({
-			ui: defaults.ui,
-			combatIndicators,
-		});
-		await reloaded.saveUserPatch({
-			sections: { combatIndicators: CLIENT_COMBAT_INDICATOR_DEFAULTS },
-		});
-		const reset = new ClientSettingsStore(path, initialWindow);
-		await reset.load();
-		expect(reset.readUser("persisted").sections.combatIndicators).toEqual(
-			CLIENT_COMBAT_INDICATOR_DEFAULTS,
-		);
-		for (const invalid of [
-			{
-				...combatIndicators,
-				fontSize: COMBAT_INDICATOR_SIZE_RANGE.minimum - 1,
-			},
-			{
-				...combatIndicators,
-				fontSize: COMBAT_INDICATOR_SIZE_RANGE.maximum + 1,
-			},
-			{
-				...combatIndicators,
-				colors: { ...combatIndicators.colors, damage: "red" },
-			},
-		])
-			expect(
-				clientCombatIndicatorSettingsSchema.safeParse(invalid).success,
-			).toBe(false);
 	});
 
 	it("adds environment sections to an older profile without losing fonts or graphics", async () => {

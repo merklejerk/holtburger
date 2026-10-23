@@ -90,20 +90,11 @@ impl TerrainCollisionSurface {
                 let southeast = vertex(column + 1, row);
                 let northwest = vertex(column, row + 1);
                 let northeast = vertex(column + 1, row + 1);
-                let triangle_vertices = if terrain
-                    .cell_diagonals
-                    .uses_southwest_to_northeast_cut(column, row)
-                {
-                    [
-                        [southwest, southeast, northeast],
-                        [southwest, northeast, northwest],
-                    ]
-                } else {
-                    [
-                        [southwest, southeast, northwest],
-                        [northeast, northwest, southeast],
-                    ]
-                };
+                let triangle_vertices = terrain.cell_diagonals.cell_triangles(
+                    column,
+                    row,
+                    [southwest, southeast, northwest, northeast],
+                );
                 cells.push(TerrainCollisionCell {
                     triangles: triangle_vertices.map(TerrainCollisionTriangle::from_vertices),
                 });

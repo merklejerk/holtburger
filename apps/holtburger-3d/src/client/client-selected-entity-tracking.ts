@@ -1,4 +1,5 @@
 import { selectedEntityNameColor } from "./client-selected-entity-color";
+import { canInteractEquipment } from "./client-action-item";
 import type { HexRgbaColor } from "../lib/frontend-color";
 import type { ItemStructure } from "../app/item-structure";
 import type { ClientEntitySelection } from "./client-entity-selection";
@@ -117,6 +118,7 @@ export class ClientSelectedEntityTracking {
 			canInteract:
 				(record.canTrade ||
 					record.canPickUp ||
+					(!unrestrictedUse && canInteractEquipment(record)) ||
 					record.description.useCapability === "direct" ||
 					record.description.useCapability === "targeted" ||
 					(unrestrictedUse &&

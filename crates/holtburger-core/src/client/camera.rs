@@ -6,6 +6,7 @@
 //! serializable path; it never owns a second body or collision scene.
 
 use crate::placed_motion::present_placed_motion_pose;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -375,6 +376,8 @@ struct CameraCollisionPublication {
     environment: Arc<holtburger_world::CollisionScene>,
     /// Prepared peers from this epoch; absent when the followed player excludes entity response.
     entities: Option<Arc<holtburger_world::EntityCollisionSnapshot>>,
+    /// Camera-only exclusions captured with the same server entity state as the geometry.
+    excluded: BTreeSet<SpatialBodyId>,
 }
 
 /// Local-player identity and body preparation state from one publication.
@@ -453,6 +456,22 @@ impl ClientCameraSceneInput {
                 Ok(CameraCollisionPublication {
                     environment: Arc::clone(&snapshot.scene),
                     entities,
+                    // RETAIL DIVERGENCE: retail clears missile state on impact
+                    // (acclient.c:308446,308481), removing its missile exclusion
+                    // (:302641) before a server state update. Keep server-classified
+                    // projectiles out of camera queries across that local transition.
+                    // Restoring retail eligibility can snap the boom onto an impacted spell.
+                    // Camera-only filtering cannot affect content collision or reporting.
+                    // Census 2026-10-22: local 43,913-template catalog contains 193
+                    // ProjectileSpell and 317 Missile templates; eligibility still uses
+                    // live server state, so custom-server projectiles follow the same rule.
+                    excluded: world
+                        .entities
+                        .iter()
+                        .filter(|entity| entity.physics.is_authoritative_projectile())
+                        .map(|entity| SpatialBodyId::Entity(entity.guid))
+                        .chain([SpatialBodyId::LocalPlayer(world.player.guid)])
+                        .collect(),
                 })
             }),
         }
@@ -742,7 +761,7 @@ impl ClientCameraRuntime {
             holtburger_world::spatial::CameraCollisionQuery {
                 environment: collision.environment.as_ref(),
                 entities,
-                target: SpatialBodyId::LocalPlayer(active.identity.player_guid),
+                excluded: &collision.excluded,
             }
         });
         let query: &dyn holtburger_world::spatial::SphereCollisionQuery = match &entity_query {
@@ -1324,8 +1343,14 @@ mod tests {
         assert!((samples.last().unwrap().visual_pivot.coords.x - 9.5).abs() < 1e-5);
     }
 
-    #[test]
-    fn boom_follows_player_entity_exclusion_without_restarting_the_camera() {
+    /// Install a solid peer halfway along a clear upward boom, then let the boom settle.
+    fn boom_with_obstacle() -> (
+        ClientRuntime,
+        SimulationSceneSnapshot,
+        ClientCameraRuntime,
+        SpatialBodyId,
+        f32,
+    ) {
         let (mut client, collision, _) = super::super::tests::floor_contact_publication();
         let player = SpatialBodyId::LocalPlayer(client.world.player.guid);
         let mut camera = ClientCameraRuntime::new().unwrap();
@@ -1389,6 +1414,75 @@ mod tests {
             "clear {clear_reach}, blocked {}",
             camera.active.as_ref().unwrap().controller.rendered_reach()
         );
+        (client, collision, camera, blocker_id, clear_reach)
+    }
+
+    #[test]
+    fn server_projectiles_remain_camera_excluded_until_server_reclassification() {
+        let (mut client, collision, mut camera, blocker_id, clear_reach) = boom_with_obstacle();
+        let duration = ACTIVATION_SETTLE_STEP;
+        // The indexed geometry is an ordinary solid after local missile retirement. The
+        // server classification must still exclude it without removing that world target.
+        let blocker_pose = client.world.scene.body(blocker_id).unwrap().pose;
+        let guid = blocker_id.authoritative_guid().unwrap();
+        let mut entity =
+            holtburger_world::entity::Entity::new(guid, "Projectile".into(), blocker_pose);
+        entity
+            .physics
+            .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                holtburger_common::properties::PhysicsState::MISSILE,
+            ));
+        // Insert only entity facts: preserve the already-installed solid body in this fixture.
+        client.world.entities.insert(entity);
+        let projectile = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        assert!(
+            projectile
+                .collision
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .excluded
+                .contains(&blocker_id)
+        );
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            camera.advance(&projectile, duration).unwrap().unwrap();
+        }
+        assert!(
+            (camera.active.as_ref().unwrap().controller.rendered_reach() - clear_reach).abs()
+                < 0.01
+        );
+        client
+            .world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .physics
+            .reconcile(holtburger_world::resolve_effective_entity_physics_state(
+                holtburger_common::properties::PhysicsState::empty(),
+            ));
+        let reclassified = ClientCameraSceneInput::capture(&client.world, Some(&collision), None);
+        assert!(
+            !reclassified
+                .collision
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .excluded
+                .contains(&blocker_id)
+        );
+        for _ in 0..ACTIVATION_SETTLE_MAXIMUM_STEPS {
+            camera.advance(&reclassified, duration).unwrap().unwrap();
+        }
+        assert!(camera.active.as_ref().unwrap().controller.rendered_reach() < clear_reach - 0.5);
+    }
+
+    #[test]
+    fn boom_follows_player_entity_exclusion_without_restarting_the_camera() {
+        let (mut client, collision, mut camera, _, clear_reach) = boom_with_obstacle();
+        let player = SpatialBodyId::LocalPlayer(client.world.player.guid);
+        let duration = ACTIVATION_SETTLE_STEP;
         assert!(client.world.scene.set_physical_collision_exclusion(
             player,
             holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE,

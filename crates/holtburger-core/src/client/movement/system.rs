@@ -707,14 +707,14 @@ impl MovementSystem {
                         PlayerDriveIntent::ClientDirected(command) => command.acquires_control(),
                         _ => false,
                     };
-                    if matches!(
+                    let supersedes_local_command = matches!(
                         command,
                         PlayerDriveIntent::ManualHeld(_)
                             | PlayerDriveIntent::ManualPulse { .. }
                             | PlayerDriveIntent::Stop
                             | PlayerDriveIntent::SnapFacing { .. }
-                    ) || acquires_client_directed_control
-                    {
+                    ) || acquires_client_directed_control;
+                    if supersedes_local_command {
                         world.admit_entity_sticky_target(world.player.guid, None);
                     }
                     explicit_stop_requested |= matches!(command, PlayerDriveIntent::Stop);
@@ -723,9 +723,12 @@ impl MovementSystem {
                     {
                         self.pending_manual_playback_stop = true;
                     }
-                    world
-                        .motion_runtimes
-                        .release_local_command(world.player.guid);
+                    // Passive updates and scoped releases cannot displace a newer emote owner.
+                    if supersedes_local_command {
+                        world
+                            .motion_runtimes
+                            .release_local_command(world.player.guid);
+                    }
                     self.ingest_drive_intent(command, now);
                     // A new controller invalidates the previous presentation owner. Updates from
                     // that same controller must retain its cursor or a continuously steered body

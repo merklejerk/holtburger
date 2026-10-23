@@ -27,12 +27,15 @@
 		visible,
 		selectedGuid,
 		onSelectEntity,
+		onExamineEntity,
 		onSetWaypoint,
 	}: {
 		readonly owner: ClientNearby;
 		readonly visible: boolean;
 		readonly selectedGuid: number | null;
 		readonly onSelectEntity: (guid: number) => boolean;
+		/** Examine the current selection only after this panel successfully selects its row. */
+		readonly onExamineEntity: () => void;
 		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 	} = $props();
 	// Cold initial markup; only this visible consumer's bounded timer publishes later rows.
@@ -124,6 +127,14 @@
 	function cancelEditor(): void {
 		editor = null;
 		error = null;
+	}
+	/** Both pointer actions share selection admission and unavailable-target feedback. */
+	function selectEntity(guid: number): boolean {
+		const selected = onSelectEntity(guid);
+		error = selected
+			? null
+			: "This entity is currently outside selection range or unavailable.";
+		return selected;
 	}
 	function focusPattern(input: HTMLInputElement): void {
 		input.focus();
@@ -260,6 +271,10 @@
 							class:expanded={expanded === row.guid}
 							data-entity-guid={row.guid}
 							class:selected={selectedGuid === row.guid}
+							oncontextmenu={(event) => {
+								event.preventDefault();
+								if (selectEntity(row.guid)) onExamineEntity();
+							}}
 						>
 							<div class="entity-row">
 								<button
@@ -285,11 +300,8 @@
 									class="ui-catalog-trigger entity-name"
 									type="button"
 									aria-pressed={selectedGuid === row.guid}
-									onclick={() => {
-										error = onSelectEntity(row.guid)
-											? null
-											: "This entity is currently outside selection range or unavailable.";
-									}}>{row.facts.name}</button
+									onclick={() => selectEntity(row.guid)}
+									>{row.facts.name}</button
 								>
 								<span
 									>{row.distance === null

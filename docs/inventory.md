@@ -26,6 +26,9 @@ indices at or after its destination. The item and pack domains shift independent
 - A stack-only target permits merging without authorizing positional movement.
 - A container target appends after the highest remaining native index. Explicit
   full-container drops fail; they do not redirect to another container.
+- An unequip target requires player-owned equipped gear and allocates carried
+  storage in the main pack, then other packs in native order. Full or incomplete
+  required storage rejects the request; already carried items are not moved.
 - A pack target exchanges two real carried containers. Main-pack and focus entries
   cannot be swapped. The first request moves the source to the target's original
   index; the second moves the target to the source's original index. This restores
@@ -58,11 +61,21 @@ nonempty source. ACE's `Player_Inventory.cs`
 before reducing the source quantity. Both changes arrive through ordinary world-state
 updates; the client does not wait for them to release an interaction lock.
 
-`inventory_storage.rs` shares capacity allocation between pickup, splits, and equipment
-replacement. It reserves currently free positions in the preferred source
+`inventory_storage.rs` shares capacity allocation between pickup, splits, unequipping,
+and equipment replacement. It reserves currently free positions in the preferred source
 container, then main pack, then remaining containers in native pack order.
 Fallback containers are inspected only as needed; unhydrated required storage
 rejects preflight rather than being treated as empty.
+
+In the 3D frontend, ordinary Interact, inventory double-click, and equipment action
+cells equip carried gear and unequip owned worn gear. Worn items without an authored
+use action can also be unequipped. The action-bar alternate modifier chooses a side
+only when equipping; worn gear unequips with either activation. Active target acquisition
+retains precedence for Interact and inventory clicks. Unrestricted diagnostic Use
+and dedicated caster-spell shortcuts retain their authored activation behavior.
+The frontend submits the unequip intent; core chooses storage and revalidates
+ownership and equipment state. Equipment remains displayed until server updates
+confirm its new location.
 
 ## Pickup and ground drop
 

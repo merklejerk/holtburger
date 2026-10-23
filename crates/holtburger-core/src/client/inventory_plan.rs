@@ -22,6 +22,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum InventoryTarget {
+    /// Remove equipped gear into automatically allocated carried storage.
+    Unequip,
     /// Acquire a loose world item or accessible external contents into carried storage.
     Pickup {
         /// Optional carried-container preference from scripting; allocation may use other packs.
@@ -118,6 +120,9 @@ pub enum InventoryPlanError {
     /// Source must be carried or equipped by this player.
     #[error("Item is not owned by the player")]
     NotOwned,
+    /// A stale unequip request must not move an already carried item.
+    #[error("Item is not equipped")]
+    NotEquipped,
     /// Contents transfers require ownership or current external-container access.
     #[error("This item is no longer accessible")]
     NotAccessible,
@@ -181,6 +186,28 @@ pub fn plan_inventory_intent(
         _ => {}
     }
     match intent.target {
+        InventoryTarget::Unequip => {
+            if !matches!(
+                world.storage_location(intent.item),
+                Some(StorageLocation::Equipped { .. })
+            ) {
+                return Err(InventoryPlanError::NotEquipped);
+            }
+            let entity = world
+                .get_visible_entity(intent.item)
+                .ok_or(InventoryPlanError::Pending(intent.item))?;
+            let destinations = allocate_storage(
+                world,
+                world.player.guid,
+                &[entity.uses_player_container_slot()],
+            )?;
+            let destination = destinations[0];
+            Ok(InventoryPlan::Move(InventoryMove {
+                item: intent.item,
+                container: destination.container,
+                placement: destination.placement,
+            }))
+        }
         InventoryTarget::Pickup { container } => {
             let entity = holtburger_world::interaction::pickup_candidate(world, intent.item)
                 .ok_or(InventoryPlanError::NotPickable)?;
@@ -695,6 +722,54 @@ pub(super) mod tests {
         world
     }
 
+    #[test]
+    fn unequip_allocates_main_pack_then_carried_pack_and_rejects_full_storage() {
+        for (root_capacity, pack_capacity, expected) in [
+            (1, 2, Ok((PLAYER, 0))),
+            (0, 2, Ok((PACK, 1))),
+            (0, 1, Err(StorageAllocationError::NoSpace)),
+        ] {
+            let world = outfit(root_capacity, pack_capacity);
+            let item = world.player_equipment().next().expect("equipped armor").0;
+            assert_eq!(
+                plan_inventory_intent(
+                    &world,
+                    InventoryIntent {
+                        item,
+                        target: InventoryTarget::Unequip,
+                    }
+                ),
+                expected
+                    .map(|(container, placement)| InventoryPlan::Move(InventoryMove {
+                        item,
+                        container,
+                        placement,
+                    }))
+                    .map_err(InventoryPlanError::Storage)
+            );
+        }
+    }
+
+    #[test]
+    fn unequip_rejects_carried_and_unowned_items() {
+        let world = outfit(1, 2);
+        for (item, error) in [
+            (SOURCE, InventoryPlanError::NotEquipped),
+            (Guid(0x8000_0042), InventoryPlanError::NotOwned),
+        ] {
+            assert_eq!(
+                plan_inventory_intent(
+                    &world,
+                    InventoryIntent {
+                        item,
+                        target: InventoryTarget::Unequip,
+                    }
+                ),
+                Err(error)
+            );
+        }
+    }
+
     /// Carried source and equipped matching ammo, with no free storage slots.
     pub(in crate::client) fn ammo_inventory() -> WorldState {
         let mut world = inventory();
@@ -1014,6 +1089,7 @@ pub(super) mod tests {
     fn external_access_does_not_grant_specialized_owned_item_actions() {
         let world = external_storage();
         for target in [
+            InventoryTarget::Unequip,
             InventoryTarget::Ground,
             InventoryTarget::Split { amount: 1 },
             InventoryTarget::Give { guid: PLAYER },

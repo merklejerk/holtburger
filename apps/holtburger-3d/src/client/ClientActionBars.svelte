@@ -278,6 +278,9 @@
 							keys.add(key);
 						}
 						const action = bindingAction(facts);
+						const equipped =
+							facts?.ownedByPlayer === true &&
+							facts.location.kind === "equipped";
 						next.set(content.item, {
 							label:
 								facts?.description.kind === "known"
@@ -297,6 +300,7 @@
 								action?.kind === "targeted"
 									? "Use on selected target"
 									: action?.kind === "equipment" &&
+										  !equipped &&
 										  facts?.description.kind === "known" &&
 										  facts.description.hasAlternateEquipSide
 										? "Equip alternate side"
@@ -306,9 +310,7 @@
 								facts.description.consumable?.availability === "ready"
 									? facts.description.consumable.identity
 									: null,
-							equipped:
-								facts?.ownedByPlayer === true &&
-								facts.location.kind === "equipped",
+							equipped,
 							display: key === undefined ? undefined : repository.read(key),
 						});
 					}

@@ -26,6 +26,142 @@ export async function probeBindingControls(client, evaluateExpression) {
 		await settle();
 	};
 	const initial = await read(`${api}.bindingSettings.read()`);
+	// Explicit fixture bindings keep behavior checks independent of product defaults.
+	const panelSettings = {
+		...initial,
+		client: {
+			...initial.client,
+			toggleInventory: [
+				{ key: "b", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			toggleCharacter: [
+				{ key: "f", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			toggleSocial: [
+				{ key: "o", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			toggleWorld: [
+				{ key: "m", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			toggleJournal: [
+				{ key: "j", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			toggleSettings: [
+				{ key: "F10", shift: false, ctrl: false, alt: false, meta: false },
+			],
+		},
+	};
+
+	await read(
+		`globalThis.__releaseSystemPanelKeys = ${api}.bindSystemPanelKeys()`,
+	);
+	try {
+		await read(
+			`${api}.bindingSettings.replace(${JSON.stringify(panelSettings)})`,
+		);
+		await settle();
+		const pressed = (label) =>
+			`document.querySelector('button[aria-label="${label}"]').getAttribute('aria-pressed') === 'true'`;
+		for (const [label, name] of [
+			["Inventory", "b"],
+			["Character", "f"],
+			["Social", "o"],
+			["World", "m"],
+			["Journal", "j"],
+			["Settings", "F10"],
+		]) {
+			await key(name);
+			assert.equal(await read(pressed(label)), true, `${label} opens`);
+			await client.send("Input.dispatchKeyEvent", {
+				type: "keyDown",
+				key: name,
+				code: name,
+				autoRepeat: true,
+			});
+			await client.send("Input.dispatchKeyEvent", {
+				type: "keyUp",
+				key: name,
+				code: name,
+			});
+			await settle();
+			assert.equal(await read(pressed(label)), true, `${label} ignores repeat`);
+			await key(name);
+			assert.equal(await read(pressed(label)), false, `${label} closes`);
+		}
+		await key("b");
+		await key("f");
+		assert.equal(
+			await read(pressed("Inventory")),
+			false,
+			"switch closes prior panel",
+		);
+		assert.equal(await read(pressed("Character")), true);
+		await key("f");
+		await read(
+			`${api}.bindingSettings.replace({...${api}.bindingSettings.read(), client: {...${api}.bindingSettings.read().client, toggleInventory: [{key: 'F8'}]}})`,
+		);
+		await settle();
+		assert.match(
+			await read(
+				`document.querySelector('button[aria-label="Inventory"]').title`,
+			),
+			/F8/,
+		);
+		await key("b");
+		assert.equal(
+			await read(pressed("Inventory")),
+			false,
+			"old binding retired",
+		);
+		await key("F8");
+		assert.equal(await read(pressed("Inventory")), true, "remapped key opens");
+		await key("F8");
+		await read(
+			`${api}.bindingSettings.replace({...${api}.bindingSettings.read(), client: {...${api}.bindingSettings.read().client, toggleInventory: []}})`,
+		);
+		await settle();
+		await key("F8");
+		assert.equal(
+			await read(pressed("Inventory")),
+			false,
+			"unbound panel ignores old key",
+		);
+		await read(
+			`document.querySelector('button[aria-label="Inventory"]').click()`,
+		);
+		await settle();
+		assert.equal(
+			await read(pressed("Inventory")),
+			true,
+			"dock opens unbound panel",
+		);
+		await read(
+			`document.querySelector('button[aria-label="Inventory"]').click()`,
+		);
+		await settle();
+		// Native editors retain letter input instead of toggling a panel.
+		await read(
+			`${api}.bindingSettings.replace(${JSON.stringify(panelSettings)}); globalThis.__panelEditor = document.createElement('input'); document.body.append(globalThis.__panelEditor); globalThis.__panelEditor.focus()`,
+		);
+		await key("b");
+		assert.equal(
+			await read(pressed("Inventory")),
+			false,
+			"editor owns text input",
+		);
+		await read(
+			`globalThis.__panelEditor.remove(); delete globalThis.__panelEditor`,
+		);
+		await key("b");
+		assert.equal(await read(pressed("Inventory")), true);
+		await key("b");
+	} finally {
+		await read(
+			`globalThis.__panelEditor?.remove(); delete globalThis.__panelEditor; globalThis.__releaseSystemPanelKeys(); delete globalThis.__releaseSystemPanelKeys; ${api}.bindingSettings.replace(${JSON.stringify(initial)})`,
+		);
+		await settle();
+	}
+
 	const settings = {
 		...initial,
 		actionBars: {
@@ -142,6 +278,14 @@ export async function probeBindingControls(client, evaluateExpression) {
 		);
 		return {
 			passed: true,
+			systemPanels: {
+				toggles: true,
+				ignoresRepeat: true,
+				switches: true,
+				remaps: true,
+				unbinds: true,
+				editorOwnership: true,
+			},
 			actionFocus: true,
 			actionCellHint: true,
 			spellTab: true,

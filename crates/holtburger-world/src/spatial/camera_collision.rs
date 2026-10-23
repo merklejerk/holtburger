@@ -8,6 +8,7 @@ use super::{
 use anyhow::Result;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, Vector3};
+use std::collections::BTreeSet;
 
 /// Collision operations required by unregistered sphere motion and camera clearance.
 /// Environment-only callers and cameras share the solver while supplying explicit obstacles.
@@ -63,14 +64,14 @@ impl SphereCollisionQuery for CollisionScene {
     }
 }
 
-/// Borrowed camera query: geometry is shared; target exclusion belongs to this camera instance.
+/// Borrowed camera query: geometry is shared; exclusions belong to this camera instance.
 pub struct CameraCollisionQuery<'a> {
     /// Immutable world collision paired with the entity capture.
     pub environment: &'a CollisionScene,
     /// Collision-only entity publication, including current authored part poses.
     pub entities: &'a EntityCollisionSnapshot,
-    /// Followed body never obstructs its own camera.
-    pub target: SpatialBodyId,
+    /// Bodies excluded by the camera owner, including the followed body.
+    pub excluded: &'a BTreeSet<SpatialBodyId>,
 }
 
 impl SphereCollisionQuery for CameraCollisionQuery<'_> {
@@ -82,7 +83,7 @@ impl SphereCollisionQuery for CameraCollisionQuery<'_> {
         request: StaticSphereSweepRequest,
     ) -> Result<Option<StaticSphereSweepHit>> {
         self.environment
-            .sweep_camera_entity_sphere(self.entities, self.target, request)
+            .sweep_camera_entity_sphere(self.entities, self.excluded, request)
     }
     fn entity_contacts(
         &self,
@@ -94,14 +95,14 @@ impl SphereCollisionQuery for CameraCollisionQuery<'_> {
         let extent = Vector3::new(radius, radius, radius);
         let mut contacts = Vec::new();
         for id in self.entities.index.candidates(
-            Some(self.target),
+            None,
             anchor,
             center - extent,
             center + extent,
             placement,
         ) {
             let target = &self.entities.targets[&id];
-            if !target.camera_solid {
+            if self.excluded.contains(&id) || !target.camera_solid {
                 continue;
             }
             let local = WorldPosition {
@@ -134,6 +135,6 @@ impl SphereCollisionQuery for CameraCollisionQuery<'_> {
         policy: CollisionQueryPolicy,
     ) -> Result<UncoveredCollisionQuery<Option<StaticSphereSweepHit>>> {
         self.environment
-            .sweep_camera_sphere(self.entities, self.target, request, policy)
+            .sweep_camera_sphere(self.entities, self.excluded, request, policy)
     }
 }

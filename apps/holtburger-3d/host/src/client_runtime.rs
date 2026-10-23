@@ -704,8 +704,8 @@ impl ClientHostRuntime {
                     Arc::clone(&self.content.repository),
                 ),
             ))
-            .dynamic_scale_source(Arc::new(
-                holtburger_core::ContentClientDynamicScaleSource::new(Arc::clone(
+            .dynamic_script_source(Arc::new(
+                holtburger_core::ContentClientDynamicScriptSource::new(Arc::clone(
                     &self.content.service,
                 )),
             ))

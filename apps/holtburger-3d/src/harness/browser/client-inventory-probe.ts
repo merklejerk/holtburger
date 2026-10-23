@@ -1473,6 +1473,8 @@ export async function probeClientInventory(options: {
 	summaryTrigger.blur();
 	// Equipment references one identity in several independently labeled rows.
 	const armor = owned(91, 1, 0);
+	if (armor.description.kind !== "known")
+		throw new Error("Known armor fixture required");
 	const armorSlots = EQUIPMENT_SLOTS.filter((slot) =>
 		["Chest armor", "Upper arm armor"].includes(slot.label),
 	);
@@ -1482,6 +1484,7 @@ export async function probeClientInventory(options: {
 		{
 			...armor,
 			location: { kind: "equipped", wearerGuid: 1, mask: armorMask },
+			description: { ...armor.description, useCapability: "unsupported" },
 		},
 		// Shirt and pants can share the abdomen bit without competing for a slot.
 		{
@@ -1603,6 +1606,28 @@ export async function probeClientInventory(options: {
 		)
 	)
 		throw new Error("Equipment selection did not follow the shared identity");
+	const beforeUnequip = commands.length;
+	equippedCells[0]?.dispatchEvent(
+		new MouseEvent("dblclick", { bubbles: true }),
+	);
+	await sample();
+	const unequipCommands = commands.slice(beforeUnequip);
+	if (
+		unequipCommands.filter(
+			(entry) =>
+				entry.command === "submit_client_inventory" &&
+				JSON.stringify(entry.args?.intent) ===
+					JSON.stringify({ item: 91, target: { kind: "unequip" } }),
+		).length !== 1 ||
+		unequipCommands.some((entry) => entry.command === "submit_client_item_use")
+	)
+		throw new Error(
+			"Equipped armor double-click did not submit one unequip intent",
+		);
+	if (equipmentCells().length !== armorSlots.length)
+		throw new Error(
+			"Unequip submission changed equipment before server confirmation",
+		);
 	const equipmentViewport = equipment.querySelector<HTMLElement>(
 		".item-grid-strip-viewport",
 	);
@@ -1848,6 +1873,7 @@ export async function probeClientInventory(options: {
 		equipmentHover: true,
 		dropSelectionPreserved: true,
 		equipmentStrip: true,
+		equipmentDoubleClickUnequips: true,
 		aetheriaActivation: true,
 		ambientCurrencyOverlay: true,
 		initial,

@@ -1219,6 +1219,7 @@
 
 	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
+		if (worldView?.handleSystemPanelKeydown(event)) return;
 		if (preciseJumpActive && !event.isComposing) {
 			if (
 				inputArbiter?.applyPowerKey(event, true) ||
@@ -1616,7 +1617,7 @@
 		};
 	});
 
-	/** Raw browser ownership ends at the client shell; every edge publishes an idle replacement. */
+	/** Owns one browser-to-host movement controller per active world-input lifetime. */
 	$effect(() => {
 		const currentSession = session;
 		const shouldOwnInput = worldInputEnabled;
@@ -1688,11 +1689,12 @@
 		keyboard.bindGame({
 			keydown: handleGameKeydown,
 			keyup: handleGameKeyup,
-			cancel: () => {
+			cancel: (reason) => {
 				itemInteractions?.cancelTargeting();
 				selectionInput?.cancel();
 				characterInput.reset();
-				inputArbiter?.reset();
+				if (reason === "focus-transfer") inputArbiter?.releaseHeldActions();
+				else inputArbiter?.reset();
 			},
 		}),
 	);

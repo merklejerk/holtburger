@@ -54,6 +54,13 @@ pub(crate) enum BehaviorHookPayloadManifest {
     Ethereal {
         ethereal: bool,
     },
+    /// Physics flags executed by the host-owned script controller.
+    NoDraw {
+        no_draw: bool,
+    },
+    SetLight {
+        lights_on: bool,
+    },
     ReplaceObject {
         part_index: u32,
         gfx_obj_id: String,
@@ -130,6 +137,12 @@ pub(crate) fn behavior_hook_payload(
                 byte_length,
             }
         }
+        AnimationHookPayload::NoDraw(enabled) => {
+            BehaviorHookPayloadManifest::NoDraw { no_draw: *enabled }
+        }
+        AnimationHookPayload::SetLight(enabled) => BehaviorHookPayloadManifest::SetLight {
+            lights_on: *enabled,
+        },
         AnimationHookPayload::Attack(AttackConeHookPayload {
             part_index,
             left_x,

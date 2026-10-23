@@ -152,8 +152,9 @@ async function fixture() {
 }
 
 describe("shared frontend item interaction flow", () => {
-	it("equips carried equipment from ordinary Use and selected-item interaction while preserving wielded activation", async () => {
+	it("shares state-based equipment interaction across inventory, selection, and action cells", async () => {
 		const f = await fixture();
+		const inventory = vi.spyOn(f.lifecycle, "submitInventory");
 		const equip = vi
 			.spyOn(f.lifecycle, "equipItem")
 			.mockResolvedValue(undefined);
@@ -186,9 +187,13 @@ describe("shared frontend item interaction flow", () => {
 		f.interactions.use(2, false);
 		f.select(2);
 		f.interactions.interactSelected(false);
+		f.interactions.activate(2, "equipment", false);
+		f.interactions.activate(2, "equipment", true);
 		expect(equip.mock.calls).toEqual([
 			[2, false],
 			[2, false],
+			[2, false],
+			[2, true],
 		]);
 		expect(f.submit).not.toHaveBeenCalled();
 		expect(f.interactions.snapshot().kind).toBe("idle");
@@ -197,13 +202,70 @@ describe("shared frontend item interaction flow", () => {
 			location: { kind: "equipped", wearerGuid: 1, mask: CASTER_EQUIP_MASK },
 		});
 		f.interactions.use(2, false);
-		expect(equip).toHaveBeenCalledTimes(2);
+		f.interactions.interactSelected(false);
+		f.interactions.activate(2, "equipment", false);
+		f.interactions.activate(2, "equipment", true);
+		expect(equip).toHaveBeenCalledTimes(4);
+		expect(inventory.mock.calls).toEqual([
+			[{ item: 2, target: { kind: "unequip" } }],
+			[{ item: 2, target: { kind: "unequip" } }],
+			[{ item: 2, target: { kind: "unequip" } }],
+			[{ item: 2, target: { kind: "unequip" } }],
+		]);
+		expect(f.interactions.snapshot().kind).toBe("idle");
+		f.interactions.use(2, true);
 		expect(f.interactions.snapshot().kind).toBe("acquiring");
+		f.destroy();
+	});
+
+	it("unequips non-usable armor but keeps equipped targeting recipients and other wearers intact", async () => {
+		const f = await fixture();
+		const inventory = vi.spyOn(f.lifecycle, "submitInventory");
+		const armor = entityFacts(3);
+		if (armor.description.kind !== "known")
+			throw new Error("Known fixture required");
+		const publish = (ownedByPlayer: boolean, wearerGuid: number) =>
+			f.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				worldContainer: null,
+				upserts: [
+					{
+						...armor,
+						ownedByPlayer,
+						location: { kind: "equipped", wearerGuid, mask: CASTER_EQUIP_MASK },
+						description: { ...armor.description, useCapability: "unsupported" },
+					},
+				],
+				removed: [],
+			});
+		publish(true, 1);
+		f.interactions.use(3, false);
+		expect(inventory).toHaveBeenCalledWith({
+			item: 3,
+			target: { kind: "unequip" },
+		});
+		inventory.mockClear();
+		f.interactions.use(2, false);
+		f.select(3);
+		f.interactions.interactSelected(false);
+		expect(f.request().intent).toEqual({
+			kind: "targeted",
+			source: 2,
+			target: 3,
+		});
+		expect(inventory).not.toHaveBeenCalled();
+		publish(false, 9);
+		f.interactions.use(3, false);
+		expect(inventory).not.toHaveBeenCalled();
+		expect(f.failure).toHaveBeenCalledWith(
+			"This item cannot currently be used.",
+		);
 		f.destroy();
 	});
 
 	it("casts an equipped item's unlearned spell using the selected target and rejects stale equipment", async () => {
 		const f = await fixture();
+		const inventory = vi.spyOn(f.lifecycle, "submitInventory");
 		const source = entityFacts(2);
 		if (source.description.kind !== "known")
 			throw new Error("Known fixture required");
@@ -245,9 +307,13 @@ describe("shared frontend item interaction flow", () => {
 			target: 3,
 		});
 		f.result({ kind: "executed" });
+		f.interactions.castWieldedSpell(2);
+		f.resolveTarget(false);
+		expect(f.interactions.snapshot().kind).toBe("acquiring");
 		f.select(null);
 		f.interactions.castWieldedSpell(2);
 		expect(f.interactions.snapshot().kind).toBe("acquiring");
+		expect(inventory).not.toHaveBeenCalled();
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
 			worldContainer: null,

@@ -16,6 +16,7 @@ import {
 } from "./keyboard-policy-probe.mjs";
 import { probeTrade } from "./client-trade-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
+import { probeActionBars } from "./client-action-bar-probe.mjs";
 import { probeItemUse } from "./client-item-use-probe.mjs";
 import { probeClientBook } from "./client-book-probe.mjs";
 import { probeLoadouts } from "./client-loadout-probe.mjs";
@@ -572,6 +573,8 @@ try {
 		);
 	}
 	// Publish success evidence only after every requested assertion has passed.
+	if (result.collisionScriptProbe)
+		report.collisionScriptProbe = result.collisionScriptProbe;
 	process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
 	await Promise.allSettled(children.toReversed().map(stopChild));
@@ -4621,6 +4624,11 @@ async function runClientHudHarness({ viteUrl }) {
 			return {
 				clientInventory: {
 					drag: await probeInventoryDrag(client, evaluateExpression),
+					actionBars: await probeActionBars(
+						client,
+						evaluateExpression,
+						options.screenshotPath,
+					),
 					itemUse: await probeItemUse(client, evaluateExpression),
 				},
 				consoleMessages,
@@ -4982,7 +4990,8 @@ async function runClientHudHarness({ viteUrl }) {
 				`document.querySelector('nav[aria-label="Game shortcuts"] button[aria-label="Journal"]').click()`,
 			);
 			await delay(50);
-			const selector = 'section.hud-window[aria-label="Journal"] details';
+			const selector =
+				'section.hud-window[aria-label="Journal"] details.contract-row';
 			await evaluateExpression(
 				client,
 				`(() => {
@@ -6553,6 +6562,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					? await evaluate(
 							client,
 							`async () => (await import('/src/harness/browser/dynamic-material-table-probe.ts')).probeDynamicMaterialTables()`,
+							[],
+						)
+					: null,
+			collisionScriptProbe:
+				process.env.HOLTBURGER_PROBE_COLLISION_SCRIPTS === "1"
+					? await evaluate(
+							client,
+							"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probeCollisionScriptPlayback",
 							[],
 						)
 					: null,

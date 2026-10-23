@@ -112,13 +112,16 @@ export interface EffectCommandPort {
 	): void;
 }
 
-/** Composition-selected ownership of whole-object scale. */
-interface ScaleCommandPort {
-	applyScale(
+/** Composition-selected ownership of whole-object scale and physics presentation flags. */
+interface ObjectStateCommandPort {
+	applyObjectState(
 		target: BehaviorTarget,
-		values: { readonly end: number; readonly durationSeconds: number },
+		command: Extract<
+			PreparedBehaviorCommand,
+			{ kind: "scale" | "no-draw" | "set-light" }
+		>,
 		mode: BehaviorDispatchMode,
-	): "executed" | "folded-initial-state" | "owned-by-world";
+	): "executed" | "folded-initial-state" | "owned-by-world" | "no-consumer";
 }
 
 interface Vec3Like {
@@ -198,7 +201,7 @@ export interface BehaviorConsumers {
 	readonly audio: AudioCommandPort;
 	readonly effects: EffectCommandPort;
 	readonly particles: ParticleCommandPort;
-	readonly scale: ScaleCommandPort;
+	readonly objectState: ObjectStateCommandPort;
 	readonly scheduler: ScriptActivationPort;
 	readonly targets: BehaviorTargetRegistry;
 }
@@ -316,7 +319,13 @@ export class BehaviorEventRouter {
 			}
 
 			case "scale":
-				return this.#consumers.scale.applyScale(target, command, mode);
+			case "no-draw":
+			case "set-light":
+				return this.#consumers.objectState.applyObjectState(
+					target,
+					command,
+					mode,
+				);
 
 			case "create-particle": {
 				// Replay is delegated rather than decided here: persistence is a property of the

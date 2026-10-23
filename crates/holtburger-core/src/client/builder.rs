@@ -26,7 +26,7 @@ pub struct ClientRuntimeBuilder {
     server_endpoint: Option<ServerEndpoint>,
     world_bootstrap: Option<Arc<WorldBootstrap>>,
     collision_source: Option<Arc<dyn super::collision::ClientCollisionSource>>,
-    dynamic_scale_source: Option<Arc<dyn super::dynamic_scale::ClientDynamicScaleSource>>,
+    dynamic_script_source: Option<Arc<dyn super::dynamic_script::ClientDynamicScriptSource>>,
     selection_envelope_source:
         Option<Arc<dyn super::selection_envelope::ClientSelectionEnvelopeSource>>,
     combat_tuning: ClientCombatTuning,
@@ -43,7 +43,7 @@ impl ClientRuntimeBuilder {
             server_endpoint: None,
             world_bootstrap: None,
             collision_source: None,
-            dynamic_scale_source: None,
+            dynamic_script_source: None,
             selection_envelope_source: None,
             combat_tuning: ClientCombatTuning::default(),
             requires_external_world_reveal: false,
@@ -114,12 +114,12 @@ impl ClientRuntimeBuilder {
         self
     }
 
-    /// Injects immutable content preparation for core-owned direct scale timelines.
-    pub fn dynamic_scale_source(
+    /// Injects immutable content preparation for core-owned object-state script timelines.
+    pub fn dynamic_script_source(
         mut self,
-        source: Arc<dyn super::dynamic_scale::ClientDynamicScaleSource>,
+        source: Arc<dyn super::dynamic_script::ClientDynamicScriptSource>,
     ) -> Self {
-        self.dynamic_scale_source = Some(source);
+        self.dynamic_script_source = Some(source);
         self
     }
 
@@ -254,9 +254,9 @@ impl ClientRuntimeBuilder {
             collision_coordinator: self
                 .collision_source
                 .map(super::collision::ClientCollisionCoordinator::new),
-            dynamic_scale_coordinator: self
-                .dynamic_scale_source
-                .map(super::dynamic_scale::ClientDynamicScaleCoordinator::new),
+            dynamic_script_coordinator: self
+                .dynamic_script_source
+                .map(super::dynamic_script::ClientDynamicScriptCoordinator::new),
             entity_cue_inbox: super::entity_cues::ClientEntityCueInbox::default(),
             selection_envelope_coordinator: self
                 .selection_envelope_source
@@ -321,7 +321,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         combat_approach_drive_active: false,
         melee_approach_state: None,
         collision_coordinator: None,
-        dynamic_scale_coordinator: None,
+        dynamic_script_coordinator: None,
         entity_cue_inbox: super::entity_cues::ClientEntityCueInbox::default(),
         selection_envelope_coordinator: None,
         requires_external_world_reveal: false,

@@ -19,7 +19,7 @@
 	} from "./client-spells";
 	import { CLIENT_ACTION_BAR_TUNING, CLIENT_TUNING } from "./client-tuning";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
-	import ShortcutBarShapeToggle from "./ShortcutBarShapeToggle.svelte";
+	import ShortcutBarLayoutControls from "./ShortcutBarLayoutControls.svelte";
 	import {
 		resolveClientHudPlacement,
 		type ClientHudPlacement,
@@ -418,7 +418,7 @@
 				{/if}
 			</div>
 		</div>
-		{#if editable}<ShortcutBarShapeToggle
+		{#if editable}<ShortcutBarLayoutControls
 				label="Toggle spell bar shape"
 				topInset={metrics.tabs}
 				orientation="horizontal"

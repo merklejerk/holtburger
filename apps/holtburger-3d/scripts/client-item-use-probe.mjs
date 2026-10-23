@@ -58,6 +58,39 @@ export async function probeItemUse(client, evaluateExpression) {
 	await read(api + ".beginItemUseProbe()");
 	await read(api + ".itemUseProbe().ready()");
 
+	const action = ".action-cell[data-action-cell='1']";
+	const bind = async (source, id) => {
+		const start = await point(source);
+		const end = await point(action);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...start,
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			...end,
+			button: "left",
+			buttons: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			...end,
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+		});
+		await read(api + ".itemUseProbe().ready()");
+		assert.equal(
+			await read(
+				`document.querySelector(${JSON.stringify(action)}).dataset.actionItem`,
+			),
+			String(id),
+		);
+	};
+
 	try {
 		await read(api + ".itemUseProbe().select(91)");
 		await click(food, true);
@@ -70,7 +103,9 @@ export async function probeItemUse(client, evaluateExpression) {
 			unrestricted: false,
 		});
 		await reply({ kind: "executed" });
-		await click(tool, true);
+		await bind(tool, 95);
+		await click(action);
+		await resolveTarget(false);
 		assert.equal((await state()).kind, "acquiring");
 		await read(`(async () => {
             const expected = 'Use ' + ${api}.itemUseProbe().snapshot().name + ' on… (Escape to cancel)';
@@ -83,17 +118,30 @@ export async function probeItemUse(client, evaluateExpression) {
             throw new Error('Target acquisition guidance did not appear in the existing toast surface');
         })()`);
 
-		const hover = async (selector, eligible) => {
+		const hover = async (selector, target, eligible) => {
 			await client.send("Input.dispatchMouseEvent", {
 				type: "mouseMoved",
 				...(await point(selector)),
 				buttons: 0,
 			});
-			const commands = await read(api + ".itemUseProbe().queryCommands()");
-			const query = commands.at(-1)?.args?.query;
-			assert.ok(query, "Hover submits a read-only target query");
+			// The viewport clears hover while the pointer is over a panel. Install the
+			// fixture hit only after entering the viewport so its timer cannot erase it.
+			if (selector === ".client-canvas")
+				await read(api + `.itemUseProbe().hoverWorld(${target})`);
+			// Viewport picking may publish after the pointer event completes.
+			const sequence = await read(`(async () => {
+                const deadline = performance.now() + 5000;
+                while (performance.now() < deadline) {
+                    const state = ${api}.itemUseProbe().snapshot();
+                    if (state.kind === 'acquiring' && state.considered?.target === ${target})
+                        return state.considered.sequence;
+                    await new Promise(requestAnimationFrame);
+                }
+                throw new Error('Hover did not consider target ' + ${target} + ': ' +
+                    JSON.stringify(${api}.itemUseProbe().queryCommands().at(-1)));
+            })()`);
 			await read(
-				`${api}.itemUseProbe().targetReply(${JSON.stringify({ sequence: query.sequence, eligible })})`,
+				`${api}.itemUseProbe().targetReply(${JSON.stringify({ sequence, eligible })})`,
 			);
 			const asset = eligible
 				? "combine-cursor-eligible.svg"
@@ -119,10 +167,9 @@ export async function probeItemUse(client, evaluateExpression) {
             })()`);
 			assert.equal((await state()).kind, "acquiring");
 		};
-		await hover(food, true);
-		await hover(tool, false);
-		await read(api + ".itemUseProbe().hoverWorld(91)");
-		await hover(".client-canvas", true);
+		await hover(food, 91, true);
+		await hover(tool, 95, false);
+		await hover(".client-canvas", 91, true);
 		await read(api + ".itemUseProbe().hoverWorld(null)");
 		await click(food);
 		pending = await state();
@@ -161,9 +208,11 @@ export async function probeItemUse(client, evaluateExpression) {
 			amount: 1,
 		});
 		await reply({ kind: "executed" });
-		await click(tool, true);
+		await read(api + ".itemUseProbe().select(95)");
+		await click(action);
+		await resolveTarget(false);
 		await click('button[aria-label="Interact"]');
-		// The second entry point attempts the selected source as target; selection was retained by double-click.
+		// Interact targets the selected worn source while acquisition is active.
 		assert.equal((await state()).kind, "submitting");
 		await reply({
 			kind: "rejected",
@@ -207,38 +256,6 @@ export async function probeItemUse(client, evaluateExpression) {
 		assert.equal((await state()).request.intent.kind, "direct");
 		await reply({ kind: "executed" });
 
-		const action = ".action-cell[data-action-cell='1']";
-		const bind = async (source, id) => {
-			const start = await point(source);
-			const end = await point(action);
-			await client.send("Input.dispatchMouseEvent", {
-				type: "mousePressed",
-				...start,
-				button: "left",
-				buttons: 1,
-				clickCount: 1,
-			});
-			await client.send("Input.dispatchMouseEvent", {
-				type: "mouseMoved",
-				...end,
-				button: "left",
-				buttons: 1,
-			});
-			await client.send("Input.dispatchMouseEvent", {
-				type: "mouseReleased",
-				...end,
-				button: "left",
-				buttons: 0,
-				clickCount: 1,
-			});
-			await read(api + ".itemUseProbe().ready()");
-			assert.equal(
-				await read(
-					`document.querySelector(${JSON.stringify(action)}).dataset.actionItem`,
-				),
-				String(id),
-			);
-		};
 		await bind(food, 91);
 		for (const count of [12, 2, 1]) {
 			await read(api + `.itemUseProbe().setFoodCount(${count})`);

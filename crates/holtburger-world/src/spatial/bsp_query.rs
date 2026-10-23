@@ -10,6 +10,7 @@
 use holtburger_common::{Plane, Sphere, Vector3};
 use holtburger_content::{BspSolid, CollisionPolygon, PlacedCollisionShape};
 use holtburger_dat::physics::BspNode;
+use std::ops::Range;
 
 use super::SupportFeature;
 
@@ -115,6 +116,145 @@ pub struct ShapeSupport {
     pub height_delta: f32,
     /// Authored feature reached by the bounded vertical probe.
     pub feature: SupportFeature,
+}
+
+/// Immutable landblock-space geometry compiled for one resident static BSP placement.
+#[derive(Debug)]
+pub(super) struct PreparedBspSupport {
+    /// Preorder nodes; subtree successors preserve authored traversal when bounds reject a branch.
+    nodes: Box<[PreparedSupportNode]>,
+    /// Resolved polygons in compact authored-ID order, including placed planes and vertices.
+    polygons: Box<[PreparedSupportPolygon]>,
+    /// Leaf observations in authored order; unresolved IDs are omitted and duplicates retained.
+    references: Box<[usize]>,
+}
+
+/// One flattened branch or leaf, with optional authored bounds already placed in landblock space.
+#[derive(Debug)]
+struct PreparedSupportNode {
+    /// Missing authored bounds admit the node without culling, as in the source BSP.
+    bounds: Option<Sphere>,
+    /// First node after this complete subtree, used only when the bounds reject it.
+    subtree_end: usize,
+    /// This leaf's reference range; branches have an empty range.
+    polygons: Range<usize>,
+}
+
+/// One static polygon with the same placed plane and vertex arithmetic as live queries.
+#[derive(Debug)]
+struct PreparedSupportPolygon {
+    /// Landblock-space polygon plane, independent of finite-face triangulation.
+    plane: Plane,
+    /// Landblock-space corners in authored winding order.
+    vertices: Box<[Vector3]>,
+}
+
+impl PreparedBspSupport {
+    pub(super) fn new(collider: &PlacedCollisionShape, solid: &BspSolid) -> Self {
+        let mut authored = solid.polygons.iter().collect::<Vec<_>>();
+        authored.sort_unstable_by_key(|(id, _)| **id);
+        let polygons = authored
+            .iter()
+            .map(|(_, polygon)| PreparedSupportPolygon {
+                plane: transform_plane(
+                    Plane {
+                        normal: polygon.normal,
+                        d: polygon.d,
+                    },
+                    collider,
+                ),
+                vertices: polygon
+                    .vertices
+                    .iter()
+                    .map(|vertex| collider.point_to_landblock_space(*vertex))
+                    .collect(),
+            })
+            .collect();
+        let ids = authored.iter().map(|(id, _)| **id).collect::<Vec<_>>();
+        let mut nodes = Vec::new();
+        let mut references = Vec::new();
+        append_support_node(&solid.bsp, collider, &ids, &mut nodes, &mut references);
+        Self {
+            nodes: nodes.into_boxed_slice(),
+            polygons,
+            references: references.into_boxed_slice(),
+        }
+    }
+
+    pub(super) fn visit(
+        &self,
+        center: Vector3,
+        radius: f32,
+        probe: SupportProbe,
+        found: &mut impl FnMut(ShapeSupport),
+    ) {
+        let mut index = 0;
+        while let Some(node) = self.nodes.get(index) {
+            if node
+                .bounds
+                .is_some_and(|bounds| !support_bounds_reach(bounds, center, radius))
+            {
+                index = node.subtree_end;
+                continue;
+            }
+            for &polygon in &self.references[node.polygons.clone()] {
+                let polygon = &self.polygons[polygon];
+                if let Some(support) = probe.on_polygon(
+                    || polygon.vertices.iter().copied(),
+                    polygon.plane.normal,
+                    polygon.plane.d,
+                    center,
+                    radius,
+                ) {
+                    found(support);
+                }
+            }
+            index += 1;
+        }
+    }
+}
+
+/// Compile branch successors after their children; only the completed immutable tree is published.
+fn append_support_node(
+    node: &BspNode,
+    collider: &PlacedCollisionShape,
+    polygon_ids: &[u16],
+    nodes: &mut Vec<PreparedSupportNode>,
+    references: &mut Vec<usize>,
+) {
+    let index = nodes.len();
+    nodes.push(PreparedSupportNode {
+        bounds: node_bounds(node).map(|bounds| transformed_sphere(bounds, collider)),
+        subtree_end: index + 1,
+        polygons: references.len()..references.len(),
+    });
+    match node {
+        BspNode::Leaf(leaf) => {
+            let start = references.len();
+            references.extend(
+                leaf.poly_ids
+                    .iter()
+                    .filter_map(|id| polygon_ids.binary_search(id).ok()),
+            );
+            nodes[index].polygons = start..references.len();
+        }
+        BspNode::Port(portal) => {
+            append_support_node(&portal.pos, collider, polygon_ids, nodes, references);
+            append_support_node(&portal.neg, collider, polygon_ids, nodes, references);
+        }
+        BspNode::Internal(internal) => {
+            for child in [&internal.pos, &internal.neg].into_iter().flatten() {
+                append_support_node(child, collider, polygon_ids, nodes, references);
+            }
+        }
+    }
+    nodes[index].subtree_end = nodes.len();
+}
+
+/// Footing uses a horizontal column, including the original fixed contact allowance.
+fn support_bounds_reach(bounds: Sphere, center: Vector3, radius: f32) -> bool {
+    let delta = bounds.center - center;
+    delta.x * delta.x + delta.y * delta.y <= (bounds.radius + radius + CONTACT_EPSILON).powi(2)
 }
 
 /// Geometry admission for ordinary vertical footing versus a blocked stair attempt.
@@ -335,10 +475,7 @@ pub(super) fn visit_placed_supports(
         solid,
         &|node| {
             node_bounds(node).is_none_or(|bounds| {
-                let bounds = transformed_sphere(bounds, collider);
-                let delta = bounds.center - center;
-                delta.x * delta.x + delta.y * delta.y
-                    <= (bounds.radius + radius + CONTACT_EPSILON).powi(2)
+                support_bounds_reach(transformed_sphere(bounds, collider), center, radius)
             })
         },
         &mut |polygon| {
@@ -729,9 +866,140 @@ mod tests {
         ColliderScale, CollisionBox, CollisionShape, LandblockPlacement, PlacedCollider,
         StaticColliderPlacement,
     };
-    use holtburger_dat::physics::{BspLeaf, InternalNode};
+    use holtburger_dat::physics::{BspLeaf, BspPortal, InternalNode};
 
     use super::*;
+
+    #[test]
+    fn prepared_support_preserves_order_bounds_and_exact_placed_geometry() {
+        let floor = |height| CollisionPolygon {
+            vertices: vec![
+                Vector3::new(-2.0, -2.0, height),
+                Vector3::new(2.0, -2.0, height),
+                Vector3::new(2.0, 2.0, height),
+                Vector3::new(-2.0, 2.0, height),
+            ],
+            normal: Vector3::new(0.0, 0.0, 1.0),
+            d: -height,
+        };
+        let leaf = |index, sphere, poly_ids| {
+            BspNode::Leaf(BspLeaf {
+                index,
+                solid: 0,
+                sphere,
+                poly_ids,
+            })
+        };
+        let partition = Plane {
+            normal: Vector3::new(1.0, 0.0, 0.0),
+            d: 0.0,
+        };
+        let bounds = Sphere {
+            center: Vector3::zero(),
+            radius: 10.0,
+        };
+        let polygons = HashMap::from([(1, floor(0.0)), (3, floor(0.2))]);
+        let shape = Arc::new(CollisionShape::Bsp(BspSolid {
+            bsp: BspNode::Internal(InternalNode {
+                tag: *b"BPnn",
+                plane: partition,
+                sphere: None,
+                poly_ids: Vec::new(),
+                pos: Some(Box::new(BspNode::Port(BspPortal {
+                    plane: partition,
+                    sphere: Some(bounds),
+                    poly_ids: Vec::new(),
+                    portal_polys: Vec::new(),
+                    pos: Box::new(leaf(0, None, vec![3, 99, 1, 3])),
+                    neg: Box::new(leaf(1, None, vec![1])),
+                }))),
+                neg: Some(Box::new(leaf(
+                    2,
+                    Some(Sphere {
+                        center: Vector3::new(100.0, 0.0, 0.0),
+                        radius: 1.0,
+                    }),
+                    vec![1],
+                ))),
+            }),
+            bounds,
+            box_bounds: CollisionBox::from_points(
+                polygons.values().flat_map(|p| p.vertices.iter().copied()),
+            )
+            .unwrap(),
+            polygons,
+        }));
+        let mut admitted = 0;
+        let mut empty = 0;
+        let bits = |support: ShapeSupport| {
+            (
+                [
+                    support.normal.x.to_bits(),
+                    support.normal.y.to_bits(),
+                    support.normal.z.to_bits(),
+                ],
+                support.height_delta.to_bits(),
+                support
+                    .feature
+                    .inward_normal()
+                    .map(|normal| [normal.x.to_bits(), normal.y.to_bits(), normal.z.to_bits()]),
+            )
+        };
+        for scale in [Vector3::new(1.0, 1.0, 1.0), Vector3::new(0.5, 2.0, 1.5)] {
+            for orientation in [
+                Quaternion::identity(),
+                Quaternion::from_axis_angle(Vector3::new(1.0, 1.0, 0.0), 0.35).unwrap(),
+            ] {
+                let collider = PlacedCollisionShape::new(
+                    Arc::clone(&shape),
+                    LandblockPlacement {
+                        origin: Vector3::new(96.0, 96.0, 4.0),
+                        orientation,
+                    },
+                    ColliderScale::from_components(scale).unwrap(),
+                )
+                .unwrap();
+                let solid = shape.as_bsp().unwrap();
+                let prepared = PreparedBspSupport::new(&collider, solid);
+                for local in [
+                    Vector3::new(0.0, 0.0, 1.0),
+                    Vector3::new(1.5, 0.0, 0.5),
+                    Vector3::new(10.0, 0.0, 1.0),
+                ] {
+                    let center = collider.point_to_landblock_space(local);
+                    for probe in [
+                        SupportProbe::Column {
+                            maximum_drop: 2.0,
+                            maximum_rise: 2.0,
+                        },
+                        SupportProbe::Stair { height: 0.5 },
+                    ] {
+                        let mut expected = Vec::new();
+                        visit_placed_supports(&collider, solid, center, 0.5, probe, &mut |s| {
+                            expected.push(bits(s))
+                        });
+                        let mut actual = Vec::new();
+                        prepared.visit(center, 0.5, probe, &mut |s| actual.push(bits(s)));
+                        assert_eq!(actual, expected);
+                        admitted += usize::from(!expected.is_empty());
+                        empty += usize::from(expected.is_empty());
+                        if scale == Vector3::new(1.0, 1.0, 1.0)
+                            && orientation == Quaternion::identity()
+                            && local == Vector3::new(0.0, 0.0, 1.0)
+                            && matches!(probe, SupportProbe::Column { .. })
+                        {
+                            assert_eq!(
+                                actual.len(),
+                                4,
+                                "leaf duplicates, ordering, and unbounded reach must survive"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert!(admitted > 0 && empty > 0);
+    }
 
     #[test]
     fn stair_probe_bounds_correction_and_requires_finite_intersection() {

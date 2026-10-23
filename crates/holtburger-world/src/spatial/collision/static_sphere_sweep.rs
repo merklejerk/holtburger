@@ -262,6 +262,7 @@ impl CollisionScene {
             let asset = self
                 .landblocks
                 .get(&owner)
+                .map(|product| &product.asset)
                 .ok_or(CollisionQueryError::UnavailableOwner { owner: owner.0 })?;
             let volume = asset
                 .static_geometry
@@ -457,7 +458,7 @@ impl CollisionScene {
 
         if swept_placement.reaches_outdoors() {
             for owner in &touched {
-                let Some(asset) = self.landblocks.get(owner) else {
+                let Some(asset) = self.landblock_asset(*owner) else {
                     continue;
                 };
                 let center = point_between_landblocks(query_center, request.anchor.0, owner.0);
@@ -997,7 +998,7 @@ fn update_water_restriction_hit(
     earliest: &mut Option<StaticSphereSweepHit>,
 ) {
     for owner in touched {
-        let Some(asset) = scene.landblocks.get(owner) else {
+        let Some(asset) = scene.landblock_asset(*owner) else {
             continue;
         };
         if !asset.terrain.entirely_water {

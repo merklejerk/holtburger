@@ -171,7 +171,7 @@ impl CollisionScene {
 
         if swept_placement.reaches_outdoors() {
             for owner in &full_touched {
-                let Some(asset) = self.landblocks.get(owner) else {
+                let Some(asset) = self.landblock_asset(*owner) else {
                     continue;
                 };
                 for cell in &asset.terrain.cells {
@@ -212,7 +212,7 @@ impl CollisionScene {
                 .excludes(PhysicalCollisionExclusions::ENTIRELY_WATER_BARRIER)
         {
             for owner in &full_touched {
-                let Some(asset) = self.landblocks.get(owner) else {
+                let Some(asset) = self.landblock_asset(*owner) else {
                     continue;
                 };
                 if !asset.terrain.entirely_water {

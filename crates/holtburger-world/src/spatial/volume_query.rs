@@ -17,12 +17,86 @@
 
 use super::SupportFeature;
 use holtburger_common::Vector3;
-use holtburger_content::{CollisionBall, CollisionCylinder, CollisionShape, PlacedCollisionShape};
+use holtburger_content::{
+    CollisionBall, CollisionBox, CollisionCylinder, CollisionShape, PlacedCollisionShape,
+};
 
 use super::bsp_query::{
-    CONTACT_EPSILON, ShapeContact, ShapeSupport, SupportProbe, placed_polygon_contacts,
-    placed_solid_contacts,
+    CONTACT_EPSILON, PreparedBspSupport, ShapeContact, ShapeSupport, SupportProbe,
+    placed_polygon_contacts, placed_solid_contacts,
 };
+
+/// Static support geometry owned by the same immutable resident product as its authored source.
+#[derive(Debug)]
+pub(super) struct PreparedStaticSupport {
+    /// Validated source bounds retain the existing horizontal broad-phase admission.
+    bounds: CollisionBox,
+    /// Placed geometry; static queries never reconstruct or rediscriminate the authored shape.
+    shape: StaticSupportShape,
+}
+
+/// One complete static query kernel; volume placement constants share the resident lifetime.
+#[derive(Debug)]
+enum StaticSupportShape {
+    Bsp(PreparedBspSupport),
+    Cylinder(PlacedCylinder),
+    Ball(PlacedBall),
+}
+
+impl PreparedStaticSupport {
+    pub(super) fn new(collider: &PlacedCollisionShape) -> Self {
+        let shape = match &*collider.shape {
+            CollisionShape::Bsp(solid) => {
+                StaticSupportShape::Bsp(PreparedBspSupport::new(collider, solid))
+            }
+            CollisionShape::Cylinder(cylinder) => {
+                StaticSupportShape::Cylinder(placed_cylinder(collider, cylinder))
+            }
+            CollisionShape::Ball(ball) => StaticSupportShape::Ball(placed_ball(collider, ball)),
+        };
+        Self {
+            bounds: collider.bounds,
+            shape,
+        }
+    }
+
+    pub(super) fn visit(
+        &self,
+        center: Vector3,
+        radius: f32,
+        probe: SupportProbe,
+        found: &mut impl FnMut(ShapeSupport),
+    ) {
+        if !support_bounds_reach(self.bounds, center, radius) {
+            return;
+        }
+        let (drop, rise) = probe.column_limits();
+        match &self.shape {
+            StaticSupportShape::Bsp(bsp) => bsp.visit(center, radius, probe, found),
+            StaticSupportShape::Cylinder(cylinder) => {
+                if let Some(support) = cylinder_support(*cylinder, center, radius, drop, rise) {
+                    found(support);
+                }
+            }
+            StaticSupportShape::Ball(ball) => {
+                if let Some(support) = ball_support(*ball, center, radius, drop, rise) {
+                    found(support);
+                }
+            }
+        }
+    }
+}
+
+/// Footing is a vertical column; height admission remains with the exact shape query.
+fn support_bounds_reach(bounds: CollisionBox, center: Vector3, radius: f32) -> bool {
+    let minimum = bounds.minimum();
+    let maximum = bounds.maximum();
+    let reach = radius + CONTACT_EPSILON;
+    !(center.x + reach < minimum.x
+        || center.x - reach > maximum.x
+        || center.y + reach < minimum.y
+        || center.y - reach > maximum.y)
+}
 
 /// Emits supports directly to the consumer under shared footing and stair admission rules.
 pub(super) fn visit_placed_shape_supports(
@@ -34,14 +108,7 @@ pub(super) fn visit_placed_shape_supports(
 ) {
     // Footing is a vertical column. The shape query owns height admission; sphere/box
     // distance would incorrectly reject sloped rims and expanded cap corners.
-    let minimum = shape.bounds.minimum();
-    let maximum = shape.bounds.maximum();
-    let reach = radius + CONTACT_EPSILON;
-    if center.x + reach < minimum.x
-        || center.x - reach > maximum.x
-        || center.y + reach < minimum.y
-        || center.y - reach > maximum.y
-    {
+    if !support_bounds_reach(shape.bounds, center, radius) {
         return;
     }
     let (maximum_drop, maximum_rise) = probe.column_limits();

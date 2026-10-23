@@ -1,0 +1,249 @@
+{
+  "metadata": {
+    "source_commit": "9466305285097f6e5585136faccf3743bb61ca24",
+    "candidate_patch_sha256": "b4c2c7855e97e537d495f721d0fa6c1683e9783111d01d1c0a8bddd4df86c6ee",
+    "binary_sha256": {
+      "baseline": "c28785a238403a0b87d0f08d4fb0f8b5ff9048d14cc29d08ea25f642faeb2829",
+      "candidate": "ba3164284824d70245f0c7f0772a70f26d920deb89c8e675324e085934b73150"
+    },
+    "fixture_sha256": "8166512597df25ac68cfaee7ba913493242b193f56fa77a27fae78a765a124c7",
+    "profile": "dev; workspace opt-level 0, Parry/Glam opt-level 3; debug information",
+    "features": [
+      "runtime-fixture"
+    ],
+    "cpu_model": "AMD Ryzen 9 5900X 12-Core Processor",
+    "method": "Alternating process order. Each process performs one explicit full untimed warmup and one measured full replay. RUST_LOG=warn; CPU/phase profiling disabled. No compiler, test, or other benchmark launched by this agent during timing.",
+    "gate": "Two exploratory pairs first. Retention requires five total pairs; a rejected or inconclusive candidate may stop early."
+  },
+  "timings": {
+    "baseline": {
+      "combined_work_ms": {
+        "median": 26760.195851000033,
+        "minimum": 25969.054713999984,
+        "maximum": 27324.160117000014,
+        "samples": [
+          25969.054713999984,
+          26071.58752399999,
+          26760.195851000033,
+          27324.160117000014,
+          27148.790300000004
+        ]
+      },
+      "message_work_ms": {
+        "median": 2342.693483999998,
+        "minimum": 2254.099727999997,
+        "maximum": 2397.983003999992,
+        "samples": [
+          2254.099727999997,
+          2259.8501100000008,
+          2342.693483999998,
+          2397.983003999992,
+          2383.5702830000037
+        ]
+      },
+      "physics_work_ms": {
+        "median": 24417.502367000034,
+        "minimum": 23714.954985999986,
+        "maximum": 24926.177113000023,
+        "samples": [
+          23714.954985999986,
+          23811.737413999992,
+          24417.502367000034,
+          24926.177113000023,
+          24765.220017
+        ]
+      },
+      "active_physics_work_p95_ms": {
+        "median": 18.853289,
+        "minimum": 18.520158,
+        "maximum": 19.262341,
+        "samples": [
+          18.638941,
+          18.520158,
+          18.853289,
+          19.262341,
+          18.875449
+        ]
+      }
+    },
+    "candidate": {
+      "combined_work_ms": {
+        "median": 25554.91142100004,
+        "minimum": 24418.90814100002,
+        "maximum": 27264.384902000038,
+        "samples": [
+          24418.90814100002,
+          25096.819443000037,
+          25554.91142100004,
+          27264.384902000038,
+          26981.40769399998
+        ]
+      },
+      "message_work_ms": {
+        "median": 2232.7523210000018,
+        "minimum": 2107.505946000003,
+        "maximum": 2410.315360999991,
+        "samples": [
+          2107.505946000003,
+          2177.0833409999977,
+          2232.7523210000018,
+          2410.315360999991,
+          2359.7962060000073
+        ]
+      },
+      "physics_work_ms": {
+        "median": 23322.15910000004,
+        "minimum": 22311.40219500002,
+        "maximum": 24854.069541000048,
+        "samples": [
+          22311.40219500002,
+          22919.73610200004,
+          23322.15910000004,
+          24854.069541000048,
+          24621.611487999973
+        ]
+      },
+      "active_physics_work_p95_ms": {
+        "median": 17.891886,
+        "minimum": 16.901422,
+        "maximum": 19.09629,
+        "samples": [
+          16.901422,
+          17.285484,
+          17.891886,
+          19.04844,
+          19.09629
+        ]
+      }
+    }
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "work_reduction_percent": 5.96920677349212,
+      "p95_reduction_percent": 9.321983475348727
+    },
+    {
+      "pair": 2,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "work_reduction_percent": 3.7388136802281036,
+      "p95_reduction_percent": 6.666649388196355
+    },
+    {
+      "pair": 3,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "work_reduction_percent": 4.504019464995624,
+      "p95_reduction_percent": 5.099391411228038
+    },
+    {
+      "pair": 4,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "work_reduction_percent": 0.21876322911307255,
+      "p95_reduction_percent": 1.110462118804767
+    },
+    {
+      "pair": 5,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "work_reduction_percent": 0.6165379899082502,
+      "p95_reduction_percent": -1.1699907112143304
+    }
+  ],
+  "median_work_reduction_percent": 4.504019464995624,
+  "summed_work_reduction_percent": 2.9693437467051,
+  "median_paired_work_reduction_percent": 3.7388136802281036,
+  "all_pairs_reduce_work": true,
+  "all_candidate_p95_below_all_baseline_p95": false,
+  "workload": {
+    "messages": 5741,
+    "physics_ticks": 1519,
+    "active_ticks": 1506,
+    "population_mismatches": 0,
+    "peak_entities": 286
+  },
+  "matching_activation_and_final_poses": true,
+  "crowd_outcome_checks": {
+    "100": {
+      "bodies": "101",
+      "ticks": "180",
+      "body_preparations": "89878",
+      "shape_queries": "12732",
+      "stationary_bodies": "0",
+      "accepted_displacement_m": "122.047079",
+      "player_displacement_m": "5.187025",
+      "max_penetration_m": "0.028848"
+    },
+    "250": {
+      "bodies": "251",
+      "ticks": "180",
+      "body_preparations": "224898",
+      "shape_queries": "30978",
+      "stationary_bodies": "0",
+      "accepted_displacement_m": "296.747679",
+      "player_displacement_m": "5.184336",
+      "max_penetration_m": "0.028441"
+    }
+  },
+  "artifact_sha256": {
+    "audit.py": "d8881c5ea3b283e0f200d3cc10290f73613a0126b2ae157a1fb4bfdc69934cd8",
+    "candidate.patch": "b4c2c7855e97e537d495f721d0fa6c1683e9783111d01d1c0a8bddd4df86c6ee",
+    "contact_collection_benchmark": "8356dc71ebc7b6d7b6d1299b1eba9b5f0931995726406aa1fb988e8f98ddbb96",
+    "crowd-100.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "crowd-100.stdout": "4ed858967e65648569673b7551eae01411425c5f5544ded5b1fb2c5c978dd69c",
+    "crowd-250.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "crowd-250.stdout": "8f6b48784d822fb7ee81add55ad4cb2528ff8d0d754720789395b1f89641691b",
+    "metadata.json": "4c1b20bf385f2eb0ca31e6bde1c24685066c20a8e9dc32c8caafa1e762ef6153",
+    "pair-01-1-baseline.stderr": "34f327cd5100c0ec170855e60ff814253cfef527ca81c29b7970680b3d8cdcaa",
+    "pair-01-1-baseline.stdout": "1c9457feea03701cdc57aa937520ac87926601a8a8b13df8ac329400a646a8aa",
+    "pair-01-2-candidate.stderr": "c8fe0a94b479c3f460f0af62f9f98b22ac0c33a10a21b6c1c855b194559996d4",
+    "pair-01-2-candidate.stdout": "0ce08d41e43aec6131797597634197fc6f2516c6221987aa387ab052c29f10a0",
+    "pair-02-1-candidate.stderr": "f060d8d695a65b412567c89b26850f9013a0d6a4ab40326aca89a3de8e720833",
+    "pair-02-1-candidate.stdout": "ebcf3d52f1f4efb81f6c78235cf317865a2f51e0b58f9298b4d50f4dbf8ff227",
+    "pair-02-2-baseline.stderr": "220357c7e4f6c75159b245b027c5570aaec3a8b243ef54835889393233a56c3e",
+    "pair-02-2-baseline.stdout": "e4697db81823bab07c24af237466245e3715a09f2d6922ce3e035b7177b16a8e",
+    "pair-03-1-baseline.stderr": "d3f2968fd38970d17587b5fb4860f3193fce766978ea30650355b3c83ddbcd13",
+    "pair-03-1-baseline.stdout": "3e8ff71486bc6edad12cfbad0be43171c9a783528a158be749e8ddb84f95c1f7",
+    "pair-03-2-candidate.stderr": "6fa571d1fcb06229ae389ad53102c374f26c8a432aaf4b373d9061970322627e",
+    "pair-03-2-candidate.stdout": "078b2f12309c0d9c0bef60edc7ffd593a0c9d27656e1085d41a8f9022f023315",
+    "pair-04-1-candidate.stderr": "601a52a83cc32f1ed6429b29944cd4e97e6ce9a95800e41e89f9ba36e895557a",
+    "pair-04-1-candidate.stdout": "b2d3ccc9414fa6d8c3c22b67018dcbbf03e44741dc5e6f9bb3060b2612642bb1",
+    "pair-04-2-baseline.stderr": "2a68e77bebda6e04125d36ec95ba34751df843b4953d8ba8916f365f8b13cc09",
+    "pair-04-2-baseline.stdout": "446fc917bded23c2b519b0dfd2ee61eec65e7307ee02051ee6c9cd7b60bb2710",
+    "pair-05-1-baseline.stderr": "45a6f8ba61b4eaaed2e560f88af77e1c03be0668bdb955e7f912ea19eb748b43",
+    "pair-05-1-baseline.stdout": "c29331cdb710ad253d0c628d06eb9d31b1864e4220ad1f1466d5fd4a07de3186",
+    "pair-05-2-candidate.stderr": "f86883820797cd1e226fd5cf9cd729fa0646634d4467ae948962532443f6e629",
+    "pair-05-2-candidate.stdout": "6bf8776adfb95c70dac05403b25f899e0bba0c46da8b95fa65bb56e37f9a294f",
+    "run_pairs.py": "45cdf76e1b71fd2da2fd5dfeb82f3e3b68e6a17cbfc94c5dfe1255f00187ca21",
+    "runtime_scene_fixture": "ba3164284824d70245f0c7f0772a70f26d920deb89c8e675324e085934b73150",
+    "samples.json": "471c214dd9e80c49d6d12d1f1cfe32a7222b7f17ae7f78fbc45bd0f546690005",
+    "state.json": "9ce2e3ef81b8520ce3f9e1c671081db7ec1ab67b4efc528ea12eee9e18da6361",
+    "tests.log": "6f08c7f5d42f3fe7310ff0dc3e257457530a4b9c994a6d8f381cd035bbe9c31f"
+  },
+  "limits": "Development profile, recorded stationary scene. Crowd candidate runs verify existing outcomes only, not paired crowd performance. No live cadence or movement-feel acceptance; residual crowd overlap is unchanged.",
+  "date": "2026-10-23",
+  "decision": "Retain per-shape support buffer removal. All five pairs reduce combined work; modest development-profile benefit with overlapping timing ranges and one p95 regression.",
+  "raw_artifacts": "caps/runtime-fixtures/2026-10-23-physics-primitives/support-visitation/",
+  "validation": {
+    "core_tests_passed": 688,
+    "world_tests_passed": 968,
+    "world_tests_ignored": 3,
+    "clippy": "world/core/harness all-targets, runtime-fixture and physics-profiling features, warnings denied: passed",
+    "format_and_whitespace": "passed",
+    "source_change": "five world files, 47 added lines and 41 removed lines; six net added lines including test adaptations"
+  }
+}

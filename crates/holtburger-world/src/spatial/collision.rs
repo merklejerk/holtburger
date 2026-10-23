@@ -1582,14 +1582,13 @@ impl CollisionScene {
                     feature: support.feature,
                 });
             };
-            super::volume_query::placed_shape_supports(
+            super::volume_query::visit_placed_shape_supports(
                 collider,
                 local_center,
                 request.radius,
                 probe,
-            )
-            .into_iter()
-            .for_each(&mut push);
+                &mut push,
+            );
         }
         Ok(supports)
     }

@@ -321,15 +321,15 @@ pub fn placed_polygon_obstructions(
     contacts
 }
 
-/// Visits placed polygon supports under one shape-owned admission rule.
-pub(super) fn placed_supports(
+/// Emits placed polygon supports in authored leaf order without an intermediate buffer.
+pub(super) fn visit_placed_supports(
     collider: &PlacedCollisionShape,
     solid: &BspSolid,
     center: Vector3,
     radius: f32,
     probe: SupportProbe,
-) -> Vec<ShapeSupport> {
-    let mut supports = Vec::new();
+    found: &mut impl FnMut(ShapeSupport),
+) {
     visit_polygons(
         &solid.bsp,
         solid,
@@ -361,11 +361,10 @@ pub(super) fn placed_supports(
                 center,
                 radius,
             ) {
-                supports.push(support);
+                found(support);
             }
         },
     );
-    supports
 }
 
 fn descend(

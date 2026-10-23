@@ -476,7 +476,8 @@ mod tests {
                         .unwrap()
                         .filter(|target| {
                             target.shapes.iter().any(|shape| {
-                                !crate::spatial::volume_query::placed_shape_supports(
+                                let mut found = false;
+                                crate::spatial::volume_query::visit_placed_shape_supports(
                                     shape,
                                     shifted,
                                     radius,
@@ -484,8 +485,9 @@ mod tests {
                                         maximum_drop: 100.0,
                                         maximum_rise: 100.0,
                                     },
-                                )
-                                .is_empty()
+                                    &mut |_| found = true,
+                                );
+                                found
                             })
                         })
                         .collect())
@@ -600,7 +602,8 @@ mod tests {
 
                 let exact_supports = |target: &SweepTarget| {
                     target.shapes.iter().any(|shape| {
-                        !crate::spatial::volume_query::placed_shape_supports(
+                        let mut found = false;
+                        crate::spatial::volume_query::visit_placed_shape_supports(
                             shape,
                             center,
                             radius,
@@ -608,8 +611,9 @@ mod tests {
                                 maximum_drop: 100.0,
                                 maximum_rise: 100.0,
                             },
-                        )
-                        .is_empty()
+                            &mut |_| found = true,
+                        );
+                        found
                     })
                 };
                 let mut exhaustive = targets

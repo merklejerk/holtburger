@@ -201,20 +201,19 @@ fn support_candidates(
         })
     {
         for shape in &target.shapes {
-            supports.extend(
-                crate::spatial::volume_query::placed_shape_supports(
-                    shape,
-                    request.center,
-                    request.radius,
-                    probe,
-                )
-                .into_iter()
-                .map(|support| SupportContact {
-                    normal: support.normal,
-                    height_delta: support.height_delta,
-                    feature: support.feature,
-                    source: SupportSource::Entity(target.contact.body_id),
-                }),
+            crate::spatial::volume_query::visit_placed_shape_supports(
+                shape,
+                request.center,
+                request.radius,
+                probe,
+                &mut |support| {
+                    supports.push(SupportContact {
+                        normal: support.normal,
+                        height_delta: support.height_delta,
+                        feature: support.feature,
+                        source: SupportSource::Entity(target.contact.body_id),
+                    })
+                },
             );
         }
     }

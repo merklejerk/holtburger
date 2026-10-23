@@ -20,6 +20,8 @@ import {
 import {
 	CLIENT_VITAL_WARNING_PERCENT,
 	CLIENT_VITAL_WARNING_THRESHOLDS,
+	CLIENT_TEXT_SCALE,
+	CLIENT_ICON_SCALE,
 } from "./client-settings-values";
 
 const viewport = { width: 1440, height: 900 };
@@ -49,9 +51,76 @@ describe("current client settings values", () => {
 		const fonts = { body: "serif", heading: "sans", mono: "mono" } as const;
 		expect(clientUiSettingsSchema.parse({ fonts })).toEqual({
 			fonts,
+			textScale: CLIENT_TEXT_SCALE.initial,
+			iconScale: CLIENT_ICON_SCALE.initial,
 			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
 		});
 	});
+	it("preserves older UI choices when adding text scaling and rejects invalid explicit scales", () => {
+		const older = {
+			fonts: { body: "serif", heading: "mono", mono: "sans" },
+			vitalWarningThresholds: { health: 35, stamina: 15, mana: 25 },
+		};
+		expect(clientUiSettingsSchema.parse(older)).toEqual({
+			...older,
+			textScale: CLIENT_TEXT_SCALE.initial,
+			iconScale: CLIENT_ICON_SCALE.initial,
+		});
+		for (const textScale of [
+			CLIENT_TEXT_SCALE.minimum,
+			1.375,
+			CLIENT_TEXT_SCALE.maximum,
+		]) {
+			expect(clientUiSettingsSchema.parse({ ...older, textScale })).toEqual({
+				...older,
+				textScale,
+				iconScale: CLIENT_ICON_SCALE.initial,
+			});
+		}
+		for (const textScale of [
+			CLIENT_TEXT_SCALE.minimum - 0.01,
+			CLIENT_TEXT_SCALE.maximum + 0.01,
+			NaN,
+			Infinity,
+			null,
+			"1.5",
+		]) {
+			expect(
+				clientUiSettingsSchema.safeParse({ ...older, textScale }).success,
+			).toBe(false);
+		}
+	});
+	it("evolves text-scaled profiles and validates independent icon scaling", () => {
+		const older = {
+			fonts: { body: "serif", heading: "theme", mono: "mono" },
+			textScale: CLIENT_TEXT_SCALE.maximum,
+		};
+		const evolved = clientUiSettingsSchema.parse(older);
+		expect(evolved.iconScale).toBe(CLIENT_ICON_SCALE.initial);
+		for (const iconScale of [
+			CLIENT_ICON_SCALE.minimum,
+			1.375,
+			CLIENT_ICON_SCALE.maximum,
+		]) {
+			expect(clientUiSettingsSchema.parse({ ...older, iconScale })).toEqual({
+				...evolved,
+				iconScale,
+			});
+		}
+		for (const iconScale of [
+			CLIENT_ICON_SCALE.minimum - 0.01,
+			CLIENT_ICON_SCALE.maximum + 0.01,
+			NaN,
+			Infinity,
+			null,
+			"1.5",
+		]) {
+			expect(
+				clientUiSettingsSchema.safeParse({ ...older, iconScale }).success,
+			).toBe(false);
+		}
+	});
+
 	it.each(["health", "stamina", "mana"] as const)(
 		"validates and preserves the %s threshold",
 		(kind) => {

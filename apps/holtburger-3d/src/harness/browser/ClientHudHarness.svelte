@@ -94,6 +94,7 @@
 	import { probeAllegiance } from "./client-allegiance-probe";
 	import { probeSquelch } from "./client-squelch-probe";
 	import { probeOverlayTheme } from "./overlay-theme-probe";
+	import { probeTextScaling } from "./text-scaling-probe";
 	import { probeSelectedActions } from "./client-selected-actions-probe";
 	import {
 		contractsUpdatedSchema,
@@ -1138,6 +1139,8 @@
 		readonly probeSquelch: () => ReturnType<typeof probeSquelch>;
 		/** Verify shared surface, backdrop, and density overrides across overlay components. */
 		readonly probeOverlayTheme: () => ReturnType<typeof probeOverlayTheme>;
+		/** Verify live text preferences across retained UI and native dialogs. */
+		readonly probeTextScaling: () => ReturnType<typeof probeTextScaling>;
 		/** Verify accepted Settings changes, shortcut presentation, and feature dispatch. */
 		readonly probeBindings: typeof probeBindings;
 		/** Accepted settings seam for focused browser remapping scenarios. */
@@ -4918,6 +4921,16 @@
 					commands: interactionCommands,
 				}),
 			probeOverlayTheme: () => probeOverlayTheme(partyProbeContext),
+			probeTextScaling: async () => {
+				const previous = spellCombatMode;
+				spellCombatMode = "magic";
+				await tick();
+				try {
+					return await probeTextScaling(partyProbeContext);
+				} finally {
+					spellCombatMode = previous;
+				}
+			},
 			probeBindings,
 			bindingSettings: { read: () => userSettings.input, replace: changeInput },
 			probeSelectedActions: () => probeSelectedActions(partyProbeContext),
@@ -5144,302 +5157,311 @@
 </script>
 
 <!-- Match the app's non-null dialog lifetime across nested snippet teardown. -->
-{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
-	<ClientMessageDialog
-		{presentation}
-		onDismiss={(id) => dialogOwner?.dismissPopup(id)}
-		onRespond={(id, accepted, suppress) => {
-			void dialogOwner?.respond(id, accepted, suppress);
-		}}
-	/>
-{/each}
+<div
+	class="harness-appearance ui-theme"
+	style:--ui-text-scale={userSettings.ui.textScale}
+	style:--ui-icon-scale={userSettings.ui.iconScale}
+>
+	{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
+		<ClientMessageDialog
+			{presentation}
+			onDismiss={(id) => dialogOwner?.dismissPopup(id)}
+			onRespond={(id, accepted, suppress) => {
+				void dialogOwner?.respond(id, accepted, suppress);
+			}}
+		/>
+	{/each}
 
-{#if !previewCharacters}
-	<ClientWorldView
-		{emotesEnabled}
-		nearby={nearbyOwner}
-		onSelectNearbyEntity={(guid) => selection.selectKnownEntity(guid)}
-		onClearWaypoint={() => waypointOwner.clear()}
-		onSetWaypoint={(target) => waypointOwner.set(target, notifyWaypoint)}
-		{partyHudPresent}
-		readPartyHudDisplay={() =>
-			presentPartyHud(
-				interactionLifecycle.partySnapshot(),
-				interactionLifecycle.state().playerGuid,
-			)}
-		onPartyHudDemand={(enabled) =>
-			interactionLifecycle.setPartyUpdateDemand("hud", enabled)}
-		party={socialParty}
-		friends={interactionLifecycle.friends}
-		contracts={interactionLifecycle.contracts}
-		squelch={interactionLifecycle.squelch}
-		allegiance={interactionLifecycle.allegiance}
-		characterGuid={housingCharacterGuid}
-		{houseCrystal}
-		{housing}
-		{housingManagement}
-		onSearchHousing={async (houseType) => {
-			housingSearches.push(houseType);
-			housing = {
-				...housing,
-				search: { ...housing.search, pendingType: houseType },
-			};
-		}}
-		onRefreshHousing={async () => {
-			housingRefreshes += 1;
-		}}
-		readConnection={() => interactionLifecycle.connectionSample()}
-		characterSheet={interactionLifecycle.characterSheet}
-		{appearanceOptions}
-		onAppearanceOptionChange={async (option, enabled) => {
-			appearanceOptions = {
-				...appearanceOptions,
-				[option === "helmet" ? "showHelmet" : "showCloak"]: enabled,
-			};
-		}}
-		inspectionPreviewHeight={userSettings.inspection.previewHeight}
-		audio={userSettings.audio}
-		onAudioChange={(audio) => (userSettings = { ...userSettings, audio })}
-		graphics={userSettings.graphics}
-		ui={userSettings.ui}
-		combatIndicators={userSettings.combatIndicators}
-		onCombatIndicatorsChange={(combatIndicators) =>
-			(userSettings = { ...userSettings, combatIndicators })}
-		clockFormat={userSettings.clockFormat}
-		environmentOverrides={userSettings.environmentOverrides}
-		weatherPresets={environmentPresets}
-		{environmentIssue}
-		readServerEnvironment={() => environmentServer.readout()}
-		onClockFormatChange={(clockFormat) =>
-			(userSettings = { ...userSettings, clockFormat })}
-		onEnvironmentOverridesChange={changeEnvironmentOverrides}
-		input={userSettings.input}
-		textureFilteringCapabilities={{ maximumAnisotropy: 8 }}
-		onGraphicsChange={(graphics) =>
-			(userSettings = { ...userSettings, graphics })}
-		onUiChange={(ui) => (userSettings = { ...userSettings, ui })}
-		onInputChange={changeInput}
-		onInspectionPreviewHeightChange={(previewHeight) =>
-			(userSettings = {
-				...userSettings,
-				inspection: { previewHeight },
-			})}
-		objectPreviewService={{
-			open: () => ({
-				dispose: async () => undefined,
-				diagnostics: () => null,
-				ready: Promise.resolve(),
-				setViewport: () => undefined,
-			}),
-		}}
-		itemSession={interactionLifecycle}
-		hudLayout={userSettings.hudLayout}
-		onHudPlacementChange={(surface, placement) =>
-			(userSettings = {
-				...userSettings,
-				hudLayout: { ...userSettings.hudLayout, [surface]: placement },
-			})}
-		onHudReset={(hudLayout) => (userSettings = { ...userSettings, hudLayout })}
-		spellBarShape={userSettings.spellBarShape}
-		onSpellBarShapeChange={(spellBarShape) =>
-			(userSettings = { ...userSettings, spellBarShape })}
-		minimapViewDiameters={userSettings.minimapViewDiameters}
-		onMinimapViewDiametersChange={(minimapViewDiameters) =>
-			(userSettings = { ...userSettings, minimapViewDiameters })}
-		chatFilters={userSettings.chatFilters}
-		onChatFiltersChange={(chatFilters) =>
-			(userSettings = { ...userSettings, chatFilters })}
-		actionBars={characterSettings?.actionBars ?? null}
-		onActionBarsChange={(actionBars) => {
-			if (characterSettings !== null)
-				characterSettings = { ...characterSettings, actionBars };
-		}}
-		{hudMode}
-		onHudModeChange={(mode) => (hudMode = mode)}
-		{spellBar}
-		onSpellBarChange={(state) => (spellBar = state)}
-		{spellBarEnabled}
-		onSelectSpellTab={selectSpellTab}
-		onActivateSpellCell={activateSpellCell}
-		onActivateCasterSpell={activateCasterSpell}
-		combatMode={spellCombatMode}
-		{combatStatus}
-		{combatProfileSelectionRevision}
-		combatControls={characterSettings?.combatControls ?? {
-			melee: { height: "medium", power: 0.5 },
-			missile: { height: "medium", accuracy: 0.5 },
-		}}
-		onCombatProfileSelect={selectCombatProfile}
-		combatEnabled={true}
-		onToggleCombat={() => {}}
-		onCastSpell={(id) => void castSpell(id)}
-		{itemInteractions}
-		entityMetadata={{
-			status: "available",
-			path: "fixture.hwc",
-			recordCount: 1,
-		}}
-		entityCollisionDisabled={false}
-		onEntityCollisionDisabledChange={() => {}}
-		cameraController={cameraEnabled ? cameraController : null}
-		{preciseJumpActive}
-		onPreciseJumpAim={() => {
-			preciseJumpAimCount += 1;
-		}}
-		onPreciseJumpPowerSet={(power) => {
-			jumpExtent = Math.max(MINIMUM_JUMP_POWER, Math.min(1, power));
-		}}
-		onPreciseJumpPowerAdjust={(steps) => preciseJumpPowerSteps.push(steps)}
-		onPreciseJumpActivate={() => {
-			preciseJumpActivationCount += 1;
-		}}
-		readCanSetCorpsePermission={() => true}
-		onCorpsePermission={(name, granted) => {
-			toast = {
-				id: 1,
-				message: `corpse-permission:${name}:${granted}`,
-				tone: "status",
-			};
-		}}
-		onSocialNotice={(message) => {
-			toast = { id: 1, message, tone: "warning" };
-		}}
-		onInventoryNotice={(message) => {
-			toast = { id: 1, message, tone: "status" };
-		}}
-		onCoordinatesCopied={() => {
-			toast = {
-				id: 2,
-				message: "Coordinates copied to clipboard.",
-				tone: "status",
-			};
-		}}
-		onPickInventoryTarget={(_x, _y, destination) => {
-			if (inventoryWorldResult === null)
-				pendingInventoryWorldPick = destination;
-			else if (destination.isCurrent())
-				destination.commit(inventoryWorldResult);
-		}}
-		onViewportSelect={(x, y) => {
-			viewportSelectionPoints.push({ x, y });
-			selectEntity(7);
-		}}
-		onViewportExamine={(x, y) => {
-			viewportSelectionPoints.push({ x, y });
-			selectEntity(7);
-			void objectInspectionOwner.examine(7);
-		}}
-		onViewportHover={(x, y) => {
-			viewportHoverPoints.push({ x, y });
-			// The item-use fixture supplies explicit hit-test results through hoverWorld.
-			if (activeItemUseProbe === null) hoveredGuid = hoverHitEnabled ? 7 : null;
-		}}
-		onViewportHoverClear={() => (hoveredGuid = null)}
-		onMaintainEntitySelection={() => {
-			selectionMaintenanceCount += 1;
-		}}
-		onSelectPartyMember={(guid) => selection.selectKnownEntity(guid)}
-		onSelectEntity={selectEntity}
-		debugEnabled={true}
-		{unrestrictedUse}
-		onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
-		{readMinimapFrame}
-		worldMapSource={worldMapFixture.source}
-		{canTeleportFromMap}
-		recallDestinations={[]}
-		onRecall={async () => {}}
-		onTeleportToMapPosition={(position) =>
-			interactionLifecycle.teleportToMapPosition(position)}
-		{readDiagnostics}
-		{readSelectedEntity}
-		{readFrameRates}
-		readTargetIndicatorFrame={() => targetIndicatorFrame}
-		readSelectedEntityDisplay={() => interactions.display(unrestrictedUse)}
-		{spells}
-		{enchantments}
-		{inventory}
-		{worldContainer}
-		{vendor}
-		{trade}
-		onSelectContentsItem={(guid, mode) =>
-			selection.selectContentsItem(guid, mode)}
-		onInteractEntity={() => itemInteractions.interactSelected(unrestrictedUse)}
-		{objectInspection}
-		{bookReader}
-		onCloseBook={() => bookReaderOwner.close()}
-		onRetryBook={() => bookReaderOwner.retry()}
-		onExamineEntity={examineHarnessSelection}
-		onExamineItem={examineHarnessItem}
-		onCloseInspection={() => objectInspectionOwner.close()}
-		selectedEntityGuid={selectedGuid}
-		hoveredEntityGuid={hoveredGuid}
-		showRetailHiddenGeometry={false}
-		onShowRetailHiddenGeometryChange={() => undefined}
-		playerName="Alice"
-		worldName="ACE Emulator"
-		{vitalWarningsEnabled}
-		vitals={warningVitals}
-		{jumpChargeActive}
-		jumpPowerKeys={["W", "S"]}
-		readJumpExtent={() => jumpExtent}
-		{toast}
-		chatMessages={messages}
-		{chatComposer}
-		{sentChatHistory}
-		onSendChat={async (message, resolution) => {
-			sentChatHistory = recordSentChat(
-				sentChatHistory,
-				message,
-				chatHistoryLimit,
-			);
-			if (resolution.kind === "error") throw new Error(resolution.message);
-			if (resolution.kind === "send" || resolution.kind === "sequence") {
-				await chatComposer.sendAll(
-					resolution.kind === "send"
-						? [resolution.request]
-						: resolution.requests,
-					async (request) => {
-						await interactionLifecycle.sendChat(request);
-						chatRequests.push(request);
-					},
+	{#if !previewCharacters}
+		<ClientWorldView
+			{emotesEnabled}
+			nearby={nearbyOwner}
+			onSelectNearbyEntity={(guid) => selection.selectKnownEntity(guid)}
+			onClearWaypoint={() => waypointOwner.clear()}
+			onSetWaypoint={(target) => waypointOwner.set(target, notifyWaypoint)}
+			{partyHudPresent}
+			readPartyHudDisplay={() =>
+				presentPartyHud(
+					interactionLifecycle.partySnapshot(),
+					interactionLifecycle.state().playerGuid,
+				)}
+			onPartyHudDemand={(enabled) =>
+				interactionLifecycle.setPartyUpdateDemand("hud", enabled)}
+			party={socialParty}
+			friends={interactionLifecycle.friends}
+			contracts={interactionLifecycle.contracts}
+			squelch={interactionLifecycle.squelch}
+			allegiance={interactionLifecycle.allegiance}
+			characterGuid={housingCharacterGuid}
+			{houseCrystal}
+			{housing}
+			{housingManagement}
+			onSearchHousing={async (houseType) => {
+				housingSearches.push(houseType);
+				housing = {
+					...housing,
+					search: { ...housing.search, pendingType: houseType },
+				};
+			}}
+			onRefreshHousing={async () => {
+				housingRefreshes += 1;
+			}}
+			readConnection={() => interactionLifecycle.connectionSample()}
+			characterSheet={interactionLifecycle.characterSheet}
+			{appearanceOptions}
+			onAppearanceOptionChange={async (option, enabled) => {
+				appearanceOptions = {
+					...appearanceOptions,
+					[option === "helmet" ? "showHelmet" : "showCloak"]: enabled,
+				};
+			}}
+			inspectionPreviewHeight={userSettings.inspection.previewHeight}
+			audio={userSettings.audio}
+			onAudioChange={(audio) => (userSettings = { ...userSettings, audio })}
+			graphics={userSettings.graphics}
+			ui={userSettings.ui}
+			clockFormat={userSettings.clockFormat}
+			environmentOverrides={userSettings.environmentOverrides}
+			weatherPresets={environmentPresets}
+			{environmentIssue}
+			readServerEnvironment={() => environmentServer.readout()}
+			onClockFormatChange={(clockFormat) =>
+				(userSettings = { ...userSettings, clockFormat })}
+			onEnvironmentOverridesChange={changeEnvironmentOverrides}
+			input={userSettings.input}
+			textureFilteringCapabilities={{ maximumAnisotropy: 8 }}
+			onGraphicsChange={(graphics) =>
+				(userSettings = { ...userSettings, graphics })}
+			onUiChange={(ui) => (userSettings = { ...userSettings, ui })}
+			onInputChange={changeInput}
+			onInspectionPreviewHeightChange={(previewHeight) =>
+				(userSettings = {
+					...userSettings,
+					inspection: { previewHeight },
+				})}
+			objectPreviewService={{
+				open: () => ({
+					dispose: async () => undefined,
+					diagnostics: () => null,
+					ready: Promise.resolve(),
+					setViewport: () => undefined,
+				}),
+			}}
+			itemSession={interactionLifecycle}
+			hudLayout={userSettings.hudLayout}
+			onHudPlacementChange={(surface, placement) =>
+				(userSettings = {
+					...userSettings,
+					hudLayout: { ...userSettings.hudLayout, [surface]: placement },
+				})}
+			onHudReset={(hudLayout) =>
+				(userSettings = { ...userSettings, hudLayout })}
+			spellBarShape={userSettings.spellBarShape}
+			onSpellBarShapeChange={(spellBarShape) =>
+				(userSettings = { ...userSettings, spellBarShape })}
+			minimapViewDiameters={userSettings.minimapViewDiameters}
+			onMinimapViewDiametersChange={(minimapViewDiameters) =>
+				(userSettings = { ...userSettings, minimapViewDiameters })}
+			chatFilters={userSettings.chatFilters}
+			onChatFiltersChange={(chatFilters) =>
+				(userSettings = { ...userSettings, chatFilters })}
+			actionBars={characterSettings?.actionBars ?? null}
+			onActionBarsChange={(actionBars) => {
+				if (characterSettings !== null)
+					characterSettings = { ...characterSettings, actionBars };
+			}}
+			{hudMode}
+			onHudModeChange={(mode) => (hudMode = mode)}
+			{spellBar}
+			onSpellBarChange={(state) => (spellBar = state)}
+			{spellBarEnabled}
+			onSelectSpellTab={selectSpellTab}
+			onActivateSpellCell={activateSpellCell}
+			onActivateCasterSpell={activateCasterSpell}
+			combatMode={spellCombatMode}
+			{combatStatus}
+			{combatProfileSelectionRevision}
+			combatControls={characterSettings?.combatControls ?? {
+				melee: { height: "medium", power: 0.5 },
+				missile: { height: "medium", accuracy: 0.5 },
+			}}
+			onCombatProfileSelect={selectCombatProfile}
+			combatEnabled={true}
+			onToggleCombat={() => {}}
+			onCastSpell={(id) => void castSpell(id)}
+			{itemInteractions}
+			entityMetadata={{
+				status: "available",
+				path: "fixture.hwc",
+				recordCount: 1,
+			}}
+			entityCollisionDisabled={false}
+			onEntityCollisionDisabledChange={() => {}}
+			cameraController={cameraEnabled ? cameraController : null}
+			{preciseJumpActive}
+			onPreciseJumpAim={() => {
+				preciseJumpAimCount += 1;
+			}}
+			onPreciseJumpPowerSet={(power) => {
+				jumpExtent = Math.max(MINIMUM_JUMP_POWER, Math.min(1, power));
+			}}
+			onPreciseJumpPowerAdjust={(steps) => preciseJumpPowerSteps.push(steps)}
+			onPreciseJumpActivate={() => {
+				preciseJumpActivationCount += 1;
+			}}
+			readCanSetCorpsePermission={() => true}
+			onCorpsePermission={(name, granted) => {
+				toast = {
+					id: 1,
+					message: `corpse-permission:${name}:${granted}`,
+					tone: "status",
+				};
+			}}
+			onSocialNotice={(message) => {
+				toast = { id: 1, message, tone: "warning" };
+			}}
+			onInventoryNotice={(message) => {
+				toast = { id: 1, message, tone: "status" };
+			}}
+			onCoordinatesCopied={() => {
+				toast = {
+					id: 2,
+					message: "Coordinates copied to clipboard.",
+					tone: "status",
+				};
+			}}
+			onPickInventoryTarget={(_x, _y, destination) => {
+				if (inventoryWorldResult === null)
+					pendingInventoryWorldPick = destination;
+				else if (destination.isCurrent())
+					destination.commit(inventoryWorldResult);
+			}}
+			onViewportSelect={(x, y) => {
+				viewportSelectionPoints.push({ x, y });
+				selectEntity(7);
+			}}
+			onViewportExamine={(x, y) => {
+				viewportSelectionPoints.push({ x, y });
+				selectEntity(7);
+				void objectInspectionOwner.examine(7);
+			}}
+			onViewportHover={(x, y) => {
+				viewportHoverPoints.push({ x, y });
+				// The item-use fixture supplies explicit hit-test results through hoverWorld.
+				if (activeItemUseProbe === null)
+					hoveredGuid = hoverHitEnabled ? 7 : null;
+			}}
+			onViewportHoverClear={() => (hoveredGuid = null)}
+			onMaintainEntitySelection={() => {
+				selectionMaintenanceCount += 1;
+			}}
+			onSelectPartyMember={(guid) => selection.selectKnownEntity(guid)}
+			onSelectEntity={selectEntity}
+			debugEnabled={true}
+			{unrestrictedUse}
+			onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
+			{readMinimapFrame}
+			worldMapSource={worldMapFixture.source}
+			{canTeleportFromMap}
+			recallDestinations={[]}
+			onRecall={async () => {}}
+			onTeleportToMapPosition={(position) =>
+				interactionLifecycle.teleportToMapPosition(position)}
+			{readDiagnostics}
+			{readSelectedEntity}
+			{readFrameRates}
+			readTargetIndicatorFrame={() => targetIndicatorFrame}
+			readSelectedEntityDisplay={() => interactions.display(unrestrictedUse)}
+			{spells}
+			{enchantments}
+			{inventory}
+			{worldContainer}
+			{vendor}
+			{trade}
+			onSelectContentsItem={(guid, mode) =>
+				selection.selectContentsItem(guid, mode)}
+			onInteractEntity={() =>
+				itemInteractions.interactSelected(unrestrictedUse)}
+			{objectInspection}
+			{bookReader}
+			onCloseBook={() => bookReaderOwner.close()}
+			onRetryBook={() => bookReaderOwner.retry()}
+			onExamineEntity={examineHarnessSelection}
+			onExamineItem={examineHarnessItem}
+			onCloseInspection={() => objectInspectionOwner.close()}
+			selectedEntityGuid={selectedGuid}
+			hoveredEntityGuid={hoveredGuid}
+			showRetailHiddenGeometry={false}
+			onShowRetailHiddenGeometryChange={() => undefined}
+			playerName="Alice"
+			worldName="ACE Emulator"
+			{vitalWarningsEnabled}
+			vitals={warningVitals}
+			{jumpChargeActive}
+			jumpPowerKeys={["W", "S"]}
+			readJumpExtent={() => jumpExtent}
+			{toast}
+			chatMessages={messages}
+			{chatComposer}
+			{sentChatHistory}
+			onSendChat={async (message, resolution) => {
+				sentChatHistory = recordSentChat(
+					sentChatHistory,
+					message,
+					chatHistoryLimit,
 				);
-			} else if (runClientHelpCommand(message, appendChat)) {
-				return;
-			} else if (waypointProbeEnabled) submitWaypointChat(message);
-			else if (message.startsWith("/"))
-				throw new Error("Unknown command. Use /help for supported commands.");
-			else await interactionLifecycle.sendChat({ kind: "speech", message });
-		}}
-		onSendChatError={(message) => {
-			appendChat({ kind: "error", message });
-		}}
-		onCanvas={() => {}}
-	/>
-{/if}
-{#if previewCharacters}
-	<div class="character-preview ui-theme">
-		<section class="ui-panel">
-			<header class="ui-frame">Asheron’s Call</header>
-			<div class="ui-body">
-				<ClientCharacterSelect
-					state={characterState}
-					{entryPending}
-					onChoose={(guid) =>
-						(characterState = { ...characterState, selectedGuid: guid })}
-					onEnter={() => {
-						entryPending = true;
-					}}
-					onDisconnect={() => {
-						previewCharacters = false;
-					}}
-				/>
-			</div>
-		</section>
-	</div>
-{/if}
+				if (resolution.kind === "error") throw new Error(resolution.message);
+				if (resolution.kind === "send" || resolution.kind === "sequence") {
+					await chatComposer.sendAll(
+						resolution.kind === "send"
+							? [resolution.request]
+							: resolution.requests,
+						async (request) => {
+							await interactionLifecycle.sendChat(request);
+							chatRequests.push(request);
+						},
+					);
+				} else if (runClientHelpCommand(message, appendChat)) {
+					return;
+				} else if (waypointProbeEnabled) submitWaypointChat(message);
+				else if (message.startsWith("/"))
+					throw new Error("Unknown command. Use /help for supported commands.");
+				else await interactionLifecycle.sendChat({ kind: "speech", message });
+			}}
+			onSendChatError={(message) => {
+				appendChat({ kind: "error", message });
+			}}
+			onCanvas={() => {}}
+		/>
+	{/if}
+	{#if previewCharacters}
+		<div class="character-preview ui-theme">
+			<section class="ui-panel">
+				<header class="ui-frame">Asheron’s Call</header>
+				<div class="ui-body">
+					<ClientCharacterSelect
+						state={characterState}
+						{entryPending}
+						onChoose={(guid) =>
+							(characterState = { ...characterState, selectedGuid: guid })}
+						onEnter={() => {
+							entryPending = true;
+						}}
+						onDisconnect={() => {
+							previewCharacters = false;
+						}}
+					/>
+				</div>
+			</section>
+		</div>
+	{/if}
+</div>
 
 <style>
 	@layer components {
+		.harness-appearance {
+			display: contents;
+		}
 		.character-preview {
 			position: fixed;
 			inset: 0;

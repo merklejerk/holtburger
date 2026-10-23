@@ -1,4 +1,8 @@
-import { CLIENT_VITAL_WARNING_THRESHOLDS } from "./client-settings-values";
+import {
+	CLIENT_TEXT_SCALE,
+	CLIENT_ICON_SCALE,
+	CLIENT_VITAL_WARNING_THRESHOLDS,
+} from "./client-settings-values";
 import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance";
 import { CLIENT_CHAT_FILTER_TAGS } from "./client-chat-policy";
 import {
@@ -20,8 +24,6 @@ import {
 	CLIENT_CLOCK_FORMAT_DEFAULT,
 	CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
 } from "./client-environment-settings";
-
-import { CLIENT_COMBAT_INDICATOR_DEFAULTS } from "./client-combat-indicator-settings";
 
 /** First-run and reset mix; frontend preferences remain separate from engine tuning. */
 export const CLIENT_AUDIO_DEFAULTS = {
@@ -49,10 +51,11 @@ export function createDefaultClientUserSettings(
 		graphics: { ...CLIENT_GRAPHICS_DEFAULTS },
 		audio: { ...CLIENT_AUDIO_DEFAULTS },
 		ui: {
+			textScale: CLIENT_TEXT_SCALE.initial,
+			iconScale: CLIENT_ICON_SCALE.initial,
 			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
 			fonts: { body: "theme", heading: "theme", mono: "theme" },
 		},
-		combatIndicators: CLIENT_COMBAT_INDICATOR_DEFAULTS,
 		input: structuredClone(CLIENT_KEYBOARD_DEFAULTS),
 		clockFormat: CLIENT_CLOCK_FORMAT_DEFAULT,
 		environmentOverrides: CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,

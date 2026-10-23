@@ -81,6 +81,60 @@ require updating tests.
 
 ## Client UI defaults
 
+### Appearance and UI scaling
+
+`src/app/ui-base.css` owns shared UI recipes and semantic font lengths (body, caption, micro,
+and three heading sizes). Feature styles belong to `@layer components`; themes and user stylesheet
+overrides follow them in the `theme` and `overrides` layers. Keep feature layout local and reuse
+shared control recipes. Common panel insets and stacked editor-label gaps use `--ui-body-padding`
+and `--ui-label-gap`. Different controls retain their own appearance contracts: for example,
+`--ui-button-background-color` styles buttons, while a theme can style tabs through `.ui-tab` and
+its state selectors.
+
+Client `ui.textScale` is a user-scoped multiplier. Its default and control bounds live in
+`client-settings-values.ts`; `client-settings-contract.ts` validates it and supplies a neutral
+value for older UI sections without discarding saved fonts or warning thresholds. Client startup
+loads settings before mounting. `ClientApp` applies scale and font-family choices at
+`client-appearance-scope`, covering startup screens, the world UI, and dialogs. Live scale changes
+update CSS through the existing UI-section persistence path; they do not own runtime lifetimes.
+Explorer uses the same typography recipes at neutral scale and does not load this preference.
+
+Theme font-size roles are **unscaled absolute CSS lengths**. Their CSS consumers multiply them by
+`--ui-text-scale` once, at the element that sets an absolute font size. Nested `ui-theme` roots
+resolve the authored body role again rather than multiplying their inherited computed font size.
+Relative `em`/percentage text inherits already scaled text and must not multiply the preference
+again. The document root font size and geometry expressed in `rem` remain independent of the
+preference. Specialized absolute size hooks such as party-name and jump-readout sizes follow the
+same rule; relative hooks such as trade status and enchantment subsection headings inherit it.
+
+The neutral theme uses 15px body text with 14px captions and 13px micro text. Panels, dialogs,
+tooltips, chat, and ordinary HUD readouts follow text scale. Inline `em` symbols follow that text.
+
+Client `ui.iconScale` independently controls UI artwork. It defaults to 100%, preserving authored
+icon sizes, and uses the same settings lifecycle as text scale. Consumers multiply raw icon lengths
+by `--ui-icon-scale` exactly once: inventory cells and strips, equipment symbols, spell/action bars,
+list and currency artwork, fixed icon controls, and shortcut/status trays grow with their hit targets.
+Item counts, equipped marks, shortcut/tab hints, and numeric action-bar menus follow icon scale.
+Count typography uses `--ui-item-count-font-size` and `--ui-item-count-font-family`. Map labels/cardinals,
+world markers, renderer nameplates, and theme-sized combat text retain their own size policies. Party name
+rows and character vital rows grow with their text; the character component publishes its natural
+minimum height to the frontend layout owner. Font/theme measurements affect fitted geometry without
+overwriting preferred saved placements. Existing name ellipsis and tooltips remain intentional.
+
+Combat indicators have no user-settings overrides. `--ui-combat-text-size`,
+`--ui-combat-text-font` (or the body font role), and `--ui-combat-text-damage-color`,
+`--ui-combat-text-critical-color`, and `--ui-combat-text-avoidance-color` own their appearance.
+The client resolves those CSS values and publishes theme/font changes to the retained renderer;
+animation, placement, and budget policy remain in the combat-effects module. Text scaling has a
+single slider; returning it to 100% restores neutral scaling.
+
+`npm run harness:browser -- --client-text-scaling --brief` verifies live endpoint sizing, nested
+roots, mixed text/icon scales, theme overrides, native dialogs, window reopening, and HUD
+measurements. Use `--viewport-width` and `--viewport-height` for constrained layouts. The existing
+`npm run probe:client:settings` checks real Electron restoration with an isolated settings file.
+
+### Placement defaults
+
 `src/client/client-ui-defaults.ts` owns the initial in-world HUD arrangement: named anchors,
 offsets, preferred sizes, minimum sizes, and panel resizability. Values are CSS pixels. Edge
 offsets point inward; offsets on centered axes are signed, positive right/down. The minimap uses
@@ -93,7 +147,8 @@ to the current viewport without discarding preferred geometry.
 
 `ClientWorldView.svelte` owns live drag/resize state, component composition, and gameplay-driven
 visibility. Diagnostics windows retain their normal border resizing. Internal component styling
-and the layout-lock button remain CSS-owned. Layout edits are not persisted yet.
+and the layout-lock button remain CSS-owned. User HUD sections persist placement edits; viewport
+fitting preserves the preferred geometry stored in those sections.
 Tests exercise geometry with explicit fixtures rather than pinning the current defaults.
 
 ## Object examination

@@ -81,14 +81,18 @@
 		--ui-combat-text-avoidance-color: #a6b3bf;
 		--ui-combat-text-size: 28px;
 		--ui-font-body: Arial, Helvetica, sans-serif;
+		/* Authored font lengths remain unscaled; each absolute-size consumer applies this once. */
+		--ui-text-scale: 1;
+		/* Authored icon lengths remain raw; consumers apply this multiplier once. */
+		--ui-icon-scale: 1;
 		--ui-font-heading: Georgia, "Times New Roman", serif;
 		--ui-font-mono: "Courier New", monospace;
-		--ui-font-size-body: 13px;
-		--ui-font-size-heading-1: 20px;
-		--ui-font-size-heading-2: 16px;
-		--ui-font-size-heading-3: 14px;
-		--ui-font-size-caption: 12px;
-		--ui-font-size-micro: 11px;
+		--ui-font-size-body: 15px;
+		--ui-font-size-heading-1: 22px;
+		--ui-font-size-heading-2: 18px;
+		--ui-font-size-heading-3: 16px;
+		--ui-font-size-caption: 14px;
+		--ui-font-size-micro: 13px;
 		--ui-line-height-body: 1.35;
 		--ui-line-height-heading: 1.25;
 		--ui-radius-surface: 3px;
@@ -183,10 +187,8 @@
 		--ui-action-alternate-width: 36px;
 		--ui-action-alternate-height: 30px;
 		--ui-action-alternate-gap: 4px;
-		/* Stroke widths use SVG viewBox units; the outline width includes the foreground stroke. */
+		/* The authored SVG stroke width uses viewBox units. */
 		--ui-action-alternate-stroke-width: 3;
-		--ui-action-alternate-outline-width: 6;
-		--ui-action-alternate-outline-color: #111;
 		/* Use none to disable the shadow, or supply another CSS filter. */
 		--ui-action-alternate-filter: drop-shadow(0 2px 3px #000a);
 		/* Optional --ui-action-alternate-color resolves to the active warning palette at the cell. */
@@ -195,6 +197,9 @@
 		--ui-overlay-gap: 8px;
 		--ui-overlay-icon-size: 16px;
 		--ui-overlay-backdrop-opacity: 0.55;
+		/* Shared panel content inset and stacked editor-label spacing. */
+		--ui-body-padding: 8px;
+		--ui-label-gap: 4px;
 		/* Menus retain their compact command-row density. */
 		--ui-menu-min-width: 140px;
 		--ui-menu-padding: 4px;
@@ -277,7 +282,13 @@
 		--ui-enchantments-tree-gutter: 22px;
 		--ui-enchantments-child-indent: 8px;
 		/* Quantity stays legible over artwork without changing the cell geometry. */
-		--ui-item-count-font: bold 16px / 1 Arial, Helvetica, sans-serif;
+		--ui-item-count-font-size: 16px;
+		--ui-item-count-font-family: Arial, Helvetica, sans-serif;
+		--ui-action-bar-label-font-size: 13px;
+		--ui-shortcut-hint-font-size: 10px;
+		--ui-status-badge-font-size: 11px;
+		/* Fixed combat-gauge hints retain the gauge geometry policy. */
+		--ui-combat-height-hint-font-size: 11px;
 		/* Compact suffix size relative to the quantity's font size. */
 		--ui-item-count-suffix-font-size: 75%;
 		--ui-item-count-color: #fff;
@@ -413,8 +424,8 @@
 	/* Shared appearance recipes for both app entries and isolated diagnostic roots. */
 	.ui-theme {
 		color: var(--ui-color-text);
-		font: var(--ui-font-size-body) / var(--ui-line-height-body)
-			var(--ui-font-body);
+		font: calc(var(--ui-font-size-body) * var(--ui-text-scale)) /
+			var(--ui-line-height-body) var(--ui-font-body);
 		color-scheme: dark;
 	}
 
@@ -430,13 +441,13 @@
 		line-height: var(--ui-line-height-heading);
 	}
 	.ui-theme h1 {
-		font-size: var(--ui-font-size-heading-1);
+		font-size: calc(var(--ui-font-size-heading-1) * var(--ui-text-scale));
 	}
 	.ui-theme h2 {
-		font-size: var(--ui-font-size-heading-2);
+		font-size: calc(var(--ui-font-size-heading-2) * var(--ui-text-scale));
 	}
 	.ui-theme h3 {
-		font-size: var(--ui-font-size-heading-3);
+		font-size: calc(var(--ui-font-size-heading-3) * var(--ui-text-scale));
 	}
 	.ui-theme .ui-muted {
 		color: var(--ui-color-muted);
@@ -471,7 +482,7 @@
 		box-shadow: none;
 	}
 	.ui-theme .ui-body {
-		padding: 8px;
+		padding: var(--ui-body-padding);
 	}
 	.ui-theme .ui-well {
 		background: var(--ui-color-well);
@@ -532,8 +543,8 @@
 	}
 	/* Minimap rim controls share the reset button's compact circular footprint. */
 	.ui-theme .ui-minimap-button {
-		width: var(--ui-minimap-button-size);
-		height: var(--ui-minimap-button-size);
+		width: calc(var(--ui-minimap-button-size) * var(--ui-icon-scale));
+		height: calc(var(--ui-minimap-button-size) * var(--ui-icon-scale));
 		border-radius: var(--ui-minimap-button-radius);
 	}
 	/* Panel action rows share spacing independently of inline forms and icon toolbars. */
@@ -550,12 +561,12 @@
 	.ui-theme .ui-icon-actions {
 		display: flex;
 		align-items: center;
-		gap: var(--ui-icon-action-gap);
+		gap: calc(var(--ui-icon-action-gap) * var(--ui-icon-scale));
 	}
 	.ui-theme .ui-icon-actions .ui-icon-button {
-		width: var(--ui-icon-action-size);
-		height: var(--ui-icon-action-size);
-		padding: var(--ui-icon-action-padding);
+		width: calc(var(--ui-icon-action-size) * var(--ui-icon-scale));
+		height: calc(var(--ui-icon-action-size) * var(--ui-icon-scale));
+		padding: calc(var(--ui-icon-action-padding) * var(--ui-icon-scale));
 	}
 	/* State rules change defaults, not the property vocabulary. Explicit component
 	   variables are consumed in every state; themes select their values with CSS. */
@@ -686,7 +697,7 @@
 	}
 	.ui-theme .ui-label {
 		display: grid;
-		gap: 4px;
+		gap: var(--ui-label-gap);
 		min-width: 0;
 	}
 	/* Native controls retain browser behavior with shared spacing, color, and focus. */
@@ -805,8 +816,8 @@
 	}
 	/* Shared compact character presence for Social relationship and friend rows. */
 	.ui-theme .ui-presence {
-		width: var(--ui-presence-size);
-		height: var(--ui-presence-size);
+		width: calc(var(--ui-presence-size) * var(--ui-icon-scale));
+		height: calc(var(--ui-presence-size) * var(--ui-icon-scale));
 		flex-shrink: 0;
 		color: var(--ui-color-muted);
 	}
@@ -1023,7 +1034,7 @@
 		background: var(--ui-color-well);
 		box-shadow: var(--ui-surface-shadow, none);
 		color: var(--ui-color-text);
-		font-size: var(--ui-font-size-caption);
+		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 	}
 	/* Map anchors retain position only; label appearance responds directly to theme changes. */
 	.ui-theme
@@ -1081,9 +1092,12 @@
 		display: grid;
 		grid-template-columns: repeat(
 			auto-fill,
-			minmax(min(100%, var(--ui-item-cell-min-size)), 1fr)
+			minmax(
+				min(100%, calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale))),
+				1fr
+			)
 		);
-		gap: var(--ui-item-grid-gap);
+		gap: calc(var(--ui-item-grid-gap) * var(--ui-icon-scale));
 	}
 	.ui-theme .ui-item-cell {
 		transition: opacity var(--ui-item-dim-duration, 150ms) ease-out;
@@ -1196,7 +1210,7 @@
 		height: 100%;
 		min-width: 0;
 		min-height: 0;
-		padding: var(--ui-item-cell-padding);
+		padding: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
 		user-select: none;
 	}
 	.ui-shortcut-hint {
@@ -1207,9 +1221,9 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		font-size: 10px;
+		font-size: calc(var(--ui-shortcut-hint-font-size) * var(--ui-icon-scale));
 		color: var(--ui-color-text);
-		text-shadow: 0 1px 2px black;
+		text-shadow: 0 1px 2px var(--ui-color-shadow);
 		pointer-events: none;
 	}
 }

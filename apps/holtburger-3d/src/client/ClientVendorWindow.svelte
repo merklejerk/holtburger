@@ -413,7 +413,10 @@
 		.vendor-offer-row {
 			display: grid;
 			grid-template-columns:
-				var(--ui-vendor-offer-icon-size) minmax(0, 1fr)
+				calc(var(--ui-vendor-offer-icon-size) * var(--ui-icon-scale)) minmax(
+					0,
+					1fr
+				)
 				auto;
 			align-items: center;
 			gap: var(--ui-vendor-offer-column-gap);
@@ -436,8 +439,8 @@
 			cursor: not-allowed;
 		}
 		.offer-icon {
-			width: var(--ui-vendor-offer-icon-size);
-			height: var(--ui-vendor-offer-icon-size);
+			width: calc(var(--ui-vendor-offer-icon-size) * var(--ui-icon-scale));
+			height: calc(var(--ui-vendor-offer-icon-size) * var(--ui-icon-scale));
 			min-width: 0;
 			overflow: hidden;
 		}
@@ -463,7 +466,7 @@
 			aspect-ratio: 1;
 			width: 100%;
 			min-width: 0;
-			padding: var(--ui-item-cell-padding);
+			padding: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
 			overflow: hidden;
 			user-select: none;
 		}
@@ -529,7 +532,7 @@
 		}
 		.queue-entry {
 			position: relative;
-			width: var(--ui-item-cell-min-size);
+			width: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
 		}
 		.queue-remove {
 			position: absolute;

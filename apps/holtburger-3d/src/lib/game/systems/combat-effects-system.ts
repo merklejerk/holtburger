@@ -71,7 +71,7 @@ export interface CombatEffectsTuning {
 	>;
 }
 
-/** Cold, resolved appearance; animation/budget policy stays outside themes and player preferences. */
+/** Cold, resolved theme appearance; animation and budget policy stays module-owned. */
 export type CombatEffectsAppearance = Pick<
 	CombatEffectsTuning,
 	"font" | "fontSize" | "colors"
@@ -128,7 +128,7 @@ export class CombatEffectsSystem {
 		this.#resources = capability.create(tuning);
 	}
 
-	/** Apply cold preferences without clearing existing effects or changing their spawn facts. */
+	/** Apply theme appearance without clearing existing effects or changing their spawn facts. */
 	setAppearance(appearance: CombatEffectsAppearance): void {
 		if (this.#disposed) return;
 		const tuning = { ...this.#tuning, ...appearance };

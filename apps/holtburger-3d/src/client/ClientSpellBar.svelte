@@ -441,13 +441,13 @@
 			position: absolute;
 			visibility: hidden;
 			pointer-events: none;
-			width: var(--ui-item-cell-min-size);
-			height: var(--ui-spell-tab-height);
+			width: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
+			height: calc(var(--ui-spell-tab-height) * var(--ui-icon-scale));
 		}
 		.spell-scrollbar-metrics {
 			display: block;
 			width: 0;
-			height: var(--ui-spell-scrollbar-height);
+			height: calc(var(--ui-spell-scrollbar-height) * var(--ui-icon-scale));
 		}
 		.spell-bar-scroll {
 			display: flex;
@@ -460,7 +460,7 @@
 			flex: 0 0 var(--spell-cell-size);
 			width: var(--spell-cell-size);
 			height: var(--spell-cell-size);
-			margin-top: var(--ui-spell-tab-height);
+			margin-top: calc(var(--ui-spell-tab-height) * var(--ui-icon-scale));
 		}
 		.spell-tabs,
 		.spell-cells {
@@ -469,7 +469,7 @@
 		}
 		.spell-tabs {
 			grid-template-columns: repeat(10, calc(var(--spell-cell-size) / 2));
-			height: var(--ui-spell-tab-height);
+			height: calc(var(--ui-spell-tab-height) * var(--ui-icon-scale));
 		}
 		.spell-tabs button {
 			--ui-hud-button-background: var(
@@ -484,7 +484,7 @@
 			min-width: 0;
 			min-height: 0;
 			padding: 0;
-			font-size: var(--ui-spell-tab-font-size);
+			font-size: calc(var(--ui-spell-tab-font-size) * var(--ui-icon-scale));
 			color: var(--ui-spell-tab-color, var(--ui-color-text));
 			border: var(--ui-spell-tab-border, 0);
 			border-radius: var(--ui-spell-tab-radius, 0);
@@ -530,7 +530,7 @@
 			--spell-scrollbar-thumb-opacity: var(--ui-spell-scrollbar-thumb-opacity);
 			display: block;
 			width: calc(100% - 4px);
-			height: var(--ui-spell-scrollbar-height);
+			height: calc(var(--ui-spell-scrollbar-height) * var(--ui-icon-scale));
 			margin: 0 2px;
 			padding: 0;
 			appearance: none;
@@ -555,8 +555,13 @@
 		}
 		.spell-scroll-handle::-webkit-slider-thumb {
 			width: var(--scroll-thumb-width);
-			height: calc(var(--ui-spell-scrollbar-height) - 2px);
-			margin-top: calc((5px - var(--ui-spell-scrollbar-height)) / 2);
+			height: calc(
+				calc(var(--ui-spell-scrollbar-height) * var(--ui-icon-scale)) - 2px
+			);
+			margin-top: calc(
+				(5px - calc(var(--ui-spell-scrollbar-height) * var(--ui-icon-scale))) /
+					2
+			);
 			appearance: none;
 			border-radius: 3px;
 			background: color-mix(
@@ -575,7 +580,9 @@
 		}
 		.spell-scroll-handle::-moz-range-thumb {
 			width: var(--scroll-thumb-width);
-			height: calc(var(--ui-spell-scrollbar-height) - 2px);
+			height: calc(
+				calc(var(--ui-spell-scrollbar-height) * var(--ui-icon-scale)) - 2px
+			);
 			border: 0;
 			border-radius: 3px;
 			background: color-mix(

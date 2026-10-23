@@ -81,24 +81,26 @@
 </ClientHudWindow>
 
 <style>
-	.book-scroll {
-		height: 100%;
-		overflow: auto;
-		padding: 1rem;
-	}
-	.book-page + .book-page {
-		margin-top: 1.4rem;
-	}
-	.book-text,
-	blockquote {
-		white-space: pre-wrap;
-		overflow-wrap: anywhere;
-	}
-	.book-author {
-		text-align: right;
-		opacity: 0.8;
-	}
-	blockquote {
-		margin: 1.5rem 0 0;
+	@layer components {
+		.book-scroll {
+			height: 100%;
+			overflow: auto;
+			padding: 1rem;
+		}
+		.book-page + .book-page {
+			margin-top: 1.4rem;
+		}
+		.book-text,
+		blockquote {
+			white-space: pre-wrap;
+			overflow-wrap: anywhere;
+		}
+		.book-author {
+			text-align: right;
+			opacity: 0.8;
+		}
+		blockquote {
+			margin: 1.5rem 0 0;
+		}
 	}
 </style>

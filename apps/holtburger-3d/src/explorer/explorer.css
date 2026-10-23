@@ -34,7 +34,7 @@
 		left: 12px;
 		z-index: 2;
 		max-width: min(380px, calc(100vw - 24px));
-		font-size: 0.9rem;
+		font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
 	}
 
 	.explorer-tools {
@@ -157,7 +157,7 @@
 	}
 
 	.explorer-control-note {
-		font-size: 0.76rem;
+		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		line-height: 1.3;
 	}
 
@@ -171,7 +171,7 @@
 	}
 
 	.explorer-world-residency > span {
-		font-size: 0.76rem;
+		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 	}
 
 	.explorer-world-residency > strong {
@@ -211,23 +211,23 @@
 	}
 
 	.explorer-frame-summary span {
-		font-size: 0.76rem;
+		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 	}
 
 	.explorer-frame-summary strong {
-		font-size: 0.94rem;
+		font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
 		font-weight: 400;
 	}
 
 	.explorer-frame-status {
 		margin: 0;
-		font-size: 0.82rem;
+		font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
 		overflow-wrap: anywhere;
 	}
 
 	.explorer-frame-note {
 		margin-bottom: 0;
-		font-size: 0.82rem;
+		font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
 	}
 
 	.explorer-section {
@@ -251,7 +251,7 @@
 	}
 
 	.explorer-environment-field > span {
-		font-size: 0.76rem;
+		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 	}
 
 	.explorer-environment-field > input,
@@ -260,7 +260,7 @@
 	}
 
 	.explorer-world-form p {
-		font-size: 0.76rem;
+		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		line-height: 1.3;
 	}
 
@@ -285,11 +285,11 @@
 	}
 
 	.explorer-lod-control > label {
-		font-size: 0.76rem;
+		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 	}
 
 	.explorer-lod-control > strong {
-		font-size: 0.72rem;
+		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		font-weight: 400;
 		font-variant-numeric: tabular-nums;
 	}

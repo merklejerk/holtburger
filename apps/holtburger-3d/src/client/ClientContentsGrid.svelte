@@ -139,7 +139,7 @@
 		}
 		h4,
 		p {
-			font-size: 0.85rem;
+			font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
 		}
 		.contents-grid {
 			margin-bottom: 8px;

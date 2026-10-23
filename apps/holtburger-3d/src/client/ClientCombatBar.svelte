@@ -503,166 +503,168 @@
 </ClientHudPanel>
 
 <style>
-	.projectile-supply {
-		--ui-inventory-equipment-slot-icon-size: 16px;
-		--ui-inventory-equipment-slot-icon-color: currentColor;
+	@layer components {
+		.projectile-supply {
+			--ui-inventory-equipment-slot-icon-size: 16px;
+			--ui-inventory-equipment-slot-icon-color: currentColor;
 
-		position: absolute;
-		left: 0;
-		width: 100%;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		gap: 4px;
-		font-size: 12px;
-		font-variant-numeric: tabular-nums;
-		white-space: nowrap;
-	}
-	.projectile-supply span {
-		display: flex;
-	}
-	.projectile-supply strong {
-		font-weight: 600;
-	}
-	.combat-bar {
-		--combat-rest-opacity: var(--ui-combat-idle-opacity);
+			position: absolute;
+			left: 0;
+			width: 100%;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 4px;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+			font-variant-numeric: tabular-nums;
+			white-space: nowrap;
+		}
+		.projectile-supply span {
+			display: flex;
+		}
+		.projectile-supply strong {
+			font-weight: 600;
+		}
+		.combat-bar {
+			--combat-rest-opacity: var(--ui-combat-idle-opacity);
 
-		position: relative;
-		box-sizing: border-box;
-		width: 100%;
-		height: 100%;
-		pointer-events: none;
-		color: var(--ui-combat-foreground-color);
-		opacity: var(--combat-rest-opacity);
-		transition: opacity var(--ui-combat-opacity-transition-duration) ease-out;
-	}
-	.combat-bar:hover,
-	.combat-bar:focus-within,
-	.combat-bar.profile-emphasized {
-		--combat-rest-opacity: 1;
-	}
-	.gauge-background {
-		position: absolute;
-		border-radius: 50% 50% 0 0 / 100% 100% 0 0;
-		background: var(--ui-hud-glass-color);
-		filter: var(--ui-hud-glass-filter);
-		pointer-events: none;
-	}
-	.gauge {
-		position: absolute;
-		z-index: 2;
-		display: block;
-		overflow: visible;
-	}
-	.gauge-track,
-	.gauge-fill,
-	.power-hit-area {
-		fill: none;
-	}
-	.gauge-track {
-		stroke: var(--ui-combat-track-color);
-	}
-	.gauge-fill {
-		stroke: var(--ui-combat-charge-color);
-	}
-	.power-control {
-		cursor: pointer;
-		outline: none;
-	}
-	.power-control.disabled {
-		cursor: default;
-		opacity: 0.55;
-	}
-	.power-control:focus-visible .power-handle {
-		filter: var(--ui-combat-handle-focus-filter);
-	}
-	.power-hit-area {
-		stroke: transparent;
-		pointer-events: stroke;
-	}
-	.power-handle {
-		fill: var(--ui-combat-foreground-color);
-		stroke: var(--ui-combat-outline-color);
-		stroke-width: 3;
-		filter: var(--ui-combat-handle-filter);
-		pointer-events: all;
-		transform-box: fill-box;
-		transform-origin: center;
-		transition: transform 120ms var(--ui-easing);
-	}
-	.power-handle:hover,
-	.power-control:focus-visible .power-handle,
-	.power-control.dragging .power-handle {
-		transform: scale(1.12);
-	}
-	.attack-height {
-		position: absolute;
-		display: grid;
-		grid-template-rows: repeat(3, minmax(0, 1fr));
-		overflow: hidden;
-		clip-path: ellipse(50% 100% at 50% 100%);
-	}
-	.height {
-		position: relative;
-		display: grid;
-		box-sizing: border-box;
-		width: 100%;
-		place-items: center;
-		padding: 0;
-		pointer-events: auto;
-		border: 0;
-		background: var(--ui-combat-height-color);
-		color: var(--ui-combat-foreground-color);
-		cursor: pointer;
-	}
-	.height::after {
-		content: attr(data-shortcut);
-		font-size: var(--ui-font-size-micro);
-		font-weight: 800;
-		opacity: 0;
-		pointer-events: none;
-		text-shadow: var(--ui-combat-breakpoint-shadow);
-		transition: opacity 100ms ease-out;
-	}
-	.combat-bar:hover .height::after,
-	.combat-bar:focus-within .height::after {
-		opacity: 1;
-	}
-	.height.selected {
-		background: var(--ui-combat-height-selected-color);
-	}
-	.height:hover:not(:disabled),
-	.height:focus-visible {
-		background: var(--ui-combat-height-hover-color);
-		outline: none;
-	}
-	.height:disabled {
-		cursor: default;
-		opacity: 0.55;
-	}
-	.breakpoint {
-		position: absolute;
-		z-index: 1;
-		display: grid;
-		place-items: center;
-		font-size: 0.9rem;
-		font-weight: 800;
-		opacity: 0;
-		pointer-events: none;
-		text-shadow: var(--ui-combat-breakpoint-shadow);
-		transform: scale(0.85);
-		transition:
-			opacity 100ms ease-out,
-			transform 100ms ease-out;
-	}
-	.combat-bar:hover .breakpoint,
-	.combat-bar:focus-within .breakpoint {
-		opacity: 1;
-		pointer-events: auto;
-		transform: translate(
-				var(--breakpoint-outward-x),
-				var(--breakpoint-outward-y)
-			)
-			scale(1);
+			position: relative;
+			box-sizing: border-box;
+			width: 100%;
+			height: 100%;
+			pointer-events: none;
+			color: var(--ui-combat-foreground-color);
+			opacity: var(--combat-rest-opacity);
+			transition: opacity var(--ui-combat-opacity-transition-duration) ease-out;
+		}
+		.combat-bar:hover,
+		.combat-bar:focus-within,
+		.combat-bar.profile-emphasized {
+			--combat-rest-opacity: 1;
+		}
+		.gauge-background {
+			position: absolute;
+			border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+			background: var(--ui-hud-glass-color);
+			filter: var(--ui-hud-glass-filter);
+			pointer-events: none;
+		}
+		.gauge {
+			position: absolute;
+			z-index: 2;
+			display: block;
+			overflow: visible;
+		}
+		.gauge-track,
+		.gauge-fill,
+		.power-hit-area {
+			fill: none;
+		}
+		.gauge-track {
+			stroke: var(--ui-combat-track-color);
+		}
+		.gauge-fill {
+			stroke: var(--ui-combat-charge-color);
+		}
+		.power-control {
+			cursor: pointer;
+			outline: none;
+		}
+		.power-control.disabled {
+			cursor: default;
+			opacity: 0.55;
+		}
+		.power-control:focus-visible .power-handle {
+			filter: var(--ui-combat-handle-focus-filter);
+		}
+		.power-hit-area {
+			stroke: transparent;
+			pointer-events: stroke;
+		}
+		.power-handle {
+			fill: var(--ui-combat-foreground-color);
+			stroke: var(--ui-combat-outline-color);
+			stroke-width: 3;
+			filter: var(--ui-combat-handle-filter);
+			pointer-events: all;
+			transform-box: fill-box;
+			transform-origin: center;
+			transition: transform 120ms var(--ui-easing);
+		}
+		.power-handle:hover,
+		.power-control:focus-visible .power-handle,
+		.power-control.dragging .power-handle {
+			transform: scale(1.12);
+		}
+		.attack-height {
+			position: absolute;
+			display: grid;
+			grid-template-rows: repeat(3, minmax(0, 1fr));
+			overflow: hidden;
+			clip-path: ellipse(50% 100% at 50% 100%);
+		}
+		.height {
+			position: relative;
+			display: grid;
+			box-sizing: border-box;
+			width: 100%;
+			place-items: center;
+			padding: 0;
+			pointer-events: auto;
+			border: 0;
+			background: var(--ui-combat-height-color);
+			color: var(--ui-combat-foreground-color);
+			cursor: pointer;
+		}
+		.height::after {
+			content: attr(data-shortcut);
+			font-size: var(--ui-combat-height-hint-font-size);
+			font-weight: 800;
+			opacity: 0;
+			pointer-events: none;
+			text-shadow: var(--ui-combat-breakpoint-shadow);
+			transition: opacity 100ms ease-out;
+		}
+		.combat-bar:hover .height::after,
+		.combat-bar:focus-within .height::after {
+			opacity: 1;
+		}
+		.height.selected {
+			background: var(--ui-combat-height-selected-color);
+		}
+		.height:hover:not(:disabled),
+		.height:focus-visible {
+			background: var(--ui-combat-height-hover-color);
+			outline: none;
+		}
+		.height:disabled {
+			cursor: default;
+			opacity: 0.55;
+		}
+		.breakpoint {
+			position: absolute;
+			z-index: 1;
+			display: grid;
+			place-items: center;
+			font-size: 0.9rem;
+			font-weight: 800;
+			opacity: 0;
+			pointer-events: none;
+			text-shadow: var(--ui-combat-breakpoint-shadow);
+			transform: scale(0.85);
+			transition:
+				opacity 100ms ease-out,
+				transform 100ms ease-out;
+		}
+		.combat-bar:hover .breakpoint,
+		.combat-bar:focus-within .breakpoint {
+			opacity: 1;
+			pointer-events: auto;
+			transform: translate(
+					var(--breakpoint-outward-x),
+					var(--breakpoint-outward-y)
+				)
+				scale(1);
+		}
 	}
 </style>

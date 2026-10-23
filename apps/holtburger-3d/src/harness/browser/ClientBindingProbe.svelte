@@ -41,8 +41,6 @@
 		audio={defaults.audio}
 		graphics={defaults.graphics}
 		ui={defaults.ui}
-		combatIndicators={defaults.combatIndicators}
-		onCombatIndicatorsChange={() => {}}
 		clockFormat={defaults.clockFormat}
 		environmentOverrides={defaults.environmentOverrides}
 		weatherPresets={[]}

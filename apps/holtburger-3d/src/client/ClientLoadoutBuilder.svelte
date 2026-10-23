@@ -211,8 +211,10 @@
 			gap: 0.6rem;
 		}
 		.loadout-slots {
-			column-gap: calc(2 * var(--ui-item-grid-gap));
-			row-gap: calc(3 * var(--ui-item-grid-gap));
+			column-gap: calc(
+				2 * calc(var(--ui-item-grid-gap) * var(--ui-icon-scale))
+			);
+			row-gap: calc(3 * calc(var(--ui-item-grid-gap) * var(--ui-icon-scale)));
 		}
 		.loadout-slot {
 			min-width: 0;
@@ -231,11 +233,11 @@
 			position: relative;
 			width: 100%;
 			aspect-ratio: 1;
-			padding: var(--ui-item-cell-padding);
+			padding: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
 			overflow: hidden;
 		}
 		.loadout-slot-label {
-			font-size: var(--ui-font-size-caption);
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 			line-height: 1.2;
 			text-align: center;
 			overflow-wrap: anywhere;
@@ -259,7 +261,7 @@
 		}
 		.loadout-result-details span {
 			text-align: right;
-			font-size: var(--ui-font-size-caption);
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 		}
 	}
 </style>

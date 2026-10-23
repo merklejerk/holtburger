@@ -465,9 +465,9 @@
 			gap: var(--ui-catalog-row-gap);
 		}
 		.spell-icon {
-			width: var(--ui-spell-icon-size);
-			height: var(--ui-spell-icon-size);
-			flex: 0 0 var(--ui-spell-icon-size);
+			width: calc(var(--ui-spell-icon-size) * var(--ui-icon-scale));
+			height: calc(var(--ui-spell-icon-size) * var(--ui-icon-scale));
+			flex: 0 0 calc(var(--ui-spell-icon-size) * var(--ui-icon-scale));
 			display: grid;
 			place-items: center;
 		}

@@ -200,6 +200,8 @@
 		/* Shared panel content inset and stacked editor-label spacing. */
 		--ui-body-padding: 8px;
 		--ui-label-gap: 4px;
+		/* Horizontal gap between a HUD window's close button and its inner right edge. */
+		--ui-hud-window-close-inset: 4px;
 		/* Menus retain their compact command-row density. */
 		--ui-menu-min-width: 140px;
 		--ui-menu-padding: 4px;

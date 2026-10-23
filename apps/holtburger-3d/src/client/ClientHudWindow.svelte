@@ -235,6 +235,7 @@
 			display: flex;
 			align-items: center;
 			justify-content: space-between;
+			padding-right: var(--ui-hud-window-close-inset);
 			cursor: move;
 			touch-action: none;
 		}
@@ -256,11 +257,13 @@
 		}
 
 		.hud-window-close {
+			/* Keep the full button clickable when a theme places it inside the resize strips. */
+			position: relative;
+			z-index: 3;
 			width: max(28px, calc(1em + 10px));
 			height: max(26px, calc(1.35em + 6px));
 			min-height: 26px;
 			flex: none;
-			margin-right: 2px;
 			cursor: pointer;
 		}
 

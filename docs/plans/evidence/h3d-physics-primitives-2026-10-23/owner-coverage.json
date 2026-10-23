@@ -1,0 +1,122 @@
+{
+  "date": "2026-10-23",
+  "decision": "Reject required-owner buffer removal after both exploratory pairs regress combined work and p95; restore world source to a86c99ea7.",
+  "metadata": {
+    "source_commit": "a86c99ea7ca7c675e3b6f93824c8a04c6fa5be7f",
+    "candidate_patch_sha256": "8cc014cd60706325c5b7dd8e896688ffd2dd17a2dcc57850a43add89a93e9ac7",
+    "binary_sha256": {
+      "baseline": "ba3164284824d70245f0c7f0772a70f26d920deb89c8e675324e085934b73150",
+      "candidate": "d5fe79c9e6c98a16a11ac25553f85061d89e311f1b2bdd968ef2d3b7dcd2e84b"
+    },
+    "fixture_sha256": "8166512597df25ac68cfaee7ba913493242b193f56fa77a27fae78a765a124c7",
+    "profile": "dev; workspace opt-level 0, Parry/Glam opt-level 3; debug information",
+    "features": [
+      "runtime-fixture"
+    ],
+    "cpu_model": "AMD Ryzen 9 5900X 12-Core Processor",
+    "method": "Alternating process order. Each process performs one explicit full untimed warmup and one measured full replay. RUST_LOG=warn; CPU/phase profiling disabled. No compiler, test, or other benchmark launched by this agent during timing.",
+    "gate": "Two exploratory pairs first. Retention requires five total pairs; a rejected or inconclusive candidate may stop early."
+  },
+  "implementation": "Replace required_query_owners and first_unavailable_owner with one unavailable_query_owner helper streaming admitted outdoor and normalized interior owners and taking the minimum unavailable owner. Touched-owner storage remains. Duplicate owners may cause repeated pure map lookups.",
+  "pairs": [
+    {
+      "pair": 1,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "work_reduction_percent": -7.869444645957535,
+      "p95_reduction_percent": -10.145882577361043
+    },
+    {
+      "pair": 2,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "work_reduction_percent": -0.1634617086065493,
+      "p95_reduction_percent": -0.9266488415323737
+    }
+  ],
+  "timings": {
+    "baseline": {
+      "combined_work_ms": {
+        "samples": [
+          24184.144289999967,
+          25962.112694000036
+        ],
+        "median": 25073.128492000003,
+        "minimum": 24184.144289999967,
+        "maximum": 25962.112694000036
+      },
+      "active_physics_work_p95_ms": {
+        "samples": [
+          16.146205000000002,
+          17.561345
+        ],
+        "median": 16.853775,
+        "minimum": 16.146205000000002,
+        "maximum": 17.561345
+      }
+    },
+    "candidate": {
+      "combined_work_ms": {
+        "samples": [
+          26087.302138000017,
+          26004.550807000007
+        ],
+        "median": 26045.92647250001,
+        "minimum": 26004.550807000007,
+        "maximum": 26087.302138000017
+      },
+      "active_physics_work_p95_ms": {
+        "samples": [
+          17.78438,
+          17.724077
+        ],
+        "median": 17.7542285,
+        "minimum": 17.724077,
+        "maximum": 17.78438
+      }
+    }
+  },
+  "summed_work_reduction_percent": -3.879842839757286,
+  "workload": {
+    "messages": 5741,
+    "physics_ticks": 1519,
+    "active_ticks": 1506,
+    "population_mismatches": 0,
+    "peak_entities": 286
+  },
+  "matching_workload_activation_and_final_poses": true,
+  "validation": {
+    "candidate_core_tests_passed": 688,
+    "candidate_world_tests_passed": 969,
+    "candidate_world_tests_ignored": 3,
+    "contract_test": "Unordered membership owners, repeated owners, outdoor coverage admitted/excluded, lowest-owner strict errors and optional-coverage reports. Rejected patch including test is preserved privately; final world source is unchanged.",
+    "clippy": "World/core/harness all-targets, runtime-fixture and physics-profiling features, warnings denied: passed",
+    "format_and_whitespace": "passed",
+    "source_after_rollback": "No world source diff against HEAD a86c99ea7."
+  },
+  "limits": "Two exploratory pairs establish no retention case; the second pair is individually close to noise. The regression cause is not isolated. Extra duplicate-owner lookups are a known source-level tradeoff, not a proven timing explanation. No live cadence or movement-feel claim.",
+  "raw_artifacts": "caps/runtime-fixtures/2026-10-23-physics-primitives/owner-coverage/",
+  "artifact_sha256": {
+    "candidate.patch": "8cc014cd60706325c5b7dd8e896688ffd2dd17a2dcc57850a43add89a93e9ac7",
+    "clippy.log": "bcd56837960f498bd1f6e10ad5e0b44db7fa50f7d7451afebc8457a7dfa556db",
+    "contact_collection_benchmark": "01c870b65088d004b5fb739c36f2ab2f87a9164b265f82ef00e52685ab8a7ee0",
+    "metadata.json": "558ec92955fc9402c1866d0cda11a90d63ffb5c2c537558a196ca7b64d0d7d6e",
+    "pair-01-1-baseline.stderr": "b204f4f9691f4f25d80b0e6532bb54394f280294f0e677761b83436e34cd0f7f",
+    "pair-01-1-baseline.stdout": "3a85f2f2becac159e86ac190c43080ac8f600ab0453602cd8816cf39d7ad0d31",
+    "pair-01-2-candidate.stderr": "e7f743d52b2f4fdc9d73ab34453f26e9978ffcadca7bd8b4efac269e85349119",
+    "pair-01-2-candidate.stdout": "7c7e9ab4c1b7f1b5de7bd21378d7c6cfa3df9b37bc74648f4716916bf071490e",
+    "pair-02-1-candidate.stderr": "697bb5dcf65d039e980bb65b6092823bec11c54cf0fd678e941a7a58695bfab4",
+    "pair-02-1-candidate.stdout": "d1cd5a5ede6f07ed433fdd3611af1690d1d0ef8a3bc7ad5c4f983681dfa39618",
+    "pair-02-2-baseline.stderr": "f0cd683cc310c6e35134431e2b968727a2e3110fa81d690ae8c6cd9a863205a7",
+    "pair-02-2-baseline.stdout": "5247c29a0d52eb88b568b81b54eaff88397711bc3710df46f9aa6b0506dd44e1",
+    "run_pairs.py": "8d43456e20443ba27381af3ae261835e269c97ac6704102e71bd4728d8ea9aea",
+    "runtime_scene_fixture": "d5fe79c9e6c98a16a11ac25553f85061d89e311f1b2bdd968ef2d3b7dcd2e84b",
+    "samples.json": "b89df6b2aac257af24b948f083756577f5ae4ca61293d5273c23ca809ba684a4",
+    "state.json": "5d7bd6b65faf735fac3f1c0a73020db96cd42b06883888ac41a29c213ed09663",
+    "tests.log": "2d7a1af9a4889eb2f6bf568191a3a4202963663724cba40efd80666540382f5a"
+  }
+}

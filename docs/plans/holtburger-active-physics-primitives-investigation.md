@@ -1,13 +1,14 @@
 # Active Physics Solver Primitives Investigation
 
-Status: **Per-shape support buffer removal retained; remaining candidates pending (2026-10-23).**
+Status: **Static resident support preparation retained after five clean pairs; release-profile qualification next (2026-10-23).**
 
 Identify frequently executed solver primitives and reduce unnecessary work without changing
 movement, contact, support, collision coverage, or simulation admission behavior. Start with
 local preparation and allocation reductions before considering retained geometry or new caches.
 The candidates began with source inspection. Baseline attribution selected support queries for the
-first experiment, which produced a modest measured saving. Exact primitive invocation counts remain
-unmeasured.
+first experiment, which produced a modest measured saving. A focused census now separates
+support-query allocator requests, candidate preparation, BSP traversal, and placement transforms.
+Invocation counts outside support queries remain unmeasured.
 
 ## Scope and ownership
 
@@ -22,8 +23,8 @@ stable candidate ordering, tie behavior, accepted-path coverage, and existing re
 decisions. Any proposed behavior change needs separate justification from ACE or the retail
 decompile, as appropriate.
 
-Current authorization covers this tracking document, baseline attribution, and the support
-allocation experiment, including implementation, checks, measurement, and retention or rollback.
+Current authorization covers the investigation, including fresh attribution, choosing the next
+candidate, implementation, checks, measurement, and retention or rollback.
 
 ## Initial ranked candidates
 
@@ -34,10 +35,10 @@ work reduction, not its share of total tick time. No percentage improvement targ
 | --- | --- | --- | --- | --- | --- |
 | 1 | Remove intermediate support allocations | Medium; broad exposure across grounding and movement | Per-shape support buffers, then potentially combined lists used only to select a winner | Medium; preserve candidate order, eligibility, and equal-height ties | Per-shape buffers removed and retained; aggregate lists remain |
 | 2 | Reject polygon contacts before preparing vertices | Medium in BSP-heavy scenes | One vertex allocation and all vertex transforms for each polygon rejected by plane distance | Low; preserve the existing plane arithmetic and rejection rule | Surveyed |
-| 3 | Transform shared polygon-fan vertices once | Small; depends on polygon sizes | Repeated transforms of vertices shared by adjacent fan triangles | Low; preserve fan order and coordinate arithmetic | Surveyed |
+| 3 | Transform shared polygon-fan vertices once | Small; depends on polygon sizes | Repeated transforms of vertices shared by adjacent fan triangles | Low; preserve fan order and coordinate arithmetic | Rejected after inconsistent exploratory measurements |
 | 4 | Compute sweep invariants once | Small | Repeated displacement lengths and enclosing-sphere calculations per BSP collider | Low; retain distinct radii and coordinate frames; compiler may already remove some work | Surveyed |
 | 5 | Reject clear mobile-pair misses using squared distance | Small; potentially medium in loose crowds | Square roots for non-overlapping candidate sphere pairs | Low to medium; preserve contact-boundary rounding and selected-contact ties | Surveyed |
-| 6 | Precompute placed BSP geometry | Potentially largest; least certain | Repeated placement transforms for node bounds, planes, and vertices | High; memory growth and geometry update obligations | Deferred pending attribution |
+| 6 | Precompute placed BSP geometry | Potentially largest; runtime benefit unmeasured | Repeated placement transforms for node bounds and planes | High; ownership and real storage cost need verification | Static resident preparation retained after five pairs; dynamic targets deferred |
 
 The initial proposed experiment order was **2, then 1, then 3**: early plane rejection was the
 cheapest experiment, while support allocation removal had broader exposure. Fresh attribution below
@@ -118,6 +119,21 @@ against unchanged geometry may justify preparation, but retained data introduces
 Before designing this change, attribute transform cost and count geometry reuse. Distinguish static
 resident colliders from moving entity targets. Any retained representation must have a clear owner,
 update rule, memory estimate, and measured advantage over narrower query-local preparation.
+The census below now establishes high static reuse and modest modeled array payload in this
+fixture. It does not yet establish runtime benefit or a complete implementation memory budget.
+
+### Owner coverage preparation
+
+The retained [`support_query`, `touched_landblocks`, and `require_query_coverage`](../../crates/holtburger-world/src/spatial/collision.rs)
+materialize touched outdoor owners and required coverage owners before querying exact geometry.
+The latter combines outdoor reach with interior membership owners, then sorts and deduplicates.
+These are distinct sets with distinct consumers. The census below identifies their preparation
+as the largest source of support-query allocator requests.
+
+The simple streaming alternative below was rejected after measurement. Any later approach must
+preserve outdoor/interior admission, missing-coverage errors, and the lowest-owner error choice
+currently supplied by sorted owners. Avoid replacing these temporary lists with a cache or
+conflating geometric footprint with membership.
 
 ## Existing optimizations and rejected experiments
 
@@ -169,8 +185,13 @@ and user acceptance separate when a retained change warrants them.
 - [x] Establish current workload attribution and benchmark baseline.
 - [ ] Evaluate early polygon plane rejection.
 - [x] Evaluate and retain per-shape support allocation removal; aggregate support lists remain.
-- [ ] Evaluate polygon fan transform reuse.
-- [ ] Reassess remaining candidates from fresh attribution.
+- [x] Evaluate polygon fan transform reuse; reject and restore retained source.
+- [x] Reassess aggregate support buffers versus fan transforms from fresh attribution.
+- [x] Census support-query allocator requests, candidate preparation, BSP traversal, and transforms.
+- [x] Evaluate temporary owner-coverage list reduction using clean executables; reject and restore.
+- [x] Census static/entity BSP placement reuse and estimate prepared bounds/plane payload.
+- [x] Evaluate and retain static resident support preparation with actual storage and five clean pairs.
+- [ ] Qualify the retained preparation change in the release profile before broadening it.
 - [x] Complete correctness, quality, and performance checks for the first retained change.
 - [ ] Record the final disposition and any remaining live or user acceptance work.
 
@@ -248,10 +269,29 @@ from the uninstrumented baseline above; outer runtime scopes include additional 
 
 ### Next investigation decision
 
-The first support experiment below is retained. Before expanding visitation through scene queries
-and winner selection, use fresh attribution to compare the remaining aggregate support buffers
-with polygon fan transform reuse. Keep the retained candidate as the next comparison baseline;
-preserve the original baseline separately so cumulative gains remain auditable.
+The first support experiment below remains retained. Fresh attribution selected polygon fan
+transform reuse, but the exploratory pairs did not establish a repeatable benefit and the change
+was reverted. Source `a86c99ea7` remains the current comparison baseline; the original baseline is
+separately preserved. The later static preparation experiment below retains an additional change against that baseline.
+
+The scoped allocator census below isolates result storage from query preparation. Result buffers
+account for 8.106% of successful support-query allocation/reallocation requests; owner coverage
+preparation accounts for 48.446%. Despite that request count, the simple required-owner streaming
+experiment measured slower in both exploratory pairs and was reverted. Do not infer CPU benefit
+from the number of avoided allocations or broaden support selection interfaces on that basis.
+
+The static resident preparation experiment below is retained: five clean alternating pairs reduce
+summed combined work by 9.787%, and every pair improves active physics p95. The representation
+prepares bounds, polygon planes and vertices in the shared world scene layer, tied to immutable
+resident owner products. Actual extra retained storage is 1.58 MiB for this fixture, exceeding the
+partial 545 KiB bounds/plane model. Dynamic targets remain unchanged.
+
+Next qualify this same change with release-profile executables and the same workload/outcome gates.
+The current measurements use workspace optimization level zero; they do not establish release
+benefit or live cadence. Broader static residency is a separate memory qualification, and user
+movement acceptance remains outstanding. Do not broaden preparation or add lazy initialization
+before that evidence exists. Early contact-plane rejection still needs a relevant contact-heavy
+workload; conservative query admission remains a separate compatibility investigation.
 
 Early polygon plane rejection now requires a targeted workload showing that the contact functions
 execute often enough to matter. Fan transform reuse remains a small later candidate. The profile
@@ -331,8 +371,295 @@ configuration, behavioral checks, raw evidence location, individual timings, med
 local work reduction, and retain/revert decision. Explain inconclusive results and architectural
 costs beside the decision.
 
+### Fan transform reuse selection and candidate
+
+A fresh cold replay of retained source `a86c99ea7` produced 8,102 CPU samples at 250 Hz.
+Support-query allocation-related stacks account for 18 samples (0.222%); this proxy includes
+allocation beneath query/index helpers and does not isolate the aggregate result buffer.
+Support result consumption through vector iterators accounts for two recovered samples (0.025%).
+Fan vertex placement accounts for 25 samples (0.309%), within 138 samples (1.703%) for
+`sweep_polygon`. These inclusive shares overlap, include bootstrap and workers, and are not
+invocation counts or available savings.
+
+Both remaining costs are small. Fan reuse is selected because it is confined to one loop and
+avoids extending visitor contracts through support selection. The candidate carries the previous
+transformed edge vertex into the next triangle, preserving triangle order and exact hit ties.
+It reduces transforms from `2n - 3` to `n`, with no net source line increase or new buffer.
+
+All 688 core tests and 968 world tests pass (three world tests ignored), as do affected
+world/core/harness all-target Clippy with warnings denied, formatting, and whitespace checks.
+The raw profile and parser are under
+`caps/runtime-fixtures/2026-10-23-physics-primitives/remaining-support/`; candidate source patch,
+binary, verification logs, and paired reports are under the adjacent `fan-reuse/` directory.
+Two exploratory alternating pairs, each with an explicit full warmup, precede a decision to reject
+or continue. Retention requires five total pairs.
+
+The [fresh attribution and rejected experiment evidence](evidence/h3d-physics-primitives-2026-10-23/fan-reuse.json)
+preserves the profile, source/binary identity, individual timings, outcome checks, and artifact hashes.
+
+| Pair | Combined work reduction | Active physics p95 reduction |
+| --- | --- | --- |
+| 1 | -5.548% | -8.329% |
+| 2 | 8.518% | 7.376% |
+
+All four measured runs preserve workload counts, activation history, and exact reported final
+authoritative and simulated poses. Summed work is 1.666% lower, but opposite directions across the
+two pairs do not establish a repeatable benefit. The candidate spans 24,661.97 to 27,025.41 ms of
+combined work, compared with 25,604.82 to 26,958.20 ms for the retained baseline. These exploratory
+results cannot establish either a speedup or an intrinsic slowdown from the loop change.
+
+**Decision: reject and stop after the exploratory gate.** The small local transform reduction does
+not justify retaining an unproven performance change. The source is restored byte-for-byte to
+`a86c99ea7` for all world files; the normal runtime-fixture harness build was refreshed successfully
+after rollback. The rejected patch and candidate executable remain private evidence. No new tests,
+runtime assets, or production diagnostics remain, and no visual acceptance was performed.
+
+### Support query allocator and traversal census
+
+An isolated checkout of `a86c99ea7` added temporary query scopes, counters, and a forwarding System
+allocator in the replay harness. No probe code entered the main checkout. The
+[sanitized census evidence](evidence/h3d-physics-primitives-2026-10-23/support-query-census.json)
+contains complete stage counts, allocator requests, instrumented timings, controls, and hashes.
+Raw logs, the instrumented executable, source snapshot, and patch are private under
+`caps/runtime-fixtures/2026-10-23-physics-primitives/support-query-census/`.
+
+One explicit warmup preceded two counter-only replays; their complete counter and allocation
+snapshots are identical. A separate cold pass enabled stage clocks and disabled per-node/reference
+census work. Allocator requests are attributed to the innermost active stage; probe bookkeeping
+allocations while diagnostic state is borrowed are excluded. Successful reallocation requests
+record full replacement sizes, so requested bytes are neither retained heap size nor physical
+memory traffic. Counters are for the synchronous replay thread, not every allocation in the program.
+
+| Support-query stage | Allocation and reallocation requests | Share of requests | Requested storage bytes |
+| --- | --- | --- | --- |
+| Owner coverage preparation | 363,188 | 48.446% | 4,360,584 |
+| Static candidate collection | 154,950 | 20.669% | 12,219,360 |
+| Hard-target candidate preparation | 162,134 | 21.627% | 3,891,216 |
+| Polygon admission | 8,637 | 1.152% | 414,576 |
+| Support-result buffers | 60,769 | 8.106% | 15,577,344 |
+| Total | 749,678 | 100% | 36,463,080 |
+
+Result buffers account for 42.721% of requested storage bytes despite only 8.106% of requests.
+This distinction prevents treating allocation count, requested storage, and CPU cost as interchangeable.
+There are 148,494 aggregate/world support queries and 60,689 nonempty world result lists. Only one
+additional entity support is emitted beyond 66,252 world supports in this fixture.
+
+| Work | Count per counter-only replay |
+| --- | --- |
+| Static references before deduplication | 384,817 |
+| Static references after deduplication | 384,778 |
+| Hard-index candidate slots | 93,594 |
+| Placed BSP support queries | 213,272 |
+| BSP nodes tested and bounds transformed | 12,546,218 |
+| BSP nodes culled | 4,892,055 |
+| BSP polygon references and plane transforms | 4,178,171 |
+| Unique polygon references summed within each placed BSP query | 4,178,171 |
+| Polygon vertex transforms | 270,253 |
+
+Static deduplication removes just 39 references (0.0101%). No repeated polygon IDs occur within
+the measured placed BSP support queries. This fixture provides no useful case for optimizing
+deduplication or adding support-polygon deduplication. Repeated BSP bounds and plane transforms
+warrant more attention than the rejected fan loop, but counts alone do not establish their CPU cost.
+
+The timed pass records substantial probe overhead, particularly at millions of transform/traversal
+boundaries. Its times must not be used as normal solver budgets or speedup estimates. The same
+BSP query, polygon, bound-transform, plane-transform, and vertex-transform counts occur in both
+counter and timed passes; aggregate query counts differ slightly.
+
+All passes match 5,741 messages, 1,519 physics inputs, 1,506 active ticks, peak population 286,
+zero population mismatches, activation history, and the final authoritative pose. The two counter
+passes end at the same simulated pose, but 3.228 mm from the uninstrumented reference; the timed
+pass differs by 1.143 mm. An allocator/report-only control, with all world query hooks restored to
+the original code, matches the reference simulated pose exactly and records no query scopes.
+The query probes therefore perturb the replay. The cause of the pose shift is not established;
+these results are diagnostic evidence, not behavior-equivalence acceptance. Replay uses real
+dispatch instants and is not a deterministic state oracle.
+
+The isolated world/harness all-target Clippy check passes with warnings denied. No tests were added
+for diagnostic logging or counters. Main world/harness source remains unchanged; future production
+experiments must use clean executables and the existing correctness and paired performance gates.
+
+### Required owner buffer removal experiment
+
+The rejected candidate replaced required-owner collection and separate missing-owner lookup with one
+`CollisionScene::unavailable_query_owner` helper. It streams admitted outdoor footprint owners and
+normalized interior membership owners, then selects the lowest unavailable owner. Transit admission,
+strict coverage, and optional-coverage completion share that result. No public contract changes.
+
+The touched-owner vector remains because terrain and membership traversal consume its distinct
+geometric footprint. Reached cells can name the same owner more than once; repeated map lookups
+are the explicit tradeoff for removing required-owner allocation, sorting, and deduplication.
+No owner cache or derived membership field is added.
+
+The candidate passes all 688 core tests and 969 world tests (three world tests ignored), affected
+world/core/harness all-target Clippy with warnings denied, formatting, and whitespace checks.
+Its new asset-free coverage test protects lowest-owner selection across unordered interior cells,
+repeated owners, admitted/excluded outdoor owners, strict errors, and optional coverage reports.
+
+Clean candidate executables and the source patch are preserved under
+`caps/runtime-fixtures/2026-10-23-physics-primitives/owner-coverage/`. Comparison uses retained source
+`a86c99ea7` with the existing profile, fixture, explicit warmup, alternating order, and exact workload
+and final-pose checks. Two exploratory pairs precede rejection or continuation to five total pairs.
+The query census probes are absent from both executables. The
+[rejected experiment evidence](evidence/h3d-physics-primitives-2026-10-23/owner-coverage.json)
+preserves the source patch, checks, exact executable identities, individual reports, and artifact hashes.
+
+| Pair | Combined work reduction | Active physics p95 reduction |
+| --- | --- | --- |
+| 1 | -7.869% | -10.146% |
+| 2 | -0.163% | -0.927% |
+
+Both measured pairs are slower, with 3.880% more summed combined work. Pair two's work difference
+is individually close to noise; these exploratory observations do not isolate the regression cause.
+Repeated lookup of duplicate owners is a known source-level tradeoff, not a proven timing explanation.
+All four runs match message/tick counts, activation history, population, and exact authoritative and
+simulated final poses.
+
+**Decision: reject after the exploratory gate.** The required-owner allocation was removed, but the
+clean replay comparison provides no retention case. The complete candidate, including its new test,
+is restored out of the working tree and preserved privately. All world source is byte-for-byte
+`a86c99ea7`, and the normal runtime-fixture harness was rebuilt successfully after rollback.
+The retained support-buffer optimization is unchanged; no new production code or diagnostics remain.
+
+### BSP placement reuse and prepared payload census
+
+A lighter isolated census of `a86c99ea7` classified support queries by immutable static owner
+product or typed entity part identity. Per-query local counters avoid the earlier per-node TLS
+probes. Published scene inventories were observed at physics boundaries, excluding loader staging.
+One explicit warmup preceded two counted replays. The normalized counts and memory models match
+exactly across both runs, as do workload, activation, population, and both reported final player
+poses against the clean reference.
+
+The [sanitized reuse evidence](evidence/h3d-physics-primitives-2026-10-23/bsp-placement-census.json)
+contains source/executable identity, controls, layout sizes, work counts, and storage models.
+Raw source snapshots, patch, binary, logs, and parser remain privately under
+`caps/runtime-fixtures/2026-10-23-physics-primitives/bsp-placement-census/`. The main solver is unchanged.
+
+| Support workload | Resident static geometry | Entity geometry |
+| --- | --- | --- |
+| BSP query records reached | 38 static parts out of 292 resident parts | 4 typed body/part/geometry records |
+| Placed BSP support queries | 200,964 | 12,308 |
+| Node-bound transforms | 12,312,348 | 233,852 |
+| Polygon-plane transforms | 4,055,091 | 123,080 |
+| Polygon-vertex transforms | 270,253 | 0 |
+
+Static geometry supplies 98.136% of bounds transforms and 97.054% of polygon-plane transforms.
+Among support-queried static parts, query counts range from 2 to 34,804, with median 6,016.
+Every observed static placement retains the same exact transform and authored geometry within its
+owner revision. Preparing the 38 support-queried parts once would transform 2,514 node bounds and
+1,268 polygon planes; preparing all 292 resident parts once would transform 18,636 bounds and
+8,588 polygon planes. These are operation-count opportunities, not measured speedups.
+
+There are 172 authored Arc allocations referenced by resident static parts, among 187 observed
+authored allocations overall. Identities use Weak references to prevent allocation-address reuse
+without retaining BSP child buffers. They identify Arc allocations, not unique DAT content IDs.
+Unqueried here means unqueried by support: sweeps, camera, recovery, or other query families may
+consume additional static parts.
+
+The four queried entity BSP records each have one observed frame/pose and no observed pose changes.
+This does not qualify moving or animated BSP target performance. Ordinary dynamic target preparation
+nevertheless constructs 110,231 BSP shapes from 32 distinct geometry/frame/pose combinations.
+Those combinations are not body counts. No same-frame frozen BSP clones or cross-frame rebuilds
+were observed. Eager preparation in the generic placed-shape constructor could therefore repeat
+work at construction cadence; static product preparation has the cleaner initial lifetime.
+
+The target layout measures spheres and planes at 16 bytes, optional slots at 20 bytes, and Vec
+headers at 24 bytes. Models retain authored geometry and assume no sharing of additional prepared
+payload between placed parts.
+
+| Additional prepared storage model | Peak complete resident set | Tick-sampled first-use support demand |
+| --- | --- | --- |
+| Unpacked sphere/polygon-plane float payload only | 435,584 bytes (425.4 KiB) | 60,512 bytes (59.1 KiB) |
+| Optional bound slots per node, optional plane slots through max polygon ID, and Vec headers | 558,496 bytes (545.4 KiB) | 77,464 bytes (75.6 KiB) |
+| Same dense model including node partition-plane slots | 938,224 bytes (916.2 KiB) | 128,656 bytes (125.6 KiB) |
+
+These are illustrative exact-length payload budgets, not measured RSS or complete cache sizes. They exclude
+topology/index mappings, spare capacity, synchronization, allocator metadata, staging overlap, and demand from
+other query families. Actual representation cost must be measured. Vertex preparation was outside
+the initial proposal because it has much lower observed transform volume; the prototype below
+includes it to keep prepared polygon geometry self-contained.
+
+This census totals 12,546,200 bounds visits, 18 fewer than the earlier intrusive census. Polygon-plane
+and vertex totals agree. Keep both datasets: the earlier query probes shifted simulated poses,
+whereas this per-query census matches the clean reference. Neither diagnostic run is a retention
+benchmark. Isolated world/core/harness all-target Clippy passes with warnings denied; no production
+diagnostics or new tests remain.
+
+### Static resident support preparation prototype
+
+The world scene now experimentally pairs each immutable resident source asset with a prepared
+static support kernel array. Preparation happens on owner-product insertion; unchanged snapshots
+share the same Arc, while replacement and eviction retire prepared data with the source product.
+Dynamic/entity constructors and other collision query families keep their existing source geometry.
+There is no global cache, lazy initialization, or additional invalidation protocol.
+
+BSP preparation flattens authored node order, places optional node bounds, compacts leaf polygon
+references, and prepares each polygon plane and its corners. It preserves duplicate leaf observations,
+omits unresolved IDs exactly as the existing source lookup does, and uses the existing placement
+functions and support admission. Static ball/cylinder placement constants share this lifetime.
+Preparing vertices broadens the original bounds/planes proposal: it keeps prepared polygons in one
+coordinate frame without borrowing source geometry through a second representation. The tradeoff
+is eager work and storage for geometry never queried for support in this fixture.
+
+A focused test compares ordered support float bit patterns against the original query across
+uniform/nonuniform placement, tilt, culling, duplicate/unresolved IDs, and both support probes.
+A scene test covers owner replacement, eviction, and retained snapshots. All 688 core and 970 world
+tests pass (three ignored), and world/core/harness all-target Clippy passes with warnings denied.
+Both 100- and 250-remote-body crowd checks match every non-timing baseline field.
+
+An isolated cold replay measures 1,658,116 additional retained object/box bytes (1,619.3 KiB) at
+peak published residency: 673 static kernels, including 292 BSP parts. This includes topology,
+compact leaf references, prepared vertices, and kernel headers; it excludes allocator metadata,
+authored source storage, RSS, and staging overlap. Nine completed product preparations total
+10.112 ms, with a largest individual preparation of 3.613 ms. These diagnostic walltimes exclude
+shadow-index rebuild and the measurement walk and are not a clean publication-cost comparison.
+The instrumented replay preserves workload and authoritative outcome but shifts the simulated
+endpoint by about 0.13 mm. It is a storage observation, not correctness or retention evidence.
+
+The accumulated prototype passes the code-quality review within its static support scope.
+The review follows owner insertion, snapshot sharing, replacement/eviction, selection, and support
+consumption. Authored geometry remains a content contract; compiled placement belongs to the world
+scene. The private resident constructor fixes source/kernel ordinal correspondence before publication.
+The dynamic query implementation remains necessary for moving targets; common transform and
+admission helpers avoid competing arithmetic. Added traversal metadata earns its place by removing
+per-query transforms and hash lookups without new invalidation state. Eager unqueried geometry and
+added representation size are accepted costs, contingent on the timing gate. No blocking finding
+was identified. The pre-commit review also inspected the core residency staging caller, authored
+placement methods, shared static selection, sweep/ray source adapters, and the mobile stair-support
+consumer. It did not re-audit unrelated collision algorithms or frontend adapters. Release-profile benefit, broader residency cost, and live acceptance remain open.
+
+[Sanitized prototype evidence](evidence/h3d-physics-primitives-2026-10-23/static-prepared-support.json)
+records all measurements and executable/patch identities. Private candidate and diagnostic source,
+executables, reports, clocks, and parsers are preserved under
+`caps/runtime-fixtures/2026-10-23-physics-primitives/static-prepared-support/`.
+
+Clean alternating replays compare against retained source `a86c99ea7`. Their executables have no
+diagnostic probes; each process performs a complete warmup before its measured replay. No compiler,
+test, profiler, or other benchmark from this agent overlaps timing. Unrelated host activity remains
+uncontrolled.
+
+| Pair | Combined work reduction | Active physics p95 reduction |
+| --- | --- | --- |
+| 1 | 12.212% | 11.013% |
+| 2 | 6.191% | 6.443% |
+| 3 | 5.394% | 4.482% |
+| 4 | 12.873% | 12.594% |
+| 5 | 12.260% | 11.162% |
+
+**Decision: retain.** Summed combined work falls by 9.787%; median paired work reduction is
+12.212%, and median paired active physics p95 reduction is 11.013%. Every pair improves both
+metrics. All ten measured replays match message/tick counts, activation history, population, and
+exact authoritative and simulated final poses. These outcomes supersede the cold diagnostic replay
+for correctness. This is one scene on one CPU in the development profile, not a release or live
+performance claim. Unrelated submodule changes are excluded from this investigation.
+
 | Date | Work | Result | Next action |
 | --- | --- | --- | --- |
 | 2026-10-23 | Read-only source survey and ranking | Six candidates identified; no implementation or benchmark result | Obtain authorization for implementation and measurement, then establish attribution and baseline |
 | 2026-10-23 | Fresh baseline and separate CPU attribution | Five recorded-scene runs and five runs at each of two crowd sizes pass workload consistency checks; support queries are sampled materially | Evaluate support allocation removal first; obtain a relevant workload before testing contact-plane rejection |
 | 2026-10-23 | Per-shape support buffer removal | Retained after five alternating pairs: 2.969% less summed work, 4.504% lower median work; one paired p95 regression; tests and crowd outcome checks pass | Attribute remaining support buffers versus fan transforms before selecting the next candidate |
+| 2026-10-23 | Fresh retained-code attribution and fan transform reuse | Rejected: exploratory pairs move in opposite directions; source restored to a86c99ea7 | Isolate result allocation from candidate preparation and traversal before widening support interfaces |
+| 2026-10-23 | Scoped allocator and support-query census | Two identical count snapshots; owner preparation owns 48.446% of allocation requests, result buffers 8.106%; millions of BSP transforms and negligible duplicate selection; query probes shift simulated pose slightly | Evaluate temporary owner-coverage lists on clean code; investigate BSP preparation separately |
+| 2026-10-23 | Required-owner streaming | Rejected: both exploratory pairs regress combined work and p95; all outcome checks match; full source rollback | Census static/moving BSP placement reuse and memory cost before preparing bounds or planes |
+| 2026-10-23 | Static/entity BSP reuse and payload census | Two identical normalized replays match clean final poses; static geometry supplies 98.136% of bounds transforms; dense static support arrays model 545.4 KiB resident or 75.6 KiB at observed support demand | Prototype static-only prepared bounds/polygon planes; measure actual memory, publication cost, correctness, and paired performance |
+| 2026-10-23 | Static resident support preparation | Retained: 9.787% less summed work over five pairs, every p95 improves, exact outcomes match; 1.58 MiB extra retained object/box storage; tests, Clippy and quality review pass | Qualify release-profile benefit and broader residency cost before broadening preparation |

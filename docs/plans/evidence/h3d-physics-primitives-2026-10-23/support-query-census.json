@@ -1,0 +1,514 @@
+{
+  "date": "2026-10-23",
+  "purpose": "Support-query work census and scoped allocator attribution; no production optimization or speedup comparison.",
+  "metadata": {
+    "source_commit": "a86c99ea7ca7c675e3b6f93824c8a04c6fa5be7f",
+    "binary_sha256": "496f9d70f893fae3dffeee606a2f27dbd9d2e28cd0a2e4aaee78077531598ff0",
+    "tracked_patch_sha256": "d87b85873a4958dbb12394e835f7465e8898a68752eb502cac26619dd09ab5b6",
+    "source_files": {
+      "crates/holtburger-debug-harness/src/bin/runtime_scene_fixture.rs": "a9a7961d5aa3dd9ec0e596db1fe69d288aab73f7809891609945c21ac9ba93a2",
+      "crates/holtburger-world/src/lib.rs": "4818a602bc140c30c36dcef7d6905d2f38bead806e3a2b8a1b16dcb40e63d269",
+      "crates/holtburger-world/src/spatial/bsp_query.rs": "ba2d5e494712a610dc936d303738e4ab10d655b45ac9695bef7391dd440a38ed",
+      "crates/holtburger-world/src/spatial/collision.rs": "6c47a691eab81d5ac73a1a7b4dd93742e180d2ce6acfd0e3c90393eddebda94c",
+      "crates/holtburger-world/src/spatial/mobile_contact/step/stairs.rs": "cee168bab80887bcb732a281861869393092fec5324c6d34b1d16952cbe62139",
+      "crates/holtburger-world/src/spatial/mobile_contact/step/targets.rs": "a926785bf3d5b7d30c55ec28f4f5def7daff09a72da7ef68f3067d72c2b9d938",
+      "crates/holtburger-world/src/spatial/volume_query.rs": "93bcf120c05cdcb6e483e3824d348aee530b275ff8c9fa455b06f3f28bf30279",
+      "crates/holtburger-world/src/support_diagnostics.rs": "6a9152f7b9941861c7f7d796ff363ea2543e497bec29e560ec26f4376e411f74",
+      "crates/holtburger-debug-harness/src/support_probe_allocator.rs": "0e7931029f257567a81b9a4d3c716c2aa91f601100662ee7978c0dcd4af4b681"
+    },
+    "build_command": "cargo build --offline --locked -p holtburger-debug-harness --features runtime-fixture --bin runtime_scene_fixture --target-dir /tmp/holtburger-support-query-probe-target",
+    "profile": "dev; workspace opt-level 0, Parry/Glam opt-level 3; debug info",
+    "fixture_sha256": "8166512597df25ac68cfaee7ba913493242b193f56fa77a27fae78a765a124c7",
+    "content_identity": [
+      {
+        "file": "assets.hba",
+        "bytes": 634425693,
+        "sha256": "20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7"
+      },
+      {
+        "file": "micro.zip",
+        "bytes": 344010,
+        "sha256": "bbc652ade89baa8a9c70c14c6a7952d621c24ea0bb39f90ce3bc8314d71e5566"
+      },
+      {
+        "file": "weenies.hwc",
+        "bytes": 7993577,
+        "sha256": "1822ccd3fc285bd810c3664145d329c8ab8b8ba312ac43a47fc7abd18b7825ba"
+      }
+    ],
+    "limits": "Temporary isolated diagnostic source; main solver is unchanged. Counts are per replay thread. Allocator forwarding preserves System and excludes probe bookkeeping while state is borrowed. Requested storage bytes are not retained heap size or physical copy traffic. Timing includes probe overhead and is not a normal performance comparison."
+  },
+  "method": {
+    "counters": "One untimed full warmup and two measured replays, with stage clocks disabled. Stage calls, actual allocator requests, per-query unique polygon IDs, and traversal counters are collected.",
+    "timing": "One cold replay with stage clocks enabled and per-node/reference census disabled. Allocator tagging remains enabled. Inclusive/exclusive times contain substantial probe overhead and do not rank normal solver costs quantitatively.",
+    "control": "One warmup and one replay using the same forwarding allocator/report hooks, with every world query hook restored to a86c99ea7.",
+    "allocation_attribution": "Successful System allocation and reallocation requests are attributed exclusively to the innermost active stage. Probe bookkeeping allocations while the diagnostic state is borrowed are excluded. Requested bytes include full replacement sizes for reallocation, not retained heap size or actual memory traffic."
+  },
+  "validation": {
+    "counter_snapshots_identical": true,
+    "counter_runtime_poses_identical": true,
+    "workload_activation_and_authoritative_pose_match": true,
+    "geometry_stage_calls_match_between_count_and_timing_passes": true,
+    "simulated_pose_checks": {
+      "counts_1": {
+        "exact_reference_match": false,
+        "same_landblock": true,
+        "coordinate_delta_m": {
+          "x": -0.0023999999999944066,
+          "y": -0.002116000000000895,
+          "z": -0.0004270000000019536
+        },
+        "distance_m": 0.0032279691758098634
+      },
+      "counts_2": {
+        "exact_reference_match": false,
+        "same_landblock": true,
+        "coordinate_delta_m": {
+          "x": -0.0023999999999944066,
+          "y": -0.002116000000000895,
+          "z": -0.0004270000000019536
+        },
+        "distance_m": 0.0032279691758098634
+      },
+      "timing": {
+        "exact_reference_match": false,
+        "same_landblock": true,
+        "coordinate_delta_m": {
+          "x": -0.0007799999999917873,
+          "y": -0.0008259999999999934,
+          "z": -0.00012900000000115597
+        },
+        "distance_m": 0.0011433796394843996
+      },
+      "allocator_control": {
+        "exact_reference_match": true,
+        "same_landblock": true,
+        "coordinate_delta_m": {
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.0
+        },
+        "distance_m": 0.0
+      }
+    },
+    "instrumentation_perturbs_simulated_pose": true,
+    "pose_drift_cause": "Not established. The allocator/report-only control matches the reference, while query probes alter the simulated final pose. The fixture uses real dispatch instants and is not a deterministic state oracle. These data are diagnostic only, not behavior-equivalence acceptance.",
+    "clippy": "Isolated world/harness all-target Clippy with warnings denied passed.",
+    "main_world_source_unchanged": true
+  },
+  "workload": {
+    "messages": 5741,
+    "physics_ticks": 1519,
+    "active_ticks": 1506,
+    "population_mismatches": 0,
+    "peak_entities": 286
+  },
+  "counter_snapshot": {
+    "counters": {
+      "aggregate_supports_returned": 66253,
+      "bsp_nodes_culled": 4892055,
+      "bsp_nodes_tested": 12546218,
+      "bsp_polygon_references": 4178171,
+      "bsp_polygon_resolutions": 4178171,
+      "bsp_unique_polygon_references": 4178171,
+      "hard_index_slots": 93594,
+      "polygon_height_admissions": 116203,
+      "shape_bounds_rejections": 183814,
+      "shape_support_calls": 397938,
+      "static_empty_selections": 23628,
+      "static_refs_after_dedup": 384778,
+      "static_refs_before_dedup": 384817,
+      "terrain_triangles": 245190,
+      "world_nonempty_results": 60689,
+      "world_supports_returned": 66252
+    },
+    "stages": {
+      "aggregate": {
+        "calls": 148494,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "world": {
+        "calls": 148494,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "world_preparation": {
+        "calls": 148494,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 296988,
+        "alloc_bytes": 3301384,
+        "realloc_calls": 66200,
+        "realloc_old_bytes": 264800,
+        "realloc_new_bytes": 1059200
+      },
+      "terrain": {
+        "calls": 148494,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "static_candidates": {
+        "calls": 148494,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "static_collect": {
+        "calls": 148494,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 124866,
+        "alloc_bytes": 8368224,
+        "realloc_calls": 30084,
+        "realloc_old_bytes": 1925536,
+        "realloc_new_bytes": 3851136
+      },
+      "static_sort": {
+        "calls": 148494,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "static_dedup": {
+        "calls": 148494,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "hard_candidates": {
+        "calls": 148494,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 162134,
+        "alloc_bytes": 3891216,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "bsp_supports": {
+        "calls": 213272,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "polygon_admission": {
+        "calls": 4178171,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 8637,
+        "alloc_bytes": 414576,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "bounds_transform": {
+        "calls": 12546218,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "plane_transform": {
+        "calls": 4178171,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "vertex_transform": {
+        "calls": 270253,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "result_buffer": {
+        "calls": 66253,
+        "inclusive_ns": 0,
+        "exclusive_ns": 0,
+        "alloc_calls": 60689,
+        "alloc_bytes": 15536384,
+        "realloc_calls": 80,
+        "realloc_old_bytes": 20480,
+        "realloc_new_bytes": 40960
+      }
+    }
+  },
+  "timing_snapshot": {
+    "counters": {},
+    "stages": {
+      "aggregate": {
+        "calls": 148858,
+        "inclusive_ns": 11999240808,
+        "exclusive_ns": 143185869,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "world": {
+        "calls": 148858,
+        "inclusive_ns": 11442261794,
+        "exclusive_ns": 338038155,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "world_preparation": {
+        "calls": 148858,
+        "inclusive_ns": 225570626,
+        "exclusive_ns": 225570626,
+        "alloc_calls": 297716,
+        "alloc_bytes": 3308664,
+        "realloc_calls": 66200,
+        "realloc_old_bytes": 264800,
+        "realloc_new_bytes": 1059200
+      },
+      "terrain": {
+        "calls": 148858,
+        "inclusive_ns": 218795332,
+        "exclusive_ns": 198614725,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "static_candidates": {
+        "calls": 148858,
+        "inclusive_ns": 352829552,
+        "exclusive_ns": 105709990,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "static_collect": {
+        "calls": 148858,
+        "inclusive_ns": 192772411,
+        "exclusive_ns": 192772411,
+        "alloc_calls": 124866,
+        "alloc_bytes": 8368224,
+        "realloc_calls": 30084,
+        "realloc_old_bytes": 1925536,
+        "realloc_new_bytes": 3851136
+      },
+      "static_sort": {
+        "calls": 148858,
+        "inclusive_ns": 27027686,
+        "exclusive_ns": 27027686,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "static_dedup": {
+        "calls": 148858,
+        "inclusive_ns": 27319465,
+        "exclusive_ns": 27319465,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "hard_candidates": {
+        "calls": 148858,
+        "inclusive_ns": 170709411,
+        "exclusive_ns": 170709411,
+        "alloc_calls": 162452,
+        "alloc_bytes": 3898848,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "bsp_supports": {
+        "calls": 213272,
+        "inclusive_ns": 10550111583,
+        "exclusive_ns": 6138369461,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "polygon_admission": {
+        "calls": 4178171,
+        "inclusive_ns": 908795690,
+        "exclusive_ns": 837423862,
+        "alloc_calls": 8637,
+        "alloc_bytes": 414576,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "bounds_transform": {
+        "calls": 12546218,
+        "inclusive_ns": 2474904946,
+        "exclusive_ns": 2474904946,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "plane_transform": {
+        "calls": 4178171,
+        "inclusive_ns": 1028041486,
+        "exclusive_ns": 1028041486,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "vertex_transform": {
+        "calls": 270253,
+        "inclusive_ns": 58692766,
+        "exclusive_ns": 58692766,
+        "alloc_calls": 0,
+        "alloc_bytes": 0,
+        "realloc_calls": 0,
+        "realloc_old_bytes": 0,
+        "realloc_new_bytes": 0
+      },
+      "result_buffer": {
+        "calls": 66617,
+        "inclusive_ns": 32859949,
+        "exclusive_ns": 32859949,
+        "alloc_calls": 61053,
+        "alloc_bytes": 15629568,
+        "realloc_calls": 80,
+        "realloc_old_bytes": 20480,
+        "realloc_new_bytes": 40960
+      }
+    }
+  },
+  "derived": {
+    "successful_allocator_requests": 749678,
+    "requested_storage_bytes": 36463080,
+    "allocation_breakdown": {
+      "world_preparation": {
+        "operations": 363188,
+        "requested_bytes": 4360584,
+        "operation_share_percent": 48.4458660918421,
+        "requested_share_percent": 11.95890199072596
+      },
+      "static_collect": {
+        "operations": 154950,
+        "requested_bytes": 12219360,
+        "operation_share_percent": 20.66887383650047,
+        "requested_share_percent": 33.51159583885947
+      },
+      "hard_candidates": {
+        "operations": 162134,
+        "requested_bytes": 3891216,
+        "operation_share_percent": 21.627151923892658,
+        "requested_share_percent": 10.671660210821466
+      },
+      "polygon_admission": {
+        "operations": 8637,
+        "requested_bytes": 414576,
+        "operation_share_percent": 1.152094632628942,
+        "requested_share_percent": 1.1369747152462162
+      },
+      "result_buffer": {
+        "operations": 60769,
+        "requested_bytes": 15577344,
+        "operation_share_percent": 8.106013515135832,
+        "requested_share_percent": 42.720867244346884
+      }
+    },
+    "static_duplicates_removed": 39,
+    "static_duplicate_percent": 0.010134687396866562,
+    "bsp_duplicate_references_within_each_shape_query": 0
+  },
+  "interpretation": [
+    "World preparation owns 48.446% of successful support-query allocator requests. Original source materializes touched owners and required coverage owners before exact geometry.",
+    "Result buffers own 8.106% of allocator requests but 42.721% of requested storage bytes; request volume and retained memory are distinct.",
+    "Static deduplication removes 39 of 384817 references; no repeated BSP polygon IDs occur within the measured placed support queries. Neither dedup path is supported as the next target in this fixture.",
+    "The repeated 12.546 million node-bound transforms and 4.178 million plane transforms warrant examining BSP support traversal/placement, without assuming a persistent geometry cache is justified.",
+    "The narrow next allocation experiment is reducing temporary owner-coverage lists while preserving outdoor/interior coverage and lowest-owner error selection. All retention measurements must use clean executables and existing correctness checks."
+  ],
+  "raw_artifacts": "caps/runtime-fixtures/2026-10-23-physics-primitives/support-query-census/",
+  "artifact_sha256": {
+    "allocator-control": "38c8a948efc346239daef0fff876a7ee360eb6ac81cb45f4bd6a85783d7d4886",
+    "build.log": "41802df8ef33641e1b4cdf09e8b9c513bdd1d4536a0b5456fd8fc100bc202efc",
+    "clippy.log": "0644f68fe5771fbc72d644e494d572158a7cc66da37076a4870ff259c4513198",
+    "control-build.log": "258b9c8576bbe28e6424d6df870d8c7aa188a2aa3d386034b662c13865894073",
+    "control-source.json": "fe50bb7b53e0c53f355eb0db6dd77aa05062574bde51742b80e6b5ed0a7a1fa7",
+    "control-tracked.patch": "6d2a1c70242b6bfda0e1dd8f7a3fe6e7910a7e7a352ca569713a511a3a759378",
+    "control.stderr": "56ff9745c2f6e31bc63f1e6b1f5661d29184d373e7c4b2684d4685c4ce55dd2a",
+    "control.stdout": "5c4063e8235d4f7928189d9a06e07b8ab14d97d847a6a543e1515e96382f1c49",
+    "counts.run.json": "9f3d00e3d88282732703125ff005b83c480e38e9e74e4310d521efd7f9bdb810",
+    "counts.stderr": "07d0fc97af96ad06a60ce6a1ea72f158dc69f21f3f6d3c138bb1ef222cfe7afc",
+    "counts.stdout": "6ec81a4e297ba5d4823578ceefa2650d53e0a49f326b0423c3281dc96a4ba395",
+    "diagnostic-source/crates/holtburger-debug-harness/src/bin/runtime_scene_fixture.rs": "a9a7961d5aa3dd9ec0e596db1fe69d288aab73f7809891609945c21ac9ba93a2",
+    "diagnostic-source/crates/holtburger-debug-harness/src/support_probe_allocator.rs": "0e7931029f257567a81b9a4d3c716c2aa91f601100662ee7978c0dcd4af4b681",
+    "diagnostic-source/crates/holtburger-world/src/lib.rs": "4818a602bc140c30c36dcef7d6905d2f38bead806e3a2b8a1b16dcb40e63d269",
+    "diagnostic-source/crates/holtburger-world/src/spatial/bsp_query.rs": "ba2d5e494712a610dc936d303738e4ab10d655b45ac9695bef7391dd440a38ed",
+    "diagnostic-source/crates/holtburger-world/src/spatial/collision.rs": "6c47a691eab81d5ac73a1a7b4dd93742e180d2ce6acfd0e3c90393eddebda94c",
+    "diagnostic-source/crates/holtburger-world/src/spatial/mobile_contact/step/stairs.rs": "cee168bab80887bcb732a281861869393092fec5324c6d34b1d16952cbe62139",
+    "diagnostic-source/crates/holtburger-world/src/spatial/mobile_contact/step/targets.rs": "a926785bf3d5b7d30c55ec28f4f5def7daff09a72da7ef68f3067d72c2b9d938",
+    "diagnostic-source/crates/holtburger-world/src/spatial/volume_query.rs": "93bcf120c05cdcb6e483e3824d348aee530b275ff8c9fa455b06f3f28bf30279",
+    "diagnostic-source/crates/holtburger-world/src/support_diagnostics.rs": "6a9152f7b9941861c7f7d796ff363ea2543e497bec29e560ec26f4376e411f74",
+    "metadata.json": "fdb0f3339504bb3d378216a3a1dcda92cfcdaf5244528c0eac3a16b2264e03c9",
+    "run.py": "f99b0fa9e9f6e9c5ad651832505f70319e8574ed3050587956703e73d5f6d135",
+    "runtime_scene_fixture": "496f9d70f893fae3dffeee606a2f27dbd9d2e28cd0a2e4aaee78077531598ff0",
+    "timing.run.json": "e2db74081fecd0816068647802ffb84674995ee963e4cdc78ab91134b9385f1f",
+    "timing.stderr": "34fd47b1595f2dd64e5429fb395ad9f09f388331829e88d40d35f11dcd6794a2",
+    "timing.stdout": "7018b68bda481cc86063a9ccb4e3b140119f42fdd64ff2b9d8b2c4ac3a0634ee",
+    "tracked.patch": "d87b85873a4958dbb12394e835f7465e8898a68752eb502cac26619dd09ab5b6"
+  },
+  "environment": {
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+    "cpu_model": "AMD Ryzen 9 5900X 12-Core Processor",
+    "cargo_lock_sha256": "ba3b3c9c73736db059c5a79e9746a3bfdc101b7b2dd55509d89908edf0a157a1"
+  }
+}

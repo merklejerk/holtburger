@@ -40,6 +40,7 @@ use super::bsp_query::{
     polygon_sphere_contact,
 };
 use super::cell_index::{GlobalCellRange, OUTDOOR_CELL_METERS};
+use super::volume_query::PreparedStaticSupport;
 use super::volume_query::{placed_ball_contact, placed_cylinder_contact};
 use super::{ContactMotionSegment, PhysicalCollisionExclusions, PhysicalCollisionFilter};
 
@@ -795,6 +796,8 @@ struct SelectedCollider<'a> {
     reference: ColliderReference,
     /// Geometry resolved once by selection and borrowed for this query.
     collider: &'a PlacedCollider,
+    /// Prepared static support geometry from the same immutable owner and collider ordinal.
+    support: &'a PreparedStaticSupport,
     /// Whether a center-containing solid BSP leaf obstructs this query.
     center_solid: bool,
 }
@@ -847,7 +850,7 @@ struct StaticShadowIndex {
 
 impl StaticShadowIndex {
     fn compile(
-        landblocks: &HashMap<Guid, Arc<LandblockCollisionAsset>>,
+        landblocks: &HashMap<Guid, Arc<ResidentLandblock>>,
     ) -> Result<Self, CollisionSceneUpdateError> {
         let mut index = Self::default();
         let mut outdoor_placements = Vec::new();
@@ -856,7 +859,7 @@ impl StaticShadowIndex {
         owners.sort_unstable();
 
         for owner in owners {
-            let asset = &landblocks[&owner];
+            let asset = &landblocks[&owner].asset;
             let mut indoor_placements = BTreeMap::<(u32, usize), Vec<usize>>::new();
             let mut outdoor_groups = BTreeMap::<StaticColliderPlacement, Vec<usize>>::new();
             for (collider_index, collider) in asset.static_geometry.colliders.iter().enumerate() {
@@ -941,7 +944,7 @@ impl StaticShadowIndex {
         }
 
         for (source_owner, collider_indices) in outdoor_placements {
-            let source_asset = &landblocks[&source_owner];
+            let source_asset = &landblocks[&source_owner].asset;
             let cell_bounds = outdoor_cell_bounds(
                 source_owner,
                 &collider_indices,
@@ -979,7 +982,7 @@ impl StaticShadowIndex {
                 }) {
                     continue;
                 }
-                let target_asset = &landblocks[target_owner];
+                let target_asset = &landblocks[target_owner].asset;
                 for reached_cell in static_reached_cells(
                     target_owner.0,
                     target_cell.0,
@@ -1051,11 +1054,32 @@ impl StaticShadowIndex {
     }
 }
 
+/// Authored and prepared geometry share one immutable owner-product lifetime.
+#[derive(Debug)]
+struct ResidentLandblock {
+    /// Lossless source asset, still consumed by topology, casts, and contact queries.
+    asset: LandblockCollisionAsset,
+    /// Static support kernels in the source collider order, prepared only on product insertion.
+    support: Box<[PreparedStaticSupport]>,
+}
+
+impl ResidentLandblock {
+    fn new(asset: LandblockCollisionAsset) -> Self {
+        let support = asset
+            .static_geometry
+            .colliders
+            .iter()
+            .map(|collider| PreparedStaticSupport::new(collider))
+            .collect();
+        Self { asset, support }
+    }
+}
+
 /// Static collision geometry resident by atomic landblock owner.
 #[derive(Debug)]
 pub struct CollisionScene {
     lineage: u64,
-    landblocks: HashMap<Guid, Arc<LandblockCollisionAsset>>,
+    landblocks: HashMap<Guid, Arc<ResidentLandblock>>,
     owner_revisions: HashMap<Guid, u64>,
     next_owner_revision: u64,
     shadows: StaticShadowIndex,
@@ -1157,13 +1181,13 @@ impl CollisionScene {
             next_owner_revision = next_owner_revision
                 .checked_add(1)
                 .expect("collision owner revision exhausted");
-            landblocks.insert(owner, Arc::new(asset));
+            landblocks.insert(owner, Arc::new(ResidentLandblock::new(asset)));
             owner_revisions.insert(owner, next_owner_revision);
         }
         let shadows = StaticShadowIndex::compile(&landblocks)?;
         let motion_transition_limit = landblocks
             .values()
-            .flat_map(|asset| asset.static_geometry.cell_volumes())
+            .flat_map(|product| product.asset.static_geometry.cell_volumes())
             .map(|volume| volume.portals.len())
             .sum::<usize>()
             .max(1);
@@ -1188,13 +1212,17 @@ impl CollisionScene {
         removed
     }
 
+    /// Read the lossless source for queries that do not consume prepared support geometry.
+    fn landblock_asset(&self, owner: Guid) -> Option<&LandblockCollisionAsset> {
+        self.landblocks.get(&owner).map(|product| &product.asset)
+    }
+
     /// Whether the current immutable snapshot contains one exact authored EnvCell.
     pub fn contains_env_cell(&self, cell: Guid) -> bool {
         if cell.0 & 0xffff < 0x0100 {
             return false;
         }
-        self.landblocks
-            .get(&landblock_key(cell))
+        self.landblock_asset(landblock_key(cell))
             .is_some_and(|asset| {
                 asset
                     .static_geometry
@@ -1239,7 +1267,7 @@ impl CollisionScene {
             return false;
         }
         outdoor_landblock_owner_at(anchor, center)
-            .and_then(|owner| self.landblocks.get(&owner))
+            .and_then(|owner| self.landblock_asset(owner))
             .is_some_and(|asset| asset.terrain.entirely_water)
     }
 
@@ -1321,7 +1349,7 @@ impl CollisionScene {
         let movement = request.sweep.end - request.sweep.start;
         let mut contacts = Vec::new();
         for owner in &touched {
-            let Some(asset) = self.landblocks.get(owner) else {
+            let Some(asset) = self.landblock_asset(*owner) else {
                 continue;
             };
             let local_center = anchor_to_landblock(request.sweep.end, request.sweep.anchor, *owner);
@@ -1532,7 +1560,7 @@ impl CollisionScene {
             maximum_rise,
         };
         for owner in &touched {
-            let Some(asset) = self.landblocks.get(owner) else {
+            let Some(asset) = self.landblock_asset(*owner) else {
                 continue;
             };
             let local_center = anchor_to_landblock(request.center, request.anchor, *owner);
@@ -1568,7 +1596,6 @@ impl CollisionScene {
             GlobalCellRange::from_sphere(request.anchor, request.center, request.radius);
         for selected in self.selected_colliders(query_cells, request.placement) {
             let reference = selected.reference;
-            let collider = selected.collider;
             let local_center = anchor_to_landblock(request.center, request.anchor, reference.owner);
             // One contract mapping for every shape's supports.
             let mut push = |support: super::bsp_query::ShapeSupport| {
@@ -1582,13 +1609,9 @@ impl CollisionScene {
                     feature: support.feature,
                 });
             };
-            super::volume_query::visit_placed_shape_supports(
-                collider,
-                local_center,
-                request.radius,
-                probe,
-                &mut push,
-            );
+            selected
+                .support
+                .visit(local_center, request.radius, probe, &mut push);
         }
         Ok(supports)
     }
@@ -1634,11 +1657,13 @@ impl CollisionScene {
                 })
                 .collect::<BTreeSet<_>>();
             for target_owner in target_owners {
-                let asset = self.landblocks.get(&target_owner).ok_or(
-                    CollisionQueryError::UnavailableOwner {
+                let asset = self
+                    .landblocks
+                    .get(&target_owner)
+                    .map(|product| &product.asset)
+                    .ok_or(CollisionQueryError::UnavailableOwner {
                         owner: target_owner.0,
-                    },
-                )?;
+                    })?;
                 for volume in asset.static_geometry.outdoor_entry_volumes() {
                     if volume.portals.iter().any(|portal| {
                         portal.target == CellCollisionPortalTarget::Outdoor
@@ -1678,6 +1703,7 @@ impl CollisionScene {
             let asset = self
                 .landblocks
                 .get(&owner)
+                .map(|product| &product.asset)
                 .ok_or(CollisionQueryError::UnavailableOwner { owner: owner.0 })?;
             let source = asset
                 .static_geometry
@@ -1775,7 +1801,7 @@ impl CollisionScene {
 
         if let Some(previous_cell) = request.previous_cell {
             let owner = landblock_key(previous_cell);
-            if let Some(asset) = self.landblocks.get(&owner)
+            if let Some(asset) = self.landblock_asset(owner)
                 && asset
                     .static_geometry
                     .cell_volume((previous_cell.0 & 0xffff) as u16)
@@ -1793,7 +1819,7 @@ impl CollisionScene {
 
         for owner in touched.iter().copied() {
             let local = anchor_to_landblock(request.center, request.anchor, owner);
-            let Some(asset) = self.landblocks.get(&owner) else {
+            let Some(asset) = self.landblock_asset(owner) else {
                 continue;
             };
             for volume in asset.static_geometry.outdoor_entry_volumes() {
@@ -2180,8 +2206,7 @@ impl CollisionScene {
             .into_iter()
             .flat_map(|owner| {
                 let local = anchor_to_landblock(center, anchor, owner);
-                self.landblocks
-                    .get(&owner)
+                self.landblock_asset(owner)
                     .into_iter()
                     .flat_map(move |asset| {
                         asset
@@ -2233,6 +2258,7 @@ impl CollisionScene {
             let asset = self
                 .landblocks
                 .get(&owner)
+                .map(|product| &product.asset)
                 .ok_or(CollisionQueryError::UnknownMotionCell { cell: cell.0 })?;
             let source = asset
                 .static_geometry
@@ -2299,7 +2325,7 @@ impl CollisionScene {
             }
         } else {
             for owner in segment.touched {
-                let Some(asset) = self.landblocks.get(owner) else {
+                let Some(asset) = self.landblock_asset(*owner) else {
                     continue;
                 };
                 let landblock_start = anchor_to_landblock(segment.start, segment.anchor, *owner);
@@ -2390,7 +2416,7 @@ impl CollisionScene {
                     let local = anchor_to_landblock(probe, segment.anchor, owner);
                     let landblock_start = anchor_to_landblock(segment.start, segment.anchor, owner);
                     let landblock_end = anchor_to_landblock(segment.end, segment.anchor, owner);
-                    self.landblocks.get(&owner).is_some_and(|asset| {
+                    self.landblock_asset(owner).is_some_and(|asset| {
                         asset
                             .static_geometry
                             .cell_volume((cell.0 & 0xffff) as u16)
@@ -2443,6 +2469,7 @@ impl CollisionScene {
         let target = self
             .landblocks
             .get(&owner)
+            .map(|product| &product.asset)
             .and_then(|asset| {
                 asset
                     .static_geometry
@@ -2460,7 +2487,7 @@ impl CollisionScene {
     fn contacts(&self, request: StaticContactRequest<'_>) -> Vec<StaticContact> {
         let mut contacts = Vec::new();
         for owner in request.touched {
-            let Some(asset) = self.landblocks.get(owner) else {
+            let Some(asset) = self.landblock_asset(*owner) else {
                 continue;
             };
             let local_center = anchor_to_landblock(request.center, request.anchor, *owner);
@@ -2556,7 +2583,7 @@ impl CollisionScene {
     ) -> Vec<StaticContact> {
         let mut contacts = Vec::new();
         for owner in touched {
-            let Some(asset) = self.landblocks.get(owner) else {
+            let Some(asset) = self.landblock_asset(*owner) else {
                 continue;
             };
             if !asset.terrain.entirely_water {
@@ -2611,8 +2638,8 @@ impl CollisionScene {
             .selected_colliders(query_cells, placement)
             .into_iter()
             .map(move |reference| {
-                let collider = &self.landblocks[&reference.owner].static_geometry.colliders
-                    [reference.collider_index];
+                let product = &self.landblocks[&reference.owner];
+                let collider = &product.asset.static_geometry.colliders[reference.collider_index];
                 // Retail keeps a reached building in the cell array but disables its BSP
                 // center-solid test after any retained sphere reaches an EnvCell. Authored
                 // polygons remain eligible for walls and walkable support (`bldg_check` and
@@ -2624,6 +2651,7 @@ impl CollisionScene {
                 SelectedCollider {
                     reference,
                     collider,
+                    support: &product.support[reference.collider_index],
                     center_solid,
                 }
             })
@@ -3729,6 +3757,80 @@ mod tests {
     }
 
     #[test]
+    fn prepared_static_support_retires_with_its_owner_product() {
+        let owner = Guid(0xda55_ffff);
+        let asset = |height| {
+            let vertices = vec![
+                Vector3::new(18.0, 18.0, height),
+                Vector3::new(22.0, 18.0, height),
+                Vector3::new(22.0, 22.0, height),
+                Vector3::new(18.0, 22.0, height),
+            ];
+            let bounds = Sphere {
+                center: Vector3::new(20.0, 20.0, height),
+                radius: 3.0,
+            };
+            let solid = BspSolid {
+                bsp: BspNode::Leaf(BspLeaf {
+                    index: 0,
+                    solid: 0,
+                    sphere: Some(bounds),
+                    poly_ids: vec![1],
+                }),
+                bounds,
+                box_bounds: CollisionBox::from_points(vertices.iter().copied()).unwrap(),
+                polygons: HashMap::from([(
+                    1,
+                    CollisionPolygon {
+                        vertices,
+                        normal: Vector3::new(0.0, 0.0, 1.0),
+                        d: -height,
+                    },
+                )]),
+            };
+            outdoor_asset(
+                owner,
+                vec![
+                    PlacedCollider::new(
+                        Arc::new(CollisionShape::Bsp(solid)),
+                        LandblockPlacement {
+                            origin: Vector3::zero(),
+                            orientation: Quaternion::identity(),
+                        },
+                        ColliderScale::uniform(1.0).unwrap(),
+                        StaticColliderPlacement::OutdoorExplicit { source_index: 0 },
+                    )
+                    .unwrap(),
+                ],
+            )
+        };
+        let mut original = CollisionScene::new();
+        original.insert(asset(0.0)).unwrap();
+        let placement = SpatialMembership::outdoor();
+        let request = SupportRequest {
+            anchor: owner,
+            center: Vector3::new(20.0, 20.0, 0.5),
+            radius: 0.5,
+            maximum_drop: 2.0,
+            maximum_rise: 2.0,
+            placement: &placement,
+        };
+        let mut replaced = original
+            .staged_residency_change(vec![asset(1.0)], &[])
+            .unwrap();
+        let supports = |scene: &CollisionScene| scene.support_contacts(request).unwrap();
+        assert_eq!(supports(&original)[0].height_delta, 0.0);
+        assert_eq!(supports(&replaced)[0].height_delta, 1.0);
+        assert_ne!(supports(&original)[0].source, supports(&replaced)[0].source);
+        assert!(replaced.remove(owner));
+        assert_eq!(
+            replaced.support_contacts(request),
+            Err(CollisionQueryError::UnavailableOwner { owner: owner.0 })
+        );
+        assert_eq!(supports(&original)[0].height_delta, 0.0);
+    }
+
+    #[test]
     fn static_sphere_sweep_reports_explicit_uncovered_policy() {
         let owner = Guid(0xda55_ffff);
         let request = StaticSphereSweepRequest {
@@ -4062,7 +4164,8 @@ mod tests {
         placement: &SpatialMembership,
     ) -> Vec<(u32, u32, u32, u32)> {
         let mut contacts = Vec::new();
-        for (owner, asset) in &scene.landblocks {
+        for (owner, product) in &scene.landblocks {
+            let asset = &product.asset;
             let local_center = anchor_to_landblock(center, anchor, *owner);
             if placement.reaches_outdoors {
                 for cell in &asset.terrain.cells {

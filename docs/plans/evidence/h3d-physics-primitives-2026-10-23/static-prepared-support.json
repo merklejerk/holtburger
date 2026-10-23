@@ -1,0 +1,239 @@
+{
+  "date": "2026-10-23",
+  "metadata": {
+    "source_commit": "a86c99ea7ca7c675e3b6f93824c8a04c6fa5be7f",
+    "candidate_patch_sha256": "7c6e8e302234d7e2cd41a931045c947ba5dc36d7e6ee5fd2e5a944d17df4fff6",
+    "binary_sha256": {
+      "baseline": "ba3164284824d70245f0c7f0772a70f26d920deb89c8e675324e085934b73150",
+      "candidate": "c20c98f0073dbd1d4612fbc7328963d00a798ef63cd77bee760b9599b939a802"
+    },
+    "fixture_sha256": "8166512597df25ac68cfaee7ba913493242b193f56fa77a27fae78a765a124c7",
+    "profile": "dev; workspace opt-level 0, Parry/Glam opt-level 3; debug information",
+    "features": [
+      "runtime-fixture"
+    ],
+    "cpu_model": "AMD Ryzen 9 5900X 12-Core Processor",
+    "method": "Alternating process order. Each process performs one explicit full untimed warmup and one measured full replay. RUST_LOG=warn; CPU/phase profiling disabled. No compiler, test, or other benchmark launched by this agent during timing.",
+    "gate": "Two exploratory pairs first. Retention requires five total pairs; a rejected or inconclusive candidate may stop early."
+  },
+  "pairs": [
+    {
+      "pair": 1,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "work_reduction_percent": 12.21240583571499,
+      "p95_reduction_percent": 11.013259140629417
+    },
+    {
+      "pair": 2,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "work_reduction_percent": 6.190576618089194,
+      "p95_reduction_percent": 6.442815416441928
+    },
+    {
+      "pair": 3,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "work_reduction_percent": 5.394187229826253,
+      "p95_reduction_percent": 4.482149714308803
+    },
+    {
+      "pair": 4,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "work_reduction_percent": 12.873202741405743,
+      "p95_reduction_percent": 12.593613653124203
+    },
+    {
+      "pair": 5,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "work_reduction_percent": 12.259566224718288,
+      "p95_reduction_percent": 11.161581137505404
+    }
+  ],
+  "timings": {
+    "baseline": {
+      "combined_work_ms": {
+        "samples": [
+          25909.515214000003,
+          26124.445568999963,
+          25882.170927999996,
+          26128.66792800008,
+          25953.441358999997
+        ],
+        "median": 25953.441358999997,
+        "sum": 129998.24099800004
+      },
+      "active_physics_work_p95_ms": {
+        "samples": [
+          17.313113,
+          17.471632,
+          17.31765,
+          17.66863,
+          17.680461
+        ],
+        "median": 17.471632,
+        "sum": 87.451486
+      }
+    },
+    "candidate": {
+      "combined_work_ms": {
+        "samples": [
+          22745.340066000004,
+          24507.191750000013,
+          24486.038169000018,
+          22765.07153199997,
+          22771.662027999966
+        ],
+        "median": 22771.662027999966,
+        "sum": 117275.30354499997
+      },
+      "active_physics_work_p95_ms": {
+        "samples": [
+          15.406375,
+          16.345966999999998,
+          16.541447,
+          15.443511,
+          15.707042000000001
+        ],
+        "median": 15.707042000000001,
+        "sum": 79.444342
+      }
+    }
+  },
+  "summed_work_reduction_percent": 9.787007389735225,
+  "validation": {
+    "measured_runs": 10,
+    "issues": [],
+    "fields": [
+      "messages",
+      "physics_ticks",
+      "active_ticks",
+      "population_mismatches",
+      "peak_entities",
+      "activation_boundaries",
+      "final_player_position",
+      "final_runtime_player_position"
+    ]
+  },
+  "memory_probe": {
+    "warmups": 0,
+    "repeats": 1,
+    "peak_published": {
+      "bytes": 1658116,
+      "colliders": 673,
+      "bsp_colliders": 292
+    },
+    "completed_preparations": 9,
+    "preparation_sum_ms": 10.112333,
+    "preparation_max_ms": 3.612725,
+    "caveats": "Extra object/box bytes include topology, leaf indices, vertices and kernel headers; exclude authored geometry, malloc metadata, RSS and staging overlap. Preparation clocks exclude shadow-index rebuild and diagnostic walks; not a comparative publication benchmark. Cold instrumented replay shifts simulated final endpoint by about 0.13 mm; clean replays supply correctness and retention evidence.",
+    "sha256": {
+      "runtime_scene_fixture": "10d2b655f8d6738f03309135c93eb069bc66fe60093a1b40948041051e46c451",
+      "diagnostic.patch": "8824df9a9c0f2966cea0d2b7ac0a2271506676b95a6330e9efba37600aedf987",
+      "prepared_support_probe.rs": "69a70e2b5d4033487ce95ff16305a3bfda32e0028b9c9fc617af142eaa991169",
+      "replay.stdout": "d483591caa4d786cb7170310eaa4b2fcef04a556fbf05fe1aefb859fe90bf1ab",
+      "clippy.log": "d76cca3f8ec8a986f9821323fde2b3cf71d0cf2d4510af0412ba063f5e880704"
+    }
+  },
+  "crowd": {
+    "100": {
+      "issues": [],
+      "outcomes": {
+        "bodies": "101",
+        "ticks": "180",
+        "body_preparations": "89878",
+        "shape_queries": "12732",
+        "stationary_bodies": "0",
+        "accepted_displacement_m": "122.047079",
+        "player_displacement_m": "5.187025",
+        "max_penetration_m": "0.028848"
+      }
+    },
+    "250": {
+      "issues": [],
+      "outcomes": {
+        "bodies": "251",
+        "ticks": "180",
+        "body_preparations": "224898",
+        "shape_queries": "30978",
+        "stationary_bodies": "0",
+        "accepted_displacement_m": "296.747679",
+        "player_displacement_m": "5.184336",
+        "max_penetration_m": "0.028441"
+      }
+    }
+  },
+  "checks": {
+    "core_tests_passed": 688,
+    "world_tests_passed": 970,
+    "ignored_tests": 3,
+    "clippy": "world/core/harness all targets, runtime-fixture + physics-profiling, warnings denied"
+  },
+  "limitations": [
+    "One recorded workload on one CPU; development profile only.",
+    "Replay does not establish live cadence or user movement acceptance.",
+    "No compiler, test, profiler or other benchmark from this agent overlaps clean timing; unrelated host activity is not excluded."
+  ],
+  "decision": "Retain static resident support preparation after all five alternating pairs improve combined work and p95, with exact workload and outcome checks.",
+  "implementation": "Compile placed BSP bounds, polygon planes and vertices, flat traversal and compact leaf references on immutable resident owner insertion. Static volume kernels share that lifetime; dynamic targets and other query families retain authored geometry.",
+  "quality_review": "Ready within static support scope. No blocking ownership, publication, lifecycle, traversal-order or contract finding. Eager unqueried geometry and added representation size accepted against the measured timing gain.",
+  "runtime_content": [
+    {
+      "file": "assets.hba",
+      "bytes": 634425693,
+      "sha256": "20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7"
+    }
+  ],
+  "median_paired_work_reduction_percent": 12.21240583571499,
+  "median_paired_p95_reduction_percent": 11.013259140629417,
+  "artifact_sha256": {
+    "candidate.patch": "7c6e8e302234d7e2cd41a931045c947ba5dc36d7e6ee5fd2e5a944d17df4fff6",
+    "clippy.log": "5355e4ba477c876c08a22614c6943e40dcc3b5b6939475a3b43f9f5fdbefbea1",
+    "contact_collection_benchmark": "221b4bb71d8a8120d7e2fc447f854957ea0ac6db95758d07c216a9c419e554de",
+    "crowd-100.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "crowd-100.stdout": "4cb9aa30c4705b09c029e8c2288530d08c27b8e448ce401cf56a24991e26488c",
+    "crowd-250.stderr": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "crowd-250.stdout": "5c337f772ba9fea03a604659f266cf57b778aa17983c38da44bc55192791feb1",
+    "metadata.json": "0a77e6782d3125b0fcc23ff4e4605a199471bbab76288310ea8f38fa8d9c3811",
+    "pair-01-1-baseline.stderr": "675716371f3c5e07e5d392b67b2bbe0b0a238276d255292f0533860e6321aa28",
+    "pair-01-1-baseline.stdout": "e048245c3bdca47420ebd858a96b6093a9fbcf47955d6a5fd4c704fa9546fde1",
+    "pair-01-2-candidate.stderr": "a9fafe4e2144aebf74b96742a9e73fa23420f4bfac37769cc2bbf71539cce438",
+    "pair-01-2-candidate.stdout": "8fd7c8bd64472d2846f0eb7807aa2533a826b679e4e15877a1799bd83d0743e1",
+    "pair-02-1-candidate.stderr": "341f9a5e4f90f4ef1502f537e3c44864f5dc43765392c9a2674df8a2217e3faa",
+    "pair-02-1-candidate.stdout": "28f2e0d904decd971823c6d9493126838b583cd402496f440992cdfa826bfcff",
+    "pair-02-2-baseline.stderr": "e8fee74f9170533f1fe4031e6cf78fba2ccba8986530926580c67d28f118e59b",
+    "pair-02-2-baseline.stdout": "f9a6b92b213f9f90da37fc910e9eb80ba69a15e9dcce5753fa2fd47e4ecc197f",
+    "pair-03-1-baseline.stderr": "d4f9781265db1ca0aac6dc95ce4336e288f6cdd16db3705bddf822d9f336ee32",
+    "pair-03-1-baseline.stdout": "06357a257e6c45c1d793862f81b1f3b5d99027e8924d3fb67eaccacca37ba0ce",
+    "pair-03-2-candidate.stderr": "86b1d45d1ca2d35f1ffe04d292ac81c3fab663d74999e9896fffaf81c2c386b7",
+    "pair-03-2-candidate.stdout": "5fa54bb9cfc981c5dd7cd5a0c696462eeafa0b7a57a6f2eb4828f5d7db2a8a75",
+    "pair-04-1-candidate.stderr": "bb661986ebc88a6194494ed829f44433f093ad0de0212469d1369c433a6a8d06",
+    "pair-04-1-candidate.stdout": "84dc516f53152213713b7f9ada5cac128e210397e4e9a8c9120148f5db5b2cca",
+    "pair-04-2-baseline.stderr": "ca77709cf63ba59ce811b9055a761d6c1a53acc19b4e6b45d3a3a962d9b66603",
+    "pair-04-2-baseline.stdout": "d733191e8acc3160627176280006838bb89be2b4d2c08c4efd15f2ab34df95b6",
+    "pair-05-1-baseline.stderr": "5216a35f61d368b143ef6ccdeee57867261fbfc6a868bab39071ec022471bb95",
+    "pair-05-1-baseline.stdout": "3c27b66334e51f6f6f106890ee7623cab0eee9088f9f86776ba4db1e845ec4d3",
+    "pair-05-2-candidate.stderr": "edd9cde46da89c9a3dc1e14904d82945cdc7ca91ef9fc67cb0b1115f24cbd35d",
+    "pair-05-2-candidate.stdout": "a14149d55dab26a156caa684080d68b653a65b14ad2ac155efd9a15175e97865",
+    "pairs.log": "612b63e692f125884661e9b4cb9e7859d82363927f36f1520a82b4d4e15860ea",
+    "run_pairs.py": "8d43456e20443ba27381af3ae261835e269c97ac6704102e71bd4728d8ea9aea",
+    "runtime_scene_fixture": "c20c98f0073dbd1d4612fbc7328963d00a798ef63cd77bee760b9599b939a802",
+    "samples.json": "24e6753f9709af8206ff0f7c7f69970c5c191adf52dd46353b3f666aaeb35e1a",
+    "state.json": "942139bd309cb2edc39279a6fb17de183249c90e011bba9c27ac3acc314bedc9",
+    "summarize.py": "1f23535714f2257decef81359cbe5cce1a051b14b4cdd9feeaff75e1c5ceacbc",
+    "tests.log": "a3585b936994775c669fe2379d92a7ddf87603400bbdeb42bede12f12dd0d971"
+  }
+}

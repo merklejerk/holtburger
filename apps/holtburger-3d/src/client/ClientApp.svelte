@@ -566,6 +566,7 @@
 	const presentationRootRetirements = new Set<Promise<void>>();
 
 	const objectPreviewService = new StandardClientObjectPreviewService({
+		startFrameLoop: startPresentationFrameLoop,
 		resolveResources: () => {
 			const assets = presentationAssets;
 			if (assets === null)
@@ -1736,55 +1737,58 @@
 		};
 		(window as ClientPerformanceWindow).__holtburgerClientPerformance =
 			performanceProbe;
-		const stopFrameLoop = startPresentationFrameLoop((timeMs) => {
-			if (cancelled) return;
-			const elapsedSeconds =
-				previousFrameTime === null
-					? 0
-					: Math.max(0, timeMs - previousFrameTime) / 1000;
-			previousFrameTime = timeMs;
-			if (usesGameplayPresentation)
-				preciseJumpSession?.adjustHeldPower(
-					inputArbiter?.precisePowerDirection ?? 0,
-					elapsedSeconds,
-				);
-			const startedAtMs = performance.now();
-			const result = root.frame(timeMs);
-			const workMs = performance.now() - startedAtMs;
-			sampledFrameWorkMs += workMs;
-			sampledFrameCount++;
-			sampler.recordFrame({
-				animationFrameTimeMs: timeMs,
-				startedAtMs,
-				workMs,
-			});
-			const visible =
-				result.kind === "gameplay"
-					? result.frame.rendered
-					: result.kind === "pregame" && result.rendered;
-			if (worldCanvasVisible !== visible) worldCanvasVisible = visible;
-			if (result.kind === "gameplay")
-				reportPresentationStatus(result.frame.status);
-			else if (result.kind === "failed") {
-				if (
-					backdropStatus.kind !== "failed" ||
-					backdropStatus.message !== result.message ||
-					backdropStatus.canRetry !== result.canRetry
-				)
-					backdropStatus = {
-						kind: "failed",
-						message: result.message,
-						canRetry: result.canRetry,
-					};
-			} else if (result.kind === "pregame") {
-				if (backdropStatus.kind !== result.status.kind)
-					backdropStatus =
-						result.status.kind === "failed"
-							? { ...result.status, canRetry: true }
-							: result.status;
-			} else if (backdropStatus.kind !== "loading")
-				backdropStatus = { kind: "loading" };
-		});
+		const stopFrameLoop = startPresentationFrameLoop(
+			(timeMs) => {
+				if (cancelled) return;
+				const elapsedSeconds =
+					previousFrameTime === null
+						? 0
+						: Math.max(0, timeMs - previousFrameTime) / 1000;
+				previousFrameTime = timeMs;
+				if (usesGameplayPresentation)
+					preciseJumpSession?.adjustHeldPower(
+						inputArbiter?.precisePowerDirection ?? 0,
+						elapsedSeconds,
+					);
+				const startedAtMs = performance.now();
+				const result = root.frame(timeMs);
+				const workMs = performance.now() - startedAtMs;
+				sampledFrameWorkMs += workMs;
+				sampledFrameCount++;
+				sampler.recordFrame({
+					animationFrameTimeMs: timeMs,
+					startedAtMs,
+					workMs,
+				});
+				const visible =
+					result.kind === "gameplay"
+						? result.frame.rendered
+						: result.kind === "pregame" && result.rendered;
+				if (worldCanvasVisible !== visible) worldCanvasVisible = visible;
+				if (result.kind === "gameplay")
+					reportPresentationStatus(result.frame.status);
+				else if (result.kind === "failed") {
+					if (
+						backdropStatus.kind !== "failed" ||
+						backdropStatus.message !== result.message ||
+						backdropStatus.canRetry !== result.canRetry
+					)
+						backdropStatus = {
+							kind: "failed",
+							message: result.message,
+							canRetry: result.canRetry,
+						};
+				} else if (result.kind === "pregame") {
+					if (backdropStatus.kind !== result.status.kind)
+						backdropStatus =
+							result.status.kind === "failed"
+								? { ...result.status, canRetry: true }
+								: result.status;
+				} else if (backdropStatus.kind !== "loading")
+					backdropStatus = { kind: "loading" };
+			},
+			() => 0,
+		);
 		return () => {
 			cancelled = true;
 			stopFrameLoop();

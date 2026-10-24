@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pregameContentTransport } from "./pregame-content-transport";
 	import { probePregameWorldLifetime } from "./pregame-world-lifetime-probe";
 	import { onMount, tick, type ComponentProps } from "svelte";
 	import PregameCreatorHarness, {
@@ -105,45 +106,12 @@
 			throw new Error("Pre-game preview probe requires a content host.");
 		const device = observePreviewDevice(canvas);
 		const commands: HostCommandName[] = [];
-		const endpoints: Partial<Record<HostCommandName, string>> = {
-			load_setup_visual: "/setup-visual",
-			load_character_creation_catalog: "/character-creation-catalog",
-			resolve_character_creation_appearance: "/character-creation-appearance",
-			load_animation: "/animation",
-			load_physics_script: "/physics-script",
-			load_particle_emitter: "/particle-emitter",
-			load_particle_meshes: "/particle-meshes",
-			load_texture_pixels: "/texture-pixels",
-		};
-		// Exercise production host adapters over the existing diagnostic HTTP endpoints.
+		const content = pregameContentTransport(url);
 		const transport: HostTransport = {
-			invoke: async (command, args) => {
+			...content,
+			invoke: (command, args) => {
 				commands.push(command);
-				const endpoint = endpoints[command];
-				if (endpoint === undefined)
-					throw new Error(`Unexpected pre-game capability: ${command}`);
-				const catalogQuery = command === "load_character_creation_catalog";
-				if (catalogQuery) {
-					const response = await fetch(new URL(endpoint, url));
-					if (!response.ok) throw new Error(await response.text());
-					return response.json();
-				}
-				if (args === undefined || !("request" in args))
-					throw new Error(`Missing ${command} request`);
-				const response = await fetch(new URL(endpoint, url), {
-					method: "POST",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify(args.request),
-				});
-				if (!response.ok) throw new Error(await response.text());
-				if (command === "resolve_character_creation_appearance")
-					return response.json();
-				return new Uint8Array(await response.arrayBuffer());
-			},
-			listen: async () => {
-				throw new Error(
-					"Static preview preparation does not subscribe to world events.",
-				);
+				return content.invoke(command, args);
 			},
 		};
 		const assets = new HostPresentationAssets(transport);
@@ -608,7 +576,6 @@
 			const worldLifetime = await probePregameWorldLifetime(
 				assets,
 				transport,
-				url,
 				composition(visual.body),
 			);
 			const retained = await assets.resources();
@@ -678,7 +645,7 @@
 {#if pickerShowcase !== null}
 	<div
 		class="ui-theme ui-panel"
-		style="max-width: 1080px; margin: 20px auto; padding: 20px;"
+		style="position: relative; max-width: 1080px; margin: 20px auto; padding: 20px; background: transparent;"
 	>
 		<ClientCharacterSelect {...pickerShowcase} />
 	</div>

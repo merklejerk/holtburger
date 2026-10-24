@@ -201,6 +201,8 @@
 	}
 	/** Semantic updates reconcile bindings; artwork sampling only presents the result. */
 	function reconcile() {
+		// Authority can withdraw the character before Svelte unmounts this HUD subscriber.
+		if (session.state().playerGuid === null) return;
 		if (
 			!bars.some((bar) =>
 				bar.slots.some(

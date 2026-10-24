@@ -5,14 +5,14 @@
 	import { onMount } from "svelte";
 	import type {
 		ClientDiagnosticResidency,
-		ClientPresentationDiagnostics,
-	} from "./client-presentation-session";
+		ClientGameplayPresentationDiagnostics,
+	} from "./client-gameplay-presentation";
 	import ToggleField from "../app/ToggleField.svelte";
 
 	interface Props {
 		/** Startup catalog availability for switch classification diagnostics. */
 		readonly entityMetadata: WeenieCatalogCapability | null;
-		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
+		readonly readDiagnostics: () => ClientGameplayPresentationDiagnostics | null;
 		/** Selection is resolved in the client layer, independently of scene residency. */
 		readonly readSelectedEntity: () => ClientSelectedEntity | null;
 		/** Runtime-confirmed local player response override. */
@@ -36,7 +36,7 @@
 		showRetailHiddenGeometry,
 		onShowRetailHiddenGeometryChange,
 	}: Props = $props();
-	let diagnostics = $state<ClientPresentationDiagnostics | null>(null);
+	let diagnostics = $state<ClientGameplayPresentationDiagnostics | null>(null);
 	let selected = $state<ClientSelectedEntity | null>(null);
 
 	onMount(() => {

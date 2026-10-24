@@ -1026,6 +1026,14 @@ export async function probeClientHud(
 	});
 	await delay(160);
 	const hoverExited = await capture();
+	assertClientHudHover({
+		hoverBaseline,
+		hoverHit,
+		hoverStationary,
+		hoverDragging,
+		hoverMiss,
+		hoverExited,
+	});
 	await evaluate(
 		client,
 		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.resetSelectionFixture",
@@ -2331,51 +2339,6 @@ function assertClientHudHarness(evidence) {
 		);
 	}
 	if (
-		evidence.hoverBaseline.gameCanvasCursor !== "grab" ||
-		evidence.hoverHit.gameCanvasCursor !== "pointer" ||
-		evidence.hoverHit.hoveredGuid !== 7 ||
-		evidence.hoverHit.selectedGuid !== null
-	) {
-		throw new Error(
-			"Client HUD hover hit did not change only the selectable canvas cursor.",
-		);
-	}
-	if (
-		evidence.hoverStationary.viewportHoverPoints.length <=
-			evidence.hoverHit.viewportHoverPoints.length ||
-		evidence.hoverStationary.viewportHoverPoints.length > 6 ||
-		evidence.hoverStationary.selectionMaintenanceCount <=
-			evidence.hoverHit.selectionMaintenanceCount
-	) {
-		throw new Error(
-			"Client HUD hover did not resample a stationary pointer at the bounded cadence.",
-		);
-	}
-	if (evidence.hoverDragging.gameCanvasCursor !== "grabbing") {
-		throw new Error(
-			"Client HUD selectable cursor overrode active camera-drag feedback.",
-		);
-	}
-	if (
-		evidence.hoverMiss.gameCanvasCursor !== "grab" ||
-		evidence.hoverMiss.hoveredGuid !== null ||
-		evidence.hoverMiss.selectedGuid !== null
-	) {
-		throw new Error(
-			"Client HUD hover miss did not restore the ordinary cursor without selecting.",
-		);
-	}
-	if (
-		evidence.hoverExited.viewportHoverPoints.length >
-			evidence.hoverMiss.viewportHoverPoints.length + 1 ||
-		evidence.hoverExited.selectionMaintenanceCount <=
-			evidence.hoverMiss.selectionMaintenanceCount
-	) {
-		throw new Error(
-			"Client HUD did not separate selection maintenance from canvas hover sampling.",
-		);
-	}
-	if (
 		evidence.viewportSelected.selectedGuid !== 7 ||
 		evidence.viewportSelected.viewportSelectionPoints.length !== 1 ||
 		evidence.viewportSelected.orbitDeltas.length !== 0
@@ -2758,4 +2721,53 @@ export async function probeClientSettingsTabs(
 			return { tabs, selected: window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim(), selectedAfterArrow };
 		})()`,
 	);
+}
+
+/** Check viewport feedback before unrelated panels or navigation obscure a failure. */
+function assertClientHudHover(evidence) {
+	if (
+		evidence.hoverBaseline.gameCanvasCursor !== "grab" ||
+		evidence.hoverHit.gameCanvasCursor !== "pointer" ||
+		evidence.hoverHit.hoveredGuid !== 7 ||
+		evidence.hoverHit.selectedGuid !== null
+	) {
+		throw new Error(
+			"Client HUD hover hit did not change only the selectable canvas cursor.",
+		);
+	}
+	if (
+		evidence.hoverStationary.viewportHoverPoints.length <=
+			evidence.hoverHit.viewportHoverPoints.length ||
+		evidence.hoverStationary.viewportHoverPoints.length > 6 ||
+		evidence.hoverStationary.selectionMaintenanceCount <=
+			evidence.hoverHit.selectionMaintenanceCount
+	) {
+		throw new Error(
+			"Client HUD hover did not resample a stationary pointer at the bounded cadence.",
+		);
+	}
+	if (evidence.hoverDragging.gameCanvasCursor !== "grabbing") {
+		throw new Error(
+			"Client HUD selectable cursor overrode active camera-drag feedback.",
+		);
+	}
+	if (
+		evidence.hoverMiss.gameCanvasCursor !== "grab" ||
+		evidence.hoverMiss.hoveredGuid !== null ||
+		evidence.hoverMiss.selectedGuid !== null
+	) {
+		throw new Error(
+			`Client HUD hover miss did not restore the ordinary cursor without selecting: ${JSON.stringify({ cursor: evidence.hoverMiss.gameCanvasCursor, hovered: evidence.hoverMiss.hoveredGuid, selected: evidence.hoverMiss.selectedGuid })}.`,
+		);
+	}
+	if (
+		evidence.hoverExited.viewportHoverPoints.length >
+			evidence.hoverMiss.viewportHoverPoints.length + 1 ||
+		evidence.hoverExited.selectionMaintenanceCount <=
+			evidence.hoverMiss.selectionMaintenanceCount
+	) {
+		throw new Error(
+			"Client HUD did not separate selection maintenance from canvas hover sampling.",
+		);
+	}
 }

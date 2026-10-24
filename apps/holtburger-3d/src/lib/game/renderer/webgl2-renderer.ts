@@ -2185,6 +2185,7 @@ export class WebGL2Renderer implements Renderer {
 	}
 
 	async destroy(): Promise<void> {
+		this.particles.clear();
 		for (const adapter of this.#combatEffectAdapters) adapter.release();
 		this.#combatEffectAdapters.clear();
 		this.#dynamicDepths.beginFrame();

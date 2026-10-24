@@ -1,0 +1,25 @@
+/* The shell owns the surface; gameplay alone admits viewport input and cursor feedback. */
+@layer components {
+	.client-canvas {
+		position: fixed;
+		inset: 0;
+		width: 100%;
+		height: 100%;
+		pointer-events: none;
+		outline: none;
+	}
+	.client-canvas.gameplay {
+		pointer-events: auto;
+		cursor: grab;
+		touch-action: none;
+	}
+	.client-canvas.gameplay[data-mouse-active] {
+		cursor: grabbing;
+	}
+	.client-canvas[data-entity-hovered] {
+		cursor: pointer;
+	}
+	.client-canvas[data-precise-jump] {
+		cursor: crosshair;
+	}
+}

@@ -146,7 +146,7 @@
 		type ClientHudViewport,
 	} from "./client-hud-layout";
 	import type { ClientChatFilterTag } from "./client-chat-policy";
-	import type { ClientPresentationDiagnostics } from "./client-presentation-session";
+	import type { ClientGameplayPresentationDiagnostics } from "./client-gameplay-presentation";
 	import type { ClientObjectPreviewService } from "./client-object-preview-service";
 	import type { ClientViewportCameraController } from "./client-viewport-pointer-gesture";
 
@@ -279,7 +279,7 @@
 		readonly onTeleportToMapPosition: (
 			position: ClientMapPosition,
 		) => Promise<void>;
-		readonly readDiagnostics: () => ClientPresentationDiagnostics | null;
+		readonly readDiagnostics: () => ClientGameplayPresentationDiagnostics | null;
 		/** Client-owned selected facts with optional presentation details. */
 		readonly readSelectedEntity: () => ClientSelectedEntity | null;
 		readonly readFrameRates: () => FrameRates | null;
@@ -374,7 +374,10 @@
 		) => Promise<void>;
 		/** Report a chat submission failure through the retained chat history. */
 		readonly onSendChatError: (message: string) => void;
-		readonly onCanvas: (canvas: HTMLCanvasElement | null) => void;
+		/** Persistent world surface borrowed from the app shell. */
+		readonly canvasElement: HTMLCanvasElement;
+		/** Common DOM boundary containing both the canvas and HUD for drag/drop hit testing. */
+		readonly interactionRoot: HTMLElement;
 	}
 
 	let {
@@ -518,7 +521,8 @@
 		sentChatHistory,
 		onSendChat,
 		onSendChatError,
-		onCanvas,
+		canvasElement,
+		interactionRoot,
 	}: Props = $props();
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
@@ -617,8 +621,7 @@
 		),
 	);
 	$effect(() => {
-		const root = worldElement;
-		if (root === null) return;
+		const root = interactionRoot;
 		const owner = new ClientSpellDrag(root, {
 			read: (cell) => spellBar.tabs[cell.tab][cell.slot],
 			bind: (cell, spell) =>
@@ -649,7 +652,6 @@
 		spells;
 		spellDrag?.cancel();
 	});
-	onMount(() => keyboard.mount(document));
 	onMount(() =>
 		inputGate.attach(() => {
 			spellDrag?.cancel();
@@ -735,7 +737,6 @@
 		size: resolvedMapPlacement.width,
 		viewDiameters: minimapViewDiameters,
 	});
-	let canvasElement = $state<HTMLCanvasElement | null>(null);
 	let viewportMouse: ClientViewportMouseController | null = null;
 	let pointerX = 0;
 	let pointerY = 0;
@@ -825,7 +826,36 @@
 	});
 
 	$effect(() => {
-		onCanvas(canvasElement);
+		const canvas = canvasElement;
+		canvas.addEventListener("pointerenter", handlePointerEnter);
+		canvas.addEventListener("pointerleave", handlePointerLeave);
+		canvas.addEventListener("pointermove", handlePointerMove);
+		canvas.addEventListener("wheel", handleWheel, { passive: false });
+		canvas.addEventListener("contextmenu", handleContextMenu);
+		canvas.addEventListener("pointerover", considerPointer);
+		return () => {
+			canvas.removeEventListener("pointerenter", handlePointerEnter);
+			canvas.removeEventListener("pointerleave", handlePointerLeave);
+			canvas.removeEventListener("pointermove", handlePointerMove);
+			canvas.removeEventListener("wheel", handleWheel);
+			canvas.removeEventListener("contextmenu", handleContextMenu);
+			canvas.removeEventListener("pointerover", considerPointer);
+		};
+	});
+	$effect(() => {
+		canvasElement.toggleAttribute(
+			"data-entity-hovered",
+			hoveredEntityGuid !== null,
+		);
+		return () => canvasElement.removeAttribute("data-entity-hovered");
+	});
+	$effect(() => {
+		if (combining) {
+			canvasElement.dataset.combining = combineEligibility;
+		} else delete canvasElement.dataset.combining;
+		return () => {
+			delete canvasElement.dataset.combining;
+		};
 	});
 
 	$effect(() => {
@@ -983,714 +1013,723 @@
 	}}
 	aria-label="Holtburger client world"
 >
-	<canvas
-		bind:this={canvasElement}
-		class="client-canvas"
-		class:client-canvas-entity-hovered={hoveredEntityGuid !== null}
-		aria-label="Game world"
-		tabindex="-1"
-		data-game-viewport
-		onpointerenter={handlePointerEnter}
-		onpointerleave={handlePointerLeave}
-		onpointermove={handlePointerMove}
-		onwheel={handleWheel}
-	></canvas>
-	{#key characterGuid}
-		<ClientVitalWarningOverlay
-			{vitals}
-			enabled={vitalWarningsEnabled}
-			thresholds={ui.vitalWarningThresholds}
-		/>
-	{/key}
-	<ClientTargetIndicator
-		readFrame={readTargetIndicatorFrame}
-		selectedGuid={selectedEntityGuid}
-	/>
-	<button
-		type="button"
-		class="client-ui-lock ui-hud-button"
-		aria-label={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
-		aria-pressed={hudMode === "layout"}
-		title={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
-		onclick={() =>
-			onHudModeChange(hudMode === "runtime" ? "layout" : "runtime")}
-	>
-		<ClientHudIcon name={hudMode === "runtime" ? "locked" : "unlocked"} />
-	</button>
-
-	<Minimap
-		readFrame={readMinimapFrame}
-		{onClearWaypoint}
-		viewState={minimap}
-		minSize={CLIENT_UI_DEFAULTS.minimap.minSize}
-		resizable={CLIENT_UI_DEFAULTS.minimap.resizable}
-		editable={hudMode === "layout"}
-		onStateChange={updateMinimap}
-		onFooterExtentChange={(extent) => {
-			if (
-				extent.width !== minimapFooterExtent.width ||
-				extent.height !== minimapFooterExtent.height
-			)
-				minimapFooterExtent = extent;
-		}}
-		{onSelectEntity}
-		{onCoordinatesCopied}
-	>
-		{#snippet actions()}
-			<button
-				class="ui-button ui-icon-button ui-minimap-button"
-				type="button"
-				aria-label="Nearby entities and alerts"
-				title="Nearby entities and alerts"
-				aria-pressed={nearbyOpen}
-				disabled={nearby === null}
-				onclick={() => (nearbyOpen = !nearbyOpen)}
-				><ClientHudIcon name="nearby" /></button
-			>
-		{/snippet}
-		{#snippet coordinateDetails()}<ClientMinimapEnvironment
-				readEnvironment={readServerEnvironment}
-				{clockFormat}
-			/>{/snippet}
-	</Minimap>
-	{#if actionBars !== null && inventory !== null && itemSession !== null && worldElement !== null && itemInteractions !== null}
-		{#key inventory}
-			<ClientActionBars
-				{input}
-				{displayPlatform}
-				bars={actionBars}
-				onBarsChange={onActionBarsChange}
-				onResetOwner={(reset) => (resetActionBars = reset)}
-				session={itemSession}
-				{worldContainer}
-				{vendor}
-				{houseCrystal}
-				{trade}
-				onDragOwner={(owner) => (itemDrag = owner)}
-				{onPickInventoryTarget}
-				{onInventoryNotice}
-				interactions={itemInteractions}
-				onSelectDragItem={(guid) => onSelectContentsItem(guid, "select")}
-				root={worldElement}
-				{inventory}
-				{viewport}
-				editable={hudMode === "layout"}
-			/>
-			<ClientLoadoutBuilder
-				{inventory}
-				capture={loadoutCapture}
-				owner={itemDrag}
-				{viewport}
-				onClose={() => (loadoutCapture = null)}
+	<div class="gameplay-controls">
+		{#key characterGuid}
+			<ClientVitalWarningOverlay
+				{vitals}
+				enabled={vitalWarningsEnabled}
+				thresholds={ui.vitalWarningThresholds}
 			/>
 		{/key}
-	{/if}
-
-	{#if actionBars !== null && spells !== null && (spellBarEnabled || (hudMode === "layout" && combatMode !== "melee" && combatMode !== "missile"))}
-		<ClientSpellBar
-			{input}
-			{displayPlatform}
-			{spells}
-			{inventory}
-			{itemInteractions}
-			configuration={spellBar}
-			enabled={spellBarEnabled}
-			placement={hudLayout.spellBar}
-			shape={spellBarShape}
-			editable={hudMode === "layout"}
-			{viewport}
-			onPlacementChange={(placement) =>
-				changeHudPlacement("spellBar", placement)}
-			onShapeChange={onSpellBarShapeChange}
-			onSelectTab={onSelectSpellTab}
-			onActivateCell={onActivateSpellCell}
-			onActivateCaster={onActivateCasterSpell}
+		<ClientTargetIndicator
+			readFrame={readTargetIndicatorFrame}
+			selectedGuid={selectedEntityGuid}
 		/>
-	{/if}
-	{#if combatMode === "melee" || combatMode === "missile"}
-		<ClientCombatBar
-			{inventory}
-			{input}
-			{displayPlatform}
-			placement={hudLayout.combatBar}
-			editable={hudMode === "layout"}
-			{viewport}
-			status={combatStatus}
-			selectionRevision={combatProfileSelectionRevision}
-			profile={combatMode === "melee"
-				? { kind: "melee", ...combatControls.melee }
-				: { kind: "missile", ...combatControls.missile }}
-			enabled={combatEnabled && hudMode === "runtime"}
-			onPlacementChange={(placement) =>
-				changeHudPlacement("combatBar", placement)}
-			onProfileSelect={onCombatProfileSelect}
-		/>
-	{/if}
-
-	<ClientHudPanel
-		label="Character HUD"
-		placement={hudLayout.character}
-		editable={hudMode === "layout"}
-		minWidth={CLIENT_UI_DEFAULTS.character.minSize.width}
-		minHeight={Math.max(
-			CLIENT_UI_DEFAULTS.character.minSize.height,
-			characterMinimumHeight,
-		)}
-		resizable={CLIENT_UI_DEFAULTS.character.resizable}
-		contentHitTesting="surface"
-		{viewport}
-		onPlacementChange={(placement) =>
-			changeHudPlacement("character", placement)}
-	>
-		<ClientCharacterHud
-			onMinimumHeightChange={(height) => (characterMinimumHeight = height)}
-			{playerName}
-			{worldName}
-			{vitals}
-			{readConnection}
-			{characterSheet}
-		/>
-	</ClientHudPanel>
-	{#if partyHudPresent || hudMode === "layout"}
-		<ClientPartyHud
-			{readPartyHudDisplay}
-			onSelectEntity={onSelectPartyMember}
-			preview={!partyHudPresent}
-			placement={hudLayout.partyHud}
-			editable={hudMode === "layout"}
-			resizable={CLIENT_UI_DEFAULTS.partyHud.resizable}
-			{viewport}
-			onPlacementChange={(placement) =>
-				changeHudPlacement("partyHud", placement)}
-		/>
-	{/if}
-
-	<ClientStatusTray
-		placement={hudLayout.statusTray}
-		editable={hudMode === "layout"}
-		{viewport}
-		{inventory}
-		enchantments={enchantmentTray}
-		onOpenEnchantments={openEnchantments}
-		onOpenInventory={() => (activePanel = "inventory")}
-		onPlacementChange={(placement) =>
-			changeHudPlacement("statusTray", placement)}
-	/>
-
-	{#if jumpChargeActive || preciseJumpActive || hudMode === "layout"}
-		<ClientHudPanel
-			label="Jump power"
-			placement={hudLayout.jumpPower}
-			editable={hudMode === "layout"}
-			minWidth={CLIENT_UI_DEFAULTS.jumpPower.minSize.width}
-			minHeight={CLIENT_UI_DEFAULTS.jumpPower.minSize.height}
-			resizable={CLIENT_UI_DEFAULTS.jumpPower.resizable}
-			contentHitTesting="descendants"
-			{viewport}
-			onPlacementChange={(placement) =>
-				changeHudPlacement("jumpPower", placement)}
+		<button
+			type="button"
+			class="client-ui-lock ui-hud-button"
+			aria-label={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
+			aria-pressed={hudMode === "layout"}
+			title={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
+			onclick={() =>
+				onHudModeChange(hudMode === "runtime" ? "layout" : "runtime")}
 		>
-			<ClientJumpPowerBar
-				active={jumpChargeActive || preciseJumpActive}
-				previewExtent={hudMode === "layout" ? HUD_PREVIEW_JUMP_EXTENT : null}
-				precise={preciseJumpActive}
-				readExtent={readJumpExtent}
-				powerKeys={jumpPowerKeys}
-				powerControl={hudMode === "runtime" && preciseJumpActive
-					? { setPower: onPreciseJumpPowerSet }
-					: null}
-			/>
-		</ClientHudPanel>
-	{/if}
-	{#if toast !== null || combining || hudMode === "layout"}
-		<ClientHudPanel
-			label="Notifications"
-			placement={hudLayout.toast}
+			<ClientHudIcon name={hudMode === "runtime" ? "locked" : "unlocked"} />
+		</button>
+
+		<Minimap
+			readFrame={readMinimapFrame}
+			{onClearWaypoint}
+			viewState={minimap}
+			minSize={CLIENT_UI_DEFAULTS.minimap.minSize}
+			resizable={CLIENT_UI_DEFAULTS.minimap.resizable}
 			editable={hudMode === "layout"}
-			minWidth={CLIENT_UI_DEFAULTS.toast.minSize.width}
-			minHeight={CLIENT_UI_DEFAULTS.toast.minSize.height}
-			resizable={CLIENT_UI_DEFAULTS.toast.resizable}
-			contentHitTesting="descendants"
-			{viewport}
-			onPlacementChange={(placement) => changeHudPlacement("toast", placement)}
-		>
-			<ClientToastOverlay
-				{toast}
-				persistentMessage={itemInteraction.kind === "acquiring"
-					? {
-							kind: "status",
-							message: `Use ${itemInteraction.name} on… (Escape to cancel)`,
-						}
-					: hudMode === "layout"
-						? { kind: "preview", message: HUD_PREVIEW_TOAST_MESSAGE }
-						: null}
-			/>
-		</ClientHudPanel>
-	{/if}
-	<ClientHudPanel
-		label="Chat"
-		placement={hudLayout.chat}
-		editable={hudMode === "layout"}
-		minWidth={CLIENT_UI_DEFAULTS.chat.minSize.width}
-		minHeight={CLIENT_UI_DEFAULTS.chat.minSize.height}
-		resizable={CLIENT_UI_DEFAULTS.chat.resizable}
-		contentHitTesting="descendants"
-		{viewport}
-		onPlacementChange={(placement) => changeHudPlacement("chat", placement)}
-	>
-		{#key chatComposer.generation}
-			<ClientChat
-				composer={chatComposer}
-				{onSetWaypoint}
-				messages={chatMessages}
-				{clockFormat}
-				sentHistory={sentChatHistory}
-				onSend={onSendChat}
-				onSendError={onSendChatError}
-				enabledTags={chatFilters}
-				onEnabledTagsChange={onChatFiltersChange}
-			/>
-		{/key}
-	</ClientHudPanel>
-	<ClientHudPanel
-		label="Frame rate"
-		placement={hudLayout.frameRate}
-		editable={hudMode === "layout"}
-		minWidth={CLIENT_UI_DEFAULTS.frameRate.minSize.width}
-		minHeight={CLIENT_UI_DEFAULTS.frameRate.minSize.height}
-		resizable={CLIENT_UI_DEFAULTS.frameRate.resizable}
-		contentHitTesting="descendants"
-		{viewport}
-		onPlacementChange={(placement) =>
-			changeHudPlacement("frameRate", placement)}
-	>
-		<ClientFpsCounter {readFrameRates} />
-	</ClientHudPanel>
-	{#if selectedEntityGuid !== null || hudMode === "layout"}
-		<ClientHudPanel
-			label="Selected entity"
-			placement={hudLayout.selectedEntity}
-			editable={hudMode === "layout"}
-			minWidth={CLIENT_UI_DEFAULTS.selectedEntity.minSize.width}
-			minHeight={CLIENT_UI_DEFAULTS.selectedEntity.minSize.height}
-			resizable={CLIENT_UI_DEFAULTS.selectedEntity.resizable}
-			contentHitTesting="descendants"
-			{viewport}
-			onPlacementChange={(placement) =>
-				changeHudPlacement("selectedEntity", placement)}
-		>
-			<ClientSelectedEntityHud
-				{input}
-				{displayPlatform}
-				selectedGuid={selectedEntityGuid}
-				readCanCorpsePermission={() =>
-					readCanSetCorpsePermission() && selectedPlayer() !== null}
-				onCorpsePermission={(granted) => {
-					const target = selectedPlayer();
-					if (target !== null && readCanSetCorpsePermission())
-						onCorpsePermission(target.name, granted);
-				}}
-				readCanSplit={canSplitSelectedEntity}
-				readCanAddFriend={() => friendTarget() !== null}
-				readCanIgnoreAccount={() => ignoreTarget() !== null}
-				onAddFriend={addSelectedFriend}
-				onIgnoreAccount={ignoreSelectedAccount}
-				readCanSwear={() => swearTarget() !== null}
-				onSwear={() => {
-					const guid = swearTarget();
-					if (guid !== null) void allegiance?.request({ kind: "swear", guid });
-				}}
-				readCanInvite={() => inviteTarget() !== null}
-				onInvite={() => {
-					const target = inviteTarget();
-					if (target !== null) party?.request({ kind: "invite", target });
-				}}
-				readSelectedDisplay={() => {
-					const display = readSelectedEntityDisplay();
-					return itemInteraction.kind === "acquiring" &&
-						selectedEntityGuid !== null
-						? { ...display, canInteract: true, interactionLabel: "Interact" }
-						: display;
-				}}
-				onInteract={onInteractEntity}
-				onExamine={onExamineEntity}
-				examinePending={objectInspection.kind === "pending" &&
-					objectInspection.guid === selectedEntityGuid}
-				onSplit={splitSelectedEntity}
-			/>
-		</ClientHudPanel>
-	{/if}
-	<div
-		class="emote-activation"
-		tabindex="-1"
-		use:keyboard.scope={{
-			transient: true,
-			activation: (event) => {
+			onStateChange={updateMinimap}
+			onFooterExtentChange={(extent) => {
 				if (
-					event.repeat ||
-					!emotesEnabled ||
-					hudMode !== "runtime" ||
-					chatComposer.emotes === null ||
-					!clientInput.shortcut("openEmotes", event)
+					extent.width !== minimapFooterExtent.width ||
+					extent.height !== minimapFooterExtent.height
 				)
-					return false;
-				openEmotes(event);
-				return true;
-			},
-			keydown: () => {},
-		}}
-	></div>
-	{#if emoteWheel !== null && chatComposer.emotes !== null}
-		<ClientEmoteWheel
-			catalog={chatComposer.emotes}
-			recent={chatComposer.recentEmotes}
-			onClose={() => {
-				closeEmotes();
+					minimapFooterExtent = extent;
 			}}
-			onExecute={executeEmote}
-		/>
-	{/if}
-
-	<ClientShortcutDock
-		placement={hudLayout.shortcuts}
-		editable={hudMode === "layout"}
-		{viewport}
-		onPlacementChange={(placement) =>
-			changeHudPlacement("shortcuts", placement)}
-		{input}
-		{displayPlatform}
-		{combatMode}
-		{combatEnabled}
-		{onToggleCombat}
-		{shortcuts}
-		{activePanel}
-		onToggle={toggleSystemPanel}
-	/>
-	{#if worldContainer !== null && itemInteractions !== null}
-		{#key worldContainer}
-			<ClientWorldContainerWindow
-				model={worldContainer}
-				interactions={itemInteractions}
-				selectedGuid={selectedEntityGuid}
-				onSelectItem={(guid) => onSelectContentsItem(guid, "select")}
-				placement={hudLayout.worldContainer}
-				{viewport}
-				onPlacementChange={(placement) =>
-					changeHudPlacement("worldContainer", placement)}
-			/>
-		{/key}
-	{/if}
-	{#if trade !== null}
-		{#key trade}
-			<ClientTradeWindow
-				inputSettings={input}
-				{displayPlatform}
-				model={trade}
-				selectedGuid={selectedEntityGuid}
-				placement={hudLayout.trade}
-				{viewport}
-				onPlacementChange={(placement) =>
-					changeHudPlacement("trade", placement)}
-				onSelectItem={onSelectEntity}
-				{onExamineItem}
-			/>
-		{/key}
-	{/if}
-	{#if vendor !== null}
-		{#key vendor}
-			<ClientVendorWindow
-				inputSettings={input}
-				{displayPlatform}
-				model={vendor}
-				placement={hudLayout.vendor}
-				{viewport}
-				onPlacementChange={(placement) =>
-					changeHudPlacement("vendor", placement)}
-				{onExamineItem}
-			/>
-		{/key}
-	{/if}
-	{#if houseCrystal !== null}
-		{#key houseCrystal}
-			<ClientHouseCrystalWindow
-				model={houseCrystal}
-				placement={hudLayout.houseCrystal}
-				{viewport}
-				onPlacementChange={(placement) =>
-					changeHudPlacement("houseCrystal", placement)}
-				{onExamineItem}
-			/>
-		{/key}
-	{/if}
-	{#if objectInspection.kind === "ready"}
-		{#key objectInspection.guid}
-			<ClientInspectionWindow
-				{onSetWaypoint}
-				inspection={objectInspection.inspection}
-				nameColor={objectInspection.nameColor}
-				preview={objectInspection.preview}
-				{objectPreviewService}
-				{spells}
-				icons={spells?.icons ?? inventory?.icons ?? null}
-				placement={hudLayout.inspection}
-				{viewport}
-				previewHeight={inspectionPreviewHeight}
-				onClose={onCloseInspection}
-				onPlacementChange={(placement) =>
-					changeHudPlacement("inspection", placement)}
-				onPreviewHeightChange={onInspectionPreviewHeightChange}
-			/>
-		{/key}
-	{/if}
-	{#if bookReader.kind !== "idle"}
-		{#key bookReader.revision}
-			<ClientBookWindow
-				{onSetWaypoint}
-				reader={bookReader}
-				placement={hudLayout.book}
-				{viewport}
-				onClose={onCloseBook}
-				onRetry={onRetryBook}
-				onPlacementChange={(placement) => changeHudPlacement("book", placement)}
-			/>
-		{/key}
-	{/if}
-
-	{#if characterSheet !== null}
-		{#key characterSheet}
-			<ClientHudWindow
-				icon="training"
-				title="Character"
-				visible={activePanel === "characterSheet"}
-				placement={hudLayout.characterSheet}
-				minWidth={CLIENT_UI_DEFAULTS.characterSheet.minSize.width}
-				minHeight={CLIENT_UI_DEFAULTS.characterSheet.minSize.height}
-				{viewport}
-				onClose={() => (activePanel = null)}
-				onPlacementChange={(placement) =>
-					changeHudPlacement("characterSheet", placement)}
-			>
-				<ClientCharacterSheetPanel
-					owner={characterSheet}
-					visible={activePanel === "characterSheet"}
-					{spells}
-					{enchantments}
-					castEnabled={combatEnabled && combatMode === "magic"}
-					{onCastSpell}
-				/>
-			</ClientHudWindow>
-		{/key}
-	{/if}
-
-	{#if worldMapSource !== null}
-		{#key worldMapSource}
-			<ClientHudWindow
-				icon="world"
-				title="World"
-				visible={activePanel === "world"}
-				placement={hudLayout.world}
-				minWidth={CLIENT_UI_DEFAULTS.world.minSize.width}
-				minHeight={CLIENT_UI_DEFAULTS.world.minSize.height}
-				{viewport}
-				onClose={() => (activePanel = null)}
-				onPlacementChange={(placement) =>
-					changeHudPlacement("world", placement)}
-			>
-				<ClientWorldPanel
-					{contracts}
-					source={worldMapSource}
-					{characterGuid}
-					{housing}
-					{housingManagement}
-					{onRefreshHousing}
-					{onSearchHousing}
-					{canTeleportFromMap}
-					{onSetWaypoint}
-					{recallDestinations}
-					{onRecall}
-					{onTeleportToMapPosition}
-					visible={activePanel === "world"}
-					readFrame={readMinimapFrame}
-				/>
-			</ClientHudWindow>
-		{/key}
-	{/if}
-
-	{#if party !== null && friends !== null && squelch !== null && allegiance !== null}
-		{#key party}
-			<ClientHudWindow
-				icon="party"
-				title="Social"
-				visible={activePanel === "social"}
-				placement={hudLayout.social}
-				minWidth={CLIENT_UI_DEFAULTS.social.minSize.width}
-				minHeight={CLIENT_UI_DEFAULTS.social.minSize.height}
-				{viewport}
-				onClose={() => (activePanel = null)}
-				onPlacementChange={(placement) =>
-					changeHudPlacement("social", placement)}
-			>
-				<ClientSocialPanel
-					owner={party}
-					onSelectEntity={onSelectPartyMember}
-					{friends}
-					{squelch}
-					{allegiance}
-					visible={activePanel === "social"}
-				/>
-			</ClientHudWindow>
-		{/key}
-	{/if}
-
-	{#if contracts !== null}
-		{#key contracts}
-			<ClientHudWindow
-				icon="journal"
-				title="Journal"
-				visible={activePanel === "journal"}
-				placement={hudLayout.journal}
-				minWidth={CLIENT_UI_DEFAULTS.journal.minSize.width}
-				minHeight={CLIENT_UI_DEFAULTS.journal.minSize.height}
-				{viewport}
-				onClose={() => (activePanel = null)}
-				onPlacementChange={(placement) =>
-					changeHudPlacement("journal", placement)}
-			>
-				<ClientJournalPanel
-					{onSetWaypoint}
-					owner={contracts}
-					visible={activePanel === "journal"}
-					onNotice={onSocialNotice}
-				/>
-			</ClientHudWindow>
-		{/key}
-	{/if}
-
-	{#if nearby !== null}{#key nearby}{#key characterGuid}
-				<ClientHudWindow
-					icon="nearby"
-					title="Nearby"
-					visible={nearbyOpen}
-					placement={hudLayout.nearby}
-					minWidth={CLIENT_UI_DEFAULTS.nearby.minSize.width}
-					minHeight={CLIENT_UI_DEFAULTS.nearby.minSize.height}
-					{viewport}
-					onClose={() => (nearbyOpen = false)}
-					onPlacementChange={(placement) =>
-						changeHudPlacement("nearby", placement)}
+			{onSelectEntity}
+			{onCoordinatesCopied}
+		>
+			{#snippet actions()}
+				<button
+					class="ui-button ui-icon-button ui-minimap-button"
+					type="button"
+					aria-label="Nearby entities and alerts"
+					title="Nearby entities and alerts"
+					aria-pressed={nearbyOpen}
+					disabled={nearby === null}
+					onclick={() => (nearbyOpen = !nearbyOpen)}
+					><ClientHudIcon name="nearby" /></button
 				>
-					<ClientNearbyPanel
-						owner={nearby}
-						visible={nearbyOpen}
-						selectedGuid={selectedEntityGuid}
-						onSelectEntity={onSelectNearbyEntity}
-						{onExamineEntity}
-						{onSetWaypoint}
+			{/snippet}
+			{#snippet coordinateDetails()}<ClientMinimapEnvironment
+					readEnvironment={readServerEnvironment}
+					{clockFormat}
+				/>{/snippet}
+		</Minimap>
+		{#if actionBars !== null && inventory !== null && itemSession !== null && worldElement !== null && itemInteractions !== null}
+			{#key inventory}
+				<ClientActionBars
+					{input}
+					{displayPlatform}
+					bars={actionBars}
+					onBarsChange={onActionBarsChange}
+					onResetOwner={(reset) => (resetActionBars = reset)}
+					session={itemSession}
+					{worldContainer}
+					{vendor}
+					{houseCrystal}
+					{trade}
+					onDragOwner={(owner) => (itemDrag = owner)}
+					{onPickInventoryTarget}
+					{onInventoryNotice}
+					interactions={itemInteractions}
+					onSelectDragItem={(guid) => onSelectContentsItem(guid, "select")}
+					root={interactionRoot}
+					{inventory}
+					{viewport}
+					editable={hudMode === "layout"}
+				/>
+				<ClientLoadoutBuilder
+					{inventory}
+					capture={loadoutCapture}
+					owner={itemDrag}
+					{viewport}
+					onClose={() => (loadoutCapture = null)}
+				/>
+			{/key}
+		{/if}
+
+		{#if actionBars !== null && spells !== null && (spellBarEnabled || (hudMode === "layout" && combatMode !== "melee" && combatMode !== "missile"))}
+			<ClientSpellBar
+				{input}
+				{displayPlatform}
+				{spells}
+				{inventory}
+				{itemInteractions}
+				configuration={spellBar}
+				enabled={spellBarEnabled}
+				placement={hudLayout.spellBar}
+				shape={spellBarShape}
+				editable={hudMode === "layout"}
+				{viewport}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("spellBar", placement)}
+				onShapeChange={onSpellBarShapeChange}
+				onSelectTab={onSelectSpellTab}
+				onActivateCell={onActivateSpellCell}
+				onActivateCaster={onActivateCasterSpell}
+			/>
+		{/if}
+		{#if combatMode === "melee" || combatMode === "missile"}
+			<ClientCombatBar
+				{inventory}
+				{input}
+				{displayPlatform}
+				placement={hudLayout.combatBar}
+				editable={hudMode === "layout"}
+				{viewport}
+				status={combatStatus}
+				selectionRevision={combatProfileSelectionRevision}
+				profile={combatMode === "melee"
+					? { kind: "melee", ...combatControls.melee }
+					: { kind: "missile", ...combatControls.missile }}
+				enabled={combatEnabled && hudMode === "runtime"}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("combatBar", placement)}
+				onProfileSelect={onCombatProfileSelect}
+			/>
+		{/if}
+
+		<ClientHudPanel
+			label="Character HUD"
+			placement={hudLayout.character}
+			editable={hudMode === "layout"}
+			minWidth={CLIENT_UI_DEFAULTS.character.minSize.width}
+			minHeight={Math.max(
+				CLIENT_UI_DEFAULTS.character.minSize.height,
+				characterMinimumHeight,
+			)}
+			resizable={CLIENT_UI_DEFAULTS.character.resizable}
+			contentHitTesting="surface"
+			{viewport}
+			onPlacementChange={(placement) =>
+				changeHudPlacement("character", placement)}
+		>
+			<ClientCharacterHud
+				onMinimumHeightChange={(height) => (characterMinimumHeight = height)}
+				{playerName}
+				{worldName}
+				{vitals}
+				{readConnection}
+				{characterSheet}
+			/>
+		</ClientHudPanel>
+		{#if partyHudPresent || hudMode === "layout"}
+			<ClientPartyHud
+				{readPartyHudDisplay}
+				onSelectEntity={onSelectPartyMember}
+				preview={!partyHudPresent}
+				placement={hudLayout.partyHud}
+				editable={hudMode === "layout"}
+				resizable={CLIENT_UI_DEFAULTS.partyHud.resizable}
+				{viewport}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("partyHud", placement)}
+			/>
+		{/if}
+
+		<ClientStatusTray
+			placement={hudLayout.statusTray}
+			editable={hudMode === "layout"}
+			{viewport}
+			{inventory}
+			enchantments={enchantmentTray}
+			onOpenEnchantments={openEnchantments}
+			onOpenInventory={() => (activePanel = "inventory")}
+			onPlacementChange={(placement) =>
+				changeHudPlacement("statusTray", placement)}
+		/>
+
+		{#if jumpChargeActive || preciseJumpActive || hudMode === "layout"}
+			<ClientHudPanel
+				label="Jump power"
+				placement={hudLayout.jumpPower}
+				editable={hudMode === "layout"}
+				minWidth={CLIENT_UI_DEFAULTS.jumpPower.minSize.width}
+				minHeight={CLIENT_UI_DEFAULTS.jumpPower.minSize.height}
+				resizable={CLIENT_UI_DEFAULTS.jumpPower.resizable}
+				contentHitTesting="descendants"
+				{viewport}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("jumpPower", placement)}
+			>
+				<ClientJumpPowerBar
+					active={jumpChargeActive || preciseJumpActive}
+					previewExtent={hudMode === "layout" ? HUD_PREVIEW_JUMP_EXTENT : null}
+					precise={preciseJumpActive}
+					readExtent={readJumpExtent}
+					powerKeys={jumpPowerKeys}
+					powerControl={hudMode === "runtime" && preciseJumpActive
+						? { setPower: onPreciseJumpPowerSet }
+						: null}
+				/>
+			</ClientHudPanel>
+		{/if}
+		{#if toast !== null || combining || hudMode === "layout"}
+			<ClientHudPanel
+				label="Notifications"
+				placement={hudLayout.toast}
+				editable={hudMode === "layout"}
+				minWidth={CLIENT_UI_DEFAULTS.toast.minSize.width}
+				minHeight={CLIENT_UI_DEFAULTS.toast.minSize.height}
+				resizable={CLIENT_UI_DEFAULTS.toast.resizable}
+				contentHitTesting="descendants"
+				{viewport}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("toast", placement)}
+			>
+				<ClientToastOverlay
+					{toast}
+					persistentMessage={itemInteraction.kind === "acquiring"
+						? {
+								kind: "status",
+								message: `Use ${itemInteraction.name} on… (Escape to cancel)`,
+							}
+						: hudMode === "layout"
+							? { kind: "preview", message: HUD_PREVIEW_TOAST_MESSAGE }
+							: null}
+				/>
+			</ClientHudPanel>
+		{/if}
+		<ClientHudPanel
+			label="Chat"
+			placement={hudLayout.chat}
+			editable={hudMode === "layout"}
+			minWidth={CLIENT_UI_DEFAULTS.chat.minSize.width}
+			minHeight={CLIENT_UI_DEFAULTS.chat.minSize.height}
+			resizable={CLIENT_UI_DEFAULTS.chat.resizable}
+			contentHitTesting="descendants"
+			{viewport}
+			onPlacementChange={(placement) => changeHudPlacement("chat", placement)}
+		>
+			{#key chatComposer.generation}
+				<ClientChat
+					composer={chatComposer}
+					{onSetWaypoint}
+					messages={chatMessages}
+					{clockFormat}
+					sentHistory={sentChatHistory}
+					onSend={onSendChat}
+					onSendError={onSendChatError}
+					enabledTags={chatFilters}
+					onEnabledTagsChange={onChatFiltersChange}
+				/>
+			{/key}
+		</ClientHudPanel>
+		<ClientHudPanel
+			label="Frame rate"
+			placement={hudLayout.frameRate}
+			editable={hudMode === "layout"}
+			minWidth={CLIENT_UI_DEFAULTS.frameRate.minSize.width}
+			minHeight={CLIENT_UI_DEFAULTS.frameRate.minSize.height}
+			resizable={CLIENT_UI_DEFAULTS.frameRate.resizable}
+			contentHitTesting="descendants"
+			{viewport}
+			onPlacementChange={(placement) =>
+				changeHudPlacement("frameRate", placement)}
+		>
+			<ClientFpsCounter {readFrameRates} />
+		</ClientHudPanel>
+		{#if selectedEntityGuid !== null || hudMode === "layout"}
+			<ClientHudPanel
+				label="Selected entity"
+				placement={hudLayout.selectedEntity}
+				editable={hudMode === "layout"}
+				minWidth={CLIENT_UI_DEFAULTS.selectedEntity.minSize.width}
+				minHeight={CLIENT_UI_DEFAULTS.selectedEntity.minSize.height}
+				resizable={CLIENT_UI_DEFAULTS.selectedEntity.resizable}
+				contentHitTesting="descendants"
+				{viewport}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("selectedEntity", placement)}
+			>
+				<ClientSelectedEntityHud
+					{input}
+					{displayPlatform}
+					selectedGuid={selectedEntityGuid}
+					readCanCorpsePermission={() =>
+						readCanSetCorpsePermission() && selectedPlayer() !== null}
+					onCorpsePermission={(granted) => {
+						const target = selectedPlayer();
+						if (target !== null && readCanSetCorpsePermission())
+							onCorpsePermission(target.name, granted);
+					}}
+					readCanSplit={canSplitSelectedEntity}
+					readCanAddFriend={() => friendTarget() !== null}
+					readCanIgnoreAccount={() => ignoreTarget() !== null}
+					onAddFriend={addSelectedFriend}
+					onIgnoreAccount={ignoreSelectedAccount}
+					readCanSwear={() => swearTarget() !== null}
+					onSwear={() => {
+						const guid = swearTarget();
+						if (guid !== null)
+							void allegiance?.request({ kind: "swear", guid });
+					}}
+					readCanInvite={() => inviteTarget() !== null}
+					onInvite={() => {
+						const target = inviteTarget();
+						if (target !== null) party?.request({ kind: "invite", target });
+					}}
+					readSelectedDisplay={() => {
+						const display = readSelectedEntityDisplay();
+						return itemInteraction.kind === "acquiring" &&
+							selectedEntityGuid !== null
+							? { ...display, canInteract: true, interactionLabel: "Interact" }
+							: display;
+					}}
+					onInteract={onInteractEntity}
+					onExamine={onExamineEntity}
+					examinePending={objectInspection.kind === "pending" &&
+						objectInspection.guid === selectedEntityGuid}
+					onSplit={splitSelectedEntity}
+				/>
+			</ClientHudPanel>
+		{/if}
+		<div
+			class="emote-activation"
+			tabindex="-1"
+			use:keyboard.scope={{
+				transient: true,
+				activation: (event) => {
+					if (
+						event.repeat ||
+						!emotesEnabled ||
+						hudMode !== "runtime" ||
+						chatComposer.emotes === null ||
+						!clientInput.shortcut("openEmotes", event)
+					)
+						return false;
+					openEmotes(event);
+					return true;
+				},
+				keydown: () => {},
+			}}
+		></div>
+		{#if emoteWheel !== null && chatComposer.emotes !== null}
+			<ClientEmoteWheel
+				catalog={chatComposer.emotes}
+				recent={chatComposer.recentEmotes}
+				onClose={() => {
+					closeEmotes();
+				}}
+				onExecute={executeEmote}
+			/>
+		{/if}
+
+		<ClientShortcutDock
+			placement={hudLayout.shortcuts}
+			editable={hudMode === "layout"}
+			{viewport}
+			onPlacementChange={(placement) =>
+				changeHudPlacement("shortcuts", placement)}
+			{input}
+			{displayPlatform}
+			{combatMode}
+			{combatEnabled}
+			{onToggleCombat}
+			{shortcuts}
+			{activePanel}
+			onToggle={toggleSystemPanel}
+		/>
+		{#if worldContainer !== null && itemInteractions !== null}
+			{#key worldContainer}
+				<ClientWorldContainerWindow
+					model={worldContainer}
+					interactions={itemInteractions}
+					selectedGuid={selectedEntityGuid}
+					onSelectItem={(guid) => onSelectContentsItem(guid, "select")}
+					placement={hudLayout.worldContainer}
+					{viewport}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("worldContainer", placement)}
+				/>
+			{/key}
+		{/if}
+		{#if trade !== null}
+			{#key trade}
+				<ClientTradeWindow
+					inputSettings={input}
+					{displayPlatform}
+					model={trade}
+					selectedGuid={selectedEntityGuid}
+					placement={hudLayout.trade}
+					{viewport}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("trade", placement)}
+					onSelectItem={onSelectEntity}
+					{onExamineItem}
+				/>
+			{/key}
+		{/if}
+		{#if vendor !== null}
+			{#key vendor}
+				<ClientVendorWindow
+					inputSettings={input}
+					{displayPlatform}
+					model={vendor}
+					placement={hudLayout.vendor}
+					{viewport}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("vendor", placement)}
+					{onExamineItem}
+				/>
+			{/key}
+		{/if}
+		{#if houseCrystal !== null}
+			{#key houseCrystal}
+				<ClientHouseCrystalWindow
+					model={houseCrystal}
+					placement={hudLayout.houseCrystal}
+					{viewport}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("houseCrystal", placement)}
+					{onExamineItem}
+				/>
+			{/key}
+		{/if}
+		{#if objectInspection.kind === "ready"}
+			{#key objectInspection.guid}
+				<ClientInspectionWindow
+					{onSetWaypoint}
+					inspection={objectInspection.inspection}
+					nameColor={objectInspection.nameColor}
+					preview={objectInspection.preview}
+					{objectPreviewService}
+					{spells}
+					icons={spells?.icons ?? inventory?.icons ?? null}
+					placement={hudLayout.inspection}
+					{viewport}
+					previewHeight={inspectionPreviewHeight}
+					onClose={onCloseInspection}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("inspection", placement)}
+					onPreviewHeightChange={onInspectionPreviewHeightChange}
+				/>
+			{/key}
+		{/if}
+		{#if bookReader.kind !== "idle"}
+			{#key bookReader.revision}
+				<ClientBookWindow
+					{onSetWaypoint}
+					reader={bookReader}
+					placement={hudLayout.book}
+					{viewport}
+					onClose={onCloseBook}
+					onRetry={onRetryBook}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("book", placement)}
+				/>
+			{/key}
+		{/if}
+
+		{#if characterSheet !== null}
+			{#key characterSheet}
+				<ClientHudWindow
+					icon="training"
+					title="Character"
+					visible={activePanel === "characterSheet"}
+					placement={hudLayout.characterSheet}
+					minWidth={CLIENT_UI_DEFAULTS.characterSheet.minSize.width}
+					minHeight={CLIENT_UI_DEFAULTS.characterSheet.minSize.height}
+					{viewport}
+					onClose={() => (activePanel = null)}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("characterSheet", placement)}
+				>
+					<ClientCharacterSheetPanel
+						owner={characterSheet}
+						visible={activePanel === "characterSheet"}
+						{spells}
+						{enchantments}
+						castEnabled={combatEnabled && combatMode === "magic"}
+						{onCastSpell}
 					/>
 				</ClientHudWindow>
-			{/key}{/key}{/if}
+			{/key}
+		{/if}
 
-	{#if activePanel !== null && activePanel !== "world" && activePanel !== "social" && activePanel !== "journal" && activePanel !== "characterSheet"}
-		{@const panel = activePanel}
-		{#key panel}
-			<ClientHudWindow
-				icon={panel}
-				title={panel === "inventory"
-					? "Inventory"
-					: panel === "settings"
-						? "Settings"
-						: "Client diagnostics"}
-				placement={hudLayout[panel]}
-				minWidth={CLIENT_UI_DEFAULTS[panel].minSize.width}
-				minHeight={CLIENT_UI_DEFAULTS[panel].minSize.height}
-				{viewport}
-				onClose={() => (activePanel = null)}
-				onPlacementChange={(placement) => changeHudPlacement(panel, placement)}
-			>
-				{#if panel === "inventory"}
-					{#if inventory !== null && itemInteractions !== null}
-						{#key inventory}
-							<ClientInventoryPanel
-								onSaveLoadout={openLoadoutBuilder}
-								{input}
-								{displayPlatform}
-								interactions={itemInteractions}
-								{inventory}
-								selectedGuid={selectedEntityGuid}
-								onSelectItem={(guid) => onSelectContentsItem(guid, "toggle")}
-								requestedSplit={requestedInventorySplit}
-								{appearanceOptions}
-								{onAppearanceOptionChange}
-								onRequestedSplitConsumed={(request) => {
-									if (requestedInventorySplit === request)
-										requestedInventorySplit = null;
-								}}
-							/>
-						{/key}
+		{#if worldMapSource !== null}
+			{#key worldMapSource}
+				<ClientHudWindow
+					icon="world"
+					title="World"
+					visible={activePanel === "world"}
+					placement={hudLayout.world}
+					minWidth={CLIENT_UI_DEFAULTS.world.minSize.width}
+					minHeight={CLIENT_UI_DEFAULTS.world.minSize.height}
+					{viewport}
+					onClose={() => (activePanel = null)}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("world", placement)}
+				>
+					<ClientWorldPanel
+						{contracts}
+						source={worldMapSource}
+						{characterGuid}
+						{housing}
+						{housingManagement}
+						{onRefreshHousing}
+						{onSearchHousing}
+						{canTeleportFromMap}
+						{onSetWaypoint}
+						{recallDestinations}
+						{onRecall}
+						{onTeleportToMapPosition}
+						visible={activePanel === "world"}
+						readFrame={readMinimapFrame}
+					/>
+				</ClientHudWindow>
+			{/key}
+		{/if}
+
+		{#if party !== null && friends !== null && squelch !== null && allegiance !== null}
+			{#key party}
+				<ClientHudWindow
+					icon="party"
+					title="Social"
+					visible={activePanel === "social"}
+					placement={hudLayout.social}
+					minWidth={CLIENT_UI_DEFAULTS.social.minSize.width}
+					minHeight={CLIENT_UI_DEFAULTS.social.minSize.height}
+					{viewport}
+					onClose={() => (activePanel = null)}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("social", placement)}
+				>
+					<ClientSocialPanel
+						owner={party}
+						onSelectEntity={onSelectPartyMember}
+						{friends}
+						{squelch}
+						{allegiance}
+						visible={activePanel === "social"}
+					/>
+				</ClientHudWindow>
+			{/key}
+		{/if}
+
+		{#if contracts !== null}
+			{#key contracts}
+				<ClientHudWindow
+					icon="journal"
+					title="Journal"
+					visible={activePanel === "journal"}
+					placement={hudLayout.journal}
+					minWidth={CLIENT_UI_DEFAULTS.journal.minSize.width}
+					minHeight={CLIENT_UI_DEFAULTS.journal.minSize.height}
+					{viewport}
+					onClose={() => (activePanel = null)}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("journal", placement)}
+				>
+					<ClientJournalPanel
+						{onSetWaypoint}
+						owner={contracts}
+						visible={activePanel === "journal"}
+						onNotice={onSocialNotice}
+					/>
+				</ClientHudWindow>
+			{/key}
+		{/if}
+
+		{#if nearby !== null}{#key nearby}{#key characterGuid}
+					<ClientHudWindow
+						icon="nearby"
+						title="Nearby"
+						visible={nearbyOpen}
+						placement={hudLayout.nearby}
+						minWidth={CLIENT_UI_DEFAULTS.nearby.minSize.width}
+						minHeight={CLIENT_UI_DEFAULTS.nearby.minSize.height}
+						{viewport}
+						onClose={() => (nearbyOpen = false)}
+						onPlacementChange={(placement) =>
+							changeHudPlacement("nearby", placement)}
+					>
+						<ClientNearbyPanel
+							owner={nearby}
+							visible={nearbyOpen}
+							selectedGuid={selectedEntityGuid}
+							onSelectEntity={onSelectNearbyEntity}
+							{onExamineEntity}
+							{onSetWaypoint}
+						/>
+					</ClientHudWindow>
+				{/key}{/key}{/if}
+
+		{#if activePanel !== null && activePanel !== "world" && activePanel !== "social" && activePanel !== "journal" && activePanel !== "characterSheet"}
+			{@const panel = activePanel}
+			{#key panel}
+				<ClientHudWindow
+					icon={panel}
+					title={panel === "inventory"
+						? "Inventory"
+						: panel === "settings"
+							? "Settings"
+							: "Client diagnostics"}
+					placement={hudLayout[panel]}
+					minWidth={CLIENT_UI_DEFAULTS[panel].minSize.width}
+					minHeight={CLIENT_UI_DEFAULTS[panel].minSize.height}
+					{viewport}
+					onClose={() => (activePanel = null)}
+					onPlacementChange={(placement) =>
+						changeHudPlacement(panel, placement)}
+				>
+					{#if panel === "inventory"}
+						{#if inventory !== null && itemInteractions !== null}
+							{#key inventory}
+								<ClientInventoryPanel
+									onSaveLoadout={openLoadoutBuilder}
+									{input}
+									{displayPlatform}
+									interactions={itemInteractions}
+									{inventory}
+									selectedGuid={selectedEntityGuid}
+									onSelectItem={(guid) => onSelectContentsItem(guid, "toggle")}
+									requestedSplit={requestedInventorySplit}
+									{appearanceOptions}
+									{onAppearanceOptionChange}
+									onRequestedSplitConsumed={(request) => {
+										if (requestedInventorySplit === request)
+											requestedInventorySplit = null;
+									}}
+								/>
+							{/key}
+						{/if}
+					{:else if panel === "settings"}
+						<ClientSettingsPanel
+							{displayPlatform}
+							{audio}
+							{onAudioChange}
+							{graphics}
+							{ui}
+							{input}
+							{textureFilteringCapabilities}
+							selectedTab={settingsTab}
+							onSelectTab={(tab) => (settingsTab = tab)}
+							{onGraphicsChange}
+							{onUiChange}
+							{clockFormat}
+							{environmentOverrides}
+							{weatherPresets}
+							{environmentIssue}
+							{onClockFormatChange}
+							{onEnvironmentOverridesChange}
+							{onInputChange}
+							canResetHudPlacements={resetActionBars !== null}
+							onResetHudPlacements={resetHudPlacements}
+						/>
+					{:else}
+						<ClientDebugPanel
+							{entityMetadata}
+							{readDiagnostics}
+							{readSelectedEntity}
+							{entityCollisionDisabled}
+							{onEntityCollisionDisabledChange}
+							{unrestrictedUse}
+							{onUnrestrictedUseChange}
+							{showRetailHiddenGeometry}
+							{onShowRetailHiddenGeometryChange}
+						/>
 					{/if}
-				{:else if panel === "settings"}
-					<ClientSettingsPanel
-						{displayPlatform}
-						{audio}
-						{onAudioChange}
-						{graphics}
-						{ui}
-						{input}
-						{textureFilteringCapabilities}
-						selectedTab={settingsTab}
-						onSelectTab={(tab) => (settingsTab = tab)}
-						{onGraphicsChange}
-						{onUiChange}
-						{clockFormat}
-						{environmentOverrides}
-						{weatherPresets}
-						{environmentIssue}
-						{onClockFormatChange}
-						{onEnvironmentOverridesChange}
-						{onInputChange}
-						canResetHudPlacements={resetActionBars !== null}
-						onResetHudPlacements={resetHudPlacements}
-					/>
-				{:else}
-					<ClientDebugPanel
-						{entityMetadata}
-						{readDiagnostics}
-						{readSelectedEntity}
-						{entityCollisionDisabled}
-						{onEntityCollisionDisabledChange}
-						{unrestrictedUse}
-						{onUnrestrictedUseChange}
-						{showRetailHiddenGeometry}
-						{onShowRetailHiddenGeometryChange}
-					/>
-				{/if}
+				</ClientHudWindow>
+			{/key}
+		{/if}
+		{#if enchantmentsOpen}
+			<ClientHudWindow
+				icon="buffed"
+				title="Enchantments"
+				placement={hudLayout.enchantments}
+				minWidth={CLIENT_UI_DEFAULTS.enchantments.minSize.width}
+				minHeight={CLIENT_UI_DEFAULTS.enchantments.minSize.height}
+				{viewport}
+				focusRevision={enchantmentLaunch?.revision ?? 0}
+				onClose={() => (enchantmentsOpen = false)}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("enchantments", placement)}
+			>
+				<ClientEnchantmentsPanel
+					{enchantments}
+					{spells}
+					launch={enchantmentLaunch}
+				/>
 			</ClientHudWindow>
-		{/key}
-	{/if}
-	{#if enchantmentsOpen}
-		<ClientHudWindow
-			icon="buffed"
-			title="Enchantments"
-			placement={hudLayout.enchantments}
-			minWidth={CLIENT_UI_DEFAULTS.enchantments.minSize.width}
-			minHeight={CLIENT_UI_DEFAULTS.enchantments.minSize.height}
-			{viewport}
-			focusRevision={enchantmentLaunch?.revision ?? 0}
-			onClose={() => (enchantmentsOpen = false)}
-			onPlacementChange={(placement) =>
-				changeHudPlacement("enchantments", placement)}
-		>
-			<ClientEnchantmentsPanel
-				{enchantments}
-				{spells}
-				launch={enchantmentLaunch}
-			/>
-		</ClientHudWindow>
-	{/if}
+		{/if}
+	</div>
 </main>
 
 <style>
 	@layer components {
+		:global(.client-canvas[data-combining="neutral"]) {
+			cursor:
+				url("./combine-cursor.svg") 12 12,
+				crosshair;
+		}
+		:global(.client-canvas[data-combining="eligible"]) {
+			cursor:
+				url("./combine-cursor-eligible.svg") 12 12,
+				crosshair;
+		}
+		:global(.client-canvas[data-combining="ineligible"]) {
+			cursor:
+				url("./combine-cursor-ineligible.svg") 12 12,
+				crosshair;
+		}
 		.combining {
 			--combine-cursor: url("./combine-cursor.svg") 12 12, crosshair;
 		}
@@ -1700,7 +1739,6 @@
 		.combining[data-combine-eligibility="ineligible"] {
 			--combine-cursor: url("./combine-cursor-ineligible.svg") 12 12, crosshair;
 		}
-		.client-world.combining :global(.client-canvas),
 		.client-world.combining :global(.item-grid-cell) {
 			cursor: var(--combine-cursor);
 		}
@@ -1710,28 +1748,11 @@
 			position: fixed;
 			inset: 0;
 			overflow: hidden;
-			background: var(--ui-color-well);
+			pointer-events: none;
 		}
-
-		.client-canvas {
-			display: block;
-			width: 100%;
-			height: 100%;
-			min-height: 320px;
-			cursor: grab;
-			outline: none;
-			touch-action: none;
-		}
-
-		.client-canvas.client-canvas-entity-hovered {
-			cursor: pointer;
-		}
-
-		.client-canvas:active {
-			cursor: grabbing;
-		}
-		.client-canvas:global([data-precise-jump]) {
-			cursor: crosshair;
+		.gameplay-controls {
+			display: contents;
+			pointer-events: auto;
 		}
 
 		.client-ui-lock {

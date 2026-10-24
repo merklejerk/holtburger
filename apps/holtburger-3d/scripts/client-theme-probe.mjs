@@ -199,10 +199,26 @@ export async function probeClientTheme(
 	await client.send("Page.enable");
 	await client.send("Page.addScriptToEvaluateOnNewDocument", {
 		source: `
+		// The early renderer now observes the same deliberately refused host as session startup.
+		// Retain that exact injected fault as evidence; all unexpected console errors still propagate.
+		window.__THEME_EXPECTED_PRESENTATION_ERRORS__ = [];
+		const reportConsoleError = console.error.bind(console);
+		console.error = (...args) => {
+			if (args.length === 1 && args[0] instanceof Error && args[0].message === "Theme harness: no live connection") {
+				window.__THEME_EXPECTED_PRESENTATION_ERRORS__.push(args[0].message);
+				return;
+			}
+			reportConsoleError(...args);
+		};
 		window.holtburgerHost = {
 			listen: async () => 1,
 			unlisten: async () => {},
 			invoke: async () => { throw new Error("Theme harness: no live connection"); }
+		};
+		window.holtburgerVisualCache = {
+			read: async () => ({ kind: "missing" }),
+			stage: async () => {},
+			listenFailures: () => () => {}
 		};
 		window.holtburgerSettings = {
 			loadUser: async () => ({ sections: {}, hudPlacements: {}, unavailable: [] }),
@@ -229,10 +245,18 @@ export async function probeClientTheme(
 			"Client startup failure did not reach its themed lifecycle screen.",
 		);
 	});
+	const expectedPresentationErrors = await read(
+		() => window.__THEME_EXPECTED_PRESENTATION_ERRORS__,
+	);
+	if (expectedPresentationErrors.length !== 1)
+		throw new Error(
+			`Expected one deliberately refused presentation startup: ${JSON.stringify(expectedPresentationErrors)}`,
+		);
 	await capture("startup");
 	return {
 		...application,
 		startup,
+		expectedPresentationErrors,
 		windowGesture: { before: windowBefore, after: windowAfter },
 	};
 }

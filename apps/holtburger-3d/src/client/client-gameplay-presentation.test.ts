@@ -4,12 +4,10 @@ import {
 	predictedJumpFixture,
 } from "./client-precise-jump-fixtures";
 import { emptyHousing } from "./client-housing-contract";
-import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
 import {
 	entityFacts,
 	playerEntitySnapshot,
 } from "./client-entity-mirror.test-support";
-import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import { describe, expect, it, vi } from "vitest";
 
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
@@ -32,7 +30,7 @@ import type {
 	ClientDynamicScriptCue,
 	ClientDynamicSoundCue,
 } from "./client-host-contract";
-import type { ClientPresentationRuntime } from "./client-presentation-session";
+import type { ClientGameplayRuntime } from "./client-gameplay-presentation";
 import type { SceneInterestRequest } from "../lib/game/runtime/scene-interest";
 import type {
 	SceneActivationReceipt,
@@ -40,7 +38,7 @@ import type {
 	SceneActivationStatus,
 } from "../lib/game/runtime/scene-availability";
 import type { DynamicEntityRealizationDisposition } from "../lib/game/runtime/dynamic-entity-presentation";
-import { ClientPresentationSession } from "./client-presentation-session";
+import { ClientGameplayPresentation } from "./client-gameplay-presentation";
 import { formatClientLocation } from "./client-location-command";
 import {
 	clientWeatherPresets,
@@ -70,19 +68,50 @@ import type {
 import type { PrimaryCameraView } from "../lib/game/runtime/types";
 import { projectClientTargetIndicator } from "./client-target-indicator";
 
-describe("ClientPresentationSession", () => {
+describe("ClientGameplayPresentation", () => {
+	it("invalidates a delayed portal profile before another driver can borrow the runtime", async () => {
+		const state = {
+			...currentState(0x01010001),
+			lifecycle: portalLifecycle(1, "initial-entry"),
+		};
+		const lifecycle = new ClientLifecycleSession(
+			new FakeClientTransport(state),
+		);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const resources = fakeOwner(runtime, activeRegion());
+		const profile =
+			controlledPromise<
+				Awaited<ReturnType<LandblockProfileSource["loadLandblockProfile"]>>
+			>();
+		resources.profileSource = { loadLandblockProfile: () => profile.promise };
+		const presentation = new ClientGameplayPresentation({
+			canvas: fakeCanvas(),
+			session: lifecycle,
+			resources,
+		});
+		await presentation.start();
+		presentation.frame(1000);
+		await presentation.destroy();
+		profile.resolve({ landblockId: "0x0101ffff", sceneClass: "dungeon-only" });
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(runtime.sceneRequests).toHaveLength(0);
+		expect(resources.destroyed).toBe(false);
+		lifecycle.stop();
+	});
+
 	it("binds scene demand when the runtime starts and unbinds it on teardown", async () => {
 		const transport = new FakeClientTransport(currentState(0x0101_0001));
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
 		const bindMembership = vi.fn();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
 			onSceneMembership: bindMembership,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 		try {
 			await presentation.start();
@@ -104,15 +133,10 @@ describe("ClientPresentationSession", () => {
 		const region = clientEnvironmentFixture();
 		const preset = clientWeatherPresets(region)[0];
 		if (preset === undefined) throw new Error("Fixture preset missing.");
-		let created = 0;
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => {
-				created += 1;
-				return fakeOwner(runtime, region);
-			},
+			resources: fakeOwner(runtime, region),
 		});
 		try {
 			await lifecycle.start();
@@ -138,7 +162,6 @@ describe("ClientPresentationSession", () => {
 			expect(
 				runtime.environments.at(-1)?.sky?.objects[0]?.orientation,
 			).not.toEqual(fixed?.sky?.objects[0]?.orientation);
-			expect(created).toBe(1);
 		} finally {
 			await presentation.destroy();
 			lifecycle.stop();
@@ -153,11 +176,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 		try {
 			await presentation.start();
@@ -194,59 +216,16 @@ describe("ClientPresentationSession", () => {
 		}
 	});
 
-	it("expires construction-stage sounds while retaining fresh repeated cues", async () => {
-		const playerGuid = 0x0101_0001;
-		const transport = new FakeClientTransport(currentState(playerGuid));
-		const lifecycle = new ClientLifecycleSession(transport);
-		await lifecycle.start();
-		const runtime = new FakePresentationRuntime();
-		const owner = fakeOwner(runtime, activeRegion());
-		const ready = controlledPromise<typeof owner>();
-		const clock = vi.spyOn(performance, "now").mockReturnValue(0);
-		const presentation = new ClientPresentationSession({
-			canvas: fakeCanvas(),
-			hostTransport: {} as never,
-			session: lifecycle,
-			ownerFactory: () => ready.promise,
-		});
-		try {
-			const started = presentation.start();
-			const cue = {
-				guid: playerGuid,
-				generation: view(playerGuid).generation,
-				worldGeneration: 1,
-				soundId: 0x94,
-				volume: 0.8,
-			};
-			transport.emit("client-dynamic-sound-cue", cue);
-			clock.mockReturnValue(
-				SHARED_FRONTEND_TUNING.audio.maximumWarmupReplaySeconds * 2_000,
-			);
-			transport.emit("client-dynamic-sound-cue", cue);
-			transport.emit("client-dynamic-sound-cue", cue);
-			expect(runtime.dynamicSoundCues).toHaveLength(0);
-			ready.resolve(owner);
-			await started;
-			expect(runtime.dynamicSoundCues).toEqual([cue, cue]);
-		} finally {
-			ready.resolve(owner);
-			await presentation.destroy();
-			lifecycle.stop();
-			clock.mockRestore();
-		}
-	});
-
 	it("delivers sound cues imperatively and rejects a prior world's packets", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport(currentState(playerGuid));
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 		await presentation.start();
 		const cue = {
@@ -277,11 +256,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 		await presentation.start();
 
@@ -314,11 +292,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 
 		await presentation.start();
@@ -343,11 +320,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 
 		await presentation.start();
@@ -377,11 +353,10 @@ describe("ClientPresentationSession", () => {
 		const runtime = new FakePresentationRuntime();
 		runtime.dynamicOriginEnvCellId = "0x01000100";
 		runtime.envCellScopeAvailable = false;
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 
 		await presentation.start();
@@ -418,107 +393,6 @@ describe("ClientPresentationSession", () => {
 		await presentation.destroy();
 	});
 
-	it("retains frame settings across owner construction and applies later changes", async () => {
-		const playerGuid = 0x0101_0001;
-		const lifecycle = new ClientLifecycleSession(
-			new FakeClientTransport(currentState(playerGuid)),
-		);
-		await lifecycle.start();
-		const runtime = new FakePresentationRuntime();
-		const hiddenSettings = {
-			...CLIENT_TUNING.frameSettings,
-			showRetailHiddenGeometry: false,
-		};
-		const visibleSettings = {
-			...CLIENT_TUNING.frameSettings,
-			showRetailHiddenGeometry: true,
-		};
-		let constructedWith: Parameters<
-			ClientPresentationRuntime["setFrameSettings"]
-		>[0] = hiddenSettings;
-		const presentation = new ClientPresentationSession({
-			canvas: fakeCanvas(),
-			hostTransport: {} as never,
-			session: lifecycle,
-			ownerFactory: async (dependencies) => {
-				constructedWith = dependencies.frameSettings;
-				return fakeOwner(runtime, activeRegion());
-			},
-		});
-		presentation.setFrameSettings(visibleSettings);
-
-		await presentation.start();
-		expect(constructedWith.showRetailHiddenGeometry).toBe(true);
-		presentation.setFrameSettings(hiddenSettings);
-		expect(runtime.frameSettings.at(-1)?.showRetailHiddenGeometry).toBe(false);
-		await presentation.destroy();
-	});
-
-	it("applies the latest pending mix before playback and retains levels through mute and replacement", async () => {
-		const lifecycle = new ClientLifecycleSession(
-			new FakeClientTransport(currentState(0x0101_0001)),
-		);
-		await lifecycle.start();
-		const runtime = new FakePresentationRuntime();
-		const owner = fakeOwner(runtime, activeRegion());
-		let releaseGate: () => void = () => {
-			throw new Error("Construction gate not installed");
-		};
-		let signalEntered: () => void = () => {
-			throw new Error("Construction signal not installed");
-		};
-		const gate = new Promise<void>((resolve) => {
-			releaseGate = resolve;
-		});
-		const entered = new Promise<void>((resolve) => {
-			signalEntered = resolve;
-		});
-		const presentation = new ClientPresentationSession({
-			canvas: fakeCanvas(),
-			hostTransport: {} as never,
-			session: lifecycle,
-			ownerFactory: async () => {
-				signalEntered();
-				await gate;
-				return owner;
-			},
-		});
-		const mix = {
-			...CLIENT_AUDIO_DEFAULTS,
-			masterVolume: 0.4,
-			effectVolume: 0.7,
-			ambientVolume: 0.2,
-		};
-		presentation.setAudioSettings(mix);
-		const starting = presentation.start();
-		await entered;
-		presentation.setAudioSettings({ ...mix, muted: true });
-		releaseGate();
-		await starting;
-		expect(owner.outputVolumes).toEqual([0]);
-		expect(runtime.audioSettings.at(-1)).toEqual({
-			effectVolume: mix.effectVolume,
-			ambientVolume: mix.ambientVolume,
-		});
-		presentation.setAudioSettings(mix);
-		expect(owner.outputVolumes.at(-1)).toBe(mix.masterVolume);
-		await presentation.destroy();
-		const replacementOwner = fakeOwner(
-			new FakePresentationRuntime(),
-			activeRegion(),
-		);
-		const replacement = new ClientPresentationSession({
-			canvas: fakeCanvas(),
-			hostTransport: {} as never,
-			session: lifecycle,
-			ownerFactory: async () => replacementOwner,
-		});
-		replacement.setAudioSettings({ ...mix, muted: true });
-		await replacement.start();
-		expect(replacementOwner.outputVolumes).toEqual([0]);
-		await replacement.destroy();
-	});
-
 	it("reissues scene demand when view distance changes without moving", async () => {
 		const playerGuid = 0x0101_0001;
 		const lifecycle = new ClientLifecycleSession(
@@ -526,11 +400,10 @@ describe("ClientPresentationSession", () => {
 		);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 		try {
 			await presentation.start();
@@ -562,11 +435,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 		try {
 			await presentation.start();
@@ -594,11 +466,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 
 		await presentation.start();
@@ -661,11 +532,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 
 		await presentation.start();
@@ -693,11 +563,10 @@ describe("ClientPresentationSession", () => {
 		);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 		try {
 			presentation.setHoveredEntityGuid(7);
@@ -719,11 +588,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 		await presentation.start();
 		expect(presentation.frame(1_000).rendered).toBe(true);
@@ -787,11 +655,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 		await presentation.start();
 
@@ -901,11 +768,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 
 		await presentation.start();
@@ -939,11 +805,10 @@ describe("ClientPresentationSession", () => {
 		runtime.dynamicOriginEnvCellId = "0x01000100";
 		runtime.envCellScopeAvailable = false;
 		const releaseSceneActivation = runtime.holdNextSceneActivation();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 
 		await presentation.start();
@@ -1001,11 +866,10 @@ describe("ClientPresentationSession", () => {
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
 		runtime.realizationDisposition = "deferred";
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 
 		await presentation.start();
@@ -1075,11 +939,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 
 		await presentation.start();
@@ -1123,11 +986,10 @@ describe("ClientPresentationSession", () => {
 			const lifecycle = new ClientLifecycleSession(transport);
 			await lifecycle.start();
 			const runtime = new FakePresentationRuntime();
-			const presentation = new ClientPresentationSession({
+			const presentation = new ClientGameplayPresentation({
 				canvas: fakeCanvas(),
-				hostTransport: {} as never,
 				session: lifecycle,
-				ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+				resources: fakeOwner(runtime, activeRegion()),
 			});
 
 			await presentation.start();
@@ -1162,11 +1024,10 @@ describe("ClientPresentationSession", () => {
 			const lifecycle = new ClientLifecycleSession(transport);
 			await lifecycle.start();
 			const runtime = new FakePresentationRuntime();
-			const presentation = new ClientPresentationSession({
+			const presentation = new ClientGameplayPresentation({
 				canvas: fakeCanvas(),
-				hostTransport: {} as never,
 				session: lifecycle,
-				ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+				resources: fakeOwner(runtime, activeRegion()),
 			});
 			await presentation.start();
 			try {
@@ -1221,11 +1082,10 @@ describe("ClientPresentationSession", () => {
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
 		const owner = fakeOwner(runtime, activeRegion());
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => owner,
+			resources: owner,
 		});
 
 		await presentation.start();
@@ -1274,7 +1134,7 @@ describe("ClientPresentationSession", () => {
 		});
 
 		await presentation.destroy();
-		expect(owner.destroyed).toBe(true);
+		expect(owner.destroyed).toBe(false);
 	});
 
 	it("preserves accepted upserts without replacing the complete mirror", async () => {
@@ -1283,11 +1143,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 
 		await presentation.start();
@@ -1314,11 +1173,10 @@ describe("ClientPresentationSession", () => {
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
 		const releaseRealization = runtime.holdNextUpsertRealization();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 		await presentation.start();
 		const now = vi.spyOn(performance, "now");
@@ -1359,12 +1217,11 @@ describe("ClientPresentationSession", () => {
 		const failure = new Error("visual realization failed");
 		runtime.failNextUpsertRealization(failure);
 		const onError = vi.fn();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
 			onError,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 		await presentation.start();
 
@@ -1395,11 +1252,10 @@ describe("ClientPresentationSession", () => {
 		const lifecycle = new ClientLifecycleSession(transport);
 		await lifecycle.start();
 		const runtime = new FakePresentationRuntime();
-		const presentation = new ClientPresentationSession({
+		const presentation = new ClientGameplayPresentation({
 			canvas: fakeCanvas(),
-			hostTransport: {} as never,
 			session: lifecycle,
-			ownerFactory: async () => fakeOwner(runtime, activeRegion()),
+			resources: fakeOwner(runtime, activeRegion()),
 		});
 		await presentation.start();
 		presentation.frame(1_000);
@@ -1414,55 +1270,6 @@ describe("ClientPresentationSession", () => {
 		expect(runtime.advances).toHaveLength(requestsBefore);
 		expect(presentation.frame(1_016).status.kind).toBe("loading-player");
 		await presentation.destroy();
-	});
-
-	it("cancels presentation construction during startup", async () => {
-		const transport = new FakeClientTransport(currentState(0x0100_0001));
-		const lifecycle = new ClientLifecycleSession(transport);
-		await lifecycle.start();
-		let observedSignal: AbortSignal | undefined;
-		const presentation = new ClientPresentationSession({
-			canvas: fakeCanvas(),
-			hostTransport: {} as never,
-			session: lifecycle,
-			ownerFactory: async ({ signal }) => {
-				observedSignal = signal;
-				return await new Promise<never>((_resolve, reject) => {
-					signal?.addEventListener("abort", () =>
-						reject(new DOMException("cancelled", "AbortError")),
-					);
-				});
-			},
-		});
-		const started = presentation.start();
-		const retirement = presentation.destroy();
-		expect(presentation.destroy()).toBe(retirement);
-		await retirement;
-		await expect(started).resolves.toBeUndefined();
-		expect(observedSignal?.aborted).toBe(true);
-	});
-
-	it("reports owner release failures after marking the session stopped", async () => {
-		const transport = new FakeClientTransport(currentState(0x0100_0001));
-		const lifecycle = new ClientLifecycleSession(transport);
-		await lifecycle.start();
-		const runtime = new FakePresentationRuntime();
-		const owner = fakeOwner(runtime, activeRegion());
-		owner.destroy = async () => {
-			throw new Error("owner release failed");
-		};
-		const presentation = new ClientPresentationSession({
-			canvas: fakeCanvas(),
-			hostTransport: {} as never,
-			session: lifecycle,
-			ownerFactory: async () => owner,
-		});
-
-		await presentation.start();
-		await expect(presentation.destroy()).rejects.toMatchObject({
-			message: "Client presentation shutdown failed for: presentation-owner.",
-		});
-		expect(presentation.status().kind).toBe("stopped");
 	});
 });
 
@@ -1630,14 +1437,11 @@ function fallbackCameraTick(identity: {
 	};
 }
 
-class FakePresentationRuntime implements ClientPresentationRuntime {
+class FakePresentationRuntime implements ClientGameplayRuntime {
 	readonly sceneMembership = new RenderSceneInterestController();
 	sceneInterestMembership() {
 		return this.sceneMembership;
 	}
-	audioSettings: Parameters<
-		ClientPresentationRuntime["setAudioSettings"]
-	>[0][] = [];
 	readonly mapGeometry = { revision: 0 } as MapTerrainSource["mapGeometry"];
 	readonly terrainInstallationRevision = 0;
 	readonly dynamicEntityPlacementRevision = 0;
@@ -1662,9 +1466,6 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	activationFailure: string | null = null;
 	worldIndicators: Array<WorldIndicatorInput | null> = [];
 	completedActivations: number[] = [];
-	frameSettings: Parameters<
-		ClientPresentationRuntime["setFrameSettings"]
-	>[0][] = [];
 	realizationDisposition: DynamicEntityRealizationDisposition = "installed";
 	dynamicOriginEnvCellId: string | null = null;
 	selectedFrame: SelectedDynamicEntityFrame | null = null;
@@ -1702,17 +1503,6 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		this.#nextUpsertRealization = { kind: "failure", error };
 	}
 
-	setAudioSettings(
-		settings: Parameters<ClientPresentationRuntime["setAudioSettings"]>[0],
-	): void {
-		this.audioSettings.push(settings);
-	}
-	setFrameSettings(
-		settings: Parameters<ClientPresentationRuntime["setFrameSettings"]>[0],
-	): void {
-		this.frameSettings.push(settings);
-	}
-
 	setDynamicEntityNameplateDecoration(
 		guid: number,
 		decoration: Pick<NameplateContent, "indicators" | "strikeThrough">,
@@ -1724,7 +1514,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 
 	async replaceDynamicEntitySnapshot(
 		entities: readonly DynamicEntityView[],
-	): ReturnType<ClientPresentationRuntime["replaceDynamicEntitySnapshot"]> {
+	): ReturnType<ClientGameplayRuntime["replaceDynamicEntitySnapshot"]> {
 		this.snapshotReplacements.push([...entities]);
 		this.#desired.clear();
 		for (const entity of entities)
@@ -1739,7 +1529,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 
 	async upsertDynamicEntity(
 		entity: DynamicEntityView,
-	): ReturnType<ClientPresentationRuntime["upsertDynamicEntity"]> {
+	): ReturnType<ClientGameplayRuntime["upsertDynamicEntity"]> {
 		this.upserted.push(entity);
 		this.#desired.set(entity.identity.guid, entity);
 		const outcome = this.#nextUpsertRealization;
@@ -1767,7 +1557,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	}
 
 	async reevaluateDynamicEntityEligibility(): ReturnType<
-		ClientPresentationRuntime["reevaluateDynamicEntityEligibility"]
+		ClientGameplayRuntime["reevaluateDynamicEntityEligibility"]
 	> {
 		this.eligibilityReevaluationCount += 1;
 		return new Map(
@@ -1901,7 +1691,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	}
 
 	dynamicEntityOrigin(): ReturnType<
-		ClientPresentationRuntime["dynamicEntityOrigin"]
+		ClientGameplayRuntime["dynamicEntityOrigin"]
 	> {
 		if (this.realizationDisposition === "deferred") return null;
 		return {
@@ -1948,7 +1738,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 	}
 
 	readonly combatOutcomes: Parameters<
-		ClientPresentationRuntime["acceptCombatOutcome"]
+		ClientGameplayRuntime["acceptCombatOutcome"]
 	>[] = [];
 	combatClearCount = 0;
 	readonly combatAdvanceTimes: number[] = [];
@@ -1956,7 +1746,7 @@ class FakePresentationRuntime implements ClientPresentationRuntime {
 		this.combatAdvanceTimes.push(nowMs);
 	}
 	acceptCombatOutcome(
-		...args: Parameters<ClientPresentationRuntime["acceptCombatOutcome"]>
+		...args: Parameters<ClientGameplayRuntime["acceptCombatOutcome"]>
 	): void {
 		this.combatOutcomes.push(args);
 	}
@@ -1983,8 +1773,6 @@ function fakeOwner(
 	activeRegion: ActiveRegionSource;
 	profileSource: LandblockProfileSource;
 	runtime: FakePresentationRuntime;
-	outputVolumes: number[];
-	setOutputVolume(volume: number): void;
 	destroyed: boolean;
 	destroy(): Promise<void>;
 } {
@@ -1997,10 +1785,6 @@ function fakeOwner(
 			}),
 		},
 		runtime,
-		outputVolumes: [] as number[],
-		setOutputVolume(volume: number) {
-			this.outputVolumes.push(volume);
-		},
 		destroyed: false,
 		async destroy() {
 			this.destroyed = true;

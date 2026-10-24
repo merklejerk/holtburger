@@ -74,10 +74,10 @@ export async function probeLoadouts(client, evaluateExpression) {
 		);
 		assert.notEqual(initialIcon, "⭐", "New draft reused a saved loadout icon");
 		const originalDragGap = await read(
-			`document.querySelector('.client-world').style.getPropertyValue('--ui-drag-ghost-offset')`,
+			`document.querySelector('.harness-appearance').style.getPropertyValue('--ui-drag-ghost-offset')`,
 		);
 		await read(
-			`document.querySelector('.client-world').style.setProperty('--ui-drag-ghost-offset', '1.25rem')`,
+			`document.querySelector('.harness-appearance').style.setProperty('--ui-drag-ghost-offset', '1.25rem')`,
 		);
 		try {
 			for (const [source, visual] of [
@@ -126,7 +126,7 @@ export async function probeLoadouts(client, evaluateExpression) {
 			}
 		} finally {
 			await read(
-				`document.querySelector('.client-world').style.setProperty('--ui-drag-ghost-offset', ${JSON.stringify(originalDragGap)})`,
+				`document.querySelector('.harness-appearance').style.setProperty('--ui-drag-ghost-offset', ${JSON.stringify(originalDragGap)})`,
 			);
 		}
 		const inspection = `${api}.objectInspectionProbe()`;

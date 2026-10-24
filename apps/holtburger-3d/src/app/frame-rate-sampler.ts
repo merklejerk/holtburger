@@ -93,7 +93,9 @@ export function createFrameRateSampler(emaWindowMs: number): FrameRateSampler {
 				previousSample !== null &&
 				animationFrameTimeMs <= previousSample.animationFrameTimeMs
 			) {
-				throw new Error("Animation-frame timestamps must increase.");
+				throw new Error(
+					`Animation-frame timestamps must increase. Previous=${previousSample.animationFrameTimeMs}, current=${animationFrameTimeMs}, start=${startedAtMs}.`,
+				);
 			}
 			if (
 				previousSample !== null &&

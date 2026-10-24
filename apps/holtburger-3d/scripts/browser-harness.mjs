@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { probeClientPresentation } from "./client-presentation-probe.mjs";
 import { probeClientMouseMovement } from "./client-mouse-movement-probe.mjs";
 import { probeSpellBar } from "./client-spell-bar-probe.mjs";
 import { probeClientWaypoint } from "./client-waypoint-probe.mjs";
@@ -115,7 +116,14 @@ try {
 		}
 	}
 	let report;
-	if (options.clientMouseMovement) {
+	if (options.clientPresentation) {
+		report = {
+			suite: "client-presentation",
+			passed: true,
+			evidence: result.clientPresentation,
+			browserErrors,
+		};
+	} else if (options.clientMouseMovement) {
 		report = {
 			suite: "client-mouse-movement",
 			evidence: result.clientMouseMovement,
@@ -603,6 +611,7 @@ function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		pregamePreview: false,
+		clientPresentation: false,
 		worldMap: false,
 		clientWorldMap: false,
 		clientWaypoint: false,
@@ -771,6 +780,9 @@ function parseArgs(args) {
 			case "--client-connection":
 				parsed.clientHud = true;
 				parsed.clientConnection = true;
+				break;
+			case "--client-presentation":
+				parsed.clientPresentation = true;
 				break;
 			case "--pregame-preview":
 				parsed.pregamePreview = true;
@@ -1897,6 +1909,7 @@ Options:
                         Print only workload identity, particle/SAO metrics, timings, and errors.
   --nameplate-report-only
                         Print only renderer identity, errors, profiling, and nameplate evidence.
+  --client-presentation Verify actual client selection/creator/gameplay/return on one world context.
   --pregame-preview    Exercise static asset ownership and direct preview draw before world startup.
   --object-preview-report-only
                         Print only renderer identity, errors, and object-preview evidence.
@@ -5205,7 +5218,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const terrainGlTrace = options.traceTerrainGl ? "&traceTerrainGl=true" : "";
 	const worldMarker =
 		options.worldMarker === null ? "" : `&worldMarker=${options.worldMarker}`;
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}${options.worldMap ? "&world-map=1" : ""}${options.pregamePreview ? "&pregame-preview=1" : ""}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}${options.worldMap ? "&world-map=1" : ""}${options.pregamePreview ? "&pregame-preview=1" : ""}${options.clientPresentation ? "&client-presentation=1&presentation-gates=1" : ""}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -5259,8 +5272,27 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			});
 		});
 		await client.send("Runtime.enable");
+		if (options.clientPresentation) {
+			const clientPresentation = await probeClientPresentation(
+				client,
+				evaluateExpression,
+				consoleMessages,
+			);
+			return {
+				clientPresentation,
+				consoleMessages,
+				state: { error: null },
+				screenshot: options.screenshotPath
+					? (await client.send("Page.captureScreenshot")).data
+					: "",
+			};
+		}
 		if (options.pregamePreview)
-			return await probePregamePreview(client, consoleMessages);
+			return await probePregamePreview(
+				client,
+				consoleMessages,
+				browserWebSocketUrl,
+			);
 		if (options.worldMap)
 			return await probeWorldMap(client, consoleMessages, browserWebSocketUrl);
 		await waitForHarnessApi(client);
@@ -7262,7 +7294,18 @@ function delay(milliseconds) {
 }
 
 /** Isolated production preview preparation and draw without world startup. */
-async function probePregamePreview(client, consoleMessages) {
+async function probePregamePreview(
+	client,
+	consoleMessages,
+	browserWebSocketUrl,
+) {
+	const browser = await createCdpClient(browserWebSocketUrl);
+	let hardware;
+	try {
+		hardware = (await browser.send("SystemInfo.getInfo")).gpu.devices;
+	} finally {
+		browser.close();
+	}
 	const deadline = Date.now() + 120_000;
 	while (Date.now() < deadline) {
 		const proof = await evaluateExpression(
@@ -7291,7 +7334,7 @@ async function probePregamePreview(client, consoleMessages) {
 				? (await client.send("Page.captureScreenshot")).data
 				: "";
 			return {
-				pregamePreview: proof,
+				pregamePreview: { ...proof, hardware },
 				consoleMessages,
 				screenshot,
 				state: { error: null },

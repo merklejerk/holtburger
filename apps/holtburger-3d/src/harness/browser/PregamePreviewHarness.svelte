@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { probePreviewFrameCadence } from "./preview-frame-cadence-probe";
+	import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
 	import { pregameContentTransport } from "./pregame-content-transport";
 	import { probePregameWorldLifetime } from "./pregame-world-lifetime-probe";
 	import { onMount, tick, type ComponentProps } from "svelte";
@@ -10,7 +12,10 @@
 	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
 	import type { ObjectPreviewSource as CapturedSource } from "../../client/client-object-preview-contract";
 	import ClientCharacterCreator from "../../client/ClientCharacterCreator.svelte";
-	import type { ObjectPreviewHandle } from "../../lib/game/preview/object-preview-controller";
+	import type {
+		ObjectPreviewHandle,
+		ObjectPreviewViewport,
+	} from "../../lib/game/preview/object-preview-controller";
 	import { Vec3 } from "../../lib/game/math/types";
 	import type {
 		ObjectPreviewSource,
@@ -48,6 +53,8 @@
 		| {
 				kind: "ready";
 				diagnostics: ObjectPreviewRendererDiagnostics;
+				/** Real draw counts under controlled focus and viewport suspension. */
+				frameCadence: Awaited<ReturnType<typeof probePreviewFrameCadence>>;
 				device: PreviewDeviceProbeSnapshot;
 				replacementCount: number;
 				failedReplacementPreservedVisual: boolean;
@@ -116,6 +123,7 @@
 		};
 		const assets = new HostPresentationAssets(transport);
 		const service = new StandardClientObjectPreviewService({
+			startFrameLoop: startPresentationFrameLoop,
 			resolveResources: () => assets.resources(),
 		});
 		let disposed = false;
@@ -306,13 +314,18 @@
 				canvas,
 				source: composition(visual.body),
 			});
-			preview.setViewport({
+			const previewViewport: ObjectPreviewViewport = {
 				extent: { width: 512, height: 512 },
 				rotation: { kind: "subject", headingRadians: 0, cameraYawRadians: 0 },
 				framing: { kind: "body" },
 				minimumFrameIntervalSeconds: 1 / 30,
-			});
+			};
+			preview.setViewport(previewViewport);
 			await preview.ready;
+			const frameCadence = await probePreviewFrameCadence(
+				preview,
+				previewViewport,
+			);
 			const diagnostics = preview.diagnostics();
 			if (
 				diagnostics === null ||
@@ -449,6 +462,7 @@
 				throw new Error("Retained preview did not draw its replacements.");
 			await service.destroy();
 			const surfaceService = new StandardClientObjectPreviewService({
+				startFrameLoop: startPresentationFrameLoop,
 				resolveResources: () => assets.resources(),
 			});
 			let surfaceHandle: ObjectPreviewHandle | null = null;
@@ -600,6 +614,7 @@
 				creatorWorkflow,
 				worldLifetime,
 				diagnostics: finalDiagnostics,
+				frameCadence,
 				preparedBodies,
 				preparedBackgrounds: backgrounds.size,
 				attachmentPlacements,

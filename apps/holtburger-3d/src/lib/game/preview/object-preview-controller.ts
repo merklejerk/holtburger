@@ -1,3 +1,4 @@
+import type { StartPresentationFrameLoop } from "../presentation-frame-loop";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { ObjectPreviewSource } from "../runtime/object-preview-source";
 import type { PresentationAssetService } from "../runtime/presentation-asset-service";
@@ -49,6 +50,8 @@ export interface ObjectPreviewResources {
 }
 
 interface ControllerDependencies {
+	/** App scheduling policy applies before animation or drawing work. */
+	readonly startFrameLoop: StartPresentationFrameLoop;
 	readonly resolveResources: () => Promise<ObjectPreviewResources>;
 	readonly onError?: (error: unknown) => void;
 }
@@ -91,7 +94,7 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 	#work: Promise<void> | null = null;
 	#revision = 0;
 	#viewport: ResolvedObjectPreviewViewport | null = null;
-	#animationFrame: number | null = null;
+	#stopFrameLoop: (() => void) | null = null;
 	#lastDrawTimestampMs: number | null = null;
 	#activeClockSeconds = 0;
 	#readySettled = false;
@@ -144,7 +147,7 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 		this.#revision++;
 		this.#pending?.resolve({ kind: "superseded" });
 		this.#pending = null;
-		this.#cancelFrame();
+		this.#stopFrames();
 		const previous = this.#active;
 		this.#active = null;
 		let gpu: Promise<void>;
@@ -161,11 +164,11 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 		this.#viewport =
 			viewport === null ? null : resolveObjectPreviewViewport(viewport);
 		if (viewport === null) {
-			this.#cancelFrame();
+			this.#stopFrames();
 			this.#lastDrawTimestampMs = null;
 			return;
 		}
-		this.#scheduleFrame();
+		this.#startFrameLoop();
 	}
 
 	diagnostics(): ObjectPreviewRendererDiagnostics | null {
@@ -179,7 +182,7 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 		this.#pending?.resolve({ kind: "superseded" });
 		this.#pending = null;
 		this.#viewport = null;
-		this.#cancelFrame();
+		this.#stopFrames();
 		this.#rejectReadyOnce(abortError("Object preview mount was disposed."));
 		return (this.#disposalCompletion = this.#release());
 	}
@@ -296,7 +299,7 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 			transferLease();
 			this.#activeClockSeconds = 0;
 			this.#lastDrawTimestampMs = null;
-			this.#scheduleFrame();
+			this.#startFrameLoop();
 			await this.#retire(previous, retirement);
 			return true;
 		} finally {
@@ -350,22 +353,27 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 			);
 	}
 
-	#scheduleFrame(): void {
+	#startFrameLoop(): void {
 		if (
 			this.#disposed ||
 			this.#viewport === null ||
 			this.#active === null ||
 			this.#renderer === null ||
-			this.#animationFrame !== null
+			this.#stopFrameLoop !== null
 		)
 			return;
-		this.#animationFrame = requestAnimationFrame((timestampMs) =>
-			this.#drawFrame(timestampMs),
+		this.#stopFrameLoop = this.#dependencies.startFrameLoop(
+			(timestampMs) => this.#drawFrame(timestampMs),
+			() => {
+				const viewport = this.#viewport;
+				if (viewport === null)
+					throw new Error("Running preview has no viewport.");
+				return viewport.minimumFrameIntervalSeconds * 1_000;
+			},
 		);
 	}
 
 	#drawFrame(timestampMs: number): void {
-		this.#animationFrame = null;
 		const viewport = this.#viewport;
 		const active = this.#active;
 		const renderer = this.#renderer;
@@ -376,14 +384,6 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 			renderer === null
 		)
 			return;
-		const minimumMs = viewport.minimumFrameIntervalSeconds * 1_000;
-		if (
-			this.#lastDrawTimestampMs !== null &&
-			timestampMs - this.#lastDrawTimestampMs < minimumMs
-		) {
-			this.#scheduleFrame();
-			return;
-		}
 		if (this.#lastDrawTimestampMs !== null)
 			this.#activeClockSeconds +=
 				Math.max(0, timestampMs - this.#lastDrawTimestampMs) / 1_000;
@@ -402,7 +402,6 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 				},
 			);
 			this.#resolveReadyOnce();
-			this.#scheduleFrame();
 		} catch (cause) {
 			this.#rejectReadyOnce(cause);
 			this.#dependencies.onError?.(cause);
@@ -412,10 +411,9 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 		}
 	}
 
-	#cancelFrame(): void {
-		if (this.#animationFrame === null) return;
-		cancelAnimationFrame(this.#animationFrame);
-		this.#animationFrame = null;
+	#stopFrames(): void {
+		this.#stopFrameLoop?.();
+		this.#stopFrameLoop = null;
 	}
 
 	async #release(): Promise<void> {

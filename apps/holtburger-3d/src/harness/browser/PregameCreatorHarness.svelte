@@ -17,6 +17,7 @@
 </script>
 
 <script lang="ts">
+	import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
 	import { onMount, tick, untrack } from "svelte";
 	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
 	import {
@@ -123,6 +124,7 @@
 	let currentHandle: ObjectPreviewHandle | null = null;
 	const devices: ReturnType<typeof observePreviewDevice>[] = [];
 	const previewOwner = new StandardClientObjectPreviewService({
+		startFrameLoop: startPresentationFrameLoop,
 		resolveResources: async () => resources,
 	});
 	const previewService: ClientObjectPreviewService = {

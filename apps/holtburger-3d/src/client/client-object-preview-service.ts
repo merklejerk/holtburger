@@ -1,3 +1,4 @@
+import type { StartPresentationFrameLoop } from "../lib/game/presentation-frame-loop";
 import type { ObjectPreviewSource } from "../lib/game/runtime/object-preview-source";
 import {
 	ObjectPreviewController,
@@ -16,6 +17,8 @@ export interface ClientObjectPreviewService {
 }
 
 interface ServiceDependencies {
+	/** Shared frontend scheduling policy for every mounted preview. */
+	readonly startFrameLoop: StartPresentationFrameLoop;
 	readonly resolveResources: () => Promise<ObjectPreviewResources>;
 	readonly onError?: (error: unknown) => void;
 }

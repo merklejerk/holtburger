@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
 	import { probeCombatEffectsAppearance } from "./combat-effects-appearance-probe";
 	import {
 		CombatEffectsRuntimeProbe,
@@ -2010,7 +2011,10 @@
 				canvas: previewCanvasElement,
 				source: objectPreviewSource(guid),
 			},
-			{ resolveResources: async () => resources },
+			{
+				resolveResources: async () => resources,
+				startFrameLoop: startPresentationFrameLoop,
+			},
 		);
 		activePreviewHandle = handle;
 		handle.setViewport({
@@ -2063,7 +2067,10 @@
 						canvas: previewCanvas,
 						source,
 					},
-					{ resolveResources: async () => resources },
+					{
+						resolveResources: async () => resources,
+						startFrameLoop: startPresentationFrameLoop,
+					},
 				);
 				activePreviewHandle = handle;
 			}

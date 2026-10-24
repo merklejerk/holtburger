@@ -1,3 +1,7 @@
+import {
+	BACKGROUND_FRAME_INTERVAL_MS,
+	startPresentationFrameLoop,
+} from "../app/presentation-frame-loop";
 import { Mat4 } from "../lib/game/math/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -17,7 +21,7 @@ vi.mock("../lib/game/renderer/webgl2-preview-renderer", () => ({
 }));
 vi.mock("../lib/game/preview/object-preview-presentation", () => ({
 	ObjectPreviewPresentation: class {
-		advance = vi.fn(() => ({}));
+		advance = vi.fn((timeSeconds: number) => ({ timeSeconds }));
 		dispose = vi.fn();
 	},
 }));
@@ -67,6 +71,8 @@ const acquire = vi.mocked(acquireObjectPreviewAssets);
 const build = vi.mocked(WebGL2PreviewRenderer.build);
 let callbacks: Map<number, FrameRequestCallback>;
 let nextFrame: number;
+let focused: boolean;
+let tasks: (() => void)[];
 
 function lease() {
 	return { assets: {}, release: vi.fn() } as unknown as Awaited<
@@ -103,29 +109,115 @@ function frame(timestamp: number) {
 	const pending = [...callbacks.values()];
 	callbacks.clear();
 	for (const callback of pending) callback(timestamp);
+	for (const task of tasks.splice(0)) task();
 }
 function service(resolveResources = async () => RESOURCES) {
-	return new StandardClientObjectPreviewService({ resolveResources });
+	return new StandardClientObjectPreviewService({
+		startFrameLoop: startPresentationFrameLoop,
+		resolveResources,
+	});
 }
 
 beforeEach(() => {
 	vi.resetAllMocks();
 	callbacks = new Map();
 	nextFrame = 0;
-	vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-		callbacks.set(++nextFrame, callback);
-		return nextFrame;
+	focused = true;
+	tasks = [];
+	vi.stubGlobal("document", { hasFocus: () => focused });
+	vi.stubGlobal("window", {
+		requestAnimationFrame: (callback: FrameRequestCallback) => {
+			callbacks.set(++nextFrame, callback);
+			return nextFrame;
+		},
+		cancelAnimationFrame: (id: number) => callbacks.delete(id),
+		reportError: (error: unknown) => {
+			throw error;
+		},
+		scheduler: {
+			postTask: (task: () => void) => {
+				tasks.push(task);
+				return Promise.resolve();
+			},
+		},
 	});
-	vi.stubGlobal("cancelAnimationFrame", (id: number) => callbacks.delete(id));
 	acquire.mockResolvedValue(lease());
 	build.mockResolvedValue(device().renderer);
 });
 afterEach(() => vi.unstubAllGlobals());
 
 describe("preview mount lifecycle through the client service", () => {
+	it("limits background work, updates cadence, and stops hidden previews", async () => {
+		const renderer = device();
+		build.mockResolvedValue(renderer.renderer);
+		const owner = service();
+		const handle = owner.open(REQUEST);
+		handle.setViewport(VIEWPORT);
+		await flush();
+		frame(0);
+		await handle.ready;
+		focused = false;
+		frame(BACKGROUND_FRAME_INTERVAL_MS / 2);
+		expect(renderer.draw).toHaveBeenCalledTimes(1);
+		frame(BACKGROUND_FRAME_INTERVAL_MS);
+		expect(renderer.draw).toHaveBeenCalledTimes(2);
+		focused = true;
+		frame(BACKGROUND_FRAME_INTERVAL_MS * 1.5);
+		expect(renderer.draw).toHaveBeenCalledTimes(3);
+		handle.setViewport({
+			...VIEWPORT,
+			minimumFrameIntervalSeconds: (BACKGROUND_FRAME_INTERVAL_MS * 2) / 1_000,
+		});
+		frame(BACKGROUND_FRAME_INTERVAL_MS * 2);
+		expect(renderer.draw).toHaveBeenCalledTimes(3);
+		handle.setViewport(null);
+		expect(callbacks.size).toBe(0);
+		frame(BACKGROUND_FRAME_INTERVAL_MS * 20);
+		handle.setViewport(VIEWPORT);
+		frame(BACKGROUND_FRAME_INTERVAL_MS * 21);
+		expect(renderer.draw).toHaveBeenCalledTimes(4);
+		expect(renderer.draw).toHaveBeenLastCalledWith(
+			{
+				timeSeconds: expect.closeTo(
+					(BACKGROUND_FRAME_INTERVAL_MS * 1.5) / 1_000,
+				),
+			},
+			expect.anything(),
+		);
+		await owner.destroy();
+		expect(callbacks.size).toBe(0);
+	});
+
+	it("stops scheduling and retires the device after a draw failure", async () => {
+		const renderer = device();
+		const cause = new Error("Preview draw failed.");
+		renderer.draw.mockImplementation(() => {
+			throw cause;
+		});
+		build.mockResolvedValue(renderer.renderer);
+		const onError = vi.fn();
+		const owner = new StandardClientObjectPreviewService({
+			startFrameLoop: startPresentationFrameLoop,
+			resolveResources: async () => RESOURCES,
+			onError,
+		});
+		const handle = owner.open(REQUEST);
+		const ready = expect(handle.ready).rejects.toBe(cause);
+		handle.setViewport(VIEWPORT);
+		await flush();
+		frame(0);
+		await ready;
+		await owner.destroy();
+		expect(onError).toHaveBeenCalledExactlyOnceWith(cause);
+		expect(callbacks.size).toBe(0);
+		expect(tasks).toHaveLength(0);
+		expect(renderer.destroy).toHaveBeenCalledOnce();
+	});
+
 	it("admits an empty surface without preparing resources and later draws its first source", async () => {
 		const resources = vi.fn(async () => RESOURCES);
 		const owner = new StandardClientObjectPreviewService({
+			startFrameLoop: startPresentationFrameLoop,
 			resolveResources: resources,
 		});
 		const handle = owner.open({ ...REQUEST, source: null });
@@ -342,7 +434,7 @@ describe("preview mount lifecycle through the client service", () => {
 		frame(200);
 		await handle.ready;
 		expect(renderer.draw).toHaveBeenCalledExactlyOnceWith(
-			{},
+			{ timeSeconds: 0 },
 			{
 				extent: VIEWPORT.extent,
 				cameraYawRadians: 2,

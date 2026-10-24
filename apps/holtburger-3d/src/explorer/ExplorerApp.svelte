@@ -2036,7 +2036,7 @@
 					};
 				};
 
-				stopFrameLoop = startPresentationFrameLoop(step);
+				stopFrameLoop = startPresentationFrameLoop(step, () => 0);
 			} catch (error) {
 				if (!destroyed)
 					startupError =

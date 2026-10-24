@@ -1,3 +1,4 @@
+import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
 import { probePregameOutdoorEnvironment } from "./pregame-outdoor-probe";
 import { ClientPresentationRoot } from "../../client/client-presentation-root";
 import { ClientGameplayPresentation } from "../../client/client-gameplay-presentation";
@@ -183,6 +184,7 @@ export async function probePregameWorldLifetime(
 	const previewCanvas = document.createElement("canvas");
 	const previewDevice = observePreviewDevice(previewCanvas);
 	const service = new StandardClientObjectPreviewService({
+		startFrameLoop: startPresentationFrameLoop,
 		resolveResources: () => assets.resources(),
 	});
 	try {

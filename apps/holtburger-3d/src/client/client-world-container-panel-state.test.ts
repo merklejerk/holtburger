@@ -74,6 +74,13 @@ function fixture() {
 			mirror.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
+					salvage: {
+						skills: {
+							salvagingSkill: 0,
+							tinkeringSkill: 0,
+							augmentationBonusSalvage: 0,
+						},
+					},
 					worldContainer: access,
 					entities: [entityFacts(1), ...records],
 				},

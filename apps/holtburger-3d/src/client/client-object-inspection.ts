@@ -1,3 +1,4 @@
+import type { AppraisalRequest } from "./client-appraisal-requests";
 import type {
 	ObjectInspection,
 	ObjectInspectionResult,
@@ -16,7 +17,7 @@ import { selectedEntityNameColor } from "./client-selected-entity-color";
 
 type InspectionSession = Pick<
 	ClientLifecycleSession,
-	"examineEntity" | "subscribe" | "state"
+	"appraisals" | "subscribe" | "state"
 > & {
 	readonly entities: Pick<ClientLifecycleSession["entities"], "read">;
 };
@@ -49,8 +50,8 @@ export type ClientObjectPreviewState =
 /**
  * Owns the one-target/one-window inspection lifetime for a client session.
  *
- * The protocol echoes only a GUID, so a currently requested GUID is the complete correlation key.
- * At most one request is in flight; ready targets are refreshed on a cold, tunable cadence.
+ * Appraisal callbacks belong to this window; unrelated session results cannot change it.
+ * The session deduplicates wire requests; visible targets refresh on a cold, tunable cadence.
  * Selection changes and entity residency do not control this state machine; the entity mirror is
  * sampled only to capture presentation facts for the exact requested target.
  */
@@ -62,7 +63,10 @@ export class ClientObjectInspection {
 	#state: ClientObjectInspectionState = { kind: "idle" };
 	#playerGuid: number | null;
 	#refreshTimer: ReturnType<typeof setTimeout> | null = null;
-	#refreshGuid: number | null = null;
+	/** Only this subscription may apply an appraisal to the window. */
+	#appraisal: AppraisalRequest | null = null;
+	/** Core publishes one creature-preview outcome after each accepted appraisal. */
+	#previewExpectedFor: number | null = null;
 	#refreshFailureReported = false;
 	#previewFingerprint: string | null = null;
 	#previewRevision = 0;
@@ -103,10 +107,17 @@ export class ClientObjectInspection {
 		this.#resetPreviewIdentity();
 		this.#nameColor = this.#resolveNameColor(guid);
 		this.#replace({ kind: "pending", guid });
+		const request = this.#requestAppraisal(guid);
 		try {
-			await this.#session.examineEntity(guid);
+			await request.sent;
 		} catch (error) {
-			if (this.#state.kind !== "pending" || this.#state.guid !== guid) return;
+			if (
+				this.#appraisal !== request ||
+				this.#state.kind !== "pending" ||
+				this.#state.guid !== guid
+			)
+				return;
+			this.#appraisal = null;
 			this.#nameColor = null;
 			this.#replace({ kind: "idle" });
 			this.#reportFailure(failureText(error));
@@ -124,17 +135,13 @@ export class ClientObjectInspection {
 	destroy(): void {
 		if (this.#destroyed) return;
 		this.#destroyed = true;
+		this.close();
 		this.#unsubscribe();
-		this.#nameColor = null;
-		this.#replace({ kind: "idle" });
 		this.#listeners.clear();
 	}
 
 	#receive(event: ClientLifecycleSessionEvent): void {
 		switch (event.type) {
-			case "object-inspection-result":
-				this.#accept(event.result);
-				return;
 			case "object-preview-result":
 				this.#acceptPreview(event.result);
 				return;
@@ -164,10 +171,7 @@ export class ClientObjectInspection {
 
 	#accept(result: ObjectInspectionResult): void {
 		if (this.#state.kind === "idle" || result.guid !== this.#state.guid) return;
-		if (this.#state.kind === "ready" && this.#refreshGuid !== result.guid)
-			return;
 		const guid = this.#state.guid;
-		this.#refreshGuid = null;
 		this.#refreshFailureReported = false;
 		switch (result.outcome.kind) {
 			case "ready":
@@ -180,6 +184,7 @@ export class ClientObjectInspection {
 				}
 				if (result.outcome.inspection.details.kind === "item")
 					this.#resetPreviewIdentity();
+				else this.#previewExpectedFor = guid;
 				this.#nameColor = this.#resolveNameColor(guid) ?? this.#nameColor;
 				this.#replace({
 					kind: "ready",
@@ -213,9 +218,11 @@ export class ClientObjectInspection {
 		if (
 			this.#state.kind !== "ready" ||
 			this.#state.preview === null ||
-			result.guid !== this.#state.guid
+			result.guid !== this.#state.guid ||
+			result.guid !== this.#previewExpectedFor
 		)
 			return;
+		this.#previewExpectedFor = null;
 		switch (result.outcome.kind) {
 			case "ready":
 				{
@@ -251,21 +258,21 @@ export class ClientObjectInspection {
 		if (
 			this.#destroyed ||
 			this.#state.kind !== "ready" ||
-			this.#refreshGuid !== null
+			this.#appraisal !== null
 		)
 			return;
 		const guid = this.#state.guid;
-		this.#refreshGuid = guid;
+		const request = this.#requestAppraisal(guid);
 		try {
-			await this.#session.examineEntity(guid);
+			await request.sent;
 		} catch (error) {
 			if (
+				this.#appraisal !== request ||
 				this.#state.kind !== "ready" ||
-				this.#state.guid !== guid ||
-				this.#refreshGuid !== guid
+				this.#state.guid !== guid
 			)
 				return;
-			this.#refreshGuid = null;
+			this.#appraisal = null;
 			if (!this.#refreshFailureReported) {
 				this.#refreshFailureReported = true;
 				this.#reportFailure(failureText(error));
@@ -274,12 +281,22 @@ export class ClientObjectInspection {
 		}
 	}
 
+	#requestAppraisal(guid: number): AppraisalRequest {
+		const request = this.#session.appraisals.request(guid, (result) => {
+			if (this.#appraisal !== request) return;
+			this.#appraisal = null;
+			this.#accept(result);
+		});
+		this.#appraisal = request;
+		return request;
+	}
+
 	#scheduleRefresh(): void {
 		this.#cancelRefreshTimer();
 		if (
 			this.#destroyed ||
 			this.#state.kind !== "ready" ||
-			this.#refreshGuid !== null
+			this.#appraisal !== null
 		)
 			return;
 		this.#refreshTimer = setTimeout(() => {
@@ -295,12 +312,14 @@ export class ClientObjectInspection {
 	}
 
 	#resetRefresh(): void {
+		this.#appraisal?.cancel();
+		this.#appraisal = null;
 		this.#cancelRefreshTimer();
-		this.#refreshGuid = null;
 		this.#refreshFailureReported = false;
 	}
 
 	#resetPreviewIdentity(): void {
+		this.#previewExpectedFor = null;
 		this.#previewFingerprint = null;
 		this.#previewRevision = 0;
 	}

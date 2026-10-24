@@ -119,6 +119,7 @@ export class ClientSelectedEntityTracking {
 				(record.canTrade ||
 					record.canPickUp ||
 					(!unrestrictedUse && canInteractEquipment(record)) ||
+					record.description.useCapability === "salvage-tool" ||
 					record.description.useCapability === "direct" ||
 					record.description.useCapability === "targeted" ||
 					(unrestrictedUse &&

@@ -383,6 +383,8 @@ export async function probeAllegiance(options: {
 					...EMPTY_CLIENT_SELECTED_DISPLAY,
 					name: patron.name,
 				}),
+				readCanSalvage: () => false,
+				onSalvage: () => {},
 				readCanSplit: () => false,
 				readCanInvite: () => false,
 				readCanAddFriend: () => false,

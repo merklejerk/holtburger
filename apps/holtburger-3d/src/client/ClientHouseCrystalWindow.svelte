@@ -4,6 +4,7 @@
 	import { housingTypeLabel } from "./client-housing-presentation";
 	import { onMount } from "svelte";
 	import ItemGridCell from "../app/ItemGridCell.svelte";
+	import RemovableItemCell from "../app/RemovableItemCell.svelte";
 	import { startUiIconDisplay } from "../app/ui-icon-display";
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
@@ -183,24 +184,40 @@
 											data-housing-payment={crystal.crystal}
 											data-housing-wcid={payment.wcid}
 										>
-											<ItemGridCell
-												{...cellIdentity}
-												label={`${payment.name}. Drag payment in; drag out to remove.`}
-												{display}
-												placeholderDisplay={display}
-												equipped={false}
-												selected={row.sources.length > 0}
-												disabled={false}
-												onselect={() => {
-													const item = row.sources[0];
-													if (item !== undefined) onExamineItem(item.item);
-												}}
-												oncontextmenu={(event) => {
-													event.preventDefault();
-													const item = row.sources[0];
-													if (item !== undefined) onExamineItem(item.item);
-												}}
-											/>
+											<RemovableItemCell
+												removal={row.sources.length === 0
+													? null
+													: {
+															label: `Remove prepared ${payment.name}`,
+															disabled: !current.editable,
+															onremove: () => {
+																const captured = model.captureRow(payment.wcid);
+																if (captured !== null)
+																	act(() => model.clearRow(captured));
+															},
+														}}
+											>
+												<ItemGridCell
+													{...cellIdentity}
+													label={row.sources.length === 0
+														? `${payment.name}. Drag payment in.`
+														: `${payment.name}. Drag out or use Remove to clear prepared payment.`}
+													{display}
+													placeholderDisplay={display}
+													equipped={false}
+													selected={row.sources.length > 0}
+													disabled={false}
+													onselect={() => {
+														const item = row.sources[0];
+														if (item !== undefined) onExamineItem(item.item);
+													}}
+													oncontextmenu={(event) => {
+														event.preventDefault();
+														const item = row.sources[0];
+														if (item !== undefined) onExamineItem(item.item);
+													}}
+												/>
+											</RemovableItemCell>
 										</div>
 										<div class="housing-requirement-info">
 											<strong>{payment.name}</strong>

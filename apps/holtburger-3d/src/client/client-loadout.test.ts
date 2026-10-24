@@ -34,6 +34,13 @@ function read(...entities: ClientEntityFacts[]): ClientEntityRead {
 			playerGuid: 1,
 			revision: 1,
 			projectileSupply: { kind: "not-applicable" },
+			salvage: {
+				skills: {
+					salvagingSkill: 0,
+					tinkeringSkill: 0,
+					augmentationBonusSalvage: 0,
+				},
+			},
 			worldContainer: { kind: "closed" },
 			entities: new Map(entities.map((entity) => [entity.guid, entity])),
 		},

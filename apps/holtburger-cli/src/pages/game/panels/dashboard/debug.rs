@@ -174,7 +174,7 @@ pub fn get_debug_info(
                 || e.item_value() > 0
                 || e.usable().is_some()
                 || e.use_radius().is_some()
-                || e.workmanship().is_some()
+                || e.display_workmanship().is_some()
                 || e.burden().is_some()
                 || e.target_type().is_some()
                 || e.ui_effects().is_some()
@@ -223,7 +223,7 @@ pub fn get_debug_info(
                 if let Some(v) = e.use_radius() {
                     lines.push(Line::from(format!("  UseRadius: {:.2}", v)));
                 }
-                if let Some(v) = e.workmanship() {
+                if let Some(v) = e.display_workmanship() {
                     lines.push(Line::from(format!("  Work:      {:.2}", v)));
                 }
                 if let Some(v) = e.burden() {
@@ -633,7 +633,7 @@ fn push_object_debug_info(
         || object.item_value() > 0
         || object.usable().is_some()
         || object.use_radius().is_some()
-        || object.workmanship().is_some()
+        || object.display_workmanship.is_some()
         || object.burden().is_some()
         || object.target_type().is_some()
         || object.ui_effects().is_some()
@@ -682,7 +682,7 @@ fn push_object_debug_info(
         if let Some(v) = object.use_radius() {
             lines.push(Line::from(format!("  UseRadius: {:.2}", v)));
         }
-        if let Some(v) = object.workmanship() {
+        if let Some(v) = object.display_workmanship {
             lines.push(Line::from(format!("  Work:      {:.2}", v)));
         }
         if let Some(v) = object.burden() {

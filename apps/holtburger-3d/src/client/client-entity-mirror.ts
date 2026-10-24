@@ -1,3 +1,8 @@
+import {
+	salvageCandidateSchema,
+	salvageContextSchema,
+	type SalvageContext,
+} from "./client-salvage-contract";
 import { z } from "zod";
 import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../lib/game/map/map-blip-category";
 
@@ -126,6 +131,7 @@ const clientEntityFactsSchema = z
 					useCapability: z.enum([
 						"unavailable",
 						"unsupported",
+						"salvage-tool",
 						"direct",
 						"targeted",
 					]),
@@ -205,6 +211,7 @@ const clientEntityFactsSchema = z
 		canReceiveGive: z.boolean(),
 		canTrade: z.boolean(),
 		canOfferTrade: z.boolean(),
+		salvage: salvageCandidateSchema,
 		scenePlacement: z.enum(["available", "unavailable"]),
 		/** World-owned acquisition category, independent of rendering and disposition. */
 		targeting: z.enum(["ineligible", "creature", "non-creature"]),
@@ -235,6 +242,7 @@ const clientEntityFactsSchema = z
 export const clientEntitySnapshotSchema = z
 	.object({
 		projectileSupply: projectileSupplySchema,
+		salvage: salvageContextSchema,
 		entities: z.array(clientEntityFactsSchema),
 		worldContainer: worldContainerSchema,
 	})
@@ -244,6 +252,7 @@ export const clientEntityDeltaSchema = z
 	.object({
 		/** Null retains the previous supply; unknown supply is an explicit pending value. */
 		projectileSupply: projectileSupplySchema.nullable(),
+		salvage: salvageContextSchema.nullable(),
 		upserts: z.array(clientEntityFactsSchema),
 		removed: z.array(guid),
 		worldContainer: worldContainerSchema.nullable(),
@@ -258,6 +267,7 @@ export type ClientEntityDelta = z.infer<typeof clientEntityDeltaSchema>;
 export interface ClientEntityLevel {
 	/** Supply accepted together with equipment and item quantities. */
 	readonly projectileSupply: ProjectileSupply;
+	readonly salvage: SalvageContext;
 	/** Access accepted in the same commit as contents and their pickup eligibility. */
 	readonly worldContainer: WorldContainerState;
 	/** Local display invalidation only; not a wire sequence or transport identity. */
@@ -343,6 +353,7 @@ export class ClientEntityMirror {
 				playerGuid,
 				worldContainer: snapshot.worldContainer,
 				projectileSupply: snapshot.projectileSupply,
+				salvage: snapshot.salvage,
 				revision: this.#revision + 1,
 			},
 		};
@@ -351,6 +362,7 @@ export class ClientEntityMirror {
 	prepareDelta(delta: ClientEntityDelta): PreparedClientEntities | null {
 		if (this.#read.kind === "pending") return null;
 		if (
+			delta.salvage === null &&
 			delta.projectileSupply === null &&
 			delta.worldContainer === null &&
 			delta.upserts.length === 0 &&
@@ -374,6 +386,7 @@ export class ClientEntityMirror {
 		return {
 			level: {
 				entities,
+				salvage: delta.salvage === null ? level.salvage : delta.salvage,
 				projectileSupply:
 					delta.projectileSupply === null
 						? level.projectileSupply

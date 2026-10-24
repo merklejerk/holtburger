@@ -305,6 +305,8 @@ pub struct ClientEntityFacts {
     pub can_trade: bool,
     /// Whole-item trade admission consumed by inventory drops.
     pub can_offer_trade: bool,
+    /// Shared whole-item salvage admission and normalized review inputs.
+    pub salvage: crate::crafting::salvage::SalvageCandidate,
     /// Scene capability independent of loaded renderer assets.
     pub scene_placement: SceneAvailability,
     /// Consumed by keyboard acquisition; not a renderer visibility decision.
@@ -523,6 +525,7 @@ impl WorldState {
             can_receive_give: crate::interaction::give_recipient_candidate(self, guid),
             can_trade: self.trade_partner_candidate(guid),
             can_offer_trade: self.can_offer_trade_item(guid),
+            salvage: self.salvage_candidate(guid),
             scene_placement,
             targeting,
             corpse: entity.and_then(|entity| {

@@ -1029,6 +1029,10 @@ pub enum ClientViewEvent {
     SpellInspectionContext(super::spell_inspection::SpellInspectionContext),
     /// Correlated read-only spell inspection result.
     SpellInspectionResult(super::spell_inspection::SpellInspectionResult),
+    /// Read-only salvage evaluation for the originating draft.
+    SalvagePreview(super::salvage::SalvagePreviewResult),
+    /// Correlated local dispatch result, distinct from server processing.
+    SalvageSubmitted(super::salvage::SalvageSubmitResult),
     /// Correlated guarded-use evaluation or dispatch result.
     ItemUseResult(super::item_use::ItemUseResult),
     /// Read-only considered-target compatibility result.
@@ -1346,6 +1350,10 @@ pub enum ClientCommand {
     },
     /// Read-only character-bound spell examination.
     QuerySpellInspection(super::spell_inspection::SpellInspectionQuery),
+    /// Evaluate a proposed salvage draft without sending a game action.
+    PreviewSalvage(super::salvage::SalvagePreviewRequest),
+    /// Revalidate the exact reviewed batch before dispatch.
+    SubmitSalvage(super::salvage::SalvageSubmitRequest),
     /// Evaluate and dispatch only if the expected consequence still matches.
     SubmitItemUse(super::item_use::ItemUseRequest),
     /// Evaluate one considered target without dispatch or busy admission.

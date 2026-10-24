@@ -136,3 +136,8 @@ For script or other external integration layers, compile external intents into `
 If a new behavior cannot be described cleanly as input handling, an `AppAction`, an `AppUiAction`, a `ClientViewEvent`, or a tick update, revisit the design before adding another direct mutator path.
 
 Equipment requests are delegated to core’s equipment planner and executor. The TUI does not stage combat-mode changes or emit conflict-clearing unequips; core owns capacity preflight, sequencing, and server-confirmed completion.
+
+Salvage candidate readiness and normalized predictor inputs are read from shared entity facts.
+The CLI retains queue/confirmation presentation policy, uses shared exact-Ust discovery and
+skill-profile assembly, and displays explicit Examine guidance when raw appraisal details are
+missing. It does not independently infer eligibility or filter missing sources out of previews.

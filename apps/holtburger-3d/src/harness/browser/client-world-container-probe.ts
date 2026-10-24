@@ -174,6 +174,13 @@ export async function probeWorldContainer(options: {
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },
 			entities: {
 				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
 				worldContainer: { kind: "open", root: externalRoot.guid },
 				entities: [
 					entityFacts(1, {
@@ -302,6 +309,7 @@ export async function probeWorldContainer(options: {
 		// Later hydration/content changes must not replace this opening's chosen geometry.
 		emit("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: [
 				named(1900, "Later arrival", {
@@ -705,6 +713,13 @@ export async function probeWorldContainer(options: {
 	request = release(begin(itemCell(owned, 300), packCell(external, 100)));
 	emit("client-entity-facts-changed", {
 		projectileSupply: { kind: "not-applicable" },
+		salvage: {
+			skills: {
+				salvagingSkill: 0,
+				tinkeringSkill: 0,
+				augmentationBonusSalvage: 0,
+			},
+		},
 		worldContainer: { kind: "closed" },
 		upserts: [],
 		removed: [],
@@ -724,12 +739,20 @@ export async function probeWorldContainer(options: {
 	);
 	emit("client-entity-facts-changed", {
 		projectileSupply: { kind: "not-applicable" },
+		salvage: {
+			skills: {
+				salvagingSkill: 0,
+				tinkeringSkill: 0,
+				augmentationBonusSalvage: 0,
+			},
+		},
 		worldContainer: { kind: "closed" },
 		upserts: [],
 		removed: [],
 	});
 	emit("client-entity-facts-changed", {
 		projectileSupply: null,
+		salvage: null,
 		worldContainer: null,
 		upserts: [
 			{
@@ -800,6 +823,13 @@ export async function probeWorldContainer(options: {
 			400, "Popup close did not target its root exactly once");
 	emit("client-entity-facts-changed", {
 		projectileSupply: { kind: "not-applicable" },
+		salvage: {
+			skills: {
+				salvagingSkill: 0,
+				tinkeringSkill: 0,
+				augmentationBonusSalvage: 0,
+			},
+		},
 		worldContainer: { kind: "closed" },
 		upserts: [],
 		removed: [],

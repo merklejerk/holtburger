@@ -63,6 +63,8 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 				canInteract: interact,
 				interactionLabel: "Trade",
 			}),
+			readCanSalvage: () => false,
+			onSalvage: () => {},
 			readCanSplit: () => split,
 			readCanInvite: () => invite,
 			readCanSwear: () => swear,

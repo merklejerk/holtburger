@@ -26,6 +26,8 @@ pub struct CoreVendorItem {
     pub properties: WorldObjectProperties,
     /// Server public classification retained for the same inspection semantics as live entities.
     pub public_flags: ObjectDescriptionFlag,
+    /// Public average consumed by inspection without inventing raw appraisal totals.
+    pub public_workmanship: Option<f32>,
     pub armor_profile: Option<ArmorProfile>,
     pub creature_profile: Option<CreatureProfile>,
     pub weapon_profile: Option<WeaponProfile>,
@@ -68,6 +70,7 @@ impl CoreVendorItem {
             vendor_supply: decode_vendor_item_supply(item.packed_stack_size),
             properties,
             public_flags: item.description.obj_desc_flags,
+            public_workmanship: item.description.workmanship,
             armor_profile: None,
             creature_profile: None,
             weapon_profile: None,

@@ -49,6 +49,7 @@
 	import { ClientSpellState, type ClientSpellServices } from "./client-spells";
 	import { ClientTradeState } from "./client-trade-state";
 	import { ClientItemInteractions } from "./client-item-interactions";
+	import { ClientSalvageState } from "./client-salvage-state";
 	import { ClientInventoryState } from "./client-inventory-state";
 	import {
 		ClientBookReader,
@@ -416,6 +417,7 @@
 			hudMode === "runtime",
 	);
 
+	let salvage = $state<ClientSalvageState | null>(null);
 	let inventory = $state<ClientInventoryState | null>(null);
 	let vendor = $state<ClientVendorState | null>(null);
 	let houseCrystal = $state<ClientHouseCrystalState | null>(null);
@@ -2094,7 +2096,18 @@
 			onFailure: appendChatError,
 		});
 		selectedEntityTracking = interactions;
+		const salvageOwner = new ClientSalvageState(
+			owner,
+			(message) => toastCenter.publish({ message, tone: "status" }),
+			() => {
+				itemInteractions?.cancelTargeting();
+				gameplayView?.showInventory();
+			},
+		);
+		salvage = salvageOwner;
+		const unbindSalvage = dialogOwner.bindLocal(salvageOwner);
 		const items = new ClientItemInteractions({
+			beginSalvage: (tool) => salvageOwner.openTool(tool),
 			beginTrade: (partner) => tradeOwner.open(partner),
 			session: owner,
 			selection,
@@ -2167,6 +2180,9 @@
 			navigationWaypoint.acceptCharacter(null);
 			nearbyOwner.destroy();
 			nearby = null;
+			unbindSalvage();
+			salvageOwner.destroy();
+			salvage = null;
 			inventoryOwner.destroy();
 			containerOwner.destroy();
 			tradeOwner.destroy();
@@ -2392,6 +2408,7 @@
 			{readSelectedEntityDisplay}
 			{spells}
 			{enchantments}
+			{salvage}
 			{inventory}
 			{worldContainer}
 			{vendor}

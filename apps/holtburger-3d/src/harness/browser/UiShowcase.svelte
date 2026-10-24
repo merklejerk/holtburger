@@ -158,6 +158,7 @@
 		Extract<ClientLifecycleUiState, { kind: "character-selection" }>
 	>({
 		kind: "character-selection",
+		maxSlots: 11,
 		selectedGuid: null,
 		characters: [
 			{ guid: 1, name: "Wayfarer", slot: 0, deleteTime: 0 },
@@ -548,6 +549,10 @@
 						</nav>
 						{#if tab === "characters"}
 							<ClientCharacterSelect
+								visualCache={null}
+								management={{ kind: "idle" }}
+								creation={null}
+								previewService={null}
 								state={characters}
 								entryPending={false}
 								onChoose={(guid) =>

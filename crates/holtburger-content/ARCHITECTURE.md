@@ -102,6 +102,23 @@ derives those shadow references transactionally from independently assembled lan
 `ContentAssetService::resolve_collision` in `holtburger-core` is the sole complete product
 composition path.
 
+### Character Generation ([src/character_gen.rs](src/character_gen.rs))
+
+Content owns the static character-generation catalog, dependent appearance validation, starting
+area queries, and creation appearance composition in `character_gen/appearance.rs`. The resolver
+preserves ordered ObjDesc substitutions and applies base, body style, face/hair, skin, and starter
+clothing data using the same material/clothing queries as other content consumers. Garment colors
+are actual offered palette-template keys, not UI ordinals. The result supplies identity-free visual
+facts, the authored creation idle, scale, and heritage background identity;
+frontend layout and draft navigation stay in h3d.
+
+Raw `SkillBase` specialization cost includes training. Catalog cost interpretation normalizes
+that to a specialization **upgrade** cost, while heritage primary-cost overrides already express
+the upgrade. `CharacterGenSkillCosts` carries this distinction explicitly, including unavailable
+skills, so core validation and frontends consume one interpretation rather than charging training
+twice. General template support remains available to other clients; h3d's Custom-only choice is
+frontend policy.
+
 ### Motion Contract ([src/motion_sequence.rs](src/motion_sequence.rs))
 
 `MotionSequenceCatalog` projects the raw motion representation — motion tables, animations, and

@@ -1,28 +1,27 @@
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { ObjectPreviewSource } from "../runtime/object-preview-source";
 import type { PresentationAssetService } from "../runtime/presentation-asset-service";
-import type { RenderExtent } from "../renderer/render-extent";
 import {
 	WebGL2PreviewRenderer,
-	type ObjectPreviewRenderViewport,
 	type ObjectPreviewRendererDiagnostics,
 } from "../renderer/webgl2-preview-renderer";
 import {
 	acquireObjectPreviewAssets,
 	type ObjectPreviewAssetLease,
-} from "./object-preview-assets";
+} from "./object-preview-composition";
 import { ObjectPreviewPresentation } from "./object-preview-presentation";
 
-/** Latest UI-owned viewport policy. Null suspends both scheduling and active preview time. */
-export interface ObjectPreviewViewport {
-	readonly extent: RenderExtent;
-	readonly minimumFrameIntervalSeconds: number;
-	readonly yawRadians: number;
-}
+import {
+	resolveObjectPreviewViewport,
+	type ObjectPreviewViewport,
+	type ResolvedObjectPreviewViewport,
+} from "./object-preview-viewport";
+export type { ObjectPreviewViewport } from "./object-preview-viewport";
 
 export interface ObjectPreviewMountRequest {
 	readonly canvas: HTMLCanvasElement;
-	readonly source: ObjectPreviewSource;
+	/** An empty mounted surface admits a source later without creating a device prematurely. */
+	readonly source: ObjectPreviewSource | null;
 	/** Prior device retirement; context-B activation may not overtake it. */
 	readonly activationBarrier: Promise<void>;
 }
@@ -32,6 +31,12 @@ export interface ObjectPreviewHandle {
 	readonly ready: Promise<void>;
 	diagnostics(): ObjectPreviewRendererDiagnostics | null;
 	setViewport(viewport: ObjectPreviewViewport | null): void;
+	/** Replace the source in the mounted device, coalescing pending work to the latest request. */
+	replaceSource(
+		source: ObjectPreviewSource,
+	): Promise<ObjectPreviewReplacementResult>;
+	/** Clear a previous subject immediately while preserving device lifetime. */
+	withdrawSource(): Promise<void>;
 	dispose(): Promise<void>;
 }
 
@@ -48,25 +53,52 @@ interface ControllerDependencies {
 	readonly onError?: (error: unknown) => void;
 }
 
-/** One mount generation joining preparation, local simulation, cadence and context-B lifetime. */
+/** Outcome belongs to one requested source; superseded work cannot publish success or failure. */
+export type ObjectPreviewReplacementResult = {
+	readonly kind: "installed" | "superseded";
+};
+
+/** One cold source request; revisions are local currentness, never world/server identity. */
+interface SourceRequest {
+	/** Monotonic revision admitted by this mounted owner. */
+	readonly revision: number;
+	/** Immutable visual facts to prepare. */
+	readonly source: ObjectPreviewSource;
+	/** Complete installation or supersession for this caller only. */
+	readonly resolve: (result: ObjectPreviewReplacementResult) => void;
+	/** Report a current request's preparation failure. */
+	readonly reject: (cause: unknown) => void;
+}
+
+/** CPU leases and their presentation runtime move together at a visual installation boundary. */
+interface InstalledVisual {
+	/** CPU/content acquisitions retained until the corresponding GPU bundle retires. */
+	readonly lease: ObjectPreviewAssetLease;
+	/** Animation/effects runtime belonging to that same installed visual. */
+	readonly presentation: ObjectPreviewPresentation;
+}
+
+/** One mounted device with one preparation in flight and one latest pending source request. */
 export class ObjectPreviewController implements ObjectPreviewHandle {
 	readonly ready: Promise<void>;
 	readonly #resolveReady: () => void;
 	readonly #rejectReady: (cause: unknown) => void;
 	readonly #request: ObjectPreviewMountRequest;
 	readonly #dependencies: ControllerDependencies;
-	readonly #setupCompletion: Promise<void>;
-	#lease: ObjectPreviewAssetLease | null = null;
-	#presentation: ObjectPreviewPresentation | null = null;
+	#active: InstalledVisual | null = null;
 	#renderer: WebGL2PreviewRenderer | null = null;
-	#viewport: ObjectPreviewViewport | null = null;
+	#pending: SourceRequest | null = null;
+	#work: Promise<void> | null = null;
+	#revision = 0;
+	#viewport: ResolvedObjectPreviewViewport | null = null;
 	#animationFrame: number | null = null;
 	#lastDrawTimestampMs: number | null = null;
 	#activeClockSeconds = 0;
 	#readySettled = false;
 	#disposed = false;
-	#releaseCompletion: Promise<void> | null = null;
 	#disposalCompletion: Promise<void> | null = null;
+	readonly #retirements = new Set<Promise<void>>();
+	#retirementFailure: unknown = null;
 
 	constructor(
 		request: ObjectPreviewMountRequest,
@@ -82,13 +114,52 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 		});
 		this.#resolveReady = resolveReady;
 		this.#rejectReady = rejectReady;
-		this.#setupCompletion = this.#initialize();
+		if (request.source !== null)
+			void this.replaceSource(request.source).catch((cause: unknown) =>
+				this.#rejectReadyOnce(cause),
+			);
+	}
+
+	/** Replace appearance without changing device lifetime; only the latest request may install. */
+	replaceSource(
+		source: ObjectPreviewSource,
+	): Promise<ObjectPreviewReplacementResult> {
+		if (this.#disposed)
+			return Promise.reject(abortError("Object preview mount was disposed."));
+		this.#revision++;
+		this.#pending?.resolve({ kind: "superseded" });
+		const completion = new Promise<ObjectPreviewReplacementResult>(
+			(resolve, reject) => {
+				this.#pending = { revision: this.#revision, source, resolve, reject };
+			},
+		);
+		this.#startWork();
+		return completion;
+	}
+
+	/** Hide the previous subject now; source preparation may continue solely for cleanup. */
+	withdrawSource(): Promise<void> {
+		if (this.#disposed)
+			return Promise.reject(abortError("Object preview mount was disposed."));
+		this.#revision++;
+		this.#pending?.resolve({ kind: "superseded" });
+		this.#pending = null;
+		this.#cancelFrame();
+		const previous = this.#active;
+		this.#active = null;
+		let gpu: Promise<void>;
+		try {
+			gpu = this.#renderer?.clear() ?? Promise.resolve();
+		} catch (cause) {
+			gpu = Promise.reject(cause);
+		}
+		return this.#retire(previous, gpu);
 	}
 
 	setViewport(viewport: ObjectPreviewViewport | null): void {
 		if (this.#disposed) return;
-		if (viewport !== null) validateViewport(viewport);
-		this.#viewport = viewport;
+		this.#viewport =
+			viewport === null ? null : resolveObjectPreviewViewport(viewport);
 		if (viewport === null) {
 			this.#cancelFrame();
 			this.#lastDrawTimestampMs = null;
@@ -102,61 +173,188 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 	}
 
 	dispose(): Promise<void> {
-		if (this.#disposalCompletion) return this.#disposalCompletion;
+		if (this.#disposalCompletion !== null) return this.#disposalCompletion;
 		this.#disposed = true;
+		this.#revision++;
+		this.#pending?.resolve({ kind: "superseded" });
+		this.#pending = null;
 		this.#viewport = null;
 		this.#cancelFrame();
 		this.#rejectReadyOnce(abortError("Object preview mount was disposed."));
-		return (this.#disposalCompletion = this.#setupCompletion.then(() =>
-			this.#release(),
-		));
+		return (this.#disposalCompletion = this.#release());
 	}
 
-	async #initialize(): Promise<void> {
-		try {
-			const resources = await this.#dependencies.resolveResources();
-			this.#throwIfDisposed();
-			const lease = await acquireObjectPreviewAssets(
-				resources.assets,
-				this.#request.source,
-			);
-			this.#lease = lease;
-			this.#throwIfDisposed();
-			await this.#request.activationBarrier;
-			this.#throwIfDisposed();
-			const renderer = await WebGL2PreviewRenderer.build(
-				this.#request.canvas,
-				lease.assets,
-				{
-					particleMeshSource: resources.particleMeshSource(),
-					preserveDrawingBuffer: resources.preserveDrawingBuffer,
-					texturePreparer: resources.assets.texturePreparer,
-				},
-			);
-			this.#renderer = renderer;
-			this.#throwIfDisposed();
-			this.#presentation = new ObjectPreviewPresentation(lease.assets);
-			this.#scheduleFrame();
-		} catch (cause) {
-			let failure = cause;
+	#startWork(): void {
+		if (this.#work !== null || this.#disposed) return;
+		this.#work = this.#run().finally(() => {
+			this.#work = null;
+			if (this.#pending !== null && !this.#disposed) this.#startWork();
+		});
+	}
+
+	async #run(): Promise<void> {
+		while (this.#pending !== null && !this.#disposed) {
+			const request = this.#pending;
+			this.#pending = null;
 			try {
-				await this.#release();
-			} catch (releaseCause) {
-				failure = new AggregateError(
-					[cause, releaseCause],
-					"Object preview setup and rollback both failed.",
-				);
+				const installed = await this.#prepare(request);
+				request.resolve({
+					kind:
+						installed && this.#isCurrent(request) ? "installed" : "superseded",
+				});
+			} catch (cause) {
+				if (this.#isCurrent(request)) {
+					request.reject(cause);
+					this.#rejectReadyOnce(cause);
+				} else request.resolve({ kind: "superseded" });
 			}
-			this.#rejectReadyOnce(failure);
-			if (!this.#disposed) this.#dependencies.onError?.(failure);
 		}
+	}
+
+	async #prepare(request: SourceRequest): Promise<boolean> {
+		const resources = await this.#dependencies.resolveResources();
+		if (!this.#isCurrent(request)) return false;
+		const lease = await acquireObjectPreviewAssets(
+			resources.assets,
+			request.source,
+		);
+		// Installation transfers this lease permanently, even if withdrawal or another request
+		// retires it while #install is awaiting the previous GPU bundle's completion.
+		let releaseLease: (() => void) | null = () => lease.release();
+		// Retain the preparation outcome until cleanup finishes so cleanup failure cannot
+		// overwrite the original content or upload failure in a finally clause.
+		let outcome:
+			| { kind: "complete"; installed: boolean }
+			| { kind: "failed"; cause: unknown };
+		try {
+			let installed = false;
+			if (this.#isCurrent(request)) {
+				await this.#request.activationBarrier;
+				if (this.#isCurrent(request))
+					installed = await this.#install(request, lease, resources, () => {
+						releaseLease = null;
+					});
+			}
+			outcome = { kind: "complete", installed };
+		} catch (cause) {
+			outcome = { kind: "failed", cause };
+		}
+		try {
+			releaseLease?.();
+		} catch (cause) {
+			// Obsolete content errors need not reach UI, but broken ownership cleanup must
+			// remain observable even after its request has been superseded.
+			this.#retirementFailure ??= cause;
+			this.#dependencies.onError?.(cause);
+			if (outcome.kind === "failed")
+				throw new AggregateError(
+					[outcome.cause, cause],
+					"Preview preparation and lease cleanup failed.",
+					{ cause },
+				);
+			throw cause;
+		}
+		if (outcome.kind === "failed") throw outcome.cause;
+		return outcome.installed;
+	}
+
+	async #install(
+		request: SourceRequest,
+		lease: ObjectPreviewAssetLease,
+		resources: ObjectPreviewResources,
+		transferLease: () => void,
+	): Promise<boolean> {
+		const initial = this.#renderer === null;
+		const renderer =
+			this.#renderer ??
+			(await WebGL2PreviewRenderer.build(this.#request.canvas, lease.assets, {
+				particleMeshSource: resources.particleMeshSource,
+				preserveDrawingBuffer: resources.preserveDrawingBuffer,
+				texturePreparer: resources.assets.texturePreparer,
+			}));
+		this.#renderer = renderer;
+		const staged = initial
+			? null
+			: await renderer.prepareReplacement(lease.assets);
+		try {
+			if (!this.#isCurrent(request)) return false;
+			const presentation = new ObjectPreviewPresentation(
+				lease.assets,
+				this.#active?.presentation ?? null,
+			);
+			const previous = this.#active;
+			// Both pointer changes occur synchronously. A draw cannot pair old pose data with
+			// the new GPU bundle while previous-resource retirement is awaiting completion.
+			let retirement: Promise<void>;
+			try {
+				retirement = staged?.commit() ?? Promise.resolve();
+			} catch (cause) {
+				presentation.dispose();
+				throw cause;
+			}
+			this.#active = { lease, presentation };
+			transferLease();
+			this.#activeClockSeconds = 0;
+			this.#lastDrawTimestampMs = null;
+			this.#scheduleFrame();
+			await this.#retire(previous, retirement);
+			return true;
+		} finally {
+			if (staged !== null) await staged.dispose();
+			else if (this.#active?.lease !== lease) await renderer.clear();
+		}
+	}
+
+	#isCurrent(request: SourceRequest): boolean {
+		return !this.#disposed && request.revision === this.#revision;
+	}
+
+	#retire(previous: InstalledVisual | null, gpu: Promise<void>): Promise<void> {
+		const completion = this.#retireVisual(previous, gpu);
+		this.#retirements.add(completion);
+		void completion.then(
+			() => this.#retirements.delete(completion),
+			(cause: unknown) => {
+				this.#retirements.delete(completion);
+				this.#retirementFailure ??= cause;
+				this.#dependencies.onError?.(cause);
+			},
+		);
+		return completion;
+	}
+
+	async #retireVisual(
+		previous: InstalledVisual | null,
+		gpu: Promise<void>,
+	): Promise<void> {
+		const failures: unknown[] = [];
+		try {
+			previous?.presentation.dispose();
+		} catch (cause) {
+			failures.push(cause);
+		}
+		try {
+			await gpu;
+		} catch (cause) {
+			failures.push(cause);
+		}
+		try {
+			previous?.lease.release();
+		} catch (cause) {
+			failures.push(cause);
+		}
+		if (failures.length > 0)
+			throw new AggregateError(
+				failures,
+				"Object preview visual retirement failed.",
+			);
 	}
 
 	#scheduleFrame(): void {
 		if (
 			this.#disposed ||
 			this.#viewport === null ||
-			this.#presentation === null ||
+			this.#active === null ||
 			this.#renderer === null ||
 			this.#animationFrame !== null
 		)
@@ -169,9 +367,14 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 	#drawFrame(timestampMs: number): void {
 		this.#animationFrame = null;
 		const viewport = this.#viewport;
-		const presentation = this.#presentation;
+		const active = this.#active;
 		const renderer = this.#renderer;
-		if (this.#disposed || viewport === null || !presentation || !renderer)
+		if (
+			this.#disposed ||
+			viewport === null ||
+			active === null ||
+			renderer === null
+		)
 			return;
 		const minimumMs = viewport.minimumFrameIntervalSeconds * 1_000;
 		if (
@@ -186,12 +389,18 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 				Math.max(0, timestampMs - this.#lastDrawTimestampMs) / 1_000;
 		this.#lastDrawTimestampMs = timestampMs;
 		try {
-			const frame = presentation.advance(this.#activeClockSeconds);
-			const renderViewport: ObjectPreviewRenderViewport = {
-				extent: viewport.extent,
-				yawRadians: viewport.yawRadians,
-			};
-			renderer.draw(frame, renderViewport);
+			renderer.draw(
+				active.presentation.advance(
+					this.#activeClockSeconds,
+					viewport.subjectTransform,
+				),
+				{
+					extent: viewport.extent,
+					cameraYawRadians: viewport.cameraYawRadians,
+					subjectTransform: viewport.subjectTransform,
+					framing: viewport.framing,
+				},
+			);
 			this.#resolveReadyOnce();
 			this.#scheduleFrame();
 		} catch (cause) {
@@ -209,40 +418,30 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 		this.#animationFrame = null;
 	}
 
-	#release(): Promise<void> {
-		return (this.#releaseCompletion ??= this.#releaseOwned());
-	}
-
-	async #releaseOwned(): Promise<void> {
-		const failures: unknown[] = [];
+	async #release(): Promise<void> {
+		const results = await Promise.allSettled([
+			this.#work,
+			...this.#retirements,
+		]);
+		const failures = results.flatMap((result) =>
+			result.status === "rejected" ? [result.reason] : [],
+		);
+		if (this.#retirementFailure !== null)
+			failures.push(this.#retirementFailure);
+		const active = this.#active;
+		this.#active = null;
+		const renderer = this.#renderer;
+		this.#renderer = null;
 		try {
-			this.#presentation?.dispose();
+			await this.#retireVisual(
+				active,
+				renderer?.destroy() ?? Promise.resolve(),
+			);
 		} catch (cause) {
 			failures.push(cause);
 		}
-		this.#presentation = null;
-		const renderer = this.#renderer;
-		this.#renderer = null;
-		if (renderer)
-			try {
-				await renderer.destroy();
-			} catch (cause) {
-				failures.push(cause);
-			}
-		const lease = this.#lease;
-		this.#lease = null;
-		if (lease)
-			try {
-				lease.release();
-			} catch (cause) {
-				failures.push(cause);
-			}
 		if (failures.length > 0)
 			throw new AggregateError(failures, "Object preview teardown failed.");
-	}
-
-	#throwIfDisposed(): void {
-		if (this.#disposed) throw abortError("Object preview mount was disposed.");
 	}
 
 	#resolveReadyOnce(): void {
@@ -256,17 +455,6 @@ export class ObjectPreviewController implements ObjectPreviewHandle {
 		this.#readySettled = true;
 		this.#rejectReady(cause);
 	}
-}
-
-function validateViewport(viewport: ObjectPreviewViewport): void {
-	if (
-		!Number.isFinite(viewport.minimumFrameIntervalSeconds) ||
-		viewport.minimumFrameIntervalSeconds <= 0 ||
-		!Number.isFinite(viewport.yawRadians)
-	)
-		throw new Error(
-			"Object preview viewport requires a positive frame interval and finite yaw.",
-		);
 }
 
 function abortError(message: string): Error {

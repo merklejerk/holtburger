@@ -279,7 +279,6 @@ export interface ObjectVisualTemplateRepositoryPort<TOwnerId extends string> {
 	): StagedObjectVisualTemplateOwner<TOwnerId>;
 	dropOwner(ownerId: TOwnerId): void;
 	getDiagnostics(): ObjectVisualTemplateRepositoryDiagnostics;
-	destroy(): Promise<void>;
 }
 
 type TemplateState<TClaim extends ObjectVisualTemplateAtlasClaim> =

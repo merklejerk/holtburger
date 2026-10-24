@@ -87,6 +87,35 @@ export class ObjectPreviewSequence {
 		}
 	}
 
+	/** Keep animation phase across appearance-only replacement, using the new model's setup pose.
+	 * Changed animation identities/windows start normally; no past hooks are replayed. */
+	replacement(
+		clips: readonly PlayingClip[],
+		firstCyclicClip: number | null,
+		setupPose: readonly Mat4[],
+	): ObjectPreviewSequence {
+		const next = new ObjectPreviewSequence(clips, firstCyclicClip, setupPose);
+		if (
+			this.#firstCyclicClip !== firstCyclicClip ||
+			this.#clips.length !== clips.length
+		)
+			return next;
+		for (const [index, clip] of clips.entries()) {
+			const previous = this.#clips[index];
+			if (
+				previous === undefined ||
+				previous.animation.id !== clip.animation.id ||
+				previous.lowFrame !== clip.lowFrame ||
+				previous.highFrame !== clip.highFrame ||
+				previous.framesPerSecond !== clip.framesPerSecond
+			)
+				return next;
+		}
+		next.#clipIndex = this.#clipIndex;
+		next.#framePosition = this.#framePosition;
+		return next;
+	}
+
 	samplePose(): readonly Mat4[] {
 		const clip = this.#clips[this.#clipIndex];
 		return clip

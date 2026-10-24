@@ -1,4 +1,16 @@
 import {
+	playerVisualCaptureSchema,
+	type PlayerVisualCapture,
+} from "./client-object-preview-contract";
+import {
+	characterManagementSchema,
+	type CharacterManagementState,
+} from "./client-host-contract";
+import {
+	characterCreationDraftSchema,
+	type CharacterCreationDraft,
+} from "./client-character-creation-contract";
+import {
 	deathLocationResultSchema,
 	type DeathLocationResult,
 	type DeathLocationQuery,
@@ -241,6 +253,7 @@ type ClientCommandName = Extract<
 	| "submit_client_housing_payment"
 	| "submit_client_housing_management"
 	| "select_client_character"
+	| "create_client_character"
 	| "replace_client_drive"
 	| "queue_client_character_motion_event"
 	| "submit_client_friends"
@@ -321,6 +334,8 @@ type ClientEventName = Extract<
 	| "client-map-teleport-capability-changed"
 	| "client-recall-destinations-changed"
 	| "client-lifecycle-changed"
+	| "client-character-management-changed"
+	| "client-player-visual-capture-changed"
 	| "client-character-motion-capabilities-updated"
 	| "client-character-motion-feedback"
 	| "client-server-controlled-motion"
@@ -391,6 +406,10 @@ export interface ClientConnectionObservation {
 }
 
 export interface ClientLifecycleSessionState {
+	/** Recoverable character operation, independent of world presentation. */
+	readonly characterManagement: CharacterManagementState;
+	/** Latest complete cold capture, forwarded directly to persistence. */
+	readonly playerVisualCapture: PlayerVisualCapture | null;
 	readonly lifecycle: ClientLifecycle | null;
 	readonly playerGuid: number | null;
 	readonly worldGeneration: number;
@@ -501,7 +520,15 @@ export type ClientLifecycleSessionEvent =
 	| { readonly type: "entities" }
 	| { readonly type: "resyncing" }
 	| { readonly type: "current-state"; readonly state: ClientCurrentState }
+	| {
+			readonly type: "player-visual-capture";
+			readonly capture: PlayerVisualCapture | null;
+	  }
 	| { readonly type: "lifecycle"; readonly lifecycle: ClientLifecycle }
+	| {
+			readonly type: "character-management";
+			readonly state: CharacterManagementState;
+	  }
 	| {
 			readonly type: "character-motion-capabilities";
 			readonly capabilities: ClientCharacterMotionCapabilities | null;
@@ -720,6 +747,25 @@ export class ClientLifecycleSession {
 	/** Read the retained transport observation without subscribing the UI to network events. */
 	connectionSample(): ClientConnectionObservation | null {
 		return this.#connection;
+	}
+
+	/** Submit a validated user build; completion arrives through retained management state. */
+	async createCharacter(draft: CharacterCreationDraft): Promise<void> {
+		const lifecycle = this.#state.lifecycle;
+		if (lifecycle?.kind !== "character-selection")
+			throw new Error("Character creation requires character selection.");
+		const management = this.#state.characterManagement;
+		if (
+			["creating", "deleting", "restoring", "uncertain"].includes(
+				management.kind,
+			)
+		)
+			throw new Error("A character-management operation is still pending.");
+		if (lifecycle.characters.length >= lifecycle.maxSlots)
+			throw new Error("The server's character slots are full.");
+		await this.#transport.invoke("create_client_character", {
+			draft: characterCreationDraftSchema.parse(draft),
+		});
 	}
 
 	/** Read the latest lifecycle facts without exposing the host transport or protocol types. */
@@ -1426,6 +1472,24 @@ export class ClientLifecycleSession {
 				await this.#transport.listen("client-lifecycle-changed", (payload) =>
 					this.#receiveLifecycle(payload),
 				),
+				await this.#transport.listen(
+					"client-character-management-changed",
+					(payload) => {
+						const state = characterManagementSchema.parse(payload);
+						this.#state = { ...this.#state, characterManagement: state };
+						this.#emit({ type: "character-management", state });
+					},
+				),
+			);
+			unlisteners.push(
+				await this.#transport.listen(
+					"client-player-visual-capture-changed",
+					(payload) => {
+						const capture = playerVisualCaptureSchema.nullable().parse(payload);
+						this.#state = { ...this.#state, playerVisualCapture: capture };
+						this.#emit({ type: "player-visual-capture", capture });
+					},
+				),
 			);
 			unlisteners.push(
 				await this.#transport.listen(
@@ -1769,6 +1833,8 @@ export class ClientLifecycleSession {
 		this.#state = {
 			...this.#state,
 			lifecycle: state.lifecycle,
+			characterManagement: state.characterManagement,
+			playerVisualCapture: state.playerVisualCapture,
 			playerGuid: state.localPlayerGuid,
 			worldGeneration: state.worldGeneration,
 			worldName: state.worldName,
@@ -2030,6 +2096,8 @@ export class ClientLifecycleSession {
 
 function emptyState(): ClientLifecycleSessionState {
 	return {
+		characterManagement: { kind: "idle" },
+		playerVisualCapture: null,
 		lifecycle: null,
 		playerGuid: null,
 		worldGeneration: 0,

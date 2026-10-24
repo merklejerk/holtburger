@@ -1,9 +1,12 @@
 //! Captured creature-preview facts independent of appraisal presentation and scene residency.
 
 use super::entity_visual_facts::entity_visual_facts;
-use holtburger_common::Guid;
+use holtburger_common::properties::{EquipMask, WorldObjectExt as _};
+use holtburger_common::{Guid, ParentLocation, Placement};
 use holtburger_world::{EntityAppearance, WorldState};
+use holtburger_world::{context::WorldContext, state::storage::RosterCoverage};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 /// One resolved animation window in the default idle sequence.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -41,9 +44,7 @@ pub enum ObjectPreviewPose {
 /// Immutable renderer-source facts captured while the appraised entity is still retained.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ObjectPreviewSource {
-    /// Examined identity and frontend correlation key.
-    pub guid: Guid,
+pub struct ObjectPreviewVisual {
     /// Exact setup model used by the accepted entity generation.
     pub setup_did: u32,
     /// Lossless ordered appearance substitutions applied to that setup.
@@ -54,6 +55,28 @@ pub struct ObjectPreviewSource {
     pub translucency: f32,
     /// Shared motion selection result; the frontend only samples this description.
     pub pose: ObjectPreviewPose,
+}
+
+/// A separately rendered direct child; painted clothing remains in the body appearance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectPreviewAttachment {
+    /// Captured independent visual, with its placement pose supplied below.
+    pub visual: ObjectPreviewVisual,
+    /// Accepted named holding location, without frontend part-index assumptions.
+    pub parent_location: ParentLocation,
+    /// Accepted child-side authored placement key.
+    pub placement: Placement,
+}
+
+/// Complete immutable creature composition, independent of the original entities' lifetimes.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectPreviewSource {
+    /// Body appearance already includes accepted clothing and armor substitutions.
+    pub body: ObjectPreviewVisual,
+    /// Flat separately rendered children; no arbitrary world hierarchy or backdrop policy.
+    pub attachments: Vec<ObjectPreviewAttachment>,
 }
 
 /// Cold capture outcome emitted next to a successful creature appraisal.
@@ -76,24 +99,128 @@ pub struct ObjectPreviewResult {
 pub enum ObjectPreviewOutcome {
     /// Visual source facts captured before later despawn can remove them.
     Ready { source: Box<ObjectPreviewSource> },
+    /// Equipment or parent-announced children are awaiting required accepted facts.
+    PendingEquipment,
     /// The entity is absent or lacks valid visual facts required to render a preview.
     Unavailable,
 }
 
-/// Capture one creature's visual source without loading assets or joining it to a scene.
+/// ACE Selectable, whose items remain children even outside combat
+/// (`Creature_Equipment.cs:463-470`). Ammunition is deliberately excluded from player displays.
+const DISPLAY_EQUIPMENT: EquipMask = EquipMask::from_bits_retain(
+    EquipMask::MELEE_WEAPON.bits()
+        | EquipMask::SHIELD.bits()
+        | EquipMask::MISSILE_WEAPON.bits()
+        | EquipMask::CASTER.bits()
+        | EquipMask::TWO_HANDED.bits(),
+);
+
+/// Capture accepted child placement rather than reconstructing ACE's server-only combat style.
+/// Player rosters prove complete equipment; generic creatures use all announced direct children.
+fn preview_children(
+    world: &WorldState,
+    guid: Guid,
+) -> Result<BTreeSet<Guid>, ObjectPreviewOutcome> {
+    if guid != world.player.guid || guid == Guid::NULL {
+        return Ok(world.expected_attachment_children(guid));
+    }
+    if world.storage_coverage(guid) != Some(RosterCoverage::Announced) {
+        return Err(ObjectPreviewOutcome::PendingEquipment);
+    }
+    let mut children = BTreeSet::new();
+    for item in world.iter_equipment() {
+        let mask = world
+            .equipment_mask(item)
+            .ok_or(ObjectPreviewOutcome::PendingEquipment)?;
+        if world.entities.get(item).is_none() {
+            return Err(ObjectPreviewOutcome::PendingEquipment);
+        }
+        if mask.intersects(DISPLAY_EQUIPMENT) {
+            children.insert(item);
+        }
+    }
+    Ok(children)
+}
+
+/// Capture one creature without loading assets or joining it to a scene.
 pub fn capture_object_preview(world: &WorldState, guid: Guid) -> ObjectPreviewResult {
+    ObjectPreviewResult {
+        guid,
+        outcome: capture_composition(world, guid, CapturePolicy::Inspection),
+    }
+}
+
+/// Saved selection previews exclude transient script scale and whole-object visibility.
+#[derive(Clone, Copy)]
+enum CapturePolicy {
+    Inspection,
+    SavedCharacter,
+}
+
+/// Capture only complete player visuals, using the same equipment and idle semantics as inspection.
+pub(super) fn capture_saved_player_visual(world: &WorldState) -> Option<ObjectPreviewSource> {
+    if !world.all_player_contained_objects_exist() {
+        return None;
+    }
+    match capture_composition(world, world.player.guid, CapturePolicy::SavedCharacter) {
+        ObjectPreviewOutcome::Ready { source } => Some(*source),
+        ObjectPreviewOutcome::PendingEquipment | ObjectPreviewOutcome::Unavailable => None,
+    }
+}
+
+fn capture_visual(
+    entity: &holtburger_world::entity::Entity,
+    pose: ObjectPreviewPose,
+    policy: CapturePolicy,
+) -> Option<ObjectPreviewVisual> {
+    let facts = entity_visual_facts(entity).ok()?;
+    let (scale, translucency) = match policy {
+        CapturePolicy::Inspection => (facts.scale, facts.translucency),
+        // Physics description omission means unit scale (WorldObject hydration); scripts mutate
+        // EntityScaleState without changing this accepted DefaultScale property.
+        CapturePolicy::SavedCharacter => (entity.obj_scale().unwrap_or(1.0) as f32, 0.0),
+    };
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    Some(ObjectPreviewVisual {
+        setup_did: facts.setup_did,
+        appearance: facts.appearance.clone(),
+        scale,
+        translucency,
+        pose,
+    })
+}
+
+fn capture_composition(
+    world: &WorldState,
+    guid: Guid,
+    policy: CapturePolicy,
+) -> ObjectPreviewOutcome {
     let Some(entity) = world.entities.get(guid) else {
-        return ObjectPreviewResult {
-            guid,
-            outcome: ObjectPreviewOutcome::Unavailable,
-        };
+        return ObjectPreviewOutcome::Unavailable;
     };
-    let Ok(visual) = entity_visual_facts(entity) else {
-        return ObjectPreviewResult {
-            guid,
-            outcome: ObjectPreviewOutcome::Unavailable,
-        };
+    let children = match preview_children(world, guid) {
+        Ok(children) => children,
+        Err(outcome) => return outcome,
     };
+    let mut attachments = Vec::with_capacity(children.len());
+    for child in children {
+        let Some(child) = world.entities.get(child) else {
+            return ObjectPreviewOutcome::PendingEquipment;
+        };
+        let Some(link) = child.attachment().filter(|link| link.parent == guid) else {
+            return ObjectPreviewOutcome::PendingEquipment;
+        };
+        let Some(visual) = capture_visual(child, ObjectPreviewPose::SetupPose, policy) else {
+            return ObjectPreviewOutcome::PendingEquipment;
+        };
+        attachments.push(ObjectPreviewAttachment {
+            visual,
+            parent_location: link.location,
+            placement: link.placement,
+        });
+    }
     let pose = world
         .effective_motion_table_id_for_guid(guid)
         .and_then(|table_id| world.motion_sequences.table(table_id))
@@ -118,18 +245,11 @@ pub fn capture_object_preview(world: &WorldState, guid: Guid) -> ObjectPreviewRe
                 first_cyclic_clip: cycle.clips.len() - 1,
             }
         });
-    ObjectPreviewResult {
-        guid,
-        outcome: ObjectPreviewOutcome::Ready {
-            source: Box::new(ObjectPreviewSource {
-                guid,
-                setup_did: visual.setup_did,
-                appearance: visual.appearance.clone(),
-                scale: visual.scale,
-                translucency: visual.translucency,
-                pose,
-            }),
-        },
+    let Some(body) = capture_visual(entity, pose, policy) else {
+        return ObjectPreviewOutcome::Unavailable;
+    };
+    ObjectPreviewOutcome::Ready {
+        source: Box::new(ObjectPreviewSource { body, attachments }),
     }
 }
 
@@ -144,8 +264,160 @@ mod tests {
     use holtburger_dat::file_type::motion_table::{AnimData, MotionData, MotionDataFlags};
     use holtburger_dat::file_type::setup_model::AnimationFrame;
     use holtburger_dat::file_type::{Animation, MotionTable};
+    use holtburger_protocol::messages::object::messages::description::PhysicsChildData;
+    use holtburger_protocol::messages::{
+        GameEvent, GameEventMessage, GameMessage, ObjectDescriptionData, PlayerDescriptionEventData,
+    };
+    use holtburger_world::PhysicsAttachment;
     use holtburger_world::{EntityScaleState, entity::Entity};
     use std::collections::HashMap;
+
+    const PLAYER: Guid = Guid(0x5000_0001);
+    const SWORD: Guid = Guid(0x7000_0001);
+    const ARMOR: Guid = Guid(0x7000_0002);
+    const AMMO: Guid = Guid(0x7000_0003);
+
+    fn visual_entity(guid: Guid) -> Entity {
+        let mut entity = Entity::new(guid, "Visual".into(), Default::default());
+        entity.set_did_prop(PropertyDataId::Setup, 0x0200_0001.into());
+        entity
+    }
+
+    fn player_roster(world: &mut WorldState, equipment: &[(Guid, EquipMask)]) {
+        world.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: PLAYER,
+            sequence: 0,
+            event: GameEvent::PlayerDescription(Box::new(PlayerDescriptionEventData {
+                guid: PLAYER,
+                sequence: 0,
+                name: "Player".into(),
+                wee_type: 1,
+                pos: None,
+                properties: Default::default(),
+                positions: Default::default(),
+                attributes: Default::default(),
+                skills: Default::default(),
+                enchantments: Vec::new(),
+                spells: Default::default(),
+                has_health: true,
+                options1: Default::default(),
+                options2: Default::default(),
+                shortcuts: Vec::new(),
+                hotbar_spells: Vec::new(),
+                desired_comps: Vec::new(),
+                spellbook_filters: 0,
+                gameplay_options: Vec::new(),
+                inventory: Vec::new(),
+                equipped_objects: equipment
+                    .iter()
+                    .map(|(guid, mask)| (*guid, mask.bits(), 0))
+                    .collect(),
+            })),
+        })));
+        world.add_entity(visual_entity(PLAYER));
+    }
+
+    #[test]
+    fn remote_capture_waits_for_announced_children_and_survives_their_removal() {
+        let mut world = WorldState::synthetic();
+        let mut parent = ObjectDescriptionData::with_guid(PLAYER);
+        parent.csetup_id = Some(0x0200_0001);
+        parent.children = Some(vec![PhysicsChildData {
+            guid: SWORD,
+            location_id: ParentLocation::LeftHand as u32,
+        }]);
+        world.handle_message(&GameMessage::ObjectCreate(Box::new(parent)));
+        assert_eq!(
+            world.expected_attachment_children(PLAYER),
+            BTreeSet::from([SWORD])
+        );
+        assert_eq!(
+            capture_object_preview(&world, PLAYER).outcome,
+            ObjectPreviewOutcome::PendingEquipment
+        );
+        let mut child = ObjectDescriptionData::with_guid(SWORD);
+        child.csetup_id = Some(0x0200_0002);
+        child.animation_frame = Some(Placement::LeftHand as u32);
+        world.handle_message(&GameMessage::ObjectCreate(Box::new(child)));
+        let ObjectPreviewOutcome::Ready { source } = capture_object_preview(&world, PLAYER).outcome
+        else {
+            panic!("complete remote composition should be captured");
+        };
+        assert_eq!(source.attachments.len(), 1);
+        assert_eq!(
+            source.attachments[0].parent_location,
+            ParentLocation::LeftHand
+        );
+        assert_eq!(source.attachments[0].placement, Placement::LeftHand);
+        world.remove_entity(SWORD);
+        world.remove_entity(PLAYER);
+        assert_eq!(source.attachments[0].visual.setup_did, 0x0200_0002);
+    }
+
+    #[test]
+    fn player_capture_uses_announced_equipment_and_never_repaints_armor_or_captures_ammo() {
+        let mut world = WorldState::synthetic();
+        player_roster(
+            &mut world,
+            &[
+                (SWORD, EquipMask::MISSILE_WEAPON),
+                (ARMOR, EquipMask::CHEST_ARMOR),
+                (AMMO, EquipMask::MISSILE_AMMO),
+            ],
+        );
+        assert_eq!(
+            capture_object_preview(&world, PLAYER).outcome,
+            ObjectPreviewOutcome::PendingEquipment
+        );
+        world.add_entity(visual_entity(SWORD));
+        // These descriptions have no independent setup: worn armor is already baked into the body.
+        world.add_entity(Entity::new(ARMOR, "Armor".into(), Default::default()));
+        world.add_entity(Entity::new(AMMO, "Ammo".into(), Default::default()));
+        assert_eq!(
+            capture_object_preview(&world, PLAYER).outcome,
+            ObjectPreviewOutcome::PendingEquipment
+        );
+        world
+            .entities
+            .get_mut(SWORD)
+            .unwrap()
+            .set_attachment(Some(PhysicsAttachment {
+                parent: PLAYER,
+                location: ParentLocation::LeftHand,
+                placement: Placement::LeftHand,
+            }));
+        // No DefaultCombatStyle is present or needed: the accepted bow relationship owns handedness.
+        let ObjectPreviewOutcome::Ready { source } = capture_object_preview(&world, PLAYER).outcome
+        else {
+            panic!("complete player composition should be captured");
+        };
+        assert_eq!(source.attachments.len(), 1);
+        assert_eq!(
+            source.attachments[0].parent_location,
+            ParentLocation::LeftHand
+        );
+        assert_eq!(
+            source.attachments[0].visual.pose,
+            ObjectPreviewPose::SetupPose
+        );
+        player_roster(&mut world, &[]);
+        let ObjectPreviewOutcome::Ready { source } = capture_object_preview(&world, PLAYER).outcome
+        else {
+            panic!("confirmed empty equipment should be captured");
+        };
+        assert!(source.attachments.is_empty());
+    }
+
+    #[test]
+    fn player_capture_requires_roster_receipt_even_when_no_items_are_retained() {
+        let mut world = WorldState::synthetic();
+        world.player.guid = PLAYER;
+        world.add_entity(visual_entity(PLAYER));
+        assert_eq!(
+            capture_object_preview(&world, PLAYER).outcome,
+            ObjectPreviewOutcome::PendingEquipment
+        );
+    }
 
     fn catalog_with_two_clip_default(table_id: u32) -> MotionSequenceCatalog {
         const STYLE: u32 = 0x8000_003d;
@@ -220,11 +492,11 @@ mod tests {
         let ObjectPreviewOutcome::Ready { source } = result.outcome else {
             panic!("preview should be available");
         };
-        assert_eq!(source.setup_did, SETUP);
-        assert_eq!(source.scale, 1.25);
-        assert_eq!(source.translucency, 0.5);
+        assert_eq!(source.body.setup_did, SETUP);
+        assert_eq!(source.body.scale, 1.25);
+        assert_eq!(source.body.translucency, 0.5);
         assert_eq!(
-            source.pose,
+            source.body.pose,
             ObjectPreviewPose::DefaultIdle {
                 clips: vec![
                     ObjectPreviewClip {
@@ -256,7 +528,7 @@ mod tests {
         assert!(matches!(
             result.outcome,
             ObjectPreviewOutcome::Ready { source }
-                if source.pose == ObjectPreviewPose::SetupPose
+                if source.body.pose == ObjectPreviewPose::SetupPose
         ));
 
         let missing = capture_object_preview(&WorldState::synthetic(), GUID);

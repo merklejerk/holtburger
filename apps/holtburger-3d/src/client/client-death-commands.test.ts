@@ -39,7 +39,11 @@ function fixture() {
 		retire: () => {
 			state = {
 				playerGuid: null,
-				lifecycle: { kind: "character-selection", characters: [] },
+				lifecycle: {
+					kind: "character-selection",
+					maxSlots: 11,
+					characters: [],
+				},
 			};
 			receiver({ type: "resyncing" });
 		},

@@ -6,7 +6,8 @@
 	import type { UiIconRepository } from "../app/ui-icon-repository";
 	import { trackPointerGesture } from "../app/pointer-gesture";
 	import ClientCreatureInspection from "./ClientCreatureInspection.svelte";
-	import ClientCreaturePreview from "./ClientCreaturePreview.svelte";
+	import { objectPreviewSourceForRendering } from "./client-object-preview-contract";
+	import ClientModelPreview from "./ClientModelPreview.svelte";
 	import ClientHudWindow from "./ClientHudWindow.svelte";
 	import ClientItemInspection from "./ClientItemInspection.svelte";
 	import ClientPlayerKillerStatusIcon from "./ClientPlayerKillerStatusIcon.svelte";
@@ -155,21 +156,17 @@
 						</div>
 					{/if}
 				</header>
-				{#if preview?.kind === "ready"}
-					{#key preview.revision}
-						<ClientCreaturePreview
-							source={preview.source}
-							service={objectPreviewService}
-						/>
-					{/key}
-				{:else}
-					<div class="inspection-preview-fallback" role="status">
-						<span aria-hidden="true">◆</span>
-						{preview?.kind === "pending"
-							? "Preparing model…"
-							: "Model preview unavailable"}
-					</div>
-				{/if}
+				<ClientModelPreview
+					source={preview?.kind === "ready"
+						? objectPreviewSourceForRendering(preview.source)
+						: null}
+					emptyMessage={preview?.kind === "pending"
+						? "Preparing model…"
+						: "Model preview unavailable"}
+					service={objectPreviewService}
+					rotation="orbit"
+					framing={{ kind: "body" }}
+				/>
 				<div
 					class="inspection-preview-resize"
 					role="slider"
@@ -309,20 +306,6 @@
 		.inspection-preview-pk-status {
 			display: inline-flex;
 			margin-left: auto;
-		}
-		.inspection-preview-fallback {
-			display: grid;
-			place-content: center;
-			justify-items: center;
-			gap: 7px;
-			height: 100%;
-			border: 1px solid var(--ui-color-border);
-			background: var(--ui-color-well);
-			color: var(--ui-color-muted);
-		}
-		.inspection-preview-fallback > span {
-			font-size: 1.5rem;
-			color: var(--ui-color-danger);
 		}
 		.inspection-scroll :global(.inspection-body) {
 			display: grid;

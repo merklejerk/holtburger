@@ -25,17 +25,19 @@ const previewFixture = decodeObjectPreviewResult({
 	outcome: {
 		kind: "ready",
 		source: {
-			guid: fixture.creature.guid,
-			setupDid: 0x0200_0001,
-			appearance: {
-				paletteDid: null,
-				subPalettes: [],
-				textureChanges: [],
-				partChanges: [],
+			attachments: [],
+			body: {
+				setupDid: 0x0200_0001,
+				appearance: {
+					paletteDid: null,
+					subPalettes: [],
+					textureChanges: [],
+					partChanges: [],
+				},
+				scale: 1,
+				translucency: 0,
+				pose: { kind: "setup-pose" },
 			},
-			scale: 1,
-			translucency: 0,
-			pose: { kind: "setup-pose" },
 		},
 	},
 });
@@ -55,6 +57,8 @@ class FakeInspectionSession {
 
 	state(): ClientLifecycleSessionState {
 		return {
+			characterManagement: { kind: "idle" },
+			playerVisualCapture: null,
 			lifecycle: { kind: "in-world" },
 			playerGuid: 0x5000_0001,
 			worldGeneration: 1,
@@ -227,7 +231,10 @@ describe("ClientObjectInspection", () => {
 				...previewFixture,
 				outcome: {
 					kind: "ready",
-					source: { ...previewFixture.outcome.source, scale: 1.25 },
+					source: {
+						...previewFixture.outcome.source,
+						body: { ...previewFixture.outcome.source.body, scale: 1.25 },
+					},
 				},
 			},
 		});

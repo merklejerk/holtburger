@@ -3,17 +3,15 @@ use crate::types::{AppAction, AppUiAction, Verb};
 use holtburger_common::stats::AttributeType;
 use holtburger_content::character_gen::{
     CharacterGenGenderDefinition, CharacterGenHeritageGroup, CharacterGenSkillDefinition,
-    CharacterGenStarterArea, CharacterGenTemplate,
+    CharacterGenStarterArea, CharacterGenTemplate, is_unavailable_character_gen_skill_cost,
 };
 use holtburger_content::{CharacterGenCatalog, ContentRepository};
 use holtburger_core::character_gen::{
     CHARACTER_GEN_MAX_ATTRIBUTE, CHARACTER_GEN_MIN_ATTRIBUTE, custom_template_for_heritage,
-    is_unavailable_character_gen_skill_cost, minimum_skill_advancement_for_heritage,
+    minimum_skill_advancement_for_heritage,
 };
 use holtburger_core::{CharacterGenBuild, CharacterGenBuilder, CharacterGenValidationError};
-use holtburger_dat::file_type::{CharGen, SkillTable};
 use holtburger_protocol::messages::SkillAdvancementClass;
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 const ATTRIBUTE_ORDER: [(AttributeType, &str); 6] = [
@@ -84,28 +82,12 @@ impl CharacterCreationState {
             return Self::default();
         };
 
-        let char_gen = match repository.read_asset::<CharGen>("character generator table") {
-            Ok(char_gen) => char_gen,
-            Err(error) => {
-                return Self::Unavailable {
-                    message: format!("Could not load character generator table: {}", error),
-                };
-            }
-        };
-
-        let skill_table = match repository.read_asset::<SkillTable>("skill table") {
-            Ok(skill_table) => skill_table,
-            Err(error) => {
-                return Self::Unavailable {
-                    message: format!("Could not load skill table: {}", error),
-                };
-            }
-        };
-
-        Self::from_catalog(Arc::new(CharacterGenCatalog::from_assets(
-            &char_gen,
-            &skill_table,
-        )))
+        match repository.read_character_gen_catalog() {
+            Ok(catalog) => Self::from_catalog(Arc::new(catalog)),
+            Err(error) => Self::Unavailable {
+                message: format!("Could not load character creation choices: {error}"),
+            },
+        }
     }
 
     pub fn from_catalog(catalog: Arc<CharacterGenCatalog>) -> Self {
@@ -568,7 +550,7 @@ impl CharacterCreationFormState {
             SkillAdvancementClass::Inactive | SkillAdvancementClass::Untrained => {
                 costs.trained_cost
             }
-            SkillAdvancementClass::Trained => costs.specialized_cost,
+            SkillAdvancementClass::Trained => costs.specialization_upgrade_cost,
             SkillAdvancementClass::Specialized => unreachable!(),
         };
 
@@ -628,7 +610,6 @@ impl CharacterCreationFormState {
 
     pub fn build_request(
         &self,
-        occupied_slots: impl IntoIterator<Item = u32>,
     ) -> Result<
         holtburger_protocol::messages::CharacterCreateRequestData,
         Vec<CharacterGenValidationError>,
@@ -649,7 +630,6 @@ impl CharacterCreationFormState {
             quickness_ability: self.attribute_values[3],
             focus_ability: self.attribute_values[4],
             self_ability: self.attribute_values[5],
-            character_slot: first_available_slot(occupied_slots),
             skill_advancement_classes: self.skill_advancement_classes.clone(),
             name: self.name_input.text().trim().to_string(),
             start_area: self.start_area_id,
@@ -701,8 +681,13 @@ impl CharacterCreationFormState {
             return 0;
         };
 
-        let current_cost = advancement_cost(current, costs.trained_cost, costs.specialized_cost);
-        let next_cost = advancement_cost(next, costs.trained_cost, costs.specialized_cost);
+        let current_cost = advancement_cost(
+            current,
+            costs.trained_cost,
+            costs.specialization_upgrade_cost,
+        );
+        let next_cost =
+            advancement_cost(next, costs.trained_cost, costs.specialization_upgrade_cost);
         next_cost - current_cost
     }
 
@@ -734,12 +719,12 @@ fn advancement_rank(advancement: SkillAdvancementClass) -> u8 {
 fn advancement_cost(
     advancement: SkillAdvancementClass,
     trained_cost: i32,
-    specialized_cost: i32,
+    specialization_upgrade_cost: i32,
 ) -> i64 {
     match advancement {
         SkillAdvancementClass::Inactive | SkillAdvancementClass::Untrained => 0,
         SkillAdvancementClass::Trained => i64::from(trained_cost),
-        SkillAdvancementClass::Specialized => i64::from(trained_cost + specialized_cost),
+        SkillAdvancementClass::Specialized => i64::from(trained_cost + specialization_upgrade_cost),
     }
 }
 
@@ -767,15 +752,6 @@ fn stepped_value(values: &[u32], current: u32, delta: i32) -> Option<u32> {
         .unwrap_or_default() as i32;
     let len = values.len() as i32;
     Some(values[(index + delta).rem_euclid(len) as usize])
-}
-
-fn first_available_slot(occupied_slots: impl IntoIterator<Item = u32>) -> u32 {
-    let occupied = occupied_slots.into_iter().collect::<BTreeSet<_>>();
-    let mut candidate = 0u32;
-    while occupied.contains(&candidate) {
-        candidate += 1;
-    }
-    candidate
 }
 
 pub fn format_creation_errors(errors: &[CharacterGenValidationError]) -> String {
@@ -821,6 +797,7 @@ mod tests {
                     environment_setup_id: 0,
                     attribute_credits: 66,
                     skill_credits: 8,
+                    uses_starter_clothing: true,
                     primary_start_area_ids: vec![0],
                     secondary_start_area_ids: Vec::new(),
                     skill_overrides: BTreeMap::new(),
@@ -889,18 +866,20 @@ mod tests {
                                     name: "Shirt".to_string(),
                                     clothing_table: 0,
                                     weenie_default: 0,
+                                    palette_template_ids: vec![17],
                                 }],
                                 pants: vec![CharacterGenGear {
                                     name: "Pants".to_string(),
                                     clothing_table: 0,
                                     weenie_default: 0,
+                                    palette_template_ids: vec![17],
                                 }],
                                 footwear: vec![CharacterGenGear {
                                     name: "Sandals".to_string(),
                                     clothing_table: 0,
                                     weenie_default: 0,
+                                    palette_template_ids: vec![17],
                                 }],
-                                clothing_color_ids: vec![0],
                             },
                         },
                     )]),
@@ -916,7 +895,7 @@ mod tests {
                         description: String::new(),
                         chargen_use: true,
                         trained_cost: 2,
-                        specialized_cost: 4,
+                        specialization_total_cost: 6,
                     },
                 ),
                 (
@@ -928,7 +907,7 @@ mod tests {
                         description: String::new(),
                         chargen_use: true,
                         trained_cost: 2,
-                        specialized_cost: 4,
+                        specialization_total_cost: 6,
                     },
                 ),
                 (
@@ -940,7 +919,7 @@ mod tests {
                         description: String::new(),
                         chargen_use: true,
                         trained_cost: 2,
-                        specialized_cost: 4,
+                        specialization_total_cost: 6,
                     },
                 ),
             ]),
@@ -971,11 +950,10 @@ mod tests {
         form.raise_selected_skill();
 
         let request = form
-            .build_request([1, 2])
+            .build_request()
             .expect("build should produce a valid request");
 
         assert_eq!(request.name, "Sho Girl");
-        assert_eq!(request.character_slot, 0);
         assert_eq!(request.heritage, 7);
         assert_eq!(request.gender, 1);
         assert_eq!(request.start_area, 0);
@@ -1081,7 +1059,7 @@ mod tests {
                 description: String::new(),
                 chargen_use: true,
                 trained_cost: 8,
-                specialized_cost: 999,
+                specialization_total_cost: 999,
             },
         );
         catalog.expected_skill_slots = SkillType::Salvaging as usize + 1;

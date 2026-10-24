@@ -136,6 +136,8 @@ export async function probeWorldContainer(options: {
 	) =>
 		emit("client-current-state", {
 			lifecycle: { kind: "in-world" },
+			characterManagement: { kind: "idle" },
+			playerVisualCapture: null,
 			entityCollisionDisabled: false,
 			canTeleportFromMap: false,
 			recallDestinations: [],

@@ -41,6 +41,8 @@ async function fixture() {
 	emit("client-current-state", {
 		lifecycle: { kind: "in-world" },
 		localPlayerGuid: 1,
+		characterManagement: { kind: "idle" },
+		playerVisualCapture: null,
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
 		recallDestinations: [],

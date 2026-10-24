@@ -138,7 +138,8 @@ pub enum CharacterGenerationVerificationResponse {
     Count = 8,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CharacterCreateAppearanceData {
     pub eyes: u32,
     pub nose: u32,
@@ -147,12 +148,16 @@ pub struct CharacterCreateAppearanceData {
     pub eye_color: u32,
     pub hair_style: u32,
     pub headgear_style: u32,
+    /// Actual clothing palette-template key, not the color control's display ordinal.
     pub headgear_color: u32,
     pub shirt_style: u32,
+    /// Actual clothing palette-template key, not the color control's display ordinal.
     pub shirt_color: u32,
     pub pants_style: u32,
+    /// Actual clothing palette-template key, not the color control's display ordinal.
     pub pants_color: u32,
     pub footwear_style: u32,
+    /// Actual clothing palette-template key, not the color control's display ordinal.
     pub footwear_color: u32,
     pub skin_hue: f64,
     pub hair_hue: f64,

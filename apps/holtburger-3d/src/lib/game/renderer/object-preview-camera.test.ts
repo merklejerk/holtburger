@@ -5,13 +5,99 @@ import { AABB3, Vec3 } from "../math/types";
 import {
 	OBJECT_PREVIEW_VERTICAL_FOV_DEGREES,
 	resolveObjectPreviewViewTransform,
+	resolveObjectPreviewCompositionView,
 } from "./object-preview-camera";
+import { resolveObjectPreviewViewport } from "../preview/object-preview-viewport";
 import type { RenderExtent } from "./render-extent";
 import type { ObjectPreviewFit } from "../preview/object-preview-fit";
 
 const BOUNDS = new AABB3(new Vec3(-1, 0, -2), new Vec3(3, 6, 2));
 
 describe("object preview yaw camera", () => {
+	it("supports the creator's fixed viewpoint on negative AC Y while its subject turns independently", () => {
+		const makeView = (headingRadians: number) =>
+			resolveObjectPreviewCompositionView(
+				fit(BOUNDS),
+				null,
+				resolveObjectPreviewViewport({
+					extent: { width: 400, height: 300 },
+					minimumFrameIntervalSeconds: 1 / 30,
+					rotation: {
+						kind: "subject",
+						headingRadians,
+						cameraYawRadians: Math.PI,
+					},
+					framing: { kind: "body" },
+				}),
+			);
+		const view = makeView(Math.PI);
+		const turned = makeView(Math.PI / 2);
+		// Negative authored Y maps to render +Z; the backdrop remains authored at the origin.
+		expect(view.cameraPosition.z).toBeGreaterThan(0);
+		expect(turned.cameraPosition.z).toBeGreaterThan(0);
+		expect(Math.abs(view.cameraPosition.x)).toBeLessThan(0.00001);
+	});
+	it("uses the background only for clipping and keeps subject framing unchanged", () => {
+		const viewport = resolveObjectPreviewViewport({
+			extent: { width: 400, height: 300 },
+			minimumFrameIntervalSeconds: 1 / 30,
+			rotation: { kind: "subject", headingRadians: 0, cameraYawRadians: 0 },
+			framing: { kind: "body" },
+		});
+		const subject = fit(BOUNDS);
+		const backdrop = fit(
+			new AABB3(new Vec3(-100, -100, 50), new Vec3(100, 100, 100)),
+		);
+		const alone = resolveObjectPreviewCompositionView(subject, null, viewport);
+		const composed = resolveObjectPreviewCompositionView(
+			subject,
+			backdrop,
+			viewport,
+		);
+		expect(composed.cameraPosition).toEqual(alone.cameraPosition);
+		expect(composed.objectRoot).toEqual(alone.objectRoot);
+		expect(composed.farPlane).toBeGreaterThan(alone.farPlane);
+	});
+
+	it("frames an explicit face focus without a human head-part assumption", () => {
+		const base = {
+			extent: { width: 400, height: 300 },
+			minimumFrameIntervalSeconds: 1 / 30,
+			rotation: {
+				kind: "subject" as const,
+				headingRadians: 0,
+				cameraYawRadians: 0,
+			},
+		};
+		const body = resolveObjectPreviewCompositionView(
+			fit(BOUNDS),
+			null,
+			resolveObjectPreviewViewport({ ...base, framing: { kind: "body" } }),
+		);
+		const face = resolveObjectPreviewCompositionView(
+			fit(BOUNDS),
+			null,
+			resolveObjectPreviewViewport({
+				...base,
+				framing: { kind: "face", center: new Vec3(0, 1.65, 0), height: 0.5 },
+			}),
+		);
+		expect(face.objectRoot.m42).toBeCloseTo(-1.65);
+		expect(
+			Math.hypot(
+				face.cameraPosition.x,
+				face.cameraPosition.y,
+				face.cameraPosition.z,
+			),
+		).toBeLessThan(
+			Math.hypot(
+				body.cameraPosition.x,
+				body.cameraPosition.y,
+				body.cameraPosition.z,
+			),
+		);
+		expect(face.farPlane).toBeGreaterThan(face.nearPlane);
+	});
 	it("looks at the authored front from render -Z at yaw zero", () => {
 		const view = resolveObjectPreviewViewTransform(fit(BOUNDS), 0, {
 			height: 300,

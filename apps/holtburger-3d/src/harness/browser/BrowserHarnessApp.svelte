@@ -1978,12 +1978,15 @@
 		if (!entity)
 			throw new Error(`Object preview probe could not find entity ${guid}.`);
 		return {
-			guid,
-			setupDid: entity.presentation.content.setupDid,
-			appearance: entity.presentation.appearance,
-			scale: entity.presentation.objectScale,
-			translucency: entity.physics.translucency,
-			pose: { kind: "setup-pose" },
+			attachments: [],
+			background: null,
+			body: {
+				setupDid: entity.presentation.content.setupDid,
+				appearance: entity.presentation.appearance,
+				scale: entity.presentation.objectScale,
+				translucency: entity.physics.translucency,
+				pose: { kind: "setup-pose" },
+			},
 		};
 	}
 
@@ -2013,7 +2016,8 @@
 		handle.setViewport({
 			extent: { height: 192, width: 256 },
 			minimumFrameIntervalSeconds: 1 / 60,
-			yawRadians: 0.65,
+			rotation: { kind: "orbit", yawRadians: 0.65 },
+			framing: { kind: "body" },
 		});
 		try {
 			await handle.ready;
@@ -2067,7 +2071,8 @@
 			handle.setViewport({
 				extent,
 				minimumFrameIntervalSeconds: 1 / 60,
-				yawRadians,
+				rotation: { kind: "orbit", yawRadians },
+				framing: { kind: "body" },
 			});
 			await withTimeout(handle.ready, 5_000, "Object preview frame timed out.");
 			await withTimeout(
@@ -2134,7 +2139,8 @@
 			suspendedHandle.setViewport({
 				extent: { height: 160, width: 320 },
 				minimumFrameIntervalSeconds: 1 / 60,
-				yawRadians: -0.65,
+				rotation: { kind: "orbit", yawRadians: -0.65 },
+				framing: { kind: "body" },
 			});
 			await withTimeout(
 				waitForPreviewFrameAfter(suspendedHandle, pausedFrameCount),

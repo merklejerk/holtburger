@@ -1046,7 +1046,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(system.getRenderable(requiredAt(replacement.nodeIds, 0))).toBeNull();
 	});
 
-	it("awaits in-flight preparation before destroying shared repositories", async () => {
+	it("awaits and retires in-flight preparation before returning borrowed repositories to their owner", async () => {
 		const preparer = new DeferredPreparer();
 		const { system } = createSystem(preparer);
 		const installation = system.replaceOwner("layer", [source("pending")]);
@@ -1061,6 +1061,21 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(await installation.ready).toBe("superseded");
 		await destruction;
 		expect(destroyed).toBe(true);
+	});
+
+	it("releases world residents while leaving borrowed animations available to a later preview", async () => {
+		const { system, animations, templates } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const installation = system.replaceOwner("world", [source("character")]);
+		expect(await installation.ready).toBe("ready");
+		commit(installation);
+		await system.destroy();
+		const preview = await animations.acquire("0x03000001");
+		expect(preview.asset.frameCount).toBe(1);
+		preview.release();
+		await templates.destroy();
+		animations.destroy();
 	});
 
 	it("stages a partial animation and releases it with its uncommitted owner", async () => {
@@ -1760,11 +1775,12 @@ function createSystem(
 		new ObjectVisualTemplateAssetRepository(preparer),
 		() => () => {},
 	);
+	const animations = new AnimationAssetRepository(animationSource);
 	const system = new DynamicEntitySystem<string>(
 		scene,
 		new DynamicEntityPlacementSystem(scene),
 		templates,
-		new AnimationAssetRepository(animationSource),
+		animations,
 		new PhysicsScriptRepository({
 			destroy: () => {},
 			loadPhysicsScript: async (scriptId) => {
@@ -1790,7 +1806,7 @@ function createSystem(
 			`${ownerId}:generation:${generation}`,
 		() => particleEnvelopeRadiusOf(),
 	);
-	return { effects, geometry, scene, system };
+	return { effects, geometry, scene, system, animations, templates };
 }
 
 function source(

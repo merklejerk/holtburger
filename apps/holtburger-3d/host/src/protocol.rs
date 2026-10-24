@@ -110,6 +110,12 @@ pub enum HostEvent {
     /// Shared transport rates, reliability, and health for client HUD consumers.
     ClientConnectionUpdated(holtburger_core::client::connection::ConnectionSample),
     ClientLifecycleChanged(crate::client_projection::ClientLifecycleWire),
+    /// Retained creation/management progress, also recovered in current-state snapshots.
+    ClientCharacterManagementChanged(holtburger_core::client::types::CharacterManagementState),
+    /// Complete gameplay visual, also present in recovery snapshots.
+    ClientPlayerVisualCaptureChanged(
+        Option<holtburger_core::client::player_visual::PlayerVisualCapture>,
+    ),
     ClientCharacterMotionCapabilitiesUpdated(
         Option<crate::client_projection::ClientCharacterMotionCapabilitiesWire>,
     ),
@@ -510,6 +516,12 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::LifecycleChanged(lifecycle) => {
                 HostEvent::ClientLifecycleChanged(lifecycle)
+            }
+            crate::client_projection::ClientHostEvent::CharacterManagementChanged(state) => {
+                HostEvent::ClientCharacterManagementChanged(state)
+            }
+            crate::client_projection::ClientHostEvent::PlayerVisualCaptureChanged(capture) => {
+                HostEvent::ClientPlayerVisualCaptureChanged(capture)
             }
             crate::client_projection::ClientHostEvent::CharacterMotionCapabilitiesUpdated(
                 capabilities,

@@ -14,11 +14,6 @@ pub const CHARACTER_GEN_UNKNOWN_CONSTANT: u32 = 1;
 pub const CHARACTER_GEN_DEFAULT_CLASS_ID: u32 = 1;
 pub const CHARACTER_GEN_MIN_ATTRIBUTE: u32 = 10;
 pub const CHARACTER_GEN_MAX_ATTRIBUTE: u32 = 100;
-pub const CHARACTER_GEN_UNAVAILABLE_SKILL_COST: i32 = 999;
-
-pub fn is_unavailable_character_gen_skill_cost(cost: i32) -> bool {
-    cost >= CHARACTER_GEN_UNAVAILABLE_SKILL_COST
-}
 
 pub fn custom_template_for_heritage(
     heritage: &CharacterGenHeritageGroup,
@@ -84,7 +79,6 @@ pub struct CharacterGenBuild {
     pub quickness_ability: u32,
     pub focus_ability: u32,
     pub self_ability: u32,
-    pub character_slot: u32,
     pub skill_advancement_classes: Vec<SkillAdvancementClass>,
     pub name: String,
     pub start_area: u32,
@@ -93,13 +87,20 @@ pub struct CharacterGenBuild {
 }
 
 impl CharacterGenBuild {
-    pub fn attribute_total(&self) -> u32 {
-        self.strength_ability
-            + self.endurance_ability
-            + self.coordination_ability
-            + self.quickness_ability
-            + self.focus_ability
-            + self.self_ability
+    pub fn attribute_total(&self) -> u64 {
+        // Unvalidated host drafts may contain any u32; their sum must not overflow
+        // before validation can report the individual out-of-range attributes.
+        [
+            self.strength_ability,
+            self.endurance_ability,
+            self.coordination_ability,
+            self.quickness_ability,
+            self.focus_ability,
+            self.self_ability,
+        ]
+        .into_iter()
+        .map(u64::from)
+        .sum()
     }
 }
 
@@ -182,7 +183,8 @@ impl CharacterGenBuilder {
             quickness_ability: build.quickness_ability,
             focus_ability: build.focus_ability,
             self_ability: build.self_ability,
-            character_slot: build.character_slot,
+            // Assigned by ClientRuntime against its current authoritative roster before sending.
+            character_slot: 0,
             class_id: self.policy.class_id,
             skill_advancement_classes: build.skill_advancement_classes,
             name: build.name,
@@ -207,7 +209,11 @@ impl CharacterGenBuilder {
         };
 
         let mut rng = rand::rng();
-        let headgear_style = random_optional_index(&mut rng, appearance.headgear.len());
+        let (headgear_style, headgear_color) =
+            random_clothing(&mut rng, &appearance.headgear, u32::MAX);
+        let (shirt_style, shirt_color) = random_clothing(&mut rng, &appearance.shirts, 0);
+        let (pants_style, pants_color) = random_clothing(&mut rng, &appearance.pants, 0);
+        let (footwear_style, footwear_color) = random_clothing(&mut rng, &appearance.footwear, 0);
 
         CharacterCreateAppearanceData {
             eyes: random_required_index(&mut rng, appearance.eye_strips.len()),
@@ -217,17 +223,13 @@ impl CharacterGenBuilder {
             eye_color: random_required_index(&mut rng, appearance.eye_color_ids.len()),
             hair_style: random_required_index(&mut rng, appearance.hair_styles.len()),
             headgear_style,
-            headgear_color: if headgear_style == u32::MAX {
-                0
-            } else {
-                random_required_index(&mut rng, appearance.clothing_color_ids.len())
-            },
-            shirt_style: random_required_index(&mut rng, appearance.shirts.len()),
-            shirt_color: random_required_index(&mut rng, appearance.clothing_color_ids.len()),
-            pants_style: random_required_index(&mut rng, appearance.pants.len()),
-            pants_color: random_required_index(&mut rng, appearance.clothing_color_ids.len()),
-            footwear_style: random_required_index(&mut rng, appearance.footwear.len()),
-            footwear_color: random_required_index(&mut rng, appearance.clothing_color_ids.len()),
+            headgear_color,
+            shirt_style,
+            shirt_color,
+            pants_style,
+            pants_color,
+            footwear_style,
+            footwear_color,
             skin_hue: rng.random::<f64>(),
             hair_hue: rng.random::<f64>(),
             headgear_hue: if headgear_style == u32::MAX {
@@ -335,16 +337,16 @@ impl CharacterGenBuilder {
         }
 
         let total = build.attribute_total();
-        if total > attribute_budget {
+        if total > u64::from(attribute_budget) {
             errors.push(CharacterGenValidationError::AttributeBudgetExceeded {
                 total,
                 budget: attribute_budget,
             });
-        } else if total < attribute_budget {
+        } else if total < u64::from(attribute_budget) {
             errors.push(CharacterGenValidationError::AttributeBudgetIncomplete {
                 total,
                 budget: attribute_budget,
-                remaining: attribute_budget - total,
+                remaining: u64::from(attribute_budget) - total,
             });
         }
     }
@@ -396,7 +398,8 @@ impl CharacterGenBuilder {
                     spent_credits += i64::from(costs.trained_cost);
                 }
                 SkillAdvancementClass::Specialized => {
-                    spent_credits += i64::from(costs.trained_cost + costs.specialized_cost);
+                    spent_credits +=
+                        i64::from(costs.trained_cost + costs.specialization_upgrade_cost);
                 }
                 SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive => {}
             }
@@ -416,138 +419,41 @@ impl CharacterGenBuilder {
         gender: &holtburger_content::character_gen::CharacterGenGenderDefinition,
         errors: &mut Vec<CharacterGenValidationError>,
     ) {
-        let appearance = &gender.appearance;
-
-        validate_required_index(
-            "eyes",
-            build.appearance.eyes,
-            appearance.eye_strips.len(),
-            errors,
-        );
-        validate_required_index(
-            "nose",
-            build.appearance.nose,
-            appearance.nose_strips.len(),
-            errors,
-        );
-        validate_required_index(
-            "mouth",
-            build.appearance.mouth,
-            appearance.mouth_strips.len(),
-            errors,
-        );
-        validate_required_index(
-            "hair_color",
-            build.appearance.hair_color,
-            appearance.hair_color_ids.len(),
-            errors,
-        );
-        validate_required_index(
-            "eye_color",
-            build.appearance.eye_color,
-            appearance.eye_color_ids.len(),
-            errors,
-        );
-        validate_required_index(
-            "hair_style",
-            build.appearance.hair_style,
-            appearance.hair_styles.len(),
-            errors,
-        );
-        validate_optional_index(
-            "headgear_style",
-            build.appearance.headgear_style,
-            appearance.headgear.len(),
-            u32::MAX,
-            errors,
-        );
-        validate_required_index(
-            "shirt_style",
-            build.appearance.shirt_style,
-            appearance.shirts.len(),
-            errors,
-        );
-        validate_required_index(
-            "pants_style",
-            build.appearance.pants_style,
-            appearance.pants.len(),
-            errors,
-        );
-        validate_required_index(
-            "footwear_style",
-            build.appearance.footwear_style,
-            appearance.footwear.len(),
-            errors,
-        );
-
-        if build.appearance.headgear_style != u32::MAX {
-            validate_required_index(
-                "headgear_color",
-                build.appearance.headgear_color,
-                appearance.clothing_color_ids.len(),
-                errors,
-            );
-        }
-
-        validate_required_index(
-            "shirt_color",
-            build.appearance.shirt_color,
-            appearance.clothing_color_ids.len(),
-            errors,
-        );
-        validate_required_index(
-            "pants_color",
-            build.appearance.pants_color,
-            appearance.clothing_color_ids.len(),
-            errors,
-        );
-        validate_required_index(
-            "footwear_color",
-            build.appearance.footwear_color,
-            appearance.clothing_color_ids.len(),
-            errors,
+        errors.extend(
+            character_gen_appearance_choices(&build.appearance)
+                .validate(&gender.appearance)
+                .into_iter()
+                .map(CharacterGenValidationError::Appearance),
         );
     }
 }
 
-fn validate_required_index(
-    field: &'static str,
-    value: u32,
-    options_len: usize,
-    errors: &mut Vec<CharacterGenValidationError>,
-) {
-    if options_len == 0 {
-        if value != 0 {
-            errors.push(CharacterGenValidationError::AppearanceChoiceOutOfRange {
-                field,
-                selected: value,
-                options_len,
-            });
-        }
-        return;
+/// Adapt indexed wire appearance choices into the content-owned validation/resolution input.
+pub fn character_gen_appearance_choices(
+    appearance: &CharacterCreateAppearanceData,
+) -> holtburger_content::character_gen::appearance::CharacterGenAppearanceChoices {
+    holtburger_content::character_gen::appearance::CharacterGenAppearanceChoices {
+        eyes: appearance.eyes,
+        nose: appearance.nose,
+        mouth: appearance.mouth,
+        hair_color: appearance.hair_color,
+        eye_color: appearance.eye_color,
+        hair_style: appearance.hair_style,
+        headgear_style: appearance.headgear_style,
+        headgear_color: appearance.headgear_color,
+        shirt_style: appearance.shirt_style,
+        shirt_color: appearance.shirt_color,
+        pants_style: appearance.pants_style,
+        pants_color: appearance.pants_color,
+        footwear_style: appearance.footwear_style,
+        footwear_color: appearance.footwear_color,
+        skin_hue: appearance.skin_hue,
+        hair_hue: appearance.hair_hue,
+        headgear_hue: appearance.headgear_hue,
+        shirt_hue: appearance.shirt_hue,
+        pants_hue: appearance.pants_hue,
+        footwear_hue: appearance.footwear_hue,
     }
-
-    if value as usize >= options_len {
-        errors.push(CharacterGenValidationError::AppearanceChoiceOutOfRange {
-            field,
-            selected: value,
-            options_len,
-        });
-    }
-}
-
-fn validate_optional_index(
-    field: &'static str,
-    value: u32,
-    options_len: usize,
-    none_sentinel: u32,
-    errors: &mut Vec<CharacterGenValidationError>,
-) {
-    if value == none_sentinel {
-        return;
-    }
-
-    validate_required_index(field, value, options_len, errors);
 }
 
 fn empty_appearance() -> CharacterCreateAppearanceData {
@@ -583,12 +489,20 @@ fn random_required_index(rng: &mut impl RngExt, options_len: usize) -> u32 {
     }
 }
 
-fn random_optional_index(rng: &mut impl RngExt, options_len: usize) -> u32 {
-    if options_len == 0 {
-        u32::MAX
-    } else {
-        random_required_index(rng, options_len)
+/// Pick an actual palette-template key from the chosen garment, never its display ordinal.
+fn random_clothing(
+    rng: &mut impl RngExt,
+    styles: &[holtburger_content::character_gen::CharacterGenGear],
+    empty_style: u32,
+) -> (u32, u32) {
+    if styles.is_empty() {
+        return (empty_style, 0);
     }
+    let style = rng.random_range(0..styles.len());
+    let colors = &styles[style].palette_template_ids;
+    // Content catalog assembly supplies at least one key, including explicit no-overlay zero
+    // for garments without eligible palette effects. An empty list violates that contract.
+    (style as u32, colors[rng.random_range(0..colors.len())])
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -621,12 +535,12 @@ pub enum CharacterGenValidationError {
         max: u32,
     },
     #[error("attribute total {total} exceeds budget {budget}")]
-    AttributeBudgetExceeded { total: u32, budget: u32 },
+    AttributeBudgetExceeded { total: u64, budget: u32 },
     #[error("attribute total {total} leaves {remaining} of {budget} points unallocated")]
     AttributeBudgetIncomplete {
-        total: u32,
+        total: u64,
         budget: u32,
-        remaining: u32,
+        remaining: u64,
     },
     #[error("expected {expected} skill slots but got {actual}")]
     SkillSlotCountMismatch { expected: usize, actual: usize },
@@ -636,12 +550,9 @@ pub enum CharacterGenValidationError {
     SkillUnavailableAtCharacterCreation { skill_id: u32 },
     #[error("skill credits spent {spent} exceed budget {budget}")]
     SkillBudgetExceeded { spent: i64, budget: i64 },
-    #[error("appearance choice {field}={selected} is out of range for {options_len} options")]
-    AppearanceChoiceOutOfRange {
-        field: &'static str,
-        selected: u32,
-        options_len: usize,
-    },
+    /// Content-owned appearance validation shared with pre-game preview resolution.
+    #[error(transparent)]
+    Appearance(#[from] holtburger_content::character_gen::appearance::CharacterGenAppearanceError),
     #[error("admin flag is not allowed by local policy")]
     AdminFlagNotAllowed,
     #[error("sentinel flag is not allowed by local policy")]
@@ -678,6 +589,7 @@ mod tests {
                     environment_setup_id: 0,
                     attribute_credits: 330,
                     skill_credits: 10,
+                    uses_starter_clothing: false,
                     primary_start_area_ids: vec![0],
                     secondary_start_area_ids: vec![],
                     skill_overrides: BTreeMap::from([(
@@ -686,7 +598,7 @@ mod tests {
                             skill_id: 1,
                             skill_type: None,
                             trained_cost: 4,
-                            specialized_cost: 6,
+                            specialization_upgrade_cost: 6,
                         },
                     )]),
                     templates: vec![
@@ -758,20 +670,22 @@ mod tests {
                                     name: "Shirt".to_string(),
                                     clothing_table: 1,
                                     weenie_default: 1,
+                                    palette_template_ids: vec![17],
                                 }],
                                 pants: vec![holtburger_content::character_gen::CharacterGenGear {
                                     name: "Pants".to_string(),
                                     clothing_table: 1,
                                     weenie_default: 1,
+                                    palette_template_ids: vec![17],
                                 }],
                                 footwear: vec![
                                     holtburger_content::character_gen::CharacterGenGear {
                                         name: "Boots".to_string(),
                                         clothing_table: 1,
                                         weenie_default: 1,
+                                        palette_template_ids: vec![17],
                                     },
                                 ],
-                                clothing_color_ids: vec![1],
                             },
                         },
                     )]),
@@ -787,7 +701,7 @@ mod tests {
                         description: "Inactive".to_string(),
                         chargen_use: true,
                         trained_cost: 0,
-                        specialized_cost: 0,
+                        specialization_total_cost: 0,
                     },
                 ),
                 (
@@ -799,7 +713,7 @@ mod tests {
                         description: "Axe".to_string(),
                         chargen_use: true,
                         trained_cost: 6,
-                        specialized_cost: 4,
+                        specialization_total_cost: 10,
                     },
                 ),
                 (
@@ -811,7 +725,7 @@ mod tests {
                         description: "Bow".to_string(),
                         chargen_use: true,
                         trained_cost: 0,
-                        specialized_cost: 4,
+                        specialization_total_cost: 4,
                     },
                 ),
                 (
@@ -823,7 +737,7 @@ mod tests {
                         description: "Crossbow".to_string(),
                         chargen_use: true,
                         trained_cost: 6,
-                        specialized_cost: 4,
+                        specialization_total_cost: 10,
                     },
                 ),
                 (
@@ -835,7 +749,7 @@ mod tests {
                         description: "Hidden".to_string(),
                         chargen_use: false,
                         trained_cost: 6,
-                        specialized_cost: 4,
+                        specialization_total_cost: 10,
                     },
                 ),
             ]),
@@ -857,11 +771,11 @@ mod tests {
                 headgear_style: u32::MAX,
                 headgear_color: 0,
                 shirt_style: 0,
-                shirt_color: 0,
+                shirt_color: 17,
                 pants_style: 0,
-                pants_color: 0,
+                pants_color: 17,
                 footwear_style: 0,
-                footwear_color: 0,
+                footwear_color: 17,
                 skin_hue: 1.0,
                 hair_hue: 1.0,
                 headgear_hue: 0.0,
@@ -876,7 +790,6 @@ mod tests {
             quickness_ability: 100,
             focus_ability: 10,
             self_ability: 10,
-            character_slot: 0,
             skill_advancement_classes: vec![
                 SkillAdvancementClass::Inactive,
                 SkillAdvancementClass::Specialized,
@@ -892,6 +805,51 @@ mod tests {
     }
 
     #[test]
+    fn full_build_uses_content_shade_validation() {
+        use holtburger_content::character_gen::appearance::CharacterGenAppearanceError;
+        let builder = CharacterGenBuilder::new(test_catalog());
+        for shade in [f64::NAN, f64::INFINITY, -0.1, 1.1] {
+            let mut build = test_build();
+            build.appearance.skin_hue = shade;
+            assert!(
+                builder
+                    .validate(&build)
+                    .expect_err("invalid shade must reject full creation")
+                    .contains(&CharacterGenValidationError::Appearance(
+                        CharacterGenAppearanceError::InvalidShade { field: "skin_hue" }
+                    ))
+            );
+        }
+    }
+
+    #[test]
+    fn full_build_charges_a_base_specialization_total_without_charging_training_twice() {
+        let mut catalog = (*test_catalog()).clone();
+        catalog
+            .heritage_groups
+            .get_mut(&6)
+            .unwrap()
+            .skill_overrides
+            .clear();
+        let builder = CharacterGenBuilder::new(Arc::new(catalog));
+        // Raw base training 6 + upgrade 4 exactly fills the heritage's 10-credit budget.
+        builder
+            .validate(&test_build())
+            .expect("base total should exactly fill the budget");
+    }
+
+    #[test]
+    fn untrusted_attribute_values_report_errors_without_overflow() {
+        let builder = CharacterGenBuilder::new(test_catalog());
+        let mut build = test_build();
+        build.strength_ability = u32::MAX;
+        build.endurance_ability = u32::MAX;
+        let errors = builder.validate(&build).unwrap_err();
+        assert!(errors.iter().any(|error| matches!(error,
+            CharacterGenValidationError::AttributeBudgetExceeded { total, .. } if *total > u64::from(u32::MAX))));
+    }
+
+    #[test]
     fn build_request_uses_policy_defaults() {
         let builder = CharacterGenBuilder::new(test_catalog());
         let request = builder
@@ -901,6 +859,28 @@ mod tests {
         assert_eq!(request.unknown_constant, CHARACTER_GEN_UNKNOWN_CONSTANT);
         assert_eq!(request.class_id, CHARACTER_GEN_DEFAULT_CLASS_ID);
         assert_eq!(request.name, "Bestie");
+        assert_eq!(request.appearance.shirt_color, 17);
+        assert_eq!(request.appearance.pants_color, 17);
+        assert_eq!(request.appearance.footwear_color, 17);
+    }
+
+    #[test]
+    fn full_build_rejects_a_color_ordinal_in_place_of_a_garment_template_key() {
+        use holtburger_content::character_gen::appearance::CharacterGenAppearanceError;
+        let builder = CharacterGenBuilder::new(test_catalog());
+        let mut build = test_build();
+        build.appearance.shirt_color = 0;
+        assert!(
+            builder
+                .build_request(build)
+                .expect_err("ordinal zero is not template 17")
+                .contains(&CharacterGenValidationError::Appearance(
+                    CharacterGenAppearanceError::ClothingColorUnavailable {
+                        field: "shirt_color",
+                        selected: 0,
+                    }
+                ))
+        );
     }
 
     #[test]
@@ -918,11 +898,11 @@ mod tests {
         assert_eq!(appearance.headgear_style, u32::MAX);
         assert_eq!(appearance.headgear_color, 0);
         assert_eq!(appearance.shirt_style, 0);
-        assert_eq!(appearance.shirt_color, 0);
+        assert_eq!(appearance.shirt_color, 17);
+        assert_eq!(appearance.pants_color, 17);
+        assert_eq!(appearance.footwear_color, 17);
         assert_eq!(appearance.pants_style, 0);
-        assert_eq!(appearance.pants_color, 0);
         assert_eq!(appearance.footwear_style, 0);
-        assert_eq!(appearance.footwear_color, 0);
         assert!((0.0..1.0).contains(&appearance.skin_hue));
         assert!((0.0..1.0).contains(&appearance.hair_hue));
         assert_eq!(appearance.headgear_hue, 0.0);
@@ -1040,7 +1020,7 @@ mod tests {
                 &template,
                 Some(CharacterGenSkillCosts {
                     trained_cost: 6,
-                    specialized_cost: 4,
+                    specialization_upgrade_cost: 4,
                 }),
                 2,
             ),
@@ -1051,7 +1031,7 @@ mod tests {
                 &template,
                 Some(CharacterGenSkillCosts {
                     trained_cost: 6,
-                    specialized_cost: 4,
+                    specialization_upgrade_cost: 4,
                 }),
                 1,
             ),
@@ -1062,7 +1042,7 @@ mod tests {
                 &template,
                 Some(CharacterGenSkillCosts {
                     trained_cost: 0,
-                    specialized_cost: 4,
+                    specialization_upgrade_cost: 4,
                 }),
                 3,
             ),
@@ -1073,7 +1053,7 @@ mod tests {
                 &template,
                 Some(CharacterGenSkillCosts {
                     trained_cost: 6,
-                    specialized_cost: 4,
+                    specialization_upgrade_cost: 4,
                 }),
                 4,
             ),

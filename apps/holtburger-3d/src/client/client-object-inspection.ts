@@ -218,14 +218,6 @@ export class ClientObjectInspection {
 			return;
 		switch (result.outcome.kind) {
 			case "ready":
-				if (result.outcome.source.guid !== this.#state.guid) {
-					this.#resetPreviewIdentity();
-					this.#replace({ ...this.#state, preview: { kind: "unavailable" } });
-					this.#reportFailure(
-						"The creature preview had mismatched identities.",
-					);
-					return;
-				}
 				{
 					const fingerprint = objectPreviewFingerprint(result.outcome.source);
 					if (
@@ -244,6 +236,10 @@ export class ClientObjectInspection {
 						revision: this.#previewRevision,
 					},
 				});
+				return;
+			case "pending-equipment":
+				this.#resetPreviewIdentity();
+				this.#replace({ ...this.#state, preview: { kind: "pending" } });
 				return;
 			case "unavailable":
 				this.#resetPreviewIdentity();
@@ -328,41 +324,9 @@ export class ClientObjectInspection {
 	}
 }
 
-/** Canonical renderer identity for the strictly decoded, ordered preview contract. */
+/** Strict decoding fixes field order and preserves ordered appearance/attachment facts. */
 function objectPreviewFingerprint(source: ObjectPreviewSource): string {
-	return JSON.stringify([
-		source.guid,
-		source.setupDid,
-		source.appearance.paletteDid,
-		source.appearance.subPalettes.map((entry) => [
-			entry.paletteDid,
-			entry.offset,
-			entry.colorCount,
-		]),
-		source.appearance.textureChanges.map((entry) => [
-			entry.partIndex,
-			entry.oldTextureDid,
-			entry.newTextureDid,
-		]),
-		source.appearance.partChanges.map((entry) => [
-			entry.partIndex,
-			entry.gfxObjDid,
-		]),
-		source.scale,
-		source.translucency,
-		source.pose.kind === "setup-pose"
-			? [source.pose.kind]
-			: [
-					source.pose.kind,
-					source.pose.firstCyclicClip,
-					source.pose.clips.map((clip) => [
-						clip.animationId,
-						clip.lowFrame,
-						clip.highFrame,
-						clip.framerate,
-					]),
-				],
-	]);
+	return JSON.stringify(source);
 }
 
 function failureText(error: unknown): string {

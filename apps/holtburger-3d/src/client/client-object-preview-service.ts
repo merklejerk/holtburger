@@ -7,10 +7,10 @@ import {
 
 export interface ClientObjectPreviewOpenRequest {
 	readonly canvas: HTMLCanvasElement;
-	readonly source: ObjectPreviewSource;
+	readonly source: ObjectPreviewSource | null;
 }
 
-/** Single-active-preview policy consumed by the inspector component. */
+/** Single-active-preview policy shared by inspector, creator and picker surfaces. */
 export interface ClientObjectPreviewService {
 	open(request: ClientObjectPreviewOpenRequest): ObjectPreviewHandle;
 }

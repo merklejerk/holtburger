@@ -1,3 +1,4 @@
+import { createElectronVisualCacheTransport } from "./client-visual-cache-transport";
 import "../app/base.css";
 import ClientApp from "./ClientApp.svelte";
 import { mountEntryWithProps } from "../app/mount";
@@ -39,4 +40,5 @@ await mountEntryWithProps(ClientApp, {
 	initialUserSettings,
 	initialSettingsIssue,
 	settingsTransport,
+	visualCacheTransport: createElectronVisualCacheTransport(),
 });

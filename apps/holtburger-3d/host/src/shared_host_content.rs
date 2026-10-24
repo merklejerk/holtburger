@@ -171,6 +171,12 @@ impl SharedHostContent {
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum SharedContentCommand {
     HostStatus,
+    /// Static pre-game choices; independent of character/world activation.
+    LoadCharacterCreationCatalog,
+    /// Static appearance resolution; does not require a completed submission draft.
+    ResolveCharacterCreationAppearance {
+        request: crate::character_creation::CharacterCreationAppearanceRequest,
+    },
     /// Pose-grouped static chat vocabulary; no world state or UI categories.
     LoadSoulEmotes,
     OpenWorldMap {
@@ -230,6 +236,8 @@ pub enum SharedContentCommand {
 /// Exact wire names owned by the shared-content dispatcher.
 pub const SHARED_CONTENT_COMMAND_NAMES: &[&str] = &[
     "host_status",
+    "load_character_creation_catalog",
+    "resolve_character_creation_appearance",
     "load_soul_emotes",
     "open_world_map",
     "read_world_map_tiles",
@@ -261,6 +269,21 @@ pub async fn dispatch_shared_content(
 
     match command {
         HostStatus => encode_json(runtime.status()),
+        ResolveCharacterCreationAppearance { request } => encode_json(
+            request
+                .resolve(&runtime.content().repository)
+                .map_err(application_error)?,
+        ),
+        LoadCharacterCreationCatalog => encode_json(
+            crate::character_creation::CharacterCreationCatalog::from_catalog(
+                &runtime
+                    .content()
+                    .repository
+                    .read_character_gen_catalog()
+                    .map_err(application_error)?,
+            )
+            .map_err(application_error)?,
+        ),
         OpenWorldMap { request } => encode_json(
             runtime
                 .content()

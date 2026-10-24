@@ -472,7 +472,7 @@ pub enum ActionResultReason {
 #[derive(Debug, PartialEq, Clone)]
 pub enum ClientState {
     Connected,
-    CharacterSelection(Vec<CharacterEntry>),
+    CharacterSelection,
     EnteringWorld,
     InWorld,
     Disconnected,
@@ -488,6 +488,8 @@ pub enum ClientLifecycleState {
     Connecting,
     Authenticating,
     CharacterSelection {
+        /// Advertised server capacity; pending deletion entries still occupy roster slots.
+        max_slots: u32,
         characters: Vec<ClientCharacterSummary>,
     },
     EnteringWorld {
@@ -565,6 +567,10 @@ pub struct ClientPlayerEnchantmentsSnapshot {
 /// lifecycle, time, and generation rather than putting the broad body representation on their wire.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientApplicationSnapshot {
+    /// Retained character-management progress/result, recoverable after event loss.
+    pub character_management: CharacterManagementState,
+    /// Latest complete capture for this character lifetime; partial updates retain it.
+    pub player_visual_capture: Option<super::player_visual::PlayerVisualCapture>,
     /// Retained fellowship facts, including vital detail for independent consumers.
     pub fellowship: Option<FellowshipState>,
     /// Retained friend facts; absent until initial delivery or after retirement.
@@ -755,11 +761,72 @@ pub enum ClientCharacterMotionRejection {
     LaunchRejected,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum CharacterManagementOperation {
     Create,
     Delete,
     Restore,
+}
+
+/// One uncorrelatable server operation at a time, plus its latest recoverable result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum CharacterManagementState {
+    /// No management operation has been submitted in this session.
+    Idle,
+    /// The exact submitted name is retained until creation is confirmed or rejected.
+    Creating {
+        /// Submitted name, also used to distinguish a repeated known creation identity.
+        name: String,
+    },
+    /// Deletion awaits its acknowledgment; a subsequent roster supplies deletion metadata.
+    Deleting,
+    /// Restoration awaits its character response.
+    Restoring {
+        /// Expected restored identity; a repeated response for another character is stale.
+        guid: Guid,
+    },
+    /// Server-confirmed creation; retained until the next operation.
+    Created {
+        /// Server-confirmed roster identity.
+        guid: Guid,
+        /// Server-confirmed display name.
+        name: String,
+    },
+    /// A proven rejection or local send failure permits a deliberate retry.
+    Rejected {
+        /// Operation whose proven failure permits another submission.
+        operation: CharacterManagementOperation,
+        /// Human-readable shared failure explanation.
+        message: String,
+    },
+    /// The operation may have succeeded; a fresh session must establish the resulting roster.
+    Uncertain {
+        /// Explanation of the missing confirmation or identity.
+        message: String,
+    },
+}
+
+impl CharacterManagementState {
+    /// Pending operations cannot overlap because the wire has no request identifier.
+    pub fn pending_operation(&self) -> Option<CharacterManagementOperation> {
+        match self {
+            Self::Creating { .. } => Some(CharacterManagementOperation::Create),
+            Self::Deleting => Some(CharacterManagementOperation::Delete),
+            Self::Restoring { .. } => Some(CharacterManagementOperation::Restore),
+            _ => None,
+        }
+    }
+
+    /// An uncertain result also blocks entry/retry until the session is replaced.
+    pub fn blocks_submission(&self) -> bool {
+        self.pending_operation().is_some() || matches!(self, Self::Uncertain { .. })
+    }
 }
 
 /// Best-effort identity correlation for name-only outgoing server feedback.
@@ -974,6 +1041,8 @@ pub enum ClientViewEvent {
     ApplicationSnapshot(Box<ClientApplicationSnapshot>),
     /// Accepted semantic record changes, independent of renderer residency.
     EntityFactsChanged(super::entity_facts::ClientEntityDelta),
+    /// Complete normalized player visual or character retirement, recoverable in snapshots.
+    PlayerVisualCaptureChanged(Option<super::player_visual::PlayerVisualCapture>),
     /// Source-neutral lifecycle projection emitted whenever the authoritative client state changes.
     LifecycleChanged(ClientLifecycleState),
     /// Character permission or lifecycle changed map-teleport admission.
@@ -1230,6 +1299,8 @@ pub enum ClientViewEvent {
         parameter: Option<String>,
     },
     CharacterList(Vec<CharacterEntry>),
+    /// Complete management level, also present in application snapshots.
+    CharacterManagementChanged(CharacterManagementState),
     CharacterManagementResponse {
         operation: Option<CharacterManagementOperation>,
         response: CharacterCreateResponseData,
@@ -1292,7 +1363,6 @@ pub enum ClientCommand {
         slot: u32,
     },
     RestoreCharacter(Guid),
-    EnterWorld,
     /// Ordinary chat text after frontend-owned command parsing.
     Talk(String),
     /// Read death locations without sending a game action.

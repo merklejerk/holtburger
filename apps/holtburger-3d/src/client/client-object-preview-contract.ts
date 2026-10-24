@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { entityAppearanceSchema } from "../lib/game/runtime/entity-appearance-contract";
+import {
+	parentLocationSchema,
+	placementSchema,
+	placementKey,
+} from "../lib/game/runtime/attachment-contract.js";
+import type { ObjectPreviewSource as RenderObjectPreviewSource } from "../lib/game/runtime/object-preview-source";
+import { entityAppearanceSchema } from "../lib/game/runtime/entity-appearance-contract.js";
 
 const nonNegativeInteger = z.number().int().nonnegative();
 const dataId = nonNegativeInteger.max(0xffff_ffff);
@@ -28,14 +34,29 @@ const objectPreviewPoseSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("setup-pose") }).strict(),
 ]);
 
-const objectPreviewSourceSchema = z
+export const objectPreviewVisualSchema = z
 	.object({
-		guid: dataId,
 		setupDid: dataId,
 		appearance: entityAppearanceSchema,
 		scale: z.number().finite().positive(),
 		translucency: z.number().finite().min(0).max(1),
 		pose: objectPreviewPoseSchema,
+	})
+	.strict();
+
+/** Lossless accepted composition, excluding frontend backdrop/camera policy. */
+const objectPreviewSourceSchema = z
+	.object({
+		body: objectPreviewVisualSchema,
+		attachments: z.array(
+			z
+				.object({
+					visual: objectPreviewVisualSchema,
+					parentLocation: parentLocationSchema,
+					placement: placementSchema,
+				})
+				.strict(),
+		),
 	})
 	.strict();
 
@@ -47,11 +68,23 @@ const objectPreviewResultSchema = z
 				.object({ kind: z.literal("ready"), source: objectPreviewSourceSchema })
 				.strict(),
 			z.object({ kind: z.literal("unavailable") }).strict(),
+			z.object({ kind: z.literal("pending-equipment") }).strict(),
 		]),
 	})
 	.strict();
 
-type DeepReadonly<T> = T extends readonly (infer Item)[]
+/** Character identity and complete visual travel atomically through recovery and persistence. */
+export const playerVisualCaptureSchema = z
+	.object({ guid: dataId, source: objectPreviewSourceSchema })
+	.strict();
+
+/** Complete accepted capture independent of later world retention. */
+export type PlayerVisualCapture = DeepReadonly<
+	z.infer<typeof playerVisualCaptureSchema>
+>;
+
+/** Captured wire values stay immutable through cache and renderer handoffs. */
+export type DeepReadonly<T> = T extends readonly (infer Item)[]
 	? readonly DeepReadonly<Item>[]
 	: T extends object
 		? { readonly [Key in keyof T]: DeepReadonly<T[Key]> }
@@ -71,4 +104,18 @@ export function decodeObjectPreviewResult(
 	payload: unknown,
 ): ObjectPreviewResult {
 	return objectPreviewResultSchema.strict().parse(payload);
+}
+
+/** Interpret named child placements once at the frontend's renderer boundary. */
+export function objectPreviewSourceForRendering(
+	source: ObjectPreviewSource,
+): RenderObjectPreviewSource {
+	return {
+		body: source.body,
+		attachments: source.attachments.map((attachment) => ({
+			...attachment,
+			placement: placementKey(attachment.placement),
+		})),
+		background: null,
+	};
 }

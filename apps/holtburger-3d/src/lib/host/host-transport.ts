@@ -1,5 +1,7 @@
+import type { PlayerVisualCapture } from "../../client/client-object-preview-contract";
 import type { DeathLocationResult } from "../../client/client-death-contract";
 import type { ClientCombatOutcome } from "../../client/client-host-contract";
+import type { CharacterManagementState } from "../../client/client-host-contract";
 import type {
 	ContractsSnapshot,
 	ContractMembershipChange,
@@ -90,6 +92,8 @@ import type {
 /** Content/status commands implemented by the shared host-content capability. */
 const SHARED_HOST_COMMAND_NAMES = [
 	"host_status",
+	"load_character_creation_catalog",
+	"resolve_character_creation_appearance",
 	"load_soul_emotes",
 	"open_world_map",
 	"read_world_map_tiles",
@@ -150,6 +154,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"submit_client_housing_payment",
 	"submit_client_housing_management",
 	"select_client_character",
+	"create_client_character",
 	"replace_client_drive",
 	"queue_client_character_motion_event",
 	"submit_client_party",
@@ -264,6 +269,8 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-map-teleport-capability-changed",
 	"client-recall-destinations-changed",
 	"client-lifecycle-changed",
+	"client-character-management-changed",
+	"client-player-visual-capture-changed",
 	"client-connection-updated",
 	"client-character-motion-capabilities-updated",
 	"client-character-motion-feedback",
@@ -377,6 +384,8 @@ export interface HostEventPayloadMap {
 	"client-map-teleport-capability-changed": boolean;
 	"client-recall-destinations-changed": RecallDestination[];
 	"client-lifecycle-changed": ClientLifecycle;
+	"client-character-management-changed": CharacterManagementState;
+	"client-player-visual-capture-changed": PlayerVisualCapture | null;
 	"client-connection-updated": ClientConnectionSample;
 	"client-character-motion-capabilities-updated": ClientCharacterMotionCapabilities | null;
 	"client-character-motion-feedback": ClientCharacterMotionFeedback;

@@ -271,7 +271,7 @@ mod tests {
             ))))
             .await
             .unwrap();
-        assert!(matches!(client.state, ClientState::CharacterSelection(_)));
+        assert!(matches!(client.state, ClientState::CharacterSelection));
         assert_eq!(
             client.application_snapshot().housing,
             HousingSnapshot::default()

@@ -9,3 +9,10 @@ await import(
 		import.meta.url,
 	).href
 );
+// Cache persistence shares the preview codec; validate that emitted dependency graph as well.
+await import(
+	new URL(
+		"../dist-electron/electron/client-visual-cache-store.js",
+		import.meta.url,
+	).href
+);

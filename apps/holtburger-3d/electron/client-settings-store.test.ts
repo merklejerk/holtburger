@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as replacement from "./replace-local-file";
 import { ClientSettingsStore } from "./client-settings-store";
 import {
 	CLIENT_AUDIO_DEFAULTS,
@@ -661,13 +662,14 @@ describe("ClientSettingsStore", () => {
 		);
 		await store.saveUserPatch({ sections: { graphics: user.graphics } });
 		const before = await readFile(path, "utf8");
-		const collidingTemporaryPath = `${path}.tmp-${process.pid}-1`;
-		await writeFile(collidingTemporaryPath, "occupied", "utf8");
+		const failure = vi
+			.spyOn(replacement, "replaceLocalFile")
+			.mockRejectedValueOnce(new Error("disk full"));
 		await expect(
 			store.saveUserPatch({ sections: { ui: user.ui } }),
-		).rejects.toMatchObject({ code: "EEXIST" });
+		).rejects.toThrow("disk full");
 		expect(await readFile(path, "utf8")).toBe(before);
-		await unlink(collidingTemporaryPath);
+		failure.mockRestore();
 		await store.saveUserPatch({ sections: { ui: user.ui } });
 		expect((await readCollection(path)).user.ui).toEqual({
 			version: 1,

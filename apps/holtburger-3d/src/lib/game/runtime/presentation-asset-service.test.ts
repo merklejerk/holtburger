@@ -6,7 +6,7 @@ import type { ParticleEmitterSource } from "../../assets/particle-emitter-source
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
 import type { SetupVisualAppearance } from "../../assets/setup-visual-source";
 import { resolveObjectBehavior } from "../resolution/object-resident-classifier";
-import { acquireObjectPreviewAssets } from "../preview/object-preview-assets";
+import { acquireObjectPreviewAssets } from "../preview/object-preview-composition";
 import type { TexturePreparer } from "../textures/texture-preparer";
 import {
 	PresentationAssetService,
@@ -72,12 +72,15 @@ describe("PresentationAssetService", () => {
 
 		await expect(
 			acquireObjectPreviewAssets(service, {
-				appearance: APPEARANCE,
-				guid: 1,
-				pose: { kind: "setup-pose" },
-				scale: 1,
-				setupDid: 0x02000001,
-				translucency: 0,
+				attachments: [],
+				background: null,
+				body: {
+					appearance: APPEARANCE,
+					pose: { kind: "setup-pose" },
+					scale: 1,
+					setupDid: 0x02000001,
+					translucency: 0,
+				},
 			}),
 		).rejects.toThrow("authors neither placement 0 nor fallback 0");
 		expect(service.setupVisuals.getDiagnostics().referenceCount).toBe(0);

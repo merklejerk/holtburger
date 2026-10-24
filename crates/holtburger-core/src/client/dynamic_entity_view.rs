@@ -518,12 +518,12 @@ mod tests {
         else {
             panic!("fixture should have a preview");
         };
-        assert_eq!(source.setup_did, live.presentation.content.setup_did);
-        assert_eq!(source.appearance, live.presentation.appearance);
-        assert_eq!(source.scale, live.presentation.object_scale);
-        assert_eq!(source.translucency, live.physics.translucency);
-        assert_eq!(source.scale, 3.0);
-        assert_eq!(source.translucency, 0.5);
+        assert_eq!(source.body.setup_did, live.presentation.content.setup_did);
+        assert_eq!(source.body.appearance, live.presentation.appearance);
+        assert_eq!(source.body.scale, live.presentation.object_scale);
+        assert_eq!(source.body.translucency, live.physics.translucency);
+        assert_eq!(source.body.scale, 3.0);
+        assert_eq!(source.body.translucency, 0.5);
 
         let retained = world.entities.get_mut(guid).unwrap();
         retained.appearance = EntityAppearance::default();
@@ -533,8 +533,8 @@ mod tests {
             .unwrap();
         assert_eq!(updated.physics.translucency, 0.25);
         world.remove_entity(guid);
-        assert_eq!(source.appearance, appearance);
-        assert_eq!(source.translucency, 0.5);
+        assert_eq!(source.body.appearance, appearance);
+        assert_eq!(source.body.translucency, 0.5);
         assert_eq!(
             capture_object_preview(&world, guid).outcome,
             ObjectPreviewOutcome::Unavailable

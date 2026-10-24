@@ -1,341 +1,202 @@
-import {
-	resolvedFrameRotationFromRenderTransform,
-	sceneVector3,
-	writeRenderQuaternionFromRenderTransform,
-	type MutableRenderQuaternion,
-	type ResolvedFrameRotation,
-	type SceneVector3,
-} from "../../assets/ac-frame";
-import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
-import { dispatchAnimationHooks } from "../animation/animation-hook-dispatch";
-import {
-	BehaviorEventRouter,
-	behaviorTargetId,
-	type BehaviorConsumers,
-	type BehaviorTarget,
-	type BehaviorTargetId,
-} from "../behavior/behavior-event-router";
-import type { PreparedPhysicsScriptClosure } from "../behavior/physics-script-repository";
 import { multiplyMat4 } from "../math/matrices";
 import { Mat4 } from "../math/types";
-import type { ParticleDrawRange } from "../renderer/particle-render-routing";
-import type { ParticleRecordFrame } from "../renderer/webgl2-particle-pass";
-import { composeObjectPartTransform } from "../resolution/object-part-transform";
-import { requireSceneNodeId } from "../scene/utils";
 import type { PartRenderState } from "../systems/components";
-import { EffectSystem } from "../systems/effect-system";
-import { ParticleSystem } from "../systems/particle-system";
-import { PhysicsScriptSystem } from "../systems/physics-script-system";
-import type { PreparedObjectPreviewAssets } from "./object-preview-assets";
-import { ObjectPreviewSequence } from "./object-preview-sequence";
-
-const PREVIEW_OWNER = "object-preview-presentation";
-const PREVIEW_GENERATION = 1;
-
-type MutableParticleDrawRange = {
-	-readonly [K in keyof ParticleDrawRange]: ParticleDrawRange[K];
-};
-
-type ObjectPreviewPresentationAssets = Pick<
+import type {
 	PreparedObjectPreviewAssets,
-	| "clips"
-	| "defaultScriptRoot"
-	| "emitters"
-	| "firstCyclicClip"
-	| "scale"
-	| "scripts"
-	| "setupPose"
-	| "translucency"
-> & {
-	readonly template: Pick<PreparedObjectPreviewAssets["template"], "parts">;
-};
+	PreparedObjectPreviewAttachment,
+	PreparedObjectPreviewModel,
+} from "./object-preview-composition";
+import {
+	ObjectPreviewModelPresentation,
+	type ObjectPreviewFrame,
+} from "./object-preview-model-presentation";
+import { ObjectPreviewParticleFrame } from "./object-preview-particle-frame";
+import type { ObjectPreviewSequence } from "./object-preview-sequence";
 
-/** Borrowed synchronous render input; valid until the next advance or disposal. */
-export interface ObjectPreviewFrame {
-	readonly clockSeconds: number;
-	readonly partToPreview: readonly Mat4[];
-	readonly partRenderStates: readonly PartRenderState[];
-	readonly particleRanges: readonly ParticleDrawRange[];
-	readonly particleRecords: ParticleRecordFrame;
+export type { ObjectPreviewFrame } from "./object-preview-model-presentation";
+
+/** A direct attachment's source facts, runtime and mutable holding frame have one lifetime. */
+interface AttachedPresentation {
+	/** Resolved parent location and child model. */
+	readonly source: PreparedObjectPreviewAttachment;
+	/** Child animation/effects owner. */
+	readonly runtime: ObjectPreviewModelPresentation;
+	/** Reused rigid root produced from the subject's current part frame. */
+	readonly root: Mat4;
 }
 
-/** Private preview behavior, pose, effects and particles with no world-scene membership. */
+/** An independent background is optional as a whole, including its runtime ownership. */
+interface BackgroundPresentation {
+	/** Prepared model and its draw-part offset. */
+	readonly source: PreparedObjectPreviewModel;
+	/** Background effects owner; never inherits subject heading. */
+	readonly runtime: ObjectPreviewModelPresentation;
+}
+
+/** Initialized model owners move together; uninitialized/closed surfaces own no effects runtime. */
+interface CompositionRuntime {
+	/** Subject animation/effects owner. */
+	readonly body: ObjectPreviewModelPresentation;
+	/** Direct attachment owners with current holding frames. */
+	readonly attachments: readonly AttachedPresentation[];
+	/** Optional independent background owner. */
+	readonly background: BackgroundPresentation | null;
+}
+
+type PresentationState =
+	| { readonly kind: "uninitialized" }
+	| { readonly kind: "active"; readonly runtime: CompositionRuntime }
+	| { readonly kind: "disposed" };
+
+/** Separate model runtimes publish one flat pose/material/particle frame to the merged draw path. */
 export class ObjectPreviewPresentation {
-	readonly #assets: ObjectPreviewPresentationAssets;
-	readonly #effects = new EffectSystem();
-	readonly #sequence: ObjectPreviewSequence;
-	readonly #target: BehaviorTarget;
-	readonly #partTargets = new Map<number, BehaviorTarget>();
-	readonly #frames = new Map<BehaviorTargetId, Mat4>();
-	readonly #particles: ParticleSystem;
-	readonly #scripts: PhysicsScriptSystem<typeof PREVIEW_OWNER>;
-	readonly #router: BehaviorEventRouter;
-	readonly #partToPreview: Mat4[];
-	readonly #particleRanges: MutableParticleDrawRange[] = [];
-	#partRenderStates: readonly PartRenderState[];
-	#clockSeconds = 0;
-	#previousClockSeconds: number | null = null;
-	#destroyed = false;
+	readonly #assets: PreparedObjectPreviewAssets;
+	readonly #identity = Mat4.identity();
+	readonly #partToPreview: Mat4[] = [];
+	readonly #partRenderStates: PartRenderState[] = [];
+	readonly #particles = new ObjectPreviewParticleFrame();
+	/** A rebased cursor owns only the new model's dependencies, never the retired runtime. */
+	readonly #initialBodySequence: ObjectPreviewSequence | null;
+	#state: PresentationState = { kind: "uninitialized" };
 
 	constructor(
-		assets: ObjectPreviewPresentationAssets,
-		roll: () => number = Math.random,
+		assets: PreparedObjectPreviewAssets,
+		previous: ObjectPreviewPresentation | null,
 	) {
 		this.#assets = assets;
-		this.#target = {
-			generation: PREVIEW_GENERATION,
-			targetId: behaviorTargetId("scene-node:0"),
-		};
-		for (const part of assets.template.parts) {
-			this.#partTargets.set(part.partIndex, {
-				generation: PREVIEW_GENERATION,
-				targetId: behaviorTargetId(`scene-node:${part.partIndex + 1}`),
-			});
-		}
-		this.#sequence = new ObjectPreviewSequence(
-			assets.clips,
-			assets.firstCyclicClip,
-			assets.setupPose,
-		);
-		this.#effects.install(
-			this.#rootNodeId(),
-			assets.setupPose.length,
-			assets.translucency,
-		);
-		const scriptWiring: {
-			system?: PhysicsScriptSystem<typeof PREVIEW_OWNER>;
-		} = {};
-		const particleWiring: { system?: ParticleSystem } = {};
-		const consumers: BehaviorConsumers = {
-			audio: {
-				playSound: () => "unprepared",
-				playSoundTableKey: () => "unprepared",
-			},
-			effects: this.#effects,
-			particles: {
-				createEmitter: (target, command) => {
-					const particles = particleWiring.system;
-					if (!particles)
-						throw new Error(
-							"Preview particles received a command before wiring.",
-						);
-					return particles.createEmitter(target, command);
-				},
-				destroy: (target, emitterId) =>
-					particleWiring.system?.destroy(target, emitterId),
-				stop: (target, emitterId) =>
-					particleWiring.system?.stop(target, emitterId),
-			},
-			objectState: {
-				applyObjectState: (target, values, mode) => {
-					if (values.kind !== "scale") return "no-consumer";
-					this.#effects.applyScale(target, values);
-					return mode === "initial-state" ? "folded-initial-state" : "executed";
-				},
-			},
-			scheduler: {
-				scheduleActivation: (target, activation) => {
-					const scripts = scriptWiring.system;
-					if (!scripts)
-						throw new Error(
-							"Preview scripts received a command before wiring.",
-						);
-					scripts.scheduleActivation(target, activation);
-				},
-			},
-			targets: { isLive: (target) => this.#targetLives(target) },
-		};
-		this.#router = new BehaviorEventRouter(
-			consumers,
-			SHARED_FRONTEND_TUNING.diagnostics.maximumRecentEffectObservations,
-		);
-		this.#scripts = new PhysicsScriptSystem(this.#router, roll);
-		scriptWiring.system = this.#scripts;
-		this.#particles = new ParticleSystem({
-			clock: () => this.#clockSeconds,
-			distanceSpacingMultiplier:
-				SHARED_FRONTEND_TUNING.particleDistanceSpacingMultiplier,
-			partFrameOf: (target, partIndex) => this.#partFrameOf(target, partIndex),
-			resolveEmitter: (id) => assets.emitters.get(id) ?? null,
-			roll,
-			sceneOriginOf: (target) => this.#originOf(target),
-			sceneRotationOf: (target) => this.#rotationOf(target),
-			targetLives: (target) => this.#targetLives(target),
-			writeSceneRenderRotationOf: (target, output) =>
-				this.#writeRotationOf(target, output),
-		});
-		particleWiring.system = this.#particles;
-		this.#partToPreview = assets.setupPose.map(() => Mat4.identity());
-		this.#partRenderStates = assets.setupPose.map(() => ({
-			textureVelocity: [0, 0] as const,
-			translucency: 0,
-		}));
-		this.#publishPose();
-		if (assets.defaultScriptRoot !== null) {
-			this.#scripts.install(
-				PREVIEW_OWNER,
-				this.#target,
-				this.#borrowedScriptClosure(assets.defaultScriptRoot),
-				0,
-			);
-		}
+		this.#initialBodySequence =
+			previous !== null && previous.#state.kind === "active"
+				? previous.#state.runtime.body.replacementSequence(assets.body.visual)
+				: null;
 	}
 
-	advance(clockSeconds: number): ObjectPreviewFrame {
-		if (this.#destroyed)
-			throw new Error("Cannot advance a disposed object preview presentation.");
-		if (!Number.isFinite(clockSeconds) || clockSeconds < 0)
-			throw new Error("Object preview clock must be finite and non-negative.");
-		if (
-			this.#previousClockSeconds !== null &&
-			clockSeconds < this.#previousClockSeconds
-		)
-			throw new Error("Object preview clock moved backwards.");
-		const elapsedSeconds =
-			this.#previousClockSeconds === null
-				? 0
-				: clockSeconds - this.#previousClockSeconds;
-		this.#previousClockSeconds = clockSeconds;
-		this.#clockSeconds = clockSeconds;
-
-		this.#effects.advance(clockSeconds);
-		this.#scripts.advance(clockSeconds);
-		this.#particles.advance(clockSeconds);
-		this.#sequence.advance(elapsedSeconds, ({ clip, departedFrames }) =>
-			dispatchAnimationHooks(
-				this.#router,
-				this.#target,
-				clip,
-				departedFrames,
-				"live",
-			),
-		);
-		this.#publishPose();
-		this.#collectParticleRanges();
+	/** Initialize at first draw using its actual heading; hidden preparation spawns no effects. */
+	advance(clockSeconds: number, subjectTransform: Mat4): ObjectPreviewFrame {
+		if (this.#state.kind === "disposed")
+			throw new Error("Cannot advance a disposed preview composition.");
+		if (this.#state.kind === "uninitialized")
+			this.#state = {
+				kind: "active",
+				runtime: this.#createRuntime(subjectTransform),
+			};
+		const runtime = this.#state.runtime;
+		const body = runtime.body.advance(clockSeconds, subjectTransform);
+		const frames = [body];
+		this.#appendFrame(this.#assets.body, body);
+		for (const attachment of runtime.attachments) {
+			multiplyMat4(
+				runtime.body.rigidPartFrame(attachment.source.parentPartIndex),
+				attachment.source.offsetTransform,
+				attachment.root,
+			);
+			const frame = attachment.runtime.advance(clockSeconds, attachment.root);
+			this.#appendFrame(attachment.source.model, frame);
+			frames.push(frame);
+		}
+		if (runtime.background !== null) {
+			const frame = runtime.background.runtime.advance(
+				clockSeconds,
+				this.#identity,
+			);
+			this.#appendFrame(runtime.background.source, frame);
+			frames.push(frame);
+		}
 		return {
 			clockSeconds,
-			particleRanges: this.#particleRanges,
-			particleRecords: {
-				data: this.#particles.recordData,
-				dirtySlots: this.#particles.takeDirtyRecordSlots(),
-			},
-			partRenderStates: this.#partRenderStates,
 			partToPreview: this.#partToPreview,
+			partRenderStates: this.#partRenderStates,
+			...this.#particles.merge(frames),
 		};
 	}
 
 	dispose(): void {
-		if (this.#destroyed) return;
-		this.#destroyed = true;
-		this.#scripts.removeOwner(PREVIEW_OWNER);
-		this.#scripts.destroy();
-		this.#particles.destroy(this.#target, 0);
-		this.#effects.remove(this.#rootNodeId());
-		this.#frames.clear();
-		this.#partTargets.clear();
-		this.#particleRanges.length = 0;
+		if (this.#state.kind === "disposed") return;
+		const state = this.#state;
+		this.#state = { kind: "disposed" };
+		this.#partToPreview.length = 0;
+		this.#partRenderStates.length = 0;
+		if (state.kind === "active") retireRuntime(state.runtime);
 	}
 
-	#publishPose(): void {
-		const pose = this.#sequence.samplePose();
-		const effects = this.#effects.samplePresentation(this.#rootNodeId());
-		this.#partRenderStates = effects.partRenderStates;
-		const authoredRoot = this.#sequence.sampleAuthoredRoot();
-		const visualRoot =
-			authoredRoot === null
-				? effects.rootTransformModifier
-				: multiplyMat4(authoredRoot, effects.rootTransformModifier);
-		this.#frames.set(this.#target.targetId, visualRoot);
-		for (const part of this.#assets.template.parts) {
-			const transform = pose[part.partIndex];
-			const target = this.#partTargets.get(part.partIndex);
-			if (!transform || !target)
-				throw new Error(
-					`Preview pose has no complete frame for part ${part.partIndex}.`,
+	#createRuntime(subjectTransform: Mat4): CompositionRuntime {
+		const body = new ObjectPreviewModelPresentation(
+			this.#assets.body.visual,
+			subjectTransform,
+			this.#initialBodySequence,
+		);
+		const attachments: AttachedPresentation[] = [];
+		let background: BackgroundPresentation | null = null;
+		try {
+			for (const source of this.#assets.attachments) {
+				const root = multiplyMat4(
+					body.rigidPartFrame(source.parentPartIndex),
+					source.offsetTransform,
 				);
-			const local = composeObjectPartTransform(
-				transform,
-				this.#assets.scale,
-				part.defaultScale,
-			);
-			const complete = multiplyMat4(visualRoot, local);
-			this.#partToPreview[part.partIndex] = complete;
-			this.#frames.set(target.targetId, complete);
+				attachments.push({
+					source,
+					root,
+					runtime: new ObjectPreviewModelPresentation(
+						source.model.visual,
+						root,
+						null,
+					),
+				});
+			}
+			if (this.#assets.background !== null)
+				background = {
+					source: this.#assets.background,
+					runtime: new ObjectPreviewModelPresentation(
+						this.#assets.background.visual,
+						this.#identity,
+						null,
+					),
+				};
+			return { body, attachments, background };
+		} catch (cause) {
+			try {
+				retireRuntime({ body, attachments, background });
+			} catch (cleanupCause) {
+				throw new AggregateError(
+					[cause, cleanupCause],
+					"Preview model construction and rollback failed.",
+					{ cause: cleanupCause },
+				);
+			}
+			throw cause;
 		}
 	}
 
-	#collectParticleRanges(): void {
-		const sources = this.#particles.collectDrawRanges();
-		this.#particleRanges.length = sources.length;
-		for (let index = 0; index < sources.length; index += 1) {
-			const source = sources[index];
-			if (!source) throw new Error("Preview particle source disappeared.");
-			const range = (this.#particleRanges[index] ??= {
-				baseSlot: 0,
-				count: 0,
-				frame: { kind: "record" },
-				hwGfxObjId: source.hwGfxObjId,
-				motionType: source.motionType,
-			});
-			range.baseSlot = source.baseSlot;
-			range.count = source.count;
-			range.frame = source.frame;
-			range.hwGfxObjId = source.hwGfxObjId;
-			range.motionType = source.motionType;
+	#appendFrame(
+		model: PreparedObjectPreviewModel,
+		frame: ObjectPreviewFrame,
+	): void {
+		for (const [part, transform] of frame.partToPreview.entries()) {
+			const state = frame.partRenderStates[part];
+			if (state === undefined)
+				throw new Error("Preview model frame omits its part material state.");
+			this.#partToPreview[model.partOffset + part] = transform;
+			this.#partRenderStates[model.partOffset + part] = state;
 		}
 	}
+}
 
-	#borrowedScriptClosure(
-		rootId: PreparedPhysicsScriptClosure["rootId"],
-	): PreparedPhysicsScriptClosure {
-		return {
-			release: () => {},
-			rootId,
-			scripts: this.#assets.scripts,
-		};
+function retireRuntime(runtime: CompositionRuntime): void {
+	const failures: unknown[] = [];
+	const owners = [
+		runtime.body,
+		...runtime.attachments.map((attachment) => attachment.runtime),
+	];
+	if (runtime.background !== null) owners.push(runtime.background.runtime);
+	for (const owner of owners) {
+		try {
+			owner.dispose();
+		} catch (cause) {
+			failures.push(cause);
+		}
 	}
-
-	#rootNodeId() {
-		return requireSceneNodeId(
-			this.#target.targetId,
-			"ObjectPreviewPresentation",
+	if (failures.length > 0)
+		throw new AggregateError(
+			failures,
+			"Preview composition runtime retirement failed.",
 		);
-	}
-
-	#targetLives(target: BehaviorTarget): boolean {
-		return (
-			!this.#destroyed &&
-			target.generation === PREVIEW_GENERATION &&
-			this.#frames.has(target.targetId)
-		);
-	}
-
-	#partFrameOf(
-		target: BehaviorTarget,
-		partIndex: number,
-	): BehaviorTarget | null {
-		return this.#targetLives(target)
-			? (this.#partTargets.get(partIndex) ?? null)
-			: null;
-	}
-
-	#originOf(target: BehaviorTarget): SceneVector3 | null {
-		const frame = this.#frames.get(target.targetId);
-		return frame ? sceneVector3([frame.m41, frame.m42, frame.m43]) : null;
-	}
-
-	#rotationOf(target: BehaviorTarget): ResolvedFrameRotation | null {
-		const frame = this.#frames.get(target.targetId);
-		return frame ? resolvedFrameRotationFromRenderTransform(frame) : null;
-	}
-
-	#writeRotationOf(
-		target: BehaviorTarget,
-		output: MutableRenderQuaternion,
-	): boolean {
-		const frame = this.#frames.get(target.targetId);
-		if (!frame) return false;
-		writeRenderQuaternionFromRenderTransform(frame, output);
-		return true;
-	}
 }

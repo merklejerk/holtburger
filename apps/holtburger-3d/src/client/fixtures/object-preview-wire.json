@@ -4,33 +4,94 @@
 		"outcome": {
 			"kind": "ready",
 			"source": {
-				"guid": 1610612738,
-				"setupDid": 33554433,
-				"appearance": {
-					"paletteDid": null,
-					"subPalettes": [],
-					"textureChanges": [],
-					"partChanges": []
+				"body": {
+					"setupDid": 33554433,
+					"appearance": {
+						"paletteDid": null,
+						"subPalettes": [],
+						"textureChanges": [],
+						"partChanges": []
+					},
+					"scale": 1.25,
+					"translucency": 0.5,
+					"pose": {
+						"kind": "default-idle",
+						"clips": [
+							{
+								"animationId": 50331649,
+								"lowFrame": 2,
+								"highFrame": 8,
+								"framerate": -10.0
+							}
+						],
+						"firstCyclicClip": 0
+					}
 				},
-				"scale": 1.25,
-				"translucency": 0.5,
-				"pose": {
-					"kind": "default-idle",
-					"clips": [
-						{
-							"animationId": 50331649,
-							"lowFrame": 2,
-							"highFrame": 8,
-							"framerate": -10.0
-						}
-					],
-					"firstCyclicClip": 0
-				}
+				"attachments": []
 			}
 		}
 	},
 	"unavailable": {
 		"guid": 1610612738,
-		"outcome": { "kind": "unavailable" }
+		"outcome": {
+			"kind": "unavailable"
+		}
+	},
+	"pendingEquipment": {
+		"guid": 1610612738,
+		"outcome": {
+			"kind": "pending-equipment"
+		}
+	},
+	"equipped": {
+		"guid": 1610612738,
+		"outcome": {
+			"kind": "ready",
+			"source": {
+				"body": {
+					"setupDid": 33554433,
+					"appearance": {
+						"paletteDid": null,
+						"subPalettes": [],
+						"textureChanges": [],
+						"partChanges": []
+					},
+					"scale": 1.25,
+					"translucency": 0.5,
+					"pose": {
+						"kind": "default-idle",
+						"clips": [
+							{
+								"animationId": 50331649,
+								"lowFrame": 2,
+								"highFrame": 8,
+								"framerate": -10.0
+							}
+						],
+						"firstCyclicClip": 0
+					}
+				},
+				"attachments": [
+					{
+						"visual": {
+							"setupDid": 33554760,
+							"appearance": {
+								"paletteDid": null,
+								"subPalettes": [],
+								"textureChanges": [],
+								"partChanges": []
+							},
+							"scale": 1.0,
+							"translucency": 0.0,
+							"pose": {
+								"kind": "setup-pose"
+							}
+						},
+						"parentLocation": "right-hand",
+						"placement": "right-hand-combat"
+					}
+				]
+			}
+		}
 	}
 }

@@ -1,28 +1,22 @@
-import { AnimationHostSource } from "../../assets/animation-host-source";
+import type { HostPresentationResources } from "./host-presentation-assets";
+import { PresentationTeardownStack } from "./presentation-teardown";
 import { ActiveRegionHostSource } from "../../assets/active-region-host-source";
 import { AudioHostSource } from "../../assets/audio-host-source";
-import { SetupVisualHostSource } from "../../assets/setup-visual-host-source";
 import { LandblockProfileHostSource } from "../../assets/landblock-profile-host-source";
 import { CachedLandblockProfileSource } from "../../assets/landblock-profile-source";
 import { LandblockSourceHostBatch } from "../../assets/landblock-source-host-batch";
-import { ParticleEmitterHostSource } from "../../assets/particle-emitter-host-source";
-import { ParticleMeshHostSource } from "../../assets/particle-mesh-host-source";
-import { PhysicsScriptHostSource } from "../../assets/physics-script-host-source";
 import { PhysicsScriptTableHostSource } from "../../assets/physics-script-table-host-source";
 import { SkyHostSource } from "../../assets/sky-host-source";
 import { SoundTableHostSource } from "../../assets/sound-table-host-source";
-import { TexturePixelHostSource } from "../../assets/texture-pixel-host-source";
 import { WebAudioDevice } from "../../assets/web-audio-device";
 import type { ActiveRegionSource } from "../../assets/active-region-source";
 import type { HostTransport } from "../../host/host-transport";
 import { StandardCommitPipeline } from "../commit/pipeline";
 import { WebGL2Device } from "../renderer/webgl2-device";
-import type { ObjectPreviewResources } from "../preview/object-preview-controller";
 import type { FrameSettings } from "../renderer/renderer";
 import { ActiveRegionStaticDetailOwner } from "../resolution/active-region-static-detail";
 import { RuntimeTickProfiler } from "./runtime-tick-profiler";
 import { GamePresentationRuntime } from "./game-presentation-runtime";
-import { PresentationAssetService } from "./presentation-asset-service";
 import type { TextureFilteringCapabilities } from "../renderer/texture-filtering-policy";
 import type { PortalWarpDriveTuning } from "../renderer/portal-warp-drive-tuning";
 import type { LandblockSourceBatchSource } from "../../assets/landblock-source-batch";
@@ -36,6 +30,8 @@ import {
 export interface GamePresentationOwnerDependencies {
 	readonly canvas: HTMLCanvasElement;
 	readonly hostTransport: HostTransport;
+	/** Borrowed app-owned content assets; world construction and rollback never destroy them. */
+	readonly presentationResources: HostPresentationResources;
 	readonly audioTuning: GamePresentationAudioTuning;
 	/** Mode-owned initial display policy forwarded to the shared runtime. */
 	readonly frameSettings: FrameSettings;
@@ -56,7 +52,7 @@ interface GamePresentationAudioTuning {
 }
 
 /**
- * Owns the shared static-content and renderer lifetime used by desktop frontends.
+ * Owns world-scene and renderer lifetime while borrowing app-owned content assets.
  *
  * This owner has no Svelte state and makes no camera, scene-interest, or presentation-policy
  * decisions. Its public values are immutable composition results; the runtime remains imperative
@@ -67,41 +63,35 @@ export class GamePresentationOwner {
 	readonly profileSource: CachedLandblockProfileSource;
 	readonly device: WebGL2Device;
 	readonly runtime: GamePresentationRuntime;
-	/** Borrowed preview preparation capabilities; mounted controllers own device/playback state. */
-	readonly objectPreviewResources: ObjectPreviewResources;
 	/** Required authored portal closure retained for every client/Explorer transition. */
 	readonly portalTransitionAssets: PortalTransitionAssets;
 	readonly textureFilteringCapabilities: TextureFilteringCapabilities;
 	readonly #teardown: PresentationTeardownStack;
 	/** Browser output control retained alongside the teardown-owned audio device. */
 	readonly #audioDevice: WebAudioDevice;
-	#destroyed = false;
+	#retirement: Promise<void> | null = null;
 
 	private constructor(resources: {
 		readonly activeRegion: ActiveRegionSource;
 		readonly activeRegionSource: ActiveRegionHostSource;
 		readonly commitPipeline: StandardCommitPipeline;
 		readonly device: WebGL2Device;
-		readonly setupVisualSource: SetupVisualHostSource;
-		readonly animationSource: AnimationHostSource;
 		readonly soundTableSource: SoundTableHostSource;
 		readonly audioDevice: WebAudioDevice;
+		readonly audioContext: AudioContext;
 		readonly profileHostSource: LandblockProfileHostSource;
 		readonly profileSource: CachedLandblockProfileSource;
 		readonly portalTransitionAssets: PortalTransitionAssets;
-		readonly presentationAssets: PresentationAssetService;
 		readonly runtime: GamePresentationRuntime;
 		readonly skySource: SkyHostSource;
 		readonly staticDetailOwner: ActiveRegionStaticDetailOwner;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities;
-		readonly objectPreviewResources: ObjectPreviewResources;
 	}) {
 		this.#audioDevice = resources.audioDevice;
 		this.activeRegion = resources.activeRegion;
 		this.device = resources.device;
 		this.profileSource = resources.profileSource;
 		this.runtime = resources.runtime;
-		this.objectPreviewResources = resources.objectPreviewResources;
 		this.portalTransitionAssets = resources.portalTransitionAssets;
 		this.textureFilteringCapabilities = resources.textureFilteringCapabilities;
 		this.#teardown = createPresentationTeardown(resources);
@@ -119,6 +109,7 @@ export class GamePresentationOwner {
 		const {
 			canvas,
 			hostTransport,
+			presentationResources,
 			audioTuning,
 			frameSettings,
 			portalWarpDriveTuning,
@@ -134,14 +125,10 @@ export class GamePresentationOwner {
 		let device: WebGL2Device | undefined;
 		let commitPipeline: StandardCommitPipeline | undefined;
 		let runtime: GamePresentationRuntime | undefined;
-		let setupVisualSource: SetupVisualHostSource | undefined;
-		let animationSource: AnimationHostSource | undefined;
-		let physicsScriptSource: PhysicsScriptHostSource | undefined;
-		let particleEmitterSource: ParticleEmitterHostSource | undefined;
 		let soundTableSource: SoundTableHostSource | undefined;
 		let audioDevice: WebAudioDevice | undefined;
+		let audioContext: AudioContext | undefined;
 		let portalTransitionAssets: PortalTransitionAssets | undefined;
-		let presentationAssets: PresentationAssetService | undefined;
 		try {
 			throwIfPresentationConstructionAborted(signal);
 			activeRegionSource = ActiveRegionHostSource.build(hostTransport);
@@ -151,7 +138,7 @@ export class GamePresentationOwner {
 				LandblockSourceHostBatch.build(activeRegion, hostTransport);
 			profileHostSource = LandblockProfileHostSource.build(hostTransport);
 			profileSource = new CachedLandblockProfileSource(profileHostSource);
-			const texturePixelSource = TexturePixelHostSource.build(hostTransport);
+			const texturePixelSource = presentationResources.texturePixelSource;
 			staticDetailOwner = new ActiveRegionStaticDetailOwner(texturePixelSource);
 			const staticDetailBinding = await staticDetailOwner.install(activeRegion);
 			throwIfPresentationConstructionAborted(signal);
@@ -161,39 +148,29 @@ export class GamePresentationOwner {
 				device.getTextureFilteringCapabilities();
 			commitPipeline = await StandardCommitPipeline.build({ sourceBatch });
 			throwIfPresentationConstructionAborted(signal);
-			setupVisualSource = new SetupVisualHostSource(hostTransport);
-			animationSource = AnimationHostSource.build(hostTransport);
-			physicsScriptSource = PhysicsScriptHostSource.build(hostTransport);
-			particleEmitterSource = ParticleEmitterHostSource.build(hostTransport);
-			presentationAssets = await PresentationAssetService.build({
-				animationSource,
-				particleEmitterSource,
-				physicsScriptSource,
-				setupVisualSource,
-				texturePixelSource,
-			});
 			soundTableSource = SoundTableHostSource.build(hostTransport);
+			audioContext = audioContextFactory();
 			audioDevice = new WebAudioDevice(
-				audioContextFactory(),
+				audioContext,
 				AudioHostSource.build(hostTransport),
 				audioTuning.placementSmoothingSeconds,
 				audioTuning.loudnessCurveExponent,
 			);
 			portalTransitionAssets = await loadPortalTransitionAssets({
 				audio: audioDevice,
-				animation: animationSource,
-				setupVisual: setupVisualSource,
+				animation: presentationResources.animationSource,
+				setupVisual: presentationResources.setupVisualSource,
 				soundTable: soundTableSource,
 			});
 			throwIfPresentationConstructionAborted(signal);
 			runtime = await GamePresentationRuntime.build(
 				device,
 				commitPipeline,
-				presentationAssets,
+				presentationResources.assets,
 				PhysicsScriptTableHostSource.build(hostTransport),
 				audioDevice,
 				soundTableSource,
-				ParticleMeshHostSource.build(hostTransport),
+				presentationResources.particleMeshSource(),
 				frameSettings,
 				undefined,
 				tickProfiler,
@@ -216,10 +193,6 @@ export class GamePresentationOwner {
 			throwIfPresentationConstructionAborted(signal);
 			await runtime.installSky(sky);
 			throwIfPresentationConstructionAborted(signal);
-			const objectPreviewResources: ObjectPreviewResources = {
-				assets: presentationAssets,
-				particleMeshSource: () => ParticleMeshHostSource.build(hostTransport),
-			};
 			return new GamePresentationOwner({
 				activeRegion,
 				activeRegionSource,
@@ -228,16 +201,13 @@ export class GamePresentationOwner {
 				profileHostSource,
 				profileSource,
 				portalTransitionAssets,
-				presentationAssets,
-				setupVisualSource,
-				animationSource,
 				soundTableSource,
 				audioDevice,
+				audioContext,
 				runtime,
 				skySource,
 				staticDetailOwner,
 				textureFilteringCapabilities,
-				objectPreviewResources,
 			});
 		} catch (error) {
 			try {
@@ -245,15 +215,11 @@ export class GamePresentationOwner {
 					activeRegionSource,
 					commitPipeline,
 					device,
-					setupVisualSource,
-					animationSource,
-					physicsScriptSource,
-					particleEmitterSource,
 					soundTableSource,
 					audioDevice,
+					audioContext,
 					profileHostSource,
 					profileSource,
-					presentationAssets,
 					runtime,
 					skySource,
 					staticDetailOwner,
@@ -270,10 +236,8 @@ export class GamePresentationOwner {
 	}
 
 	/** Tear down in dependency order; repeated calls are harmless for unmount/error races. */
-	async destroy(): Promise<void> {
-		if (this.#destroyed) return;
-		this.#destroyed = true;
-		await this.#teardown.close();
+	destroy(): Promise<void> {
+		return (this.#retirement ??= this.#teardown.close());
 	}
 }
 
@@ -290,15 +254,12 @@ interface PresentationParts {
 	readonly activeRegionSource?: ActiveRegionHostSource;
 	readonly commitPipeline?: StandardCommitPipeline;
 	readonly device?: WebGL2Device;
-	readonly setupVisualSource?: SetupVisualHostSource;
-	readonly animationSource?: AnimationHostSource;
-	readonly physicsScriptSource?: PhysicsScriptHostSource;
-	readonly particleEmitterSource?: ParticleEmitterHostSource;
 	readonly soundTableSource?: SoundTableHostSource;
 	readonly audioDevice?: WebAudioDevice;
+	/** The world composition creates this context; the audio device only borrows it. */
+	readonly audioContext?: AudioContext;
 	readonly profileHostSource?: LandblockProfileHostSource;
 	readonly profileSource?: CachedLandblockProfileSource;
-	readonly presentationAssets?: PresentationAssetService;
 	readonly runtime?: GamePresentationRuntime;
 	readonly skySource?: SkyHostSource;
 	readonly staticDetailOwner?: ActiveRegionStaticDetailOwner;
@@ -309,48 +270,6 @@ async function destroyPresentationParts(
 	parts: PresentationParts,
 ): Promise<void> {
 	await createPresentationTeardown(parts).close();
-}
-
-type TeardownOperation = () => void | Promise<void>;
-
-/**
- * Reverse-order cleanup that attempts every release and reports all failures together.
- *
- * Startup is deliberately progressive, so a failed device/runtime step can leave several earlier
- * resources alive. Nested `finally` blocks guarantee progress but hide later failures; this stack
- * keeps the same ordering while making the complete shutdown result observable.
- */
-export class PresentationTeardownStack {
-	readonly #operations: {
-		readonly label: string;
-		readonly release: TeardownOperation;
-	}[] = [];
-	#closed = false;
-
-	add(label: string, release: TeardownOperation | undefined): void {
-		if (release === undefined) return;
-		this.#operations.push({ label, release });
-	}
-
-	async close(): Promise<void> {
-		if (this.#closed) return;
-		this.#closed = true;
-		const failures: unknown[] = [];
-		const labels: string[] = [];
-		for (const operation of [...this.#operations].reverse()) {
-			try {
-				await operation.release();
-			} catch (error) {
-				failures.push(error);
-				labels.push(operation.label);
-			}
-		}
-		if (failures.length === 0) return;
-		throw new AggregateError(
-			failures,
-			`Presentation teardown failed for: ${labels.join(", ")}.`,
-		);
-	}
 }
 
 function createPresentationTeardown(
@@ -376,36 +295,13 @@ function createPresentationTeardown(
 	);
 	stack.add("webgl-device", parts.device?.destroy.bind(parts.device));
 	stack.add(
-		"setup-visual-source",
-		parts.presentationAssets === undefined
-			? parts.setupVisualSource?.destroy.bind(parts.setupVisualSource)
-			: undefined,
-	);
-	stack.add(
-		"animation-source",
-		parts.presentationAssets === undefined
-			? parts.animationSource?.destroy.bind(parts.animationSource)
-			: undefined,
-	);
-	stack.add(
-		"physics-script-source",
-		parts.presentationAssets === undefined
-			? parts.physicsScriptSource?.destroy.bind(parts.physicsScriptSource)
-			: undefined,
-	);
-	stack.add(
-		"particle-emitter-source",
-		parts.presentationAssets === undefined
-			? parts.particleEmitterSource?.destroy.bind(parts.particleEmitterSource)
-			: undefined,
-	);
-	stack.add(
-		"presentation-assets",
-		parts.presentationAssets?.destroy.bind(parts.presentationAssets),
-	);
-	stack.add(
 		"sound-table-source",
 		parts.soundTableSource?.destroy.bind(parts.soundTableSource),
+	);
+	// Retire voices/device sources before closing their world-owned browser context.
+	stack.add(
+		"audio-context",
+		parts.audioContext?.close.bind(parts.audioContext),
 	);
 	stack.add("audio-device", parts.audioDevice?.destroy.bind(parts.audioDevice));
 	stack.add(

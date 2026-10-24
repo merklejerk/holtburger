@@ -50,6 +50,19 @@ contextBridge.exposeInMainWorld("holtburgerHost", {
 });
 
 if (process.argv.includes("--holtburger-mode=client")) {
+	contextBridge.exposeInMainWorld("holtburgerVisualCache", {
+		read(guid: number): Promise<unknown> {
+			return ipcRenderer.invoke("visual-cache:read", guid);
+		},
+		stage(capture: unknown): Promise<void> {
+			return ipcRenderer.invoke("visual-cache:stage", capture);
+		},
+		listenFailures(handler: (message: unknown) => void): () => void {
+			const listener = (_event: unknown, message: unknown) => handler(message);
+			ipcRenderer.on("visual-cache:failure", listener);
+			return () => ipcRenderer.removeListener("visual-cache:failure", listener);
+		},
+	});
 	contextBridge.exposeInMainWorld("holtburgerSettings", {
 		loadUser(): Promise<unknown> {
 			return ipcRenderer.invoke("settings:load-user");

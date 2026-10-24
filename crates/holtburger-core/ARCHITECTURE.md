@@ -31,6 +31,33 @@ We use a narrow runtime surface that keeps protocol and UI concerns distinct wit
 - **ClientCommand**: Commands sent from the UI to the engine (e.g., `DriveMovement`, `Use`). Handled in [src/client/commands.rs](src/client/commands.rs).
 - **Producer-Only Pattern**: The Core Engine is strictly _producer-only_ for the public event streams. It never consumes its own broadcast events internally (that would introduce latency and state drift). It uses synchronous direct logic to move from decoded protocol -> state -> view.
 
+### Character management and visual captures
+
+`client/character_selection.rs` owns the retained server roster, advertised capacity, and
+`CharacterManagementState`. Commands guard lifecycle and overlapping create/delete/restore/entry
+operations. A creation dispatch is not confirmation: core reconciles the confirmed GUID/name once
+from the server response, retaining rejection or uncertain completion through application
+snapshots and cold events. A roster refresh does not erase unresolved creation. Frontends keep
+server slot metadata when ordering rows and do not independently insert creation results.
+
+`client/object_preview.rs` captures accepted body and direct attachment facts without loading
+assets or retaining entities. The world-owned announced equipment/attachment roster determines
+completeness, including children whose descriptions have not arrived. Pending equipment is
+distinct from unavailable content; worn appearance is already composed into the body, while held
+equipment retains accepted holding locations and child placements. No server-only classification
+is guessed to replace an absent relationship.
+
+`client/player_visual.rs` retains the latest complete character-owned capture. Relevant cold
+events mark it dirty, and the existing entity-facts publication passes storage invalidation from
+the sole destructive storage-change collector. Evaluation follows the complete message mutation;
+unchanged values are not republished. Movement and script-scale ramps do not trigger capture.
+Saved visuals deliberately use accepted base scale, opaque visibility, and default idle rather
+than current motion/fade state; inspector captures can retain effective scale/translucency.
+Application replacement snapshots carry the same capture as deltas, so recovery cannot lose a
+one-time equipment update. Retirement clears this level without querying the old world.
+
+Endpoint scoping, local persistence, picker framing, and creation UI policy belong to the app.
+
 ### Vendor execution
 
 World owns `VendorDraft` evaluation: sale eligibility, source quantities, per-object

@@ -13,7 +13,6 @@ import { Vec3 } from "../math/types";
 import type { ResolvedObjectBehavior } from "../resolution/landblock-layer";
 import type { PlacedDynamicPresentationSource } from "../systems/dynamic-presentation-source";
 import type {
-	DynamicEntityAttachedPlacement,
 	DynamicEntityAdvance,
 	DynamicEntityView,
 	DynamicEntityWorldPlacement,
@@ -252,56 +251,6 @@ function spatialMembershipScopes(
 	}
 	return scopes;
 }
-
-/** Numeric DAT key for one typed feed placement. */
-export function dynamicEntityPlacementKey(
-	placement: DynamicEntityAttachedPlacement["placement"],
-): number {
-	return PLACEMENT_KEYS[placement];
-}
-
-const PLACEMENT_KEYS: Readonly<
-	Record<DynamicEntityAttachedPlacement["placement"], number>
-> = {
-	default: 0,
-	"right-hand-combat": 1,
-	"right-hand-non-combat": 2,
-	"left-hand": 3,
-	belt: 4,
-	quiver: 5,
-	shield: 6,
-	"left-weapon": 7,
-	"left-unarmed": 8,
-	"unknown0-a": 0x0a,
-	"unknown0-f": 0x0f,
-	unknown14: 0x14,
-	"unknown1-e": 0x1e,
-	unknown20: 0x20,
-	"special-crossbow-bolt": 51,
-	"missile-flight": 52,
-	"unknown3-c": 0x3c,
-	unknown63: 0x63,
-	resting: 0x65,
-	other: 0x66,
-	hook: 0x67,
-	unknown68: 0x68,
-	unknown69: 0x69,
-	"unknown6-a": 0x6a,
-	unknown78: 0x78,
-	random1: 121,
-	random2: 122,
-	random3: 123,
-	random4: 124,
-	random5: 125,
-	random6: 126,
-	random7: 127,
-	random8: 128,
-	random9: 129,
-	random10: 130,
-	unknown84: 0x84,
-	"unknown-f0": 0xf0,
-	"unknown3-f2": 0x3f2,
-};
 
 function landblockCoordinates(cellId: number): { x: number; y: number } {
 	return { x: (cellId >>> 24) & 0xff, y: (cellId >>> 16) & 0xff };

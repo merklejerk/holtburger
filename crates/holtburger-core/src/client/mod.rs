@@ -58,6 +58,7 @@ mod movement;
 pub mod movement_types;
 pub mod object_preview;
 mod party;
+pub mod player_visual;
 pub mod precise_jump;
 pub mod precise_jump_prediction;
 mod precise_jump_runtime;
@@ -189,6 +190,8 @@ pub struct ClientRuntime {
     housing_queries: housing_queries::HousingQueries,
     /// Cached narrow entity records and pending semantic invalidation.
     entity_facts: entity_facts::EntityFactsPublication,
+    /// Retained complete player visual, invalidated only by cold accepted changes.
+    player_visual: player_visual::PlayerVisualPublication,
     /// Equipped source already requested while its consumption policy remains unknown.
     projectile_appraisal: Option<Guid>,
     active_busy_operation: Option<PendingBusyOperation>,
@@ -328,20 +331,21 @@ impl ClientRuntime {
         match &self.state {
             ClientState::Connected if self.authenticating => ClientLifecycleState::Authenticating,
             ClientState::Connected => ClientLifecycleState::Connecting,
-            ClientState::CharacterSelection(characters) => {
-                ClientLifecycleState::CharacterSelection {
-                    characters: characters
-                        .iter()
-                        .enumerate()
-                        .map(|(slot, character)| ClientCharacterSummary {
-                            guid: character.guid,
-                            name: character.name.clone(),
-                            slot: slot as u32,
-                            delete_time: character.delete_time,
-                        })
-                        .collect(),
-                }
-            }
+            ClientState::CharacterSelection => ClientLifecycleState::CharacterSelection {
+                max_slots: self.character_selection.max_slots,
+                characters: self
+                    .character_selection
+                    .characters
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, character)| ClientCharacterSummary {
+                        guid: character.guid,
+                        name: character.name.clone(),
+                        slot: slot as u32,
+                        delete_time: character.delete_time,
+                    })
+                    .collect(),
+            },
             ClientState::EnteringWorld => self
                 .activation
                 .as_ref()
@@ -395,6 +399,8 @@ impl ClientRuntime {
     /// Builds one atomic replacement level for shells that lost their event baseline.
     pub fn application_snapshot(&self) -> ClientApplicationSnapshot {
         ClientApplicationSnapshot {
+            character_management: self.character_selection.management.clone(),
+            player_visual_capture: self.player_visual.snapshot(),
             fellowship: self.world.fellowship.clone(),
             friends: self.world.friends.clone(),
             contracts: self.contracts_snapshot(),
@@ -467,6 +473,15 @@ impl ClientRuntime {
         }
     }
 
+    /// Publish the same management level recovered by the atomic application snapshot.
+    fn emit_character_management(&self) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::CharacterManagementChanged(
+                self.character_selection.management.clone(),
+            ));
+    }
+
     fn character_motion_capabilities(&self) -> Option<ClientCharacterMotionCapabilities> {
         let capabilities = self.world.resolve_self_jump_capabilities().ok()?;
         let stance = MotionStance::from_repr(capabilities.movement.stance())?;
@@ -499,6 +514,17 @@ impl ClientRuntime {
     }
 
     pub(crate) fn set_exit_cause(&mut self, cause: ClientExitCause) {
+        if self
+            .character_selection
+            .management
+            .pending_operation()
+            .is_some()
+        {
+            self.character_selection.management = CharacterManagementState::Uncertain {
+                message: "The session ended before the character operation was confirmed. Reconnect to refresh the roster.".into(),
+            };
+            self.emit_character_management();
+        }
         self.reset_combat_engagement();
         self.clear_busy_operation();
         self.reset_housing();
@@ -858,7 +884,7 @@ impl ClientRuntime {
         // Portal transitions retain answerable requests; leaving the character/session retires them.
         if matches!(
             self.state,
-            ClientState::Disconnected | ClientState::CharacterSelection(_)
+            ClientState::Disconnected | ClientState::CharacterSelection
         ) {
             if self.progression.clear() {
                 self.emit_progression_guards();
@@ -980,6 +1006,7 @@ impl ClientRuntime {
             self.projectile_appraisal = None;
         }
         self.entity_facts.observe(event);
+        self.player_visual.observe(&self.world, event);
         match event {
             WorldEvent::PlayerEnchantmentsUpdated { enchantments } => {
                 let _ =
@@ -3230,12 +3257,14 @@ mod tests {
                 delete_time: 123,
             },
         ];
-        let mut client =
-            builder::build_test_client(ClientState::CharacterSelection(characters.clone()));
+        let mut client = builder::build_test_client(ClientState::CharacterSelection);
+        client.character_selection.characters = characters.clone();
+        client.character_selection.max_slots = 11;
 
         assert_eq!(
             client.lifecycle(),
             ClientLifecycleState::CharacterSelection {
+                max_slots: 11,
                 characters: vec![
                     ClientCharacterSummary {
                         guid: Guid(0x5000_0001),

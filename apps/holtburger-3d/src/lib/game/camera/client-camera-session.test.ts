@@ -314,6 +314,8 @@ function currentState(): ClientCurrentState {
 		characterSheet: null,
 		trade: { trade: null, pending_items: [] },
 		lifecycle: { kind: "in-world" },
+		characterManagement: { kind: "idle" },
+		playerVisualCapture: null,
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
 		recallDestinations: [],

@@ -52,10 +52,7 @@ import {
 	createEntityFacingCameraYaw,
 } from "../lib/game/math/camera-orientation";
 import { Quat, Vec3 } from "../lib/game/math/types";
-import {
-	GamePresentationOwner,
-	type GamePresentationOwnerDependencies,
-} from "../lib/game/runtime/game-presentation-owner";
+import type { GamePresentationOwnerDependencies } from "../lib/game/runtime/game-presentation-owner";
 import {
 	datAssetId,
 	type DynamicEntityRealizationDisposition,
@@ -167,8 +164,6 @@ import {
 	projectClientTargetIndicator,
 	type ClientTargetIndicatorFrame,
 } from "./client-target-indicator";
-import type { ObjectPreviewResources } from "../lib/game/preview/object-preview-controller";
-import { StandardClientObjectPreviewService } from "./client-object-preview-service";
 
 /** Presentation state exposed to the thin client shell. */
 export type ClientPresentationStatusKind =
@@ -394,7 +389,6 @@ export interface ClientPresentationOwner {
 	readonly runtime: ClientPresentationRuntime;
 	/** Final browser output multiplier, independent of category audibility. */
 	setOutputVolume(volume: number): void;
-	readonly objectPreviewResources?: ObjectPreviewResources;
 	/** GPU capability published once when the concrete renderer owner is ready. */
 	readonly textureFilteringCapabilities?: TextureFilteringCapabilities;
 	destroy(): Promise<void>;
@@ -402,7 +396,10 @@ export interface ClientPresentationOwner {
 
 export interface ClientPresentationOwnerFactory {
 	(
-		dependencies: GamePresentationOwnerDependencies,
+		dependencies: Omit<
+			GamePresentationOwnerDependencies,
+			"presentationResources"
+		>,
 	): Promise<ClientPresentationOwner>;
 }
 
@@ -420,7 +417,8 @@ export interface ClientPresentationSessionDependencies {
 	readonly onTextureFilteringCapabilities?: (
 		capabilities: TextureFilteringCapabilities | null,
 	) => void;
-	readonly ownerFactory?: ClientPresentationOwnerFactory;
+	/** Composition supplies app-owned asset borrowing; tests can inject a scene-only owner. */
+	readonly ownerFactory: ClientPresentationOwnerFactory;
 	/** Inject shared update clocks only for an explicit diagnostic client launch. */
 	readonly enablePerformanceProfiling?: boolean;
 }
@@ -449,7 +447,6 @@ type PendingPresentationCue =
  */
 export class ClientPresentationSession {
 	readonly camera: ClientPresentationCameraController;
-	readonly objectPreviews: StandardClientObjectPreviewService;
 	readonly #session: ClientLifecycleSession;
 	readonly #pendingEntityCues: PendingPresentationCue[] = [];
 	readonly #canvas: HTMLCanvasElement;
@@ -505,6 +502,7 @@ export class ClientPresentationSession {
 	/** Terminal visual failure retained until this presentation session is replaced. */
 	#terminalPresentationError: string | null = null;
 	#destroyed = false;
+	#retirement: Promise<void> | null = null;
 	#cameraTarget: ClientCameraTarget | null = null;
 	#cameraProjection: ProjectionClearanceRevision | null = null;
 	#cameraSynchronization: Promise<void> = Promise.resolve();
@@ -525,8 +523,7 @@ export class ClientPresentationSession {
 		this.#onError = dependencies.onError ?? (() => undefined);
 		this.#onTextureFilteringCapabilities =
 			dependencies.onTextureFilteringCapabilities;
-		this.#ownerFactory =
-			dependencies.ownerFactory ?? defaultClientPresentationOwnerFactory;
+		this.#ownerFactory = dependencies.ownerFactory;
 		this.#tickProfiler = dependencies.enablePerformanceProfiling
 			? new RuntimeTickProfiler()
 			: undefined;
@@ -539,16 +536,6 @@ export class ClientPresentationSession {
 			orbit: CLIENT_TUNING.camera.orbit,
 			recenter: CLIENT_TUNING.camera.recenter,
 			session: cameraSession,
-		});
-		this.objectPreviews = new StandardClientObjectPreviewService({
-			onError: (error) => this.#reportError(error),
-			resolveResources: async () => {
-				await this.start();
-				const resources = this.#owner?.objectPreviewResources;
-				if (!resources)
-					throw new Error("Isolated object previews are not available.");
-				return resources;
-			},
 		});
 	}
 
@@ -1314,10 +1301,13 @@ export class ClientPresentationSession {
 	}
 
 	/** Dispose subscriptions, scene demand, and shared renderer resources in order. */
-	async destroy(): Promise<void> {
+	destroy(): Promise<void> {
+		return (this.#retirement ??= this.#destroy());
+	}
+
+	async #destroy(): Promise<void> {
 		delete this.#canvas.dataset.preciseJump;
 		this.#preciseJumpMarker = null;
-		if (this.#destroyed) return;
 		this.#destroyed = true;
 		this.#constructionAbortController.abort();
 		const failures: unknown[] = [];
@@ -1347,9 +1337,6 @@ export class ClientPresentationSession {
 				labels.push("presentation-start");
 			}
 		});
-		await attempt("object-preview-service", () =>
-			this.objectPreviews.destroy(),
-		);
 		const owner = this.#owner;
 		this.#owner = null;
 		this.#onSceneMembership?.(null);
@@ -2311,10 +2298,4 @@ function errorMessage(error: unknown): string {
 
 function isPresentationCancellation(error: unknown): boolean {
 	return error instanceof Error && error.name === "AbortError";
-}
-
-function defaultClientPresentationOwnerFactory(
-	dependencies: GamePresentationOwnerDependencies,
-): Promise<ClientPresentationOwner> {
-	return GamePresentationOwner.build(dependencies);
 }

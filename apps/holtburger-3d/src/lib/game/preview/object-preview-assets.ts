@@ -19,7 +19,7 @@ import type { DatAssetId } from "../game-types";
 import { Vec3, type Mat4 } from "../math/types";
 import { resolvePlacementPose } from "../resolution/presentation";
 import { datAssetId } from "../runtime/dynamic-entity-presentation";
-import type { ObjectPreviewSource } from "../runtime/object-preview-source";
+import type { ObjectPreviewVisual } from "../runtime/object-preview-source";
 import type { PresentationAssetService } from "../runtime/presentation-asset-service";
 import type { DynamicPresentationSource } from "../systems/dynamic-presentation-source";
 import type { ObjectVisualTemplate } from "../systems/object-visual-template-repository";
@@ -29,7 +29,7 @@ import {
 } from "./object-preview-fit";
 
 /** Complete immutable preparation result borrowed by preview presentation and renderer. */
-export interface PreparedObjectPreviewAssets {
+export interface PreparedObjectPreviewVisualAssets {
 	readonly source: DynamicPresentationSource;
 	readonly template: ObjectVisualTemplate;
 	readonly setupPose: readonly Mat4[];
@@ -42,19 +42,22 @@ export interface PreparedObjectPreviewAssets {
 	readonly emitters: ReadonlyMap<DatAssetId, PreparedParticleEmitter>;
 	readonly particleMeshIds: readonly DatAssetId[];
 	readonly fit: ObjectPreviewFit;
+	/** Authored root rotation requires a heading-invariant support envelope. */
+	readonly rotatesVisualRoot: boolean;
 }
 
 /** One rollback-safe CPU lease; device and presentation borrowers do not release internals. */
-export interface ObjectPreviewAssetLease {
-	readonly assets: PreparedObjectPreviewAssets;
+export interface ObjectPreviewVisualLease {
+	readonly assets: PreparedObjectPreviewVisualAssets;
 	release(): void;
 }
 
 /** Prepare every immutable dependency before preview behavior can execute. */
-export async function acquireObjectPreviewAssets(
+export async function acquireObjectPreviewVisual(
 	service: PresentationAssetService,
-	request: ObjectPreviewSource,
-): Promise<ObjectPreviewAssetLease> {
+	request: ObjectPreviewVisual,
+	placement: number,
+): Promise<ObjectPreviewVisualLease> {
 	let setup: PreparedAssetHandle<DecodedStaticPresentation> | null = null;
 	let template: PreparedAssetHandle<ObjectVisualTemplate> | null = null;
 	let animations: ReadonlyMap<DatAssetId, PreparedAnimationHandle> | null =
@@ -79,7 +82,7 @@ export async function acquireObjectPreviewAssets(
 		const source: DynamicPresentationSource = {
 			behavior: setupHandle.asset.behavior,
 			entityClass: "other",
-			identity: `object-preview:${request.guid}`,
+			identity: "object-preview",
 			localBounds: setupHandle.asset.localBounds,
 			nameplate: null,
 			placementFrame: 0,
@@ -133,7 +136,7 @@ export async function acquireObjectPreviewAssets(
 
 		const setupPose = resolvePlacementPose(
 			setupHandle.asset.presentation,
-			0,
+			placement,
 		).partTransforms;
 		let clips: readonly PlayingClip[] = [];
 		if (request.pose.kind === "default-idle") {
@@ -155,14 +158,15 @@ export async function acquireObjectPreviewAssets(
 				);
 			});
 		}
+		const rotatesVisualRoot = [...animationHandles.values()].some((handle) =>
+			turnsVisualRoot(handle.asset),
+		);
 		const fit = createObjectPreviewFit(
 			templateHandle.asset.parts,
 			setupPose,
 			scale,
 			clips,
-			[...animationHandles.values()].some((handle) =>
-				turnsVisualRoot(handle.asset),
-			),
+			rotatesVisualRoot,
 		);
 		const particleMeshIds = [
 			...new Set(
@@ -172,7 +176,7 @@ export async function acquireObjectPreviewAssets(
 			),
 		];
 
-		const assets: PreparedObjectPreviewAssets = {
+		const assets: PreparedObjectPreviewVisualAssets = {
 			clips,
 			defaultScriptRoot: setupHandle.asset.behavior.physicsScriptId,
 			emitters: preparedEmitters,
@@ -181,6 +185,7 @@ export async function acquireObjectPreviewAssets(
 					? request.pose.firstCyclicClip
 					: null,
 			fit,
+			rotatesVisualRoot,
 			particleMeshIds,
 			scale,
 			scripts: preparedScripts,

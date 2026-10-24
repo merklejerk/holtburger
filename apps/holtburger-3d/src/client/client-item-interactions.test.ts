@@ -58,6 +58,8 @@ async function fixture() {
 	emit("client-current-state", {
 		lifecycle: { kind: "in-world" },
 		localPlayerGuid: 1,
+		characterManagement: { kind: "idle" },
+		playerVisualCapture: null,
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
 		recallDestinations: [],
@@ -432,6 +434,7 @@ describe("shared frontend item interaction flow", () => {
 		expect(f.give).toHaveBeenCalledTimes(2);
 		f.emit("client-lifecycle-changed", {
 			kind: "character-selection",
+			maxSlots: 11,
 			characters: [],
 		});
 		f.emit("client-lifecycle-changed", { kind: "in-world" });

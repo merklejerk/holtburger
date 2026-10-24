@@ -23,7 +23,7 @@ pub fn render_pulse_panel(
     // 1. Status Emoji
     let status_emoji = match client_state {
         ClientState::Connected => "🔌",
-        ClientState::CharacterSelection(_) => "👥",
+        ClientState::CharacterSelection => "👥",
         ClientState::EnteringWorld => "🚪",
         ClientState::InWorld => "🌍",
         ClientState::Disconnected => "💀",

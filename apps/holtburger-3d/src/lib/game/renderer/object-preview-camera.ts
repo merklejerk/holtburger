@@ -3,9 +3,10 @@ import {
 	createCameraRotationRadians,
 	rotateRenderVector,
 } from "../math/camera-orientation";
-import { createTranslationMat4 } from "../math/matrices";
+import { createTranslationMat4, transformPoint3 } from "../math/matrices";
 import { type Mat4, type Quat, Vec3 } from "../math/types";
 import type { ObjectPreviewFit } from "../preview/object-preview-fit";
+import type { ResolvedObjectPreviewViewport } from "../preview/object-preview-viewport";
 import type { RenderExtent } from "./render-extent";
 
 /** Vertical projection shared by preview fitting and the renderer camera. */
@@ -108,6 +109,97 @@ export function resolveObjectPreviewViewTransform(
 		nearPlane: Math.max(0.001, distance + minimumForwardOffset - planePadding),
 		objectRoot: createTranslationMat4(
 			new Vec3(-center.x, -center.y, -center.z),
+		),
+	};
+}
+
+/** Fit the subject independently from its optional backdrop, which only extends depth coverage. */
+export function resolveObjectPreviewCompositionView(
+	subject: ObjectPreviewFit,
+	background: ObjectPreviewFit | null,
+	viewport: Pick<
+		ResolvedObjectPreviewViewport,
+		"extent" | "cameraYawRadians" | "subjectTransform" | "framing"
+	>,
+): ObjectPreviewViewTransform {
+	const foreground = transformFit(subject, viewport.subjectTransform);
+	const framing =
+		viewport.framing.kind === "body"
+			? foreground
+			: transformFit(
+					faceFit(viewport.framing.center, viewport.framing.height),
+					viewport.subjectTransform,
+				);
+	const camera = resolveObjectPreviewViewTransform(
+		framing,
+		viewport.cameraYawRadians,
+		viewport.extent,
+	);
+	const forward = rotateRenderVector(new Vec3(0, 0, -1), camera.cameraRotation);
+	let nearPlane = camera.nearPlane;
+	let farPlane = camera.farPlane;
+	for (const fit of background === null
+		? [foreground]
+		: [foreground, background]) {
+		const points = fit.supportPoints;
+		for (let index = 0; index < points.length; index += 3) {
+			const x = points[index],
+				y = points[index + 1],
+				z = points[index + 2];
+			if (x === undefined || y === undefined || z === undefined)
+				throw new Error(
+					"Preview clipping support is not composed of XYZ triples.",
+				);
+			const point = transformPoint3(camera.objectRoot, new Vec3(x, y, z));
+			const depth =
+				(point.x - camera.cameraPosition.x) * forward.x +
+				(point.y - camera.cameraPosition.y) * forward.y +
+				(point.z - camera.cameraPosition.z) * forward.z;
+			if (depth <= 0) continue;
+			nearPlane = Math.min(
+				nearPlane,
+				Math.max(0.001, depth - OBJECT_PREVIEW_NEAR_CLEARANCE),
+			);
+			farPlane = Math.max(farPlane, depth + OBJECT_PREVIEW_NEAR_CLEARANCE);
+		}
+	}
+	return { ...camera, nearPlane, farPlane };
+}
+
+function transformFit(
+	fit: ObjectPreviewFit,
+	transform: Mat4,
+): ObjectPreviewFit {
+	const supportPoints = new Float32Array(fit.supportPoints.length);
+	for (let index = 0; index < fit.supportPoints.length; index += 3) {
+		const x = fit.supportPoints[index],
+			y = fit.supportPoints[index + 1],
+			z = fit.supportPoints[index + 2];
+		if (x === undefined || y === undefined || z === undefined)
+			throw new Error("Preview fit support is not composed of XYZ triples.");
+		const point = transformPoint3(transform, new Vec3(x, y, z));
+		supportPoints.set([point.x, point.y, point.z], index);
+	}
+	return { center: transformPoint3(transform, fit.center), supportPoints };
+}
+
+function faceFit(center: Vec3, height: number): ObjectPreviewFit {
+	const half = height / 2;
+	return {
+		center,
+		supportPoints: Float32Array.of(
+			center.x - half,
+			center.y - half,
+			center.z,
+			center.x + half,
+			center.y - half,
+			center.z,
+			center.x + half,
+			center.y + half,
+			center.z,
+			center.x - half,
+			center.y + half,
+			center.z,
 		),
 	};
 }

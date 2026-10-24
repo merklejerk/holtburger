@@ -60,13 +60,14 @@ describe("client lifecycle reducer", () => {
 		let state = initialClientLifecycleUiState();
 		state = reduceClientLifecycleUiState(
 			state,
-			authority({ kind: "character-selection", characters }),
+			authority({ kind: "character-selection", maxSlots: 11, characters }),
 		);
 		expect(state).toMatchObject({ selectedGuid: characters[0].guid });
 		state = reduceClientLifecycleUiState(state, { type: "select", guid: 8 });
 
 		expect(state).toEqual({
 			kind: "character-selection",
+			maxSlots: 11,
 			characters,
 			selectedGuid: 8,
 		});
@@ -77,24 +78,32 @@ describe("client lifecycle reducer", () => {
 	it("preserves a valid selection across refreshed character lists and replaces stale identity with the first available character", () => {
 		let state = reduceClientLifecycleUiState(
 			initialClientLifecycleUiState(),
-			authority({ kind: "character-selection", characters }),
+			authority({ kind: "character-selection", maxSlots: 11, characters }),
 		);
 		state = reduceClientLifecycleUiState(state, { type: "select", guid: 7 });
 		state = reduceClientLifecycleUiState(state, {
 			type: "authority",
-			lifecycle: { kind: "character-selection", characters: [characters[0]] },
+			lifecycle: {
+				kind: "character-selection",
+				maxSlots: 11,
+				characters: [characters[0]],
+			},
 		});
 		expect(state).toMatchObject({ selectedGuid: 7 });
 
 		state = reduceClientLifecycleUiState(state, {
 			type: "authority",
-			lifecycle: { kind: "character-selection", characters: [characters[1]] },
+			lifecycle: {
+				kind: "character-selection",
+				maxSlots: 11,
+				characters: [characters[1]],
+			},
 		});
 		expect(state).toMatchObject({ selectedGuid: characters[1].guid });
 
 		state = reduceClientLifecycleUiState(
 			state,
-			authority({ kind: "character-selection", characters: [] }),
+			authority({ kind: "character-selection", maxSlots: 11, characters: [] }),
 		);
 		expect(state).toMatchObject({ selectedGuid: null });
 	});

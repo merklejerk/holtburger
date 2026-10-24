@@ -5,17 +5,50 @@ import type { PreparedPhysicsScript } from "../behavior/physics-script-repositor
 import type { DatAssetId } from "../game-types";
 import type { ObjectVisualTemplate } from "../systems/object-visual-template-repository";
 import { AABB3, Mat4, Vec3 } from "../math/types";
-import { ObjectPreviewPresentation } from "./object-preview-presentation";
+import { ObjectPreviewModelPresentation } from "./object-preview-model-presentation";
 
 const SCRIPT_ID = "0x33000001" as DatAssetId;
 const EMITTER_ID = "0x32000001" as DatAssetId;
 const MESH_ID = "0x01000001" as DatAssetId;
 
-describe("ObjectPreviewPresentation", () => {
+describe("ObjectPreviewModelPresentation", () => {
+	it("keeps holding frames rigid while geometry retains independent source and default scale", () => {
+		const pose = Mat4.identity();
+		pose.m41 = 2;
+		const root = Mat4.identity();
+		root.m41 = 10;
+		const original = template();
+		const presentation = new ObjectPreviewModelPresentation(
+			{
+				clips: [],
+				defaultScriptRoot: null,
+				emitters: new Map(),
+				firstCyclicClip: null,
+				scale: new Vec3(2, 2, 2),
+				scripts: new Map(),
+				setupPose: [pose],
+				translucency: 0,
+				template: {
+					parts: original.parts.map((part) => ({
+						...part,
+						defaultScale: new Vec3(5, 5, 5),
+					})),
+				},
+			},
+			root,
+			null,
+		);
+		const frame = presentation.advance(0, root);
+		expect(frame.partToPreview[0]?.m11).toBe(10);
+		expect(frame.partToPreview[0]?.m41).toBe(14);
+		expect(presentation.rigidPartFrame(0).m11).toBe(1);
+		expect(presentation.rigidPartFrame(0).m41).toBe(14);
+		presentation.dispose();
+	});
 	it("executes a setup script and publishes a part-attached particle", () => {
 		const setupPart = Mat4.identity();
 		setupPart.m41 = 3;
-		const presentation = new ObjectPreviewPresentation(
+		const presentation = new ObjectPreviewModelPresentation(
 			{
 				clips: [],
 				defaultScriptRoot: SCRIPT_ID,
@@ -27,10 +60,12 @@ describe("ObjectPreviewPresentation", () => {
 				template: template(),
 				translucency: 0.4,
 			},
+			Mat4.identity(),
+			null,
 			() => 0.5,
 		);
 
-		const frame = presentation.advance(0);
+		const frame = presentation.advance(0, Mat4.identity());
 
 		expect(frame.partToPreview[0]?.m41).toBe(3);
 		expect(frame.partRenderStates[0]?.translucency).toBe(0.4);
@@ -42,7 +77,7 @@ describe("ObjectPreviewPresentation", () => {
 		expect(frame.particleRecords.dirtySlots).toEqual({ first: 0, last: 0 });
 
 		presentation.dispose();
-		expect(() => presentation.advance(1)).toThrow("disposed");
+		expect(() => presentation.advance(1, Mat4.identity())).toThrow("disposed");
 	});
 });
 

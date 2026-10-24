@@ -45,6 +45,13 @@ function read(items: ClientEntityFacts[]): ClientEntityRead {
 		kind: "current",
 		level: {
 			projectileSupply: { kind: "not-applicable" },
+			salvage: {
+				skills: {
+					salvagingSkill: 0,
+					tinkeringSkill: 0,
+					augmentationBonusSalvage: 0,
+				},
+			},
 			worldContainer: { kind: "closed" },
 			revision: 1,
 			playerGuid: 1,

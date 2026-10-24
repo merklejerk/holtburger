@@ -40,6 +40,13 @@ describe("contentsSections", () => {
 		const prepared = mirror.prepareSnapshot(
 			{
 				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
 				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1),
@@ -108,6 +115,13 @@ describe("contentsSections", () => {
 		const prepared = mirror.prepareSnapshot(
 			{
 				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
 				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1),
@@ -162,6 +176,13 @@ describe("contentsPackSlots", () => {
 		const { level } = mirror.prepareSnapshot(
 			{
 				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
 				worldContainer: { kind: "closed" },
 				entities: [root, bag, foci, ordinary],
 			},
@@ -184,6 +205,13 @@ describe("contentsPackSlots", () => {
 		const pending = mirror.prepareSnapshot(
 			{
 				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
 				worldContainer: { kind: "closed" },
 				entities: [unknown, bag],
 			},
@@ -211,6 +239,13 @@ describe("contentsPackSlots", () => {
 		const { level } = mirror.prepareSnapshot(
 			{
 				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
 				worldContainer: { kind: "closed" },
 				entities: [
 					entityFacts(1),

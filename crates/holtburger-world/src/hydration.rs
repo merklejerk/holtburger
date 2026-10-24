@@ -159,9 +159,8 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
         if let Some(v) = pwd.radar_behavior {
             self.ints.insert(PropertyInt::ShowableOnRadar, v as i32);
         }
-        if let Some(v) = pwd.workmanship {
-            self.ints.insert(PropertyInt::ItemWorkmanship, v as i32);
-        }
+        // Public workmanship is an average float, not the raw integer total.
+        // Entity/vendor public evidence retains it separately from appraisal properties.
         if let Some(v) = pwd.house_owner {
             self.iids.insert(PropertyInstanceId::HouseOwner, v);
         }

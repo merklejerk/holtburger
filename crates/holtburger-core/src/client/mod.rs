@@ -69,6 +69,7 @@ pub mod runtime_body_view_cache;
 #[cfg(feature = "runtime-fixture")]
 pub mod runtime_fixture;
 mod runtime_profile;
+pub mod salvage;
 pub mod selection_envelope;
 pub mod selection_query;
 mod server_combat_text;

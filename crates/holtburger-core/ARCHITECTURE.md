@@ -430,6 +430,13 @@ at their display cadence; they do not classify weapons or subtract locally for s
 
 `client/equipment_runtime.rs` owns combat staging, ordered unequips, and wield completion for all command consumers. It waits for accepted storage/equipment state between requests, revalidates the remaining plan, and stops on rejection, lifecycle invalidation, or timeout without rollback. Manual combat commands cancel pending restoration. Timeout reports uncertainty because the outstanding wire request may still complete. Ownership is released when sending the final request; wield confirmation is needed only when combat restoration depends on it. Frontends submit equipment intent and do not maintain a second equipment executor.
 
+`client/salvage.rs` evaluates ordered whole-item batches and compares world-produced review
+inputs again before dispatch. Read-only discovery/preview and guarded submission have correlated
+results; host command enqueue acceptance is not a dispatch receipt. Salvage does not acquire a
+completion-wait busy operation: server yield messages are optional, grouped by skill, and have no
+request identity. `messages.rs` publishes these as Salvaging chat, while inventory updates remain
+authoritative. Frontends own their drafts and confirmations. Mixed-material batches are supported.
+
 `client/inventory_plan.rs` is the shared identity-based evaluator for item insertion,
 append, merge-only targets, splits, equipment targets, pickup, ground drop, give, and
 native pack exchanges. Explicit ammo-slot drops top up matching equipped stacks before

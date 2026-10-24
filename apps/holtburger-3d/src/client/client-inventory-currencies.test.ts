@@ -33,6 +33,13 @@ function carried(
 const total = (...items: ClientEntityFacts[]) =>
 	inventoryCurrencyTotals({
 		projectileSupply: { kind: "not-applicable" },
+		salvage: {
+			skills: {
+				salvagingSkill: 0,
+				tinkeringSkill: 0,
+				augmentationBonusSalvage: 0,
+			},
+		},
 		worldContainer: { kind: "closed" },
 		playerGuid: 1,
 		revision: 1,

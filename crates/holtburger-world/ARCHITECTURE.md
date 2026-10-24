@@ -675,3 +675,17 @@ Core owns character admission, empty-login initialization, retirement, publicati
 and abandonment dispatch. Portal travel does not clear contract facts. Frontends
 own ordering, filtering, icons, expansion, confirmation, and visible countdown
 cadence. World does not own pending removal or periodic timer publication.
+
+## Salvage semantics and workmanship evidence
+
+`crafting/salvage.rs` owns exact Ust identity/discovery, per-item admission, normalized ordered
+sources, skill-profile selection, and estimated bag composition. Entity facts carry candidate
+readiness independently of tool ownership. A separate salvage context in core's existing entity
+snapshot/delta carries skill/augmentation inputs;
+profile changes do not require republishing every inventory candidate.
+
+Public descriptions disclose average workmanship as a float. `EntityPublicDescription` and vendor
+public evidence retain it separately from appraised integer `ItemWorkmanship` totals and
+`NumItemsInMaterial`. Inspection may display the public average; salvage review requires normalized
+raw evidence. Incomplete candidates remain queueable; frontends can request appraisal without
+inventing a raw total or silently omitting a source. Successful appraisal replaces the raw total/count evidence.

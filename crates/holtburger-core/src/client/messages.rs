@@ -784,6 +784,56 @@ impl ClientRuntime {
                         });
                     Ok(())
                 }
+                GameEvent::SalvageOperationsResult(data) => {
+                    use holtburger_common::{properties::MaterialType, stats::SkillType};
+                    let skill = SkillType::from_repr(data.skill).map_or_else(
+                        || format!("skill {}", data.skill),
+                        |skill| skill.to_string(),
+                    );
+                    for row in &data.results {
+                        let material = MaterialType::from_repr(row.material).map_or_else(
+                            || format!("material {}", row.material),
+                            |material| material.to_string(),
+                        );
+                        let _ = self
+                            .client_view_event_tx
+                            .send(ClientViewEvent::ServerMessage {
+                                combat_outcome: None,
+                                message: format!(
+                                    "You obtain {} {} (workmanship {:.2}) using {}.",
+                                    row.units, material, row.workmanship, skill
+                                ),
+                                chat_type: (ChatMessageType::Salvaging as u32).into(),
+                            });
+                    }
+                    if data.augmentation_bonus > 0 {
+                        let _ = self
+                            .client_view_event_tx
+                            .send(ClientViewEvent::ServerMessage {
+                                combat_outcome: None,
+                                message: format!(
+                                    "Your augmentation has given you a return bonus of {}%!",
+                                    data.augmentation_bonus
+                                ),
+                                chat_type: (ChatMessageType::Salvaging as u32).into(),
+                            });
+                    }
+                    for guid in &data.rejected {
+                        let name = self
+                            .world
+                            .entities
+                            .get(*guid)
+                            .map_or_else(|| guid.to_string(), |item| item.name().to_string());
+                        let _ = self
+                            .client_view_event_tx
+                            .send(ClientViewEvent::ServerMessage {
+                                combat_outcome: None,
+                                message: format!("The {name} was not suitable for salvaging."),
+                                chat_type: (ChatMessageType::Salvaging as u32).into(),
+                            });
+                    }
+                    Ok(())
+                }
                 GameEvent::QueryItemManaResponse(data) => {
                     let _ = self
                         .client_view_event_tx

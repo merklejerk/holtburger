@@ -181,6 +181,11 @@ impl ClientRuntime {
                 self.query_spell_inspection(query);
                 Ok(())
             }
+            ClientCommand::PreviewSalvage(request) => {
+                self.preview_salvage(request);
+                Ok(())
+            }
+            ClientCommand::SubmitSalvage(request) => self.submit_salvage(request).await,
             ClientCommand::SubmitItemUse(request) => self.submit_item_use(request).await,
             ClientCommand::QueryItemUseTarget(query) => {
                 self.query_item_use_target(query);
@@ -740,14 +745,7 @@ impl ClientRuntime {
                 Ok(())
             }
             ClientCommand::SalvageItemsWith { tool, items } => {
-                log::info!(">>> Salvaging {} item(s) with 0x{:08X}", items.len(), tool);
-                self.send_game_action(GameAction::SalvageItemsWith(Box::new(
-                    SalvageItemsWithActionData {
-                        tool_guid: tool,
-                        items,
-                    },
-                )))
-                .await
+                self.salvage_items_with(tool, items).await
             }
             ClientCommand::GiveObjectRequest {
                 target,
@@ -2385,22 +2383,5 @@ mod tests {
                 ..
             })
         ));
-    }
-
-    #[tokio::test]
-    async fn salvage_command_does_not_arm_busy_operation() {
-        let mut client = build_test_client();
-
-        client
-            .handle_command(ClientCommand::SalvageItemsWith {
-                tool: Guid(0x7000_0001),
-                items: vec![Guid(0x8000_0001)],
-            })
-            .await
-            .unwrap();
-
-        assert!(client.active_busy_operation.is_none());
-        assert_eq!(client.session.game_action_sequence, 1);
-        assert!(client.session.bytes_out > 0);
     }
 }

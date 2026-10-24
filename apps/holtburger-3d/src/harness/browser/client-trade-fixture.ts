@@ -30,6 +30,10 @@ export function createTradeFixture(options: {
 			const source = entityFacts(item, {
 				ownedByPlayer: true,
 				canOfferTrade: true,
+				salvage: {
+					kind: "ineligible",
+					reason: "Fixture item cannot be salvaged.",
+				},
 				location: {
 					kind: "contained",
 					parentGuid: 1,
@@ -38,6 +42,7 @@ export function createTradeFixture(options: {
 			});
 			options.emit("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [
 					player,

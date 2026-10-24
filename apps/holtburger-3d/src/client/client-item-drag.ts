@@ -1,3 +1,4 @@
+import type { ClientSalvageState } from "./client-salvage-state";
 import { showUiDragGhost, positionUiDragGhost } from "../app/ui-drag-ghost";
 import { filterDraggedEquipment } from "./client-equipment-strip-filter";
 import {
@@ -5,10 +6,7 @@ import {
 	equipmentSlotAvailability,
 } from "./client-inventory-equipment";
 import type { ClientTradeState } from "./client-trade-state";
-import type {
-	ClientHouseCrystalState,
-	HousingRowDrag,
-} from "./client-house-crystal-state";
+import type { ClientHouseCrystalState } from "./client-house-crystal-state";
 import type {
 	ClientViewportTargetPicker,
 	ClientViewportTargetResult,
@@ -93,6 +91,7 @@ interface ViewportDragTarget {
 	result: ClientViewportTargetResult | null;
 }
 type DragTarget =
+	| { readonly kind: "salvage"; readonly element: HTMLElement }
 	| {
 			readonly kind: "housing";
 			readonly element: HTMLElement;
@@ -169,9 +168,11 @@ export class ClientItemDrag {
 	#gesture: Gesture | null = null;
 	readonly #bindingSources = new Map<HTMLElement, BindingDragSource>();
 	#bindingGesture: BindingGesture | null = null;
-	/** Requirement drafts have a separate local gesture and never enter inventory targeting. */
-	#housingGesture: {
-		readonly identity: HousingRowDrag;
+	/** Local draft removals never enter inventory targeting or physical item transfer. */
+	#draftGesture: {
+		/** Releasing outside this feature-owned area removes the captured draft entry. */
+		readonly boundary: HTMLElement;
+		readonly remove: () => void;
 		readonly element: HTMLElement;
 		readonly pointer: number;
 		readonly x: number;
@@ -204,6 +205,11 @@ export class ClientItemDrag {
 		private readonly vendor: Pick<
 			ClientVendorState,
 			"canDragOffer" | "acceptsDrop" | "queueBuy" | "queueSell"
+		> | null,
+		/** Salvage queue edits remain local; drag-out captures its exact draft lifetime. */
+		private readonly salvage: Pick<
+			ClientSalvageState,
+			"acceptsDrop" | "add" | "captureRemoval"
 		> | null,
 		/** Confirmed P2P offers use their own guarded command path. */
 		private readonly trade: Pick<
@@ -243,7 +249,7 @@ export class ClientItemDrag {
 				if (
 					event.target instanceof Element &&
 					event.target.closest(
-						".item-grid-cell, [data-action-cell], [data-vendor-offer]",
+						".item-grid-cell, [data-action-cell], [data-vendor-offer], [data-salvage-item]",
 					)
 				)
 					event.preventDefault();
@@ -281,7 +287,7 @@ export class ClientItemDrag {
 	cancel(): boolean {
 		if (
 			this.#gesture === null &&
-			this.#housingGesture === null &&
+			this.#draftGesture === null &&
 			this.#bindingGesture === null
 		)
 			return false;
@@ -348,6 +354,31 @@ export class ClientItemDrag {
 				return;
 			}
 		}
+		const queuedSalvage =
+			event.target instanceof Element
+				? event.target.closest<HTMLElement>("[data-salvage-item]")
+				: null;
+		if (queuedSalvage !== null && this.#root.contains(queuedSalvage)) {
+			const boundary = queuedSalvage.closest<HTMLElement>(
+				"[data-salvage-queue]",
+			);
+			const remove = this.salvage?.captureRemoval(
+				Number(queuedSalvage.dataset.salvageItem),
+			);
+			if (boundary === null || remove == null) return;
+			this.#cancel();
+			this.#draftGesture = {
+				boundary,
+				remove,
+				element: queuedSalvage,
+				pointer: event.pointerId,
+				x: event.clientX,
+				y: event.clientY,
+				dragging: false,
+			};
+			event.stopPropagation();
+			return;
+		}
 		const requirement =
 			event.target instanceof Element
 				? event.target.closest<HTMLElement>(
@@ -362,8 +393,9 @@ export class ClientItemDrag {
 			);
 			if (identity == null) return;
 			this.#cancel();
-			this.#housingGesture = {
-				identity,
+			this.#draftGesture = {
+				boundary: requirement,
+				remove: () => this.houseCrystal?.clearRow(identity),
 				element: requirement,
 				pointer: event.pointerId,
 				x: event.clientX,
@@ -478,23 +510,23 @@ export class ClientItemDrag {
 			event.stopPropagation();
 			return;
 		}
-		const housing = this.#housingGesture;
-		if (housing !== null) {
-			if (housing.pointer !== event.pointerId) return;
-			if (!housing.element.isConnected) {
+		const draft = this.#draftGesture;
+		if (draft !== null) {
+			if (draft.pointer !== event.pointerId) return;
+			if (!draft.element.isConnected) {
 				this.#cancel();
 				return;
 			}
 			if (
-				!housing.dragging &&
-				Math.hypot(event.clientX - housing.x, event.clientY - housing.y) <
+				!draft.dragging &&
+				Math.hypot(event.clientX - draft.x, event.clientY - draft.y) <
 					CLIENT_TUNING.inventory.dragThresholdCssPixels
 			)
 				return;
-			if (!housing.dragging) {
-				housing.dragging = true;
+			if (!draft.dragging) {
+				draft.dragging = true;
 				this.cancelInteraction();
-				this.#showGhost(housing.element);
+				this.#showGhost(draft.element);
 			}
 			positionUiDragGhost(this.#ghost, event);
 			event.preventDefault();
@@ -615,6 +647,19 @@ export class ClientItemDrag {
 			return;
 		}
 
+		const salvageQueue = hit?.closest<HTMLElement>("[data-salvage-queue]");
+		if (
+			salvageQueue !== null &&
+			salvageQueue !== undefined &&
+			this.#root.contains(salvageQueue)
+		) {
+			this.#clearHighlight();
+			gesture.target = { kind: "salvage", element: salvageQueue };
+			salvageQueue.dataset.inventoryDrop = this.#canSalvage(gesture.source)
+				? "accepted"
+				: "rejected";
+			return;
+		}
 		const offer = hit?.closest<HTMLElement>("[data-trade-offer]");
 		if (offer != null && this.#root.contains(offer)) {
 			this.#clearHighlight();
@@ -768,6 +813,15 @@ export class ClientItemDrag {
 			typeof source.origin === "string" &&
 			source.origin !== "vendor" &&
 			this.houseCrystal?.acceptsDrop(crystal, source.item) === true
+		);
+	}
+
+	/** Only owned inventory gestures can contribute to the local salvage draft. */
+	#canSalvage(source: DragSource): boolean {
+		return (
+			typeof source.origin === "string" &&
+			source.origin !== "vendor" &&
+			this.salvage?.acceptsDrop(source.item) === true
 		);
 	}
 
@@ -1074,19 +1128,19 @@ export class ClientItemDrag {
 			}
 			return;
 		}
-		const housing = this.#housingGesture;
-		if (housing !== null) {
-			if (housing.pointer !== event.pointerId) return;
-			if (housing.dragging) {
+		const draft = this.#draftGesture;
+		if (draft !== null) {
+			if (draft.pointer !== event.pointerId) return;
+			if (draft.dragging) {
 				event.preventDefault();
 				event.stopPropagation();
 				this.#suppressClick = true;
 				this.#suppressDoubleClickUntil =
 					performance.now() + CLIENT_TUNING.inventory.doubleClickSuppressionMs;
 				const hit = document.elementFromPoint(event.clientX, event.clientY);
-				const outside = !housing.element.contains(hit);
+				const outside = !draft.boundary.contains(hit);
 				this.#finishGesture();
-				if (outside) this.houseCrystal?.clearRow(housing.identity);
+				if (outside) draft.remove();
 			} else this.#finishGesture();
 			return;
 		}
@@ -1126,6 +1180,14 @@ export class ClientItemDrag {
 			return;
 		}
 
+		if (gesture.target?.kind === "salvage") {
+			const source = gesture.source;
+			const accepted = this.#canSalvage(source);
+			this.#finishGesture();
+			if (accepted) this.salvage?.add(source.item);
+			else this.reportNotice("That item cannot join the salvage queue.");
+			return;
+		}
 		if (gesture.target?.kind === "trade") {
 			const { source, target } = gesture;
 			const accepted = this.#canOffer(source, target.partner, target.revision);
@@ -1218,7 +1280,7 @@ export class ClientItemDrag {
 		filterDraggedEquipment(this.#root, undefined);
 		this.#clearDimming();
 		this.#gesture = null;
-		this.#housingGesture = null;
+		this.#draftGesture = null;
 		this.#bindingGesture = null;
 		this.#views = [];
 		this.#ghost.hidden = true;
@@ -1230,7 +1292,7 @@ export class ClientItemDrag {
 		if (
 			this.#gesture?.kind === "dragging" ||
 			this.#bindingGesture?.dragging === true ||
-			this.#housingGesture?.dragging === true
+			this.#draftGesture?.dragging === true
 		) {
 			this.#suppressClick = true;
 			this.#suppressDoubleClickUntil =
@@ -1268,7 +1330,7 @@ export class ClientItemDrag {
 	}
 	#cancelPointer = (event: PointerEvent): void => {
 		if (this.#bindingGesture?.pointer === event.pointerId) this.#cancel();
-		if (this.#housingGesture?.pointer === event.pointerId) this.#cancel();
+		if (this.#draftGesture?.pointer === event.pointerId) this.#cancel();
 		if (
 			this.#gesture?.kind !== "released" &&
 			this.#gesture?.pointer === event.pointerId

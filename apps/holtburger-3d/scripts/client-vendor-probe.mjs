@@ -215,10 +215,10 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		await quote(buys, sells);
 	}
 	await wait(
-		"document.querySelectorAll('.vendor-queue .sell .vendor-cell').length === 1",
+		"document.querySelectorAll('.vendor-queue .sell .item-queue-cell').length === 1",
 	);
 	const merged = await read(
-		"document.querySelector('.vendor-queue .sell .vendor-cell').getAttribute('aria-label')",
+		"document.querySelector('.vendor-queue .sell .item-queue-cell').getAttribute('aria-label')",
 	);
 	if (!merged.includes("160") || !merged.includes("7,000"))
 		throw new Error(`Merged sale quantity or price is wrong: ${merged}`);
@@ -310,8 +310,8 @@ export async function probeVendor(client, evaluateExpression, capture) {
             currencyBorder: getComputedStyle(currency).borderTopWidth,
             groupsShareLine: groups.length === 2 && Math.abs(groups[0].getBoundingClientRect().top - groups[1].getBoundingClientRect().top) < 1,
             footerAlignment: getComputedStyle(footer).justifyContent,
-            boughtCells: panel.querySelectorAll('.buy .vendor-cell').length,
-            soldCells: panel.querySelectorAll('.sell .vendor-cell').length };
+            boughtCells: panel.querySelectorAll('.buy .item-queue-cell').length,
+            soldCells: panel.querySelectorAll('.sell .item-queue-cell').length };
     })()`);
 	if (
 		!displayed.rowsAreLines ||
@@ -406,11 +406,11 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	});
 	if (
 		!(await read(
-			"getComputedStyle(document.querySelector('.vendor-queue .buy .queue-remove')).opacity === '0'",
+			"getComputedStyle(document.querySelector('.vendor-queue .buy .item-cell-remove')).opacity === '0'",
 		))
 	)
 		throw new Error("Queue remove button was visible without hover or focus");
-	const queueCell = await point(".vendor-queue .buy .vendor-cell");
+	const queueCell = await point(".vendor-queue .buy .item-queue-cell");
 	await client.send("Input.dispatchMouseEvent", {
 		type: "mouseMoved",
 		...queueCell,
@@ -419,11 +419,11 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	});
 	if (
 		!(await read(
-			"getComputedStyle(document.querySelector('.vendor-queue .buy .queue-remove')).opacity === '1'",
+			"getComputedStyle(document.querySelector('.vendor-queue .buy .item-cell-remove')).opacity === '1'",
 		))
 	)
 		throw new Error("Queue remove button did not appear on hover");
-	const removal = await point(".vendor-queue .buy .queue-remove");
+	const removal = await point(".vendor-queue .buy .item-cell-remove");
 	await client.send("Input.dispatchMouseEvent", {
 		type: "mouseMoved",
 		...removal,
@@ -433,9 +433,9 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	if (
 		!(await read(
 			`(() => {
-				const entry = document.querySelector('.vendor-queue .buy .queue-entry');
-				const button = entry.querySelector('.queue-remove');
-				const cell = entry.querySelector('.vendor-cell');
+				const entry = document.querySelector('.vendor-queue .buy .removable-item-cell');
+				const button = entry.querySelector('.item-cell-remove');
+				const cell = entry.querySelector('.item-queue-cell');
 				const icon = button.getBoundingClientRect();
 				const art = cell.getBoundingClientRect();
 				return icon.width < art.width && icon.right > art.right - 8 && icon.top < art.top + 8 && button.getAttribute('aria-label').startsWith('Remove ');
@@ -468,7 +468,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		throw new Error("Confirmed sales were restored after failed buying");
 	await quote(buys, []);
 	await wait(
-		"document.querySelectorAll('.vendor-queue .sell .vendor-cell').length === 0",
+		"document.querySelectorAll('.vendor-queue .sell .item-queue-cell').length === 0",
 	);
 	const failure = await read(
 		"document.body.innerText.includes('Items sold; purchase failed.')",
@@ -486,12 +486,12 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	const inspectionsBefore = await read(
 		`${api}.inventoryDragCommands().filter((entry) => entry.command === 'examine_client_entity').length`,
 	);
-	await click(".vendor-queue .buy .vendor-cell");
+	await click(".vendor-queue .buy .item-queue-cell");
 	if ((await read(`${fixture}.pending().draft.buys.length`)) !== 2)
 		throw new Error("Selecting a queued item removed it from the draft");
 	if (
 		!(await read(
-			"document.querySelector('.vendor-queue .buy .vendor-cell').getAttribute('aria-pressed') === 'true'",
+			"document.querySelector('.vendor-queue .buy .item-queue-cell').getAttribute('aria-pressed') === 'true'",
 		))
 	)
 		throw new Error("Queued item did not become selected");
@@ -502,7 +502,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	if ((await inspectionCount()) !== inspectionsBefore)
 		throw new Error("Selecting a queued item inspected it immediately");
 	await read(
-		"document.querySelector('.vendor-queue .buy .vendor-cell').focus()",
+		"document.querySelector('.vendor-queue .buy .item-queue-cell').focus()",
 	);
 	for (const type of ["keyDown", "keyUp"])
 		await client.send("Input.dispatchKeyEvent", {
@@ -523,7 +523,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		);
 	await read(`${api}.objectInspectionProbe().respond('item', 7001)`);
 	await read(`${api}.objectInspectionProbe().end()`);
-	const queuedPoint = await point(".vendor-queue .buy .vendor-cell");
+	const queuedPoint = await point(".vendor-queue .buy .item-queue-cell");
 	for (const type of ["mousePressed", "mouseReleased"])
 		await client.send("Input.dispatchMouseEvent", {
 			type,
@@ -541,7 +541,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		throw new Error("Right-click did not inspect the queued item");
 	await read(`${api}.objectInspectionProbe().respond('item', 7001)`);
 	await read(`${api}.objectInspectionProbe().end()`);
-	await click(".vendor-queue .buy .queue-remove");
+	await click(".vendor-queue .buy .item-cell-remove");
 	if ((await read(`${fixture}.pending().draft.buys.length`)) !== 1)
 		throw new Error("Queue remove button lost the wrong purchase entries");
 	await quote([buys[1]], []);

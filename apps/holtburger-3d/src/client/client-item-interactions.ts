@@ -1,3 +1,4 @@
+import { ClientConfirmationSuppression } from "./client-confirmation-suppression";
 import type {
 	LocalConfirmationRequest,
 	LocalDialogSource,
@@ -14,9 +15,6 @@ import type {
 	ClientItemUseRequest,
 	ClientItemUseResult,
 } from "./client-item-use-contract";
-
-/** Suppression covers every give recipient for one hour within the character session. */
-export const GIVE_CONFIRMATION_SUPPRESSION_MS = 60 * 60 * 1_000;
 
 /** Cold state consumed by Notifications guidance and the local confirmation dialog. */
 export type ItemInteractionState =
@@ -90,13 +88,14 @@ export class ClientItemInteractions implements LocalDialogSource {
 	readonly #failure: (message: string) => void;
 	readonly #notice: (message: string) => void;
 	readonly #beginAcquisition: () => void;
+	readonly #beginSalvage: (tool: number) => void;
 	readonly #beginTrade: (partner: number) => void;
 	readonly #unsubscribe: () => void;
 	readonly #listeners = new Set<(state: ItemInteractionState) => void>();
 	#state: ItemInteractionState = { kind: "idle" };
 	#destroyed = false;
 	/** A deadline needs no timer; each give checks expiry when it starts. */
-	#giveSuppressedUntil = 0;
+	readonly #giveConfirmation = new ClientConfirmationSuppression();
 
 	constructor(options: {
 		readonly session: Session;
@@ -109,6 +108,8 @@ export class ClientItemInteractions implements LocalDialogSource {
 		readonly reportNotice: (message: string) => void;
 		/** Retire mutually exclusive frontend modes before acquisition begins. */
 		readonly beginAcquisition: () => void;
+		/** Local Ust activation shared by inventory, selection, and bound actions. */
+		readonly beginSalvage: (tool: number) => void;
 		/** Player interaction initiates negotiations through the session-owned trade flow. */
 		readonly beginTrade: (partner: number) => void;
 	}) {
@@ -118,6 +119,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 		this.#notice = options.reportNotice;
 		this.#beginAcquisition = options.beginAcquisition;
 		this.#beginTrade = options.beginTrade;
+		this.#beginSalvage = options.beginSalvage;
 		this.#unsubscribe = options.session.subscribe((event) =>
 			this.#receive(event),
 		);
@@ -201,7 +203,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 			this.#notice("This recipient cannot receive an item.");
 			return;
 		}
-		if (Date.now() < this.#giveSuppressedUntil) {
+		if (this.#giveConfirmation.active) {
 			this.#sendGive(source, recipient);
 			return;
 		}
@@ -262,6 +264,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 		this.cancel();
 		const item = this.#item(source);
 		if (item === null) return;
+		if (this.#tryBeginSalvage(item, unrestricted)) return;
 		const capability = item.description.useCapability;
 		if (capability === "targeted") {
 			this.#beginAcquisition();
@@ -275,7 +278,8 @@ export class ClientItemInteractions implements LocalDialogSource {
 			});
 		} else if (
 			capability === "direct" ||
-			(capability === "unsupported" && unrestricted)
+			((capability === "unsupported" || capability === "salvage-tool") &&
+				unrestricted)
 		) {
 			this.#submit({ kind: "direct", source, unrestricted }, null);
 		} else this.#failure("This item cannot currently be used.");
@@ -310,6 +314,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 			this.#failure("Bound action is unavailable.");
 			return;
 		}
+		if (this.#tryBeginSalvage(item, false)) return;
 		if (kind === "equipment") {
 			this.#toggleEquipment(item, alternate);
 			return;
@@ -325,6 +330,18 @@ export class ClientItemInteractions implements LocalDialogSource {
 					: null;
 			this.#useTargeted(source, target);
 		}
+	}
+
+	/** The shared semantic capability routes both ordinary and bound Ust activation locally. */
+	#tryBeginSalvage(item: ClientEntityFacts, unrestricted: boolean): boolean {
+		if (
+			unrestricted ||
+			item.description.kind !== "known" ||
+			item.description.useCapability !== "salvage-tool"
+		)
+			return false;
+		this.#beginSalvage(item.guid);
+		return true;
 	}
 
 	/** Share compatibility checks and acquisition across item and caster shortcuts. */
@@ -403,9 +420,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 		const state = this.#state;
 		if (state.kind === "confirming-give" && state.question.requestId === id) {
 			if (accepted) {
-				if (suppress === true)
-					this.#giveSuppressedUntil =
-						Date.now() + GIVE_CONFIRMATION_SUPPRESSION_MS;
+				if (suppress === true) this.#giveConfirmation.suppressForHour();
 				this.#sendGive(state.source, state.recipient);
 			} else this.cancel();
 			return;
@@ -528,19 +543,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 		}
 	}
 	#receive(event: ClientLifecycleSessionEvent): void {
-		const lifecycle =
-			event.type === "current-state"
-				? event.state.lifecycle
-				: event.type === "lifecycle"
-					? event.lifecycle
-					: null;
-		// Portal travel stays within the character session and preserves the deadline.
-		if (
-			lifecycle !== null &&
-			lifecycle.kind !== "in-world" &&
-			lifecycle.kind !== "portal-space"
-		)
-			this.#giveSuppressedUntil = 0;
+		this.#giveConfirmation.receive(event);
 		if (event.type === "item-use-target-result") {
 			const state = this.#state;
 			if (

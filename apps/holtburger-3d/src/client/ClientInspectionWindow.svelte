@@ -314,7 +314,6 @@
 			line-height: 1.35;
 		}
 		.inspection-scroll :global(h2),
-		.inspection-scroll :global(h3),
 		.inspection-scroll :global(p),
 		.inspection-scroll :global(dl),
 		.inspection-scroll :global(dd),
@@ -328,16 +327,6 @@
 		}
 		.inspection-scroll :global(.inspection-name) {
 			color: var(--ui-color-text);
-		}
-		.inspection-scroll :global(h3) {
-			margin-bottom: 7px;
-			padding-bottom: 3px;
-			border-bottom: 1px solid
-				color-mix(in srgb, var(--ui-color-border) 55%, transparent);
-			font-size: calc(var(--ui-font-size-heading-3) * var(--ui-text-scale));
-			letter-spacing: 0.06em;
-			text-transform: uppercase;
-			color: var(--ui-color-accent);
 		}
 		.inspection-scroll :global(.inspection-hero) {
 			display: grid;

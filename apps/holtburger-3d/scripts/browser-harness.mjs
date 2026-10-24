@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { probeSalvage } from "./client-salvage-probe.mjs";
 import { probeClientPresentation } from "./client-presentation-probe.mjs";
 import { probeClientMouseMovement } from "./client-mouse-movement-probe.mjs";
 import { probeSpellBar } from "./client-spell-bar-probe.mjs";
@@ -231,6 +232,13 @@ try {
 			suite: "character-sheet",
 			passed: true,
 			characterSheet: result.characterSheet,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientSalvage) {
+		report = {
+			suite: "client-salvage",
+			passed: true,
+			salvage: result.clientSalvage,
 			consoleMessages: result.consoleMessages,
 		};
 	} else if (options.clientTrade) {
@@ -644,6 +652,7 @@ function parseArgs(args) {
 		clientAllegiance: false,
 		clientInspection: false,
 		clientBook: false,
+		clientSalvage: false,
 		clientTrade: false,
 		uiTheme: false,
 		reportMode: null,
@@ -843,6 +852,10 @@ function parseArgs(args) {
 				break;
 			case "--character-sheet":
 				parsed.characterSheet = true;
+				break;
+			case "--client-salvage":
+				parsed.clientHud = true;
+				parsed.clientSalvage = true;
 				break;
 			case "--client-trade":
 				parsed.clientHud = true;
@@ -2112,6 +2125,7 @@ Options:
   --character-sheet     Exercise the Character panel with synthetic quotes in the client HUD.
   --client-keyboard     Verify pointer controls, editor ownership, native navigation, and game routing.
   --client-select-picker Verify right-edge select opening, keyboard selection, and modal dismissal.
+  --client-salvage      Exercise salvage HUD entry, Ust activation, pointer queue, and guarded submission.
   --client-trade        Exercise selected-player initiation and trade HUD controls with pointer drops.
   --client-connection   Verify connection health, traffic activity, recovery, and keyboard details.
   --client-waypoint     Verify commands, content links, compass guidance, both maps, and waypoint lifetime.
@@ -4885,6 +4899,13 @@ async function runClientHudHarness({ viteUrl }) {
 					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeConnectionBadge",
 					[],
 				),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+		if (options.clientSalvage) {
+			return {
+				clientSalvage: await probeSalvage(client, evaluateExpression),
 				consoleMessages,
 				state: { error: null, ready: true },
 			};
@@ -7909,7 +7930,7 @@ async function probeClientHousing(client) {
 	await settle();
 	if (
 		!(await read(
-			`document.querySelector('${windowSelector}').textContent.replace(/\\s+/g, " ").includes('Waiting for housing payment') && [...document.querySelectorAll('${windowSelector} .housing-payment-actions button')].every(button=>button.disabled)`,
+			`document.querySelector('${windowSelector}').textContent.replace(/\\s+/g, " ").includes('Waiting for housing payment') && [...document.querySelectorAll('${windowSelector} .housing-payment-actions button')].every(button=>button.disabled) && [...document.querySelectorAll('${windowSelector} .item-cell-remove')].every(button=>button.disabled)`,
 		))
 	)
 		throw new Error(
@@ -8048,7 +8069,35 @@ async function probeClientHousing(client) {
 	const mutationsBeforeRowRemoval = await read(
 		`${api}.commands().filter(entry => entry.command.startsWith('submit_')).length`,
 	);
-	await dragRow("inventory");
+	const removalPoints = await read(`(() => {
+        const row = document.querySelector('${windowSelector} [data-housing-requirement="273"]');
+        const cell = row?.querySelector('.item-grid-cell');
+        const remove = row?.querySelector('button[aria-label="Remove prepared Pyreal"]');
+        if (!cell || !remove || remove.disabled) throw new Error('Prepared payment has no enabled remove action');
+        cell.scrollIntoView({block:'nearest'});
+        const center = element => { const rect=element.getBoundingClientRect(); return {x:rect.x+rect.width/2,y:rect.y+rect.height/2}; };
+        return {cell:center(cell), remove:center(remove)};
+    })()`);
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		...removalPoints.cell,
+		buttons: 0,
+	});
+	await settle();
+	if (
+		!(await read(
+			`getComputedStyle(document.querySelector('${windowSelector} button[aria-label="Remove prepared Pyreal"]')).opacity === '1'`,
+		))
+	)
+		throw new Error("Prepared payment remove action did not appear on hover");
+	for (const type of ["mousePressed", "mouseReleased"])
+		await client.send("Input.dispatchMouseEvent", {
+			type,
+			...removalPoints.remove,
+			button: "left",
+			buttons: type === "mousePressed" ? 1 : 0,
+			clickCount: 1,
+		});
 	const retainedOtherRow = await read(`${api}.pending()`);
 	if (
 		retainedOtherRow.operation.kind !== "quote" ||
@@ -8104,6 +8153,7 @@ async function probeClientHousing(client) {
 		contextualExamine,
 		manual,
 		automatic,
+		removePreparedPayment: true,
 		requirementRows: isolated,
 		retainedOtherRow,
 		commands: commands.map((entry) => entry.command),

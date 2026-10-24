@@ -130,7 +130,7 @@
 
 	{#if profile !== null}
 		<section>
-			<h3>Attributes</h3>
+			<h3 class="ui-section-heading">Attributes</h3>
 			<dl class="inspection-attributes">
 				<div>
 					<dt>Strength</dt>
@@ -176,7 +176,7 @@
 
 	{#if armorLocations.length > 0}
 		<section>
-			<h3>Protection</h3>
+			<h3 class="ui-section-heading">Protection</h3>
 			<dl class="inspection-facts inspection-armor-coverage">
 				{#each armorLocations as [label, armor]}
 					<div>
@@ -197,7 +197,7 @@
 
 	{#if ratingRows.length > 0}
 		<section>
-			<h3>Combat ratings</h3>
+			<h3 class="ui-section-heading">Combat ratings</h3>
 			<dl class="inspection-facts">
 				{#each ratingRows as [label, value, suffix]}
 					<div>
@@ -213,7 +213,7 @@
 
 	{#if maxHealthBonus !== null}
 		<section>
-			<h3>Bonuses</h3>
+			<h3 class="ui-section-heading">Bonuses</h3>
 			<dl class="inspection-facts">
 				<div>
 					<dt>Maximum health</dt>
@@ -229,7 +229,7 @@
 		{@const details = creature.characterDetails}
 		{#if details.allegianceRank !== null || details.allegianceName !== null || details.patron !== null || details.monarch !== null || details.allegianceFollowers !== null || details.fellowship !== null}
 			<section>
-				<h3>Affiliation</h3>
+				<h3 class="ui-section-heading">Affiliation</h3>
 				<dl class="inspection-facts">
 					{#if details.allegianceRank !== null}<div>
 							<dt>Allegiance rank</dt>
@@ -267,7 +267,7 @@
 		{/if}
 		{#if details.arrivedInDereth !== null || details.ageSeconds !== null || details.deaths !== null || details.titlesEarned !== null || details.chessRank !== null || details.fishingSkill !== null || details.enlightenment !== null}
 			<section>
-				<h3>Character details</h3>
+				<h3 class="ui-section-heading">Character details</h3>
 				<dl class="inspection-facts">
 					{#if details.arrivedInDereth !== null}<div>
 							<dt>Arrived in Dereth</dt>

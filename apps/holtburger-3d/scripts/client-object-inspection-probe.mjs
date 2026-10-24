@@ -716,7 +716,13 @@ export async function probeObjectInspection(
 		assert.equal(rightClicked.selectedGuid, 7);
 		assert.deepEqual(rightClicked.commands.at(-1)?.args, { guid: 7 });
 
+		const crosstalk = await read(probe + ".crosstalk()");
+		assert.deepEqual(crosstalk, {
+			backgroundIsolation: true,
+			sharedCancellation: true,
+		});
 		return {
+			crosstalk,
 			buttonAndShortcutCommands: rightClicked.commandCount,
 			capturedTarget: { requested: 7, selectedAfterRequest: 8 },
 			coexistence,

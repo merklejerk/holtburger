@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use holtburger_common::Guid;
 use holtburger_protocol::messages::{GameAction, IdentifyObjectActionData};
+use holtburger_world::crafting::salvage::SalvageContext;
 use holtburger_world::{
     WorldEvent, WorldState,
     entity_facts::{ClientEntityFacts, EntityStorageLocation},
@@ -18,6 +19,8 @@ use serde::{Deserialize, Serialize};
 pub struct ClientEntitySnapshot {
     /// World-resolved equipped projectile supply, independent of attack control state.
     pub projectile_supply: ProjectileSupply,
+    /// Shared cold salvage yield profile.
+    pub salvage: SalvageContext,
     /// Confirmed access published together with its descendant records.
     pub world_container: WorldContainerState,
     /// GUID-ordered records, including pending owned and accessible external identities.
@@ -43,6 +46,7 @@ impl ClientEntitySnapshot {
         }
         Ok(Self {
             projectile_supply: world.projectile_supply(),
+            salvage: world.salvage_context(),
             world_container: world.world_container(),
             entities,
         })
@@ -71,6 +75,8 @@ fn session_entity_facts(
 pub struct ClientEntityDelta {
     /// Replacement supply when changed; None keeps the previously accepted supply.
     pub projectile_supply: Option<ProjectileSupply>,
+    /// Changed yield profile; None preserves the previous value.
+    pub salvage: Option<SalvageContext>,
     /// Replacement access when changed; None keeps the previously accepted level.
     pub world_container: Option<WorldContainerState>,
     /// Complete replacement records, applied together before observers run.
@@ -91,6 +97,8 @@ struct CollectedEntityFacts {
 pub(super) struct EntityFactsPublication {
     /// Last supply published alongside the entity domain.
     projectile_supply: ProjectileSupply,
+    /// Last cold salvage inputs published with the entity domain.
+    salvage: SalvageContext,
     records: BTreeMap<Guid, ClientEntityFacts>,
     dirty: BTreeSet<Guid>,
     owner: Option<Guid>,
@@ -152,7 +160,9 @@ impl EntityFactsPublication {
         }
         let storage_changes = world.take_storage_changes();
         let projectile_supply = world.projectile_supply();
+        let salvage = world.salvage_context();
         let mut delta = ClientEntityDelta {
+            salvage: (salvage != self.salvage).then_some(salvage),
             projectile_supply: (projectile_supply != self.projectile_supply)
                 .then_some(projectile_supply),
             ..Default::default()
@@ -219,6 +229,7 @@ impl EntityFactsPublication {
         self.dirty.clear();
         self.container = world.world_container();
         self.projectile_supply = projectile_supply;
+        self.salvage = salvage;
         Ok(CollectedEntityFacts {
             delta,
             storage_changed,
@@ -237,7 +248,8 @@ impl super::ClientRuntime {
             self.player_visual.invalidate();
         }
         let delta = collected.delta;
-        if delta.projectile_supply.is_some()
+        if delta.salvage.is_some()
+            || delta.projectile_supply.is_some()
             || delta.world_container.is_some()
             || !delta.upserts.is_empty()
             || !delta.removed.is_empty()
@@ -347,6 +359,27 @@ mod tests {
                 equipped_objects: Vec::new(),
             },
         )))
+    }
+
+    #[test]
+    fn salvage_context_changes_publish_without_republishing_candidates() {
+        use holtburger_common::properties::WorldObjectPropertyAccessorsMut;
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publication = EntityFactsPublication::default();
+        publication.collect(&mut world).unwrap();
+        assert_eq!(
+            publication.collect(&mut world).unwrap(),
+            ClientEntityDelta::default()
+        );
+        world
+            .entities
+            .get_mut(PLAYER)
+            .unwrap()
+            .set_int_prop(PropertyInt::AugmentationBonusSalvage, 2);
+        let delta = publication.collect(&mut world).unwrap();
+        assert_eq!(delta.salvage.unwrap().skills.augmentation_bonus_salvage, 2);
+        assert!(delta.upserts.is_empty());
     }
 
     #[test]

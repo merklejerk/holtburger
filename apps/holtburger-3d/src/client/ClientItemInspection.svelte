@@ -244,7 +244,7 @@
 				spellReferences === null &&
 				spellFailure === null}
 		>
-			<h3>On use</h3>
+			<h3 class="ui-section-heading">On use</h3>
 			{#if item.useEffect?.kind === "vital-change"}<p>
 					{formatInspectionVitalChange(item.useEffect)}
 				</p>{/if}
@@ -273,7 +273,7 @@
 		{@const advancement = progression.advancement}
 		{@const percent = itemProgressPercent(progression)}
 		<section data-inspection-progression>
-			<h3>Item Progression</h3>
+			<h3 class="ui-section-heading">Item Progression</h3>
 			<dl class="inspection-facts">
 				<div>
 					<dt>Item Level</dt>
@@ -306,7 +306,7 @@
 
 	{#if item.value !== null || item.burden !== null || item.material !== null || item.tinkering !== null || item.spellcraft !== null}
 		<section>
-			<h3>Item</h3>
+			<h3 class="ui-section-heading">Item</h3>
 			<dl class="inspection-facts">
 				{#if item.value !== null}<div>
 						<dt>Value</dt>
@@ -338,7 +338,7 @@
 
 	{#if item.mana !== null || item.stack !== null || item.uses !== null || item.capacity.items !== null || item.capacity.containers !== null || statuses.length > 0}
 		<section>
-			<h3>State</h3>
+			<h3 class="ui-section-heading">State</h3>
 			<dl class="inspection-facts">
 				{#if item.mana !== null}<div class="inspection-wide">
 						<dt>{item.mana.kind === "mana" ? "Mana" : "Charge"}</dt>
@@ -389,7 +389,7 @@
 
 	{#if item.weapon !== null}
 		<section>
-			<h3>Combat</h3>
+			<h3 class="ui-section-heading">Combat</h3>
 			<dl class="inspection-facts">
 				{#if item.weapon !== null}
 					<div class="inspection-wide">
@@ -434,7 +434,7 @@
 
 	{#if item.armor !== null || item.protections !== null}
 		<section>
-			<h3>Protections</h3>
+			<h3 class="ui-section-heading">Protections</h3>
 			<dl class="inspection-facts inspection-protections">
 				{#if item.armor !== null}<div class="inspection-wide">
 						<dt>Armor</dt>
@@ -467,7 +467,7 @@
 
 	{#if item.wieldRequirements.length > 0}
 		<section>
-			<h3>Wield requirements</h3>
+			<h3 class="ui-section-heading">Wield requirements</h3>
 			<ul>
 				{#each item.wieldRequirements as requirement}<li>
 						{formatWieldRequirement(requirement)}
@@ -477,7 +477,7 @@
 	{/if}
 	{#if item.bonuses.length > 0}
 		<section>
-			<h3>Bonuses</h3>
+			<h3 class="ui-section-heading">Bonuses</h3>
 			<dl class="inspection-facts">
 				{#each item.bonuses as bonus}<div>
 						<dt>{inspectionBonusLabel(bonus.kind)}</dt>
@@ -500,7 +500,7 @@
 	{/if}
 	{#if imbues.length > 0 || item.effects.length > 0}
 		<section>
-			<h3>Effects</h3>
+			<h3 class="ui-section-heading">Effects</h3>
 			<ul>
 				{#each imbues as effect}<li>
 						{effect}
@@ -511,12 +511,12 @@
 		</section>
 	{/if}
 	{#if item.useText !== null}<section>
-			<h3>Use</h3>
+			<h3 class="ui-section-heading">Use</h3>
 			<p>{item.useText}</p>
 		</section>{/if}
 	{#each spellGroups as group}
 		<section aria-busy={spellReferences === null && spellFailure === null}>
-			<h3>{group.heading}</h3>
+			<h3 class="ui-section-heading">{group.heading}</h3>
 			{#if spellFailure !== null}<p class="inspection-diagnostic">
 					Spell names unavailable: {spellFailure}
 				</p>{/if}
@@ -525,7 +525,7 @@
 	{/each}
 	{#if item.inscription !== null}
 		<section>
-			<h3>Inscription</h3>
+			<h3 class="ui-section-heading">Inscription</h3>
 			<blockquote>
 				<ClientWaypointText text={item.inscription.text} {onSetWaypoint} />
 			</blockquote>

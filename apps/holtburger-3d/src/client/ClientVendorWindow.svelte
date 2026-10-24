@@ -6,6 +6,7 @@
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { useClientInput } from "./client-input-context";
 	import ItemCellVisual from "../app/ItemCellVisual.svelte";
+	import ItemQueueCell from "../app/ItemQueueCell.svelte";
 	import UiIcon from "../app/UiIcon.svelte";
 	import { itemCellPresentation } from "../app/item-cell-presentation";
 	import { startUiIconDisplay } from "../app/ui-icon-display";
@@ -299,38 +300,29 @@
 									<div class="queue-grid">
 										{#each cells as cell (cell.key)}
 											{@const label = `${cell.name}: ${cell.amount.toLocaleString()}, ${cell.total.toLocaleString()} ${currency.name}. Click to select; Examine (${examineShortcut.description}) or right-click to inspect.`}
-											<div class="queue-entry">
-												<button
-													type="button"
-													class="vendor-cell ui-item-cell ui-item-selection ui-hud-button"
-													data-vendor-queued-item={cell.sources[0]}
-													aria-label={label}
-													title={label}
-													aria-pressed={selected === cell.sources[0]}
-													onclick={() => (selected = cell.sources[0])}
-													oncontextmenu={(event) => {
-														event.preventDefault();
-														selected = cell.sources[0];
-														onExamineItem(cell.sources[0]);
-													}}
-												>
-													<ItemCellVisual
-														display={displays.get(cell.iconKey)}
-														name={cell.name}
-														presentation={presentation(cell.name, cell.amount)}
-														tooltipLabel={label}
-													/>
-												</button>
-												<button
-													type="button"
-													class="queue-remove"
-													aria-label={`Remove ${cell.name} from ${side === "buy" ? "buying" : "selling"} queue`}
-													title={`Remove ${cell.name}`}
-													disabled={locked}
-													onclick={() => act(() => model.remove(cell))}
-													>×</button
-												>
-											</div>
+											<ItemQueueCell
+												type="button"
+												removeLabel={`Remove ${cell.name} from ${side === "buy" ? "buying" : "selling"} queue`}
+												removalDisabled={locked}
+												onremove={() => act(() => model.remove(cell))}
+												data-vendor-queued-item={cell.sources[0]}
+												aria-label={label}
+												title={label}
+												aria-pressed={selected === cell.sources[0]}
+												onclick={() => (selected = cell.sources[0])}
+												oncontextmenu={(event) => {
+													event.preventDefault();
+													selected = cell.sources[0];
+													onExamineItem(cell.sources[0]);
+												}}
+											>
+												<ItemCellVisual
+													display={displays.get(cell.iconKey)}
+													name={cell.name}
+													presentation={presentation(cell.name, cell.amount)}
+													tooltipLabel={label}
+												/>
+											</ItemQueueCell>
 										{/each}
 									</div>
 								</section>
@@ -461,15 +453,6 @@
 		.offer-price.unaffordable {
 			color: var(--ui-color-danger);
 		}
-		.vendor-cell {
-			position: relative;
-			aspect-ratio: 1;
-			width: 100%;
-			min-width: 0;
-			padding: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
-			overflow: hidden;
-			user-select: none;
-		}
 		.vendor-currencies {
 			flex: none;
 			overflow-x: auto;
@@ -518,59 +501,17 @@
 			gap: 4px;
 		}
 		.buy,
-		.buy .vendor-cell {
+		.buy :global(.item-queue-cell) {
 			border-color: var(--ui-vendor-buy-color);
 		}
 		.sell,
-		.sell .vendor-cell {
+		.sell :global(.item-queue-cell) {
 			border-color: var(--ui-vendor-sell-color);
 		}
 		.queue-grid {
 			display: flex;
 			flex-wrap: wrap;
 			gap: 4px;
-		}
-		.queue-entry {
-			position: relative;
-			width: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
-		}
-		.queue-remove {
-			position: absolute;
-			top: -4px;
-			right: -4px;
-			z-index: 1;
-			display: grid;
-			place-items: center;
-			width: 20px;
-			height: 20px;
-			padding: 0;
-			border: 1px solid var(--ui-color-border);
-			border-radius: 50%;
-			background: color-mix(in srgb, var(--ui-color-shadow) 85%, transparent);
-			color: var(--ui-color-text);
-			font-size: 15px;
-			font-weight: bold;
-			line-height: 1;
-			cursor: pointer;
-			opacity: 0;
-			pointer-events: none;
-		}
-		.queue-entry:hover .queue-remove,
-		.queue-entry:focus-within .queue-remove {
-			opacity: 1;
-			pointer-events: auto;
-		}
-		.queue-remove:hover:not(:disabled),
-		.queue-remove:focus-visible {
-			color: var(--ui-color-highlight);
-			border-color: currentColor;
-		}
-		.queue-remove:focus-visible {
-			outline: 2px solid var(--ui-color-focus);
-		}
-		.queue-remove:disabled {
-			color: var(--ui-color-muted);
-			cursor: not-allowed;
 		}
 		.vendor-footer {
 			display: flex;

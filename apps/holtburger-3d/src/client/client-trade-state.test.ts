@@ -78,6 +78,13 @@ async function fixture() {
 		dynamic: { hostTime: { seconds: 1 }, entities: [] },
 		entities: {
 			projectileSupply: { kind: "not-applicable" },
+			salvage: {
+				skills: {
+					salvagingSkill: 0,
+					tinkeringSkill: 0,
+					augmentationBonusSalvage: 0,
+				},
+			},
 			worldContainer: { kind: "closed" },
 			entities: [
 				entityFacts(PLAYER),
@@ -85,6 +92,10 @@ async function fixture() {
 				entityFacts(ITEM, {
 					ownedByPlayer: true,
 					canOfferTrade: true,
+					salvage: {
+						kind: "ineligible",
+						reason: "Fixture item cannot be salvaged.",
+					},
 					location: {
 						kind: "contained",
 						parentGuid: PLAYER,

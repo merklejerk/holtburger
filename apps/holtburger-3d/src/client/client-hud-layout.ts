@@ -285,6 +285,7 @@ export function createClientHudLayout(
 		chat: place(defaults.chat),
 		inventory: place(defaults.inventory),
 		worldContainer: place(defaults.worldContainer),
+		salvage: place(defaults.salvage),
 		vendor: place(defaults.vendor),
 		houseCrystal: place(defaults.houseCrystal),
 		trade: place(defaults.trade),

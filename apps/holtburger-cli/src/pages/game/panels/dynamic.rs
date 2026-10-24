@@ -95,6 +95,14 @@ pub fn render_dynamic_pane(f: &mut Frame, data: &GameData, view: &ViewState, are
                 .map(|session| data.salvage_preview(&session.queued_items))
                 .unwrap_or_else(|| data.salvage_preview(&[]));
 
+            let preview = match preview {
+                Ok(preview) => preview,
+                Err(reason) => {
+                    f.render_widget(Paragraph::new(format!("  {reason}")), chunks[0]);
+                    return;
+                }
+            };
+
             let mut line_spans = vec![
                 Span::raw("  "),
                 Span::styled(

@@ -1,3 +1,7 @@
+import type {
+	SalvagePreviewResult,
+	SalvageSubmitResult,
+} from "../../client/client-salvage-contract";
 import type { PlayerVisualCapture } from "../../client/client-object-preview-contract";
 import type { DeathLocationResult } from "../../client/client-death-contract";
 import type { ClientCombatOutcome } from "../../client/client-host-contract";
@@ -186,6 +190,8 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"close_client_container",
 	"equip_client_item",
 	"apply_client_equipment_set",
+	"preview_client_salvage",
+	"submit_client_salvage",
 	"submit_client_item_use",
 	"query_client_item_use_target",
 	"query_client_spell_inspection",
@@ -258,6 +264,8 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-vendor-preview",
 	"client-vendor-result",
 	"client-vendor-phase",
+	"client-salvage-preview",
+	"client-salvage-result",
 	"client-item-use-result",
 	"client-death-locations",
 	"client-item-use-target-result",
@@ -367,6 +375,8 @@ export interface HostEventPayloadMap {
 	"client-vendor-preview": VendorPreview;
 	"client-vendor-result": VendorResult;
 	"client-vendor-phase": VendorPhase;
+	"client-salvage-preview": SalvagePreviewResult;
+	"client-salvage-result": SalvageSubmitResult;
 	"client-item-use-result": ClientItemUseResult;
 	"client-death-locations": DeathLocationResult;
 	"client-item-use-target-result": ClientItemUseTargetResult;

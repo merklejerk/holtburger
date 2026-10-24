@@ -1136,8 +1136,8 @@ export class GamePresentationRuntime {
 	readonly #commitArtifacts: PendingCommitArtifact[] = [];
 	/** Resource continuations awaited before runtime-owned sources and renderer state are destroyed. */
 	readonly #realizationContinuations = new Set<Promise<void>>();
-	/** Asynchronous dependency-wake failures surfaced synchronously by the next runtime tick. */
-	readonly #dynamicRealizationFailures: unknown[] = [];
+	/** Asynchronous preparation and eviction failures surfaced by the next runtime tick. */
+	readonly #presentationFailures: unknown[] = [];
 	/** Frontend listeners informed when placement facts become available or fail. */
 	readonly #sceneAvailabilityListeners = new Set<SceneAvailabilityListener>();
 	/** Current primary-view input used for visibility and rendering. */
@@ -1543,6 +1543,7 @@ export class GamePresentationRuntime {
 			);
 		worldOwnedScriptWiring.system = this.#worldOwnedPhysicsScriptSystem;
 		this.#skyScripts = new SkyScriptSystem({
+			onFailure: (cause) => this.#presentationFailures.push(cause),
 			acquireClosure: (scriptId) =>
 				this.#physicsScripts.acquireClosure(scriptId),
 			acquireEmitter: (emitterInfoId) =>
@@ -1917,7 +1918,7 @@ export class GamePresentationRuntime {
 					? this.#prepareDynamicScriptCue(desired.scriptTableId, cue)
 					: Promise.resolve(null)
 			).catch((error: unknown) => {
-				this.#dynamicRealizationFailures.push(error);
+				this.#presentationFailures.push(error);
 				return null;
 			});
 			const predecessors = Promise.allSettled([tail, ready]);
@@ -1964,7 +1965,7 @@ export class GamePresentationRuntime {
 					if (assets !== null && !transferred) releaseCueAssets(assets);
 				}
 			})().catch((error: unknown) => {
-				this.#dynamicRealizationFailures.push(error);
+				this.#presentationFailures.push(error);
 			});
 		}
 		this.#dynamicCuePreparations.set(guid, tail);
@@ -2138,7 +2139,7 @@ export class GamePresentationRuntime {
 				) {
 					installed.hiddenCue.phase = hiding ? "idle" : "hidden-applied";
 				}
-				this.#dynamicRealizationFailures.push(error);
+				this.#presentationFailures.push(error);
 			} finally {
 				if (assets !== null && !transferred) releaseCueAssets(assets);
 			}
@@ -2572,7 +2573,7 @@ export class GamePresentationRuntime {
 			const continuation = this.#realizeAcceptedDynamicEntity(record).catch(
 				(cause: unknown) => {
 					if (this.#spawnedDesiredEntities.get(entity.identity.guid) === record)
-						this.#dynamicRealizationFailures.push(cause);
+						this.#presentationFailures.push(cause);
 				},
 			);
 			this.#trackRealizationContinuation(continuation);
@@ -4003,12 +4004,12 @@ export class GamePresentationRuntime {
 	pollPortalTransitionLoading(): void {
 		if (this.#destroyed) return;
 		this.#drainCommitArtifacts();
-		const failures = this.#dynamicRealizationFailures.splice(0);
+		const failures = this.#presentationFailures.splice(0);
 		if (failures.length === 1) throw failures[0];
 		if (failures.length > 1) {
 			throw new AggregateError(
 				failures,
-				`${failures.length} deferred dynamic entities failed presentation realization.`,
+				`${failures.length} asynchronous presentation operations failed.`,
 			);
 		}
 	}
@@ -4209,6 +4210,7 @@ export class GamePresentationRuntime {
 		]);
 		await Promise.allSettled([...this.#realizationContinuations]);
 		await Promise.allSettled([...this.#dynamicCuePreparations.values()]);
+		await this.#skyScripts.destroy();
 		this.#combatEffects?.dispose();
 		this.#combatEffects = null;
 		await this.#renderer?.destroy();
@@ -4224,7 +4226,6 @@ export class GamePresentationRuntime {
 		this.#physicsScriptSystem.destroy();
 		this.#worldOwnedPhysicsScriptSystem.destroy();
 		this.#audio.destroy();
-		this.#skyScripts.destroy();
 		// Dynamic residents own emitter and sound-table handles; release them before their repositories.
 		await this.#dynamics.destroy();
 		await this.#objectVisualTemplates.destroy();
@@ -4250,6 +4251,11 @@ export class GamePresentationRuntime {
 		this.#activeRegionStaticDetails.clear();
 		this.#activeRegionStaticDetailOwner = null;
 		this.#geometry.destroy();
+		if (this.#presentationFailures.length > 0)
+			throw new AggregateError(
+				this.#presentationFailures.splice(0),
+				"Asynchronous presentation work failed during retirement.",
+			);
 	}
 
 	#applySceneInterest(interest: SceneInterestMap): SceneInterestReceipt {
@@ -4694,9 +4700,11 @@ export class GamePresentationRuntime {
 	): void {
 		const ownerId = landblockLayerToOwnerId(landblockId, layer);
 		if (isOutdoorStaticLayer(layer)) {
-			void this.#staticLayerRealizer.evict(ownerId, revision);
+			this.#trackStaticEviction(
+				this.#staticLayerRealizer.evict(ownerId, revision),
+			);
 		} else if (layer === LandblockLayerKind.EnvCells) {
-			void this.#envCellRealizer.evict(ownerId, revision);
+			this.#trackStaticEviction(this.#envCellRealizer.evict(ownerId, revision));
 		} else {
 			this.#staticObjects.evict(ownerId, revision);
 		}
@@ -4794,9 +4802,18 @@ export class GamePresentationRuntime {
 			records.map((record) => this.#realizeAcceptedDynamicEntity(record)),
 		).then(() => undefined);
 		const guarded = continuation.catch((error: unknown) => {
-			this.#dynamicRealizationFailures.push(error);
+			this.#presentationFailures.push(error);
 		});
 		this.#trackRealizationContinuation(guarded);
+	}
+
+	/** Eviction rebuilds atlas bindings asynchronously and must drain before atlas worker teardown. */
+	#trackStaticEviction(eviction: Promise<void>): void {
+		this.#trackRealizationContinuation(
+			eviction.catch((error: unknown) => {
+				this.#presentationFailures.push(error);
+			}),
+		);
 	}
 
 	#trackRealizationContinuation(continuation: Promise<void>): void {

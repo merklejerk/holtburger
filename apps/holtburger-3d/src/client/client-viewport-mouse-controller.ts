@@ -121,6 +121,8 @@ export class ClientViewportMouseController {
 	};
 
 	#update(): void {
+		// Pointer unlock can leave Chromium's :active latched; cursor feedback follows owned buttons.
+		this.#options.canvas.toggleAttribute("data-mouse-active", this.active);
 		const movementEnabled = this.#options.movementEnabled();
 		const middle = movementEnabled && (this.#buttons & MIDDLE) !== 0;
 		const both =
@@ -275,6 +277,7 @@ export class ClientViewportMouseController {
 	/** Cancel physical sources and pending clicks without manufacturing a jump release. */
 	readonly cancel = (): void => {
 		this.#buttons = 0;
+		this.#options.canvas.removeAttribute("data-mouse-active");
 		this.#mode = null;
 		if (this.#middleForward)
 			this.#options.movement.onForward("middle-button", false);

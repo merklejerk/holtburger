@@ -19,6 +19,8 @@ const NO_SCRIPT_ID = "0x00000000";
 
 /** Everything the sky script runtime needs from the composition root, injected for testability. */
 export interface SkyScriptSystemDependencies {
+	/** Surface asynchronous activation failures through the runtime frame/error boundary. */
+	readonly onFailure: (cause: unknown) => void;
 	/** Stage one script and its transitive `CallPES` closure. */
 	readonly acquireClosure: (
 		scriptId: DatAssetId,
@@ -143,15 +145,17 @@ export class SkyScriptSystem {
 
 		for (const [targetId, wanted] of desired) {
 			if (this.#active.has(targetId) || this.#pending.has(targetId)) continue;
-			void this.#activate(targetId, wanted);
+			void this.#activate(targetId, wanted).catch(this.#dependencies.onFailure);
 		}
 	}
 
 	/** Tear down every running sky script and release the region's staged sky assets. */
-	destroy(): void {
+	async destroy(): Promise<void> {
 		this.#destroyed = true;
 		for (const targetId of [...this.#active.keys()]) this.#teardown(targetId);
 		this.#pending.clear();
+		// Mesh installation borrows the renderer and texture workers: drain before either closes.
+		await Promise.allSettled([...this.#staging.values()]);
 		for (const staged of this.#retained.values()) releaseStaged(staged);
 		this.#retained.clear();
 	}
@@ -207,7 +211,12 @@ export class SkyScriptSystem {
 	async #stage(scriptId: DatAssetId): Promise<StagedSkyAssets> {
 		const retained = this.#retained.get(scriptId);
 		if (retained) return retained;
-		const inflight = this.#staging.get(scriptId) ?? this.#stageFresh(scriptId);
+		const inflight =
+			this.#staging.get(scriptId) ??
+			this.#stageFresh(scriptId).finally(() => {
+				// Closure acquisition can fail before emitter staging begins; every outcome retires this job.
+				this.#staging.delete(scriptId);
+			});
 		this.#staging.set(scriptId, inflight);
 		return inflight;
 	}
@@ -232,11 +241,9 @@ export class SkyScriptSystem {
 		} catch (cause) {
 			for (const handle of emitterHandles) handle.release();
 			closure.release();
-			this.#staging.delete(scriptId);
 			throw cause;
 		}
 		const staged: StagedSkyAssets = { closure, emitterHandles };
-		this.#staging.delete(scriptId);
 		// A staging that lands after teardown owns assets nothing will ever release, so it releases
 		// them itself rather than entering the retained set.
 		if (this.#destroyed) {

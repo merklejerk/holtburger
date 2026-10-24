@@ -5,8 +5,8 @@ import type {
 	ClientLifecycle,
 } from "./client-host-contract";
 import {
-	clientLifecycleEnablesWorldInput,
-	clientLifecycleUsesWorldPresentation,
+	clientLifecycleEnablesGameplayInput,
+	clientLifecycleUsesGameplayPresentation,
 	initialClientLifecycleUiState,
 	reduceClientLifecycleUiState,
 } from "./client-lifecycle-state";
@@ -18,16 +18,18 @@ const characters = [
 
 describe("client lifecycle reducer", () => {
 	it("enables input only for the interactive world phase", () => {
-		expect(clientLifecycleEnablesWorldInput({ kind: "in-world" })).toBe(true);
+		expect(clientLifecycleEnablesGameplayInput({ kind: "in-world" })).toBe(
+			true,
+		);
 		expect(
-			clientLifecycleEnablesWorldInput({
+			clientLifecycleEnablesGameplayInput({
 				kind: "portal-space",
 				worldGeneration: 4,
 				cause: "teleport",
 			}),
 		).toBe(false);
 		expect(
-			clientLifecycleEnablesWorldInput({
+			clientLifecycleEnablesGameplayInput({
 				kind: "entering-world",
 				characterGuid: 7,
 			}),
@@ -36,24 +38,24 @@ describe("client lifecycle reducer", () => {
 
 	it("retains one presentation installation throughout world entry", () => {
 		expect(
-			clientLifecycleUsesWorldPresentation({
+			clientLifecycleUsesGameplayPresentation({
 				kind: "entering-world",
 				characterGuid: 7,
 			}),
 		).toBe(true);
 		expect(
-			clientLifecycleUsesWorldPresentation({
+			clientLifecycleUsesGameplayPresentation({
 				kind: "portal-space",
 				worldGeneration: 4,
 				cause: "initial-entry",
 			}),
 		).toBe(true);
-		expect(clientLifecycleUsesWorldPresentation({ kind: "in-world" })).toBe(
+		expect(clientLifecycleUsesGameplayPresentation({ kind: "in-world" })).toBe(
 			true,
 		);
-		expect(clientLifecycleUsesWorldPresentation({ kind: "connecting" })).toBe(
-			false,
-		);
+		expect(
+			clientLifecycleUsesGameplayPresentation({ kind: "connecting" }),
+		).toBe(false);
 	});
 
 	it("starts connecting and preserves one selected exact character identity", () => {

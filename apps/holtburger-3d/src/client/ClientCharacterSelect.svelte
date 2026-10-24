@@ -39,6 +39,8 @@
 		readonly onEnter: () => void | Promise<void>;
 		/** Leave character selection and disconnect. */
 		readonly onDisconnect: () => void | Promise<void>;
+		/** Foreground creator pauses the retained world backdrop without owning its lifetime. */
+		readonly onCreatingChange?: (creating: boolean) => void;
 	}
 
 	let {
@@ -51,8 +53,13 @@
 		onChoose,
 		onEnter,
 		onDisconnect,
+		onCreatingChange,
 	}: Props = $props();
 	let creating = $state(false);
+	$effect(() => {
+		onCreatingChange?.(creating);
+	});
+	onMount(() => () => onCreatingChange?.(false));
 	let previewState = $state.raw<CharacterPreviewState>({ kind: "none" });
 	let previewOwner: ClientCharacterPreview | null = null;
 	const selectedGuid = $derived(
@@ -166,7 +173,11 @@
 					</p>{/if}
 			</div>
 		{/if}
-		<form use:focusCharacter onsubmit={handleSubmit}>
+		<form
+			class="character-roster ui-panel ui-body"
+			use:focusCharacter
+			onsubmit={handleSubmit}
+		>
 			<fieldset
 				class="client-character-list"
 				aria-label="Characters"
@@ -227,15 +238,18 @@
 	@layer components {
 		.character-selection-content {
 			display: flex;
+			flex-wrap: wrap;
 			gap: 24px;
 			align-items: start;
 		}
 		.character-selection-content > form {
 			flex: 1;
 			min-width: 260px;
+			max-width: 480px;
+			margin-left: auto;
 		}
 		.character-preview-column {
-			width: min(36vw, 360px);
+			width: min(42vw, 420px);
 			display: grid;
 			gap: 8px;
 		}

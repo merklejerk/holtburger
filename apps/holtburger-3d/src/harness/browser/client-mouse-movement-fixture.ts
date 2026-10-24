@@ -6,7 +6,7 @@ import type { ViewportInputGate } from "../../lib/input/viewport-input-gate";
 import { AppInput } from "../../lib/input/app-input";
 import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
 
-/** Asset-free movement composition behind the production ClientWorldView DOM handlers. */
+/** Asset-free movement composition behind the production ClientGameplayView DOM handlers. */
 export function createClientMouseMovementFixture(
 	keyboard: KeyboardInputPolicy,
 	gate: ViewportInputGate,

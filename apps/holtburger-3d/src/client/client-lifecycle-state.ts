@@ -4,7 +4,7 @@ import type {
 	ClientLifecycle,
 } from "./client-host-contract";
 
-/** One renderer-owned lifecycle state; selection is represented only while characters are visible. */
+/** One UI projection of authority lifecycle; selection is represented only while characters are visible. */
 export type ClientLifecycleUiState =
 	| { readonly kind: "connecting" }
 	| { readonly kind: "authenticating" }
@@ -33,8 +33,8 @@ export function initialClientLifecycleUiState(): ClientLifecycleUiState {
 	return { kind: "connecting" };
 }
 
-/** Whether this lifecycle phase requires the frontend's world-presentation installation. */
-export function clientLifecycleUsesWorldPresentation(
+/** Whether this authority phase uses the gameplay driver and HUD; world resources also exist pre-game. */
+export function clientLifecycleUsesGameplayPresentation(
 	state: ClientLifecycleUiState,
 ): boolean {
 	return (
@@ -45,7 +45,7 @@ export function clientLifecycleUsesWorldPresentation(
 }
 
 /** Whether the frontend owns live character input for this authority phase. */
-export function clientLifecycleEnablesWorldInput(
+export function clientLifecycleEnablesGameplayInput(
 	state: ClientLifecycleUiState,
 ): boolean {
 	return state.kind === "in-world";

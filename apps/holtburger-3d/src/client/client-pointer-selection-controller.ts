@@ -4,7 +4,7 @@ import type {
 	ClientEntitySelectionQueryResult,
 } from "./client-host-contract";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
-import type { ClientPresentedCameraRay } from "./client-presentation-session";
+import type { ClientPresentedCameraRay } from "./client-gameplay-presentation";
 import type { EntitySelectionRefinement } from "../lib/game/selection/entity-selection-intersection";
 
 /** Transport-only authority port; selection state stays outside the lifecycle session. */

@@ -32,11 +32,36 @@ uses the shared Custom/default build for its heritage. Starter clothing is rando
 Randomize clothes action. Face framing hides headgear only in the preview and retains the same
 idle pose; the submitted outfit is unchanged.
 
-`HostPresentationAssets` owns lazy CPU/content capabilities at app scope. Isolated previews
-borrow these without starting world presentation, audio, sky, or portal traversal.
-`GamePresentationOwner` separately owns world GPU/audio resources and borrows the same content
-capabilities. Its teardown closes its browser audio context after the audio device retires.
-App shutdown drains previews and world borrowers before destroying shared assets.
+`ClientPresentationRoot` starts world presentation during pre-game and retains one canvas,
+WebGL2 device/runtime, worker composition and audio context through gameplay. Its pre-game
+backdrop controller uses a fixed DAT camera and a local environmental clock. Scene reveal uses
+existing static activation readiness; later weather and audio preparation follows normal runtime
+policy. Scene-content failures offer retry; failed resource construction or driver retirement
+requires restarting presentation rather than reusing uncertain mutable state.
+
+`ClientApp` keeps the dedicated `ClientLoadingPage` visible until the authority supplies a
+character roster and the existing backdrop status is ready. Connection and scene preparation
+run concurrently behind this opaque page; the persistent canvas continues loading and drawing.
+The app reveals selection and its background together, clears previous readiness before returning
+from gameplay, and keeps scene retry and disconnect available while loading. The page only displays
+app-owned status/actions. Selected-character previews retain their independent loading and missing
+appearance states; there is no additional frame receipt or asset-preload barrier.
+
+`ClientGameplayPresentation` borrows those resources to connect live entities, camera and portal
+transitions. Mode handoffs detach authority, invalidate pending work and withdraw old presentation
+state before the next controller is admitted. `ClientGameplayView` supplies the HUD and input over
+the app-owned canvas; the common interaction boundary includes both for drag/drop hit testing.
+
+Selection characters are transparent screen overlays, independent of backdrop depth, lighting and
+world placement. Creation retains its existing retail room and portrait preview; its opaque screen
+pauses backdrop drawing and silences its listener without evicting the scene. Returning resumes
+the backdrop, with local calendar timing reset and historical script sounds suppressed on the first
+resumed frame. Existing bounded script/particle catch-up remains runtime policy.
+
+`HostPresentationAssets` owns shared lazy CPU/content capabilities. World presentation and isolated
+model previews borrow them, with **separate WebGL contexts and GPU resources**. A persistent world
+device preserves renderer infrastructure, not permanent scene residency; ordinary resource eviction
+still applies. App shutdown drains both borrowers before destroying shared assets.
 
 Creator, picker, and inspector share `ClientModelPreview` and the single-active
 `StandardClientObjectPreviewService`. Source changes retain the canvas device, coalesce pending
@@ -70,6 +95,15 @@ picker controls with synthetic server/cache results, equipment transforms, repla
 and world/preview resource lifetimes. It does not create a real server character. Visual
 acceptance remains a user check.
 
+`npm run harness:browser -- --client-presentation --brief` verifies the production app flow.
+The browser harness route `?client-presentation=1&contentHost=<local-content-host-url>` mounts the
+production `ClientApp` with controlled authority and local settings/cache fixtures. It supports
+selection, retail-room creation, a portal reveal and return to selection without a real server.
+`__HOLTBURGER_CLIENT_PRESENTATION__` is diagnostic-only: its `read()` reports world canvas/context
+requests and portal reveals, and `returnSelection()` supplies the fixture authority edge. The
+canonical pre-game suite also exercises two real gameplay-adapter handoffs on one renderer, an
+outdoor rainy scene with particles/audio, canceled construction and final GPU retirement.
+
 ## Input configuration
 
 `src/lib/input/input-defaults.ts` owns the default character, Explorer fly, client shortcut, and
@@ -81,8 +115,9 @@ button numbers: primary `0`, middle `1`, secondary `2`.
 presses to semantic actions, suppresses repeat, and retains physical-key ownership until release.
 Each mounted frontend owns its action context. `provideAppInputPolicy()` provides one keyboard
 router and one `ViewportInputGate`; descendants access them with `useAppInputPolicy()`.
-Only `ClientWorldView` and `ExplorerApp` mount the game keyboard policy. Connection, character
-selection, and error screens retain normal browser focus and Tab navigation.
+`ClientApp` and `ExplorerApp` mount keyboard routing at their app lifetimes. Gameplay action
+contexts and viewport gestures are admitted only in their appropriate authority phase; the
+pre-game backdrop accepts no movement or picking. Pre-game foreground declares native keyboard controls so roster arrows and Tab retain browser behavior.
 
 Keyboard ownership defaults to the game. Ordinary HUD buttons, toggles, inventory controls, and
 panel gestures do not acquire it. Text/number editors, editable content, and native selects acquire
@@ -200,7 +235,7 @@ it, while shortcut width uses `{ perShortcut }` to account for the visible butto
 are startup preferences, not continuously recomputed constraints. The layout resolver fits panels
 to the current viewport without discarding preferred geometry.
 
-`ClientWorldView.svelte` owns live drag/resize state, component composition, and gameplay-driven
+`ClientGameplayView.svelte` owns live drag/resize state, component composition, and gameplay-driven
 visibility. Diagnostics windows retain their normal border resizing. Internal component styling
 and the layout-lock button remain CSS-owned. User HUD sections persist placement edits; viewport
 fitting preserves the preferred geometry stored in those sections.

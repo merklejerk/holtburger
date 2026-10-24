@@ -24,10 +24,13 @@ export function startPresentationFrameLoop(
 	const step = (timeMs: number): void => {
 		frameHandle = null;
 		if (stopped) return;
+		// Repeated display timestamps have no new elapsed time. Keep scheduling, but do not
+		// advance presentation or cadence consumers twice for that same timestamp.
 		if (
-			document.hasFocus() ||
-			previousFrameTimeMs === null ||
-			timeMs - previousFrameTimeMs >= BACKGROUND_FRAME_INTERVAL_MS
+			timeMs !== previousFrameTimeMs &&
+			(document.hasFocus() ||
+				previousFrameTimeMs === null ||
+				timeMs - previousFrameTimeMs >= BACKGROUND_FRAME_INTERVAL_MS)
 		) {
 			previousFrameTimeMs = timeMs;
 			frame(timeMs);

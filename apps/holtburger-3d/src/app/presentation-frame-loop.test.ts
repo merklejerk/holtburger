@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createFrameRateSampler } from "./frame-rate-sampler";
 import {
 	BACKGROUND_FRAME_INTERVAL_MS,
 	startPresentationFrameLoop,
@@ -77,6 +78,26 @@ describe("presentation frame loop", () => {
 		expect(browser.pending.size).toBe(0);
 		browser.advance(BACKGROUND_FRAME_INTERVAL_MS);
 		expect(frame).toHaveBeenCalledTimes(6);
+	});
+
+	it("delivers each display timestamp once while continuing to schedule after a duplicate", () => {
+		const browser = browserFrames(true);
+		const sampler = createFrameRateSampler(BACKGROUND_FRAME_INTERVAL_MS);
+		const frame = vi.fn((timeMs: number) =>
+			sampler.recordFrame({
+				animationFrameTimeMs: timeMs,
+				startedAtMs: timeMs,
+				workMs: 0,
+			}),
+		);
+		const stop = startPresentationFrameLoop(frame);
+		browser.advance(0);
+		expect(() => browser.advance(0)).not.toThrow();
+		expect(frame).toHaveBeenCalledTimes(1);
+		browser.advance(BACKGROUND_FRAME_INTERVAL_MS);
+		expect(frame).toHaveBeenCalledTimes(2);
+		expect(browser.pending.size).toBe(1);
+		stop();
 	});
 
 	it("caps complete background frames without replaying missed frames after a stall", () => {

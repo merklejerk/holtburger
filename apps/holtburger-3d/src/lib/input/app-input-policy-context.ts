@@ -12,7 +12,7 @@ interface AppInputPolicy {
 
 const APP_INPUT_POLICY = Symbol("app-input-policy");
 
-/** Provide shared policy; the gameplay surface owns mounting its DOM listeners. */
+/** Provide shared policy; the app shell owns mounting its DOM listeners. */
 export function provideAppInputPolicy(): AppInputPolicy {
 	const viewport = new ViewportInputGate();
 	const keyboard = new KeyboardInputPolicy(viewport);

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import "./client-canvas.css";
 	import { persistPlayerVisualCapture } from "./client-visual-capture";
 	import type { ClientVisualCacheTransport } from "./client-visual-cache-transport";
 	import { ClientFacingInputDispatch } from "./client-facing-input-dispatch";
@@ -108,17 +109,23 @@
 		type ClientTimedEnchantments,
 	} from "./client-lifecycle-session";
 	import {
-		ClientPresentationSession,
-		type ClientPresentationCameraController,
-		type ClientPresentationDiagnostics,
-		type ClientPresentationStatus,
-	} from "./client-presentation-session";
+		ClientGameplayPresentation,
+		type ClientGameplayPresentationCameraController,
+		type ClientGameplayPresentationDiagnostics,
+		type ClientGameplayPresentationStatus,
+	} from "./client-gameplay-presentation";
 	import { StandardClientObjectPreviewService } from "./client-object-preview-service";
 	import { HostPresentationAssets } from "../lib/game/runtime/host-presentation-assets";
+	import { RuntimeTickProfiler } from "../lib/game/runtime/runtime-tick-profiler";
+	import { ClientPresentationRoot } from "./client-presentation-root";
+
 	import { GamePresentationOwner } from "../lib/game/runtime/game-presentation-owner";
 	import { PresentationTeardownStack } from "../lib/game/runtime/presentation-teardown";
 	import { clientDebugEnabled } from "./client-debug";
 	import ClientCharacterSelect from "./ClientCharacterSelect.svelte";
+	import ClientLoadingPage, {
+		type ClientLoadingPageState,
+	} from "./ClientLoadingPage.svelte";
 	import {
 		loadCharacterCreationCatalog,
 		resolveCharacterCreationAppearance,
@@ -129,10 +136,11 @@
 		type ClientSelectedEntityDisplay,
 		EMPTY_CLIENT_SELECTED_DISPLAY,
 	} from "./client-selected-entity-tracking";
-	import ClientWorldView from "./ClientWorldView.svelte";
+	import ClientGameplayView from "./ClientGameplayView.svelte";
 	import { hostWorldMapSource } from "../lib/assets/world-map-source";
 	import type { MinimapFrame } from "../app/minimap-frame";
 	import type {
+		ClientLifecycle,
 		RecallDestination,
 		CharacterManagementState,
 		ClientCombatMode,
@@ -196,8 +204,8 @@
 	import type { ClientSettingsTransport } from "./client-settings-transport";
 	import { ClientSettingsPersistence } from "./client-settings-persistence";
 	import {
-		clientLifecycleEnablesWorldInput,
-		clientLifecycleUsesWorldPresentation,
+		clientLifecycleEnablesGameplayInput,
+		clientLifecycleUsesGameplayPresentation,
 		initialClientLifecycleUiState,
 		reduceClientLifecycleUiState,
 		type ClientLifecycleUiState,
@@ -459,31 +467,104 @@
 	const MAXIMUM_CHAT_LINES = 250;
 	let entryPending = $state(false);
 	let canvasElement = $state<HTMLCanvasElement | null>(null);
-	/** View-owned inventory modal entry used by gameplay shortcuts. */
-	let worldView = $state<ClientWorldView | null>(null);
-	let cameraController = $state<ClientPresentationCameraController | null>(
-		null,
+	let interactionRoot = $state<HTMLElement | null>(null);
+	let presentationRoot =
+		$state.raw<ClientPresentationRoot<GamePresentationOwner> | null>(null);
+	/** Cold scene status also carries the root's decision about safe retry after failure. */
+	type BackdropUiStatus =
+		| { readonly kind: "loading" | "ready" | "stopped" }
+		| {
+				readonly kind: "failed";
+				readonly message: string;
+				readonly canRetry: boolean;
+		  };
+	let backdropStatus = $state<BackdropUiStatus>({ kind: "loading" });
+	let worldCanvasVisible = $state(false);
+	let creatingCharacter = $state(false);
+	/** Cold page admission shares the current roster with markup and canvas reveal. */
+	const pregameSelection = $derived(
+		lifecycle.kind === "character-selection" &&
+			backdropStatus.kind === "ready" &&
+			startupError === null &&
+			commandFailure === null
+			? lifecycle
+			: null,
 	);
+	const loadingPage = $derived.by((): ClientLoadingPageState => {
+		if (lifecycle.kind === "exiting")
+			return {
+				kind: "pending",
+				title: "Disconnecting",
+				message: lifecycle.diagnostic ?? "Closing the game session…",
+			};
+		if (startupError !== null)
+			return {
+				kind: "failed",
+				title: "Client unavailable",
+				message: startupError,
+				retry: null,
+			};
+		if (commandFailure !== null)
+			return {
+				kind: "failed",
+				title: "Client stopped",
+				message: commandFailure,
+				retry: null,
+			};
+		if (backdropStatus.kind === "failed")
+			return {
+				kind: "failed",
+				title: "Scene unavailable",
+				message: backdropStatus.canRetry
+					? backdropStatus.message
+					: `${backdropStatus.message} Restart client to retry.`,
+				retry: backdropStatus.canRetry ? retryBackdrop : null,
+			};
+		if (lifecycle.kind === "connecting")
+			return {
+				kind: "pending",
+				title: "Connecting",
+				message: "Opening the game session…",
+			};
+		if (lifecycle.kind === "authenticating")
+			return {
+				kind: "pending",
+				title: "Authenticating",
+				message: "Checking the launch account…",
+			};
+		return { kind: "pending", title: "Loading", message: "Preparing scene…" };
+	});
+	function retryBackdrop(): void {
+		backdropStatus = { kind: "loading" };
+		void presentationRoot?.retry();
+	}
+	/** Withdraw old scene readiness before authority changes can mount another pregame page. */
+	function acceptAuthorityLifecycle(next: ClientLifecycle): void {
+		const accepted = reduceClientLifecycleUiState(lifecycle, {
+			type: "authority",
+			lifecycle: next,
+		});
+		if (
+			clientLifecycleUsesGameplayPresentation(lifecycle) !==
+			clientLifecycleUsesGameplayPresentation(accepted)
+		)
+			backdropStatus = { kind: "loading" };
+		lifecycle = accepted;
+	}
+
+	onMount(() => keyboard.mount(document));
+	/** View-owned inventory modal entry used by gameplay shortcuts. */
+	let gameplayView = $state<ClientGameplayView | null>(null);
+	let cameraController =
+		$state<ClientGameplayPresentationCameraController | null>(null);
 	/** Imperative presentation source sampled by the radar on its own bounded cadence. */
-	let presentationSession: ClientPresentationSession | null = null;
+	let gameplayPresentation: ClientGameplayPresentation | null = null;
 	/** Cold content catalog and validation issue consumed by Settings. */
 	let weatherPresets = $state<readonly ClientWeatherPreset[]>([]);
 	let environmentIssue = $state<string | null>(null);
 	let presentationAssets: HostPresentationAssets | null = null;
-	const presentationRetirements = new Set<Promise<void>>();
-	const retirePresentation = (
-		presentation: ClientPresentationSession,
-	): void => {
-		const retirement = presentation.destroy();
-		presentationRetirements.add(retirement);
-		void retirement.then(
-			() => presentationRetirements.delete(retirement),
-			(error: unknown) => {
-				presentationRetirements.delete(retirement);
-				console.error(error);
-			},
-		);
-	};
+	const presentationRootRetirements = new Set<Promise<void>>();
+
 	const objectPreviewService = new StandardClientObjectPreviewService({
 		resolveResources: () => {
 			const assets = presentationAssets;
@@ -527,7 +608,7 @@
 		reset(): void;
 		setRendererProfilingEnabled(enabled: boolean): void;
 		snapshot(): {
-			readonly diagnostics: ClientPresentationDiagnostics;
+			readonly diagnostics: ClientGameplayPresentationDiagnostics | null;
 			readonly frameRates: FrameRates | null;
 			readonly meanFrameWorkMs: number | null;
 			readonly sampledFrameCount: number;
@@ -620,9 +701,9 @@
 			element,
 			(appearance) => {
 				combatAppearance = appearance;
-				presentationSession?.setCombatEffectsAppearance(appearance);
+				gameplayPresentation?.setCombatEffectsAppearance(appearance);
 			},
-			() => presentationSession?.refreshCombatEffectsFontAtlas(),
+			() => gameplayPresentation?.refreshCombatEffectsFontAtlas(),
 		);
 	}
 
@@ -634,11 +715,11 @@
 	): void {
 		const accepted = clientEnvironmentOverridesSchema.parse(overrides);
 		changeUserSection("environmentOverrides", accepted);
-		presentationSession?.setEnvironmentOverrides(accepted);
+		gameplayPresentation?.setEnvironmentOverrides(accepted);
 	}
 	function changeInput(input: ClientInputConfiguration): void {
 		const accepted = clientInputSettingsSchema.parse(input);
-		worldView?.cancelMouseInput();
+		gameplayView?.cancelMouseInput();
 		keyboard.cancel();
 		characterInput.replaceBindings(accepted.character);
 		inputArbiter?.replacePowerBindings(accepted.preciseJump);
@@ -719,12 +800,12 @@
 						),
 					};
 		frameSettings = frameSettingsWithGraphics(frameSettings, effective);
-		presentationSession?.setFrameSettings(frameSettings);
+		presentationRoot?.setFrameSettings(frameSettings);
 	}
 	function changeAudio(audio: ClientAudioSettings): void {
 		const accepted = clientAudioSettingsSchema.parse(audio);
 		changeUserSection("audio", accepted);
-		presentationSession?.setAudioSettings(accepted);
+		presentationRoot?.setAudioSettings(accepted);
 	}
 	function changeGraphics(graphics: ClientGraphicsSettings): void {
 		const accepted = clientGraphicsSettingsSchema.parse(graphics);
@@ -739,11 +820,11 @@
 			return;
 		changeUserSection("graphics", accepted);
 		if (accepted.viewDistance !== previous.viewDistance)
-			presentationSession?.setSceneInterestRadii(
+			gameplayPresentation?.setSceneInterestRadii(
 				clientSceneInterestRadii(accepted.viewDistance),
 			);
 		if (accepted.verticalFovDegrees !== previous.verticalFovDegrees)
-			presentationSession?.setFieldOfView(accepted.verticalFovDegrees);
+			gameplayPresentation?.setFieldOfView(accepted.verticalFovDegrees);
 		applyFrameGraphics(accepted);
 	}
 	let inputController: CharacterInputController | null = null;
@@ -779,7 +860,7 @@
 	});
 
 	$effect(() => {
-		if (!worldInputEnabled) return untrack(() => inputGate.block());
+		if (!gameplayInputEnabled) return untrack(() => inputGate.block());
 	});
 	let preciseJumpSession: ClientPreciseJumpSession | null = null;
 	let nearby = $state.raw<ClientNearby | null>(null);
@@ -800,11 +881,11 @@
 	let hoveredEntityGuid = $state<number | null>(null);
 	let preciseJumpActive = $state(false);
 	let inputDispatch: Promise<void> = Promise.resolve();
-	const usesWorldPresentation = $derived(
-		clientLifecycleUsesWorldPresentation(lifecycle),
+	const usesGameplayPresentation = $derived(
+		clientLifecycleUsesGameplayPresentation(lifecycle),
 	);
-	const worldInputEnabled = $derived(
-		clientLifecycleEnablesWorldInput(lifecycle),
+	const gameplayInputEnabled = $derived(
+		clientLifecycleEnablesGameplayInput(lifecycle),
 	);
 
 	function queueCharacterMotionEdge(
@@ -975,10 +1056,7 @@
 					inputController?.setFullChargeDurationMs(
 						characterMotion.fullChargeDurationMs,
 					);
-				lifecycle = reduceClientLifecycleUiState(lifecycle, {
-					type: "authority",
-					lifecycle: event.state.lifecycle,
-				});
+				acceptAuthorityLifecycle(event.state.lifecycle);
 				return;
 			case "resyncing":
 				canTeleportFromMap = false;
@@ -1010,10 +1088,7 @@
 				) {
 					retireCharacterSettings();
 				}
-				lifecycle = reduceClientLifecycleUiState(lifecycle, {
-					type: "authority",
-					lifecycle: event.lifecycle,
-				});
+				acceptAuthorityLifecycle(event.lifecycle);
 				return;
 			case "character-motion-capabilities":
 				characterMotion = event.capabilities;
@@ -1148,6 +1223,15 @@
 			inputGate.cancel();
 			await inputDispatch;
 			await session.disconnect();
+			// Failed startup retires authority listeners. An accepted user disconnect must still
+			// retire this frontend attempt; a previously received authority exit remains absorbing.
+			lifecycle = reduceClientLifecycleUiState(lifecycle, {
+				type: "exit",
+				exit: {
+					cause: "explicit-disconnect",
+					diagnostic: "Closing the game session…",
+				},
+			});
 		} catch (error) {
 			commandFailure = diagnostic(error);
 		}
@@ -1227,9 +1311,9 @@
 			(await runClientLocationCommand(
 				message,
 				() => {
-					if (presentationSession === null)
+					if (gameplayPresentation === null)
 						throw new Error("World presentation is unavailable.");
-					return presentationSession.readLocationReport();
+					return gameplayPresentation.readLocationReport();
 				},
 				appendChatLine,
 			));
@@ -1292,7 +1376,7 @@
 
 	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
-		if (worldView?.handleSystemPanelKeydown(event)) return;
+		if (gameplayView?.handleSystemPanelKeydown(event)) return;
 		if (preciseJumpActive && !event.isComposing) {
 			if (
 				inputArbiter?.applyPowerKey(event, true) ||
@@ -1357,7 +1441,7 @@
 		if (clientInput.shortcut("splitStack", event) && !event.isComposing) {
 			event.preventDefault();
 			if (!event.repeat && canvasElement !== null)
-				worldView?.splitSelectedEntity(canvasElement);
+				gameplayView?.splitSelectedEntity(canvasElement);
 			return;
 		}
 		if (selectionInput?.keydown(event, performance.now())) return;
@@ -1384,7 +1468,7 @@
 	}
 
 	function aimPreciseJump(clientX: number, clientY: number): void {
-		const ray = presentationSession?.samplePreciseJumpRay(clientX, clientY);
+		const ray = gameplayPresentation?.samplePreciseJumpRay(clientX, clientY);
 		if (ray !== null && ray !== undefined) preciseJumpSession?.aim(ray);
 	}
 
@@ -1405,7 +1489,9 @@
 		return "The client command failed.";
 	}
 
-	function presentationStatusText(status: ClientPresentationStatus): string {
+	function presentationStatusText(
+		status: ClientGameplayPresentationStatus,
+	): string {
 		if (status.diagnostic !== null && status.kind !== "error") {
 			return status.diagnostic;
 		}
@@ -1429,7 +1515,7 @@
 
 	const EMPTY_TRACKED_GUIDS: ReadonlySet<number> = new Set();
 	function readMinimapFrame(): MinimapFrame {
-		const frame = presentationSession?.readMinimapFrame() ?? {
+		const frame = gameplayPresentation?.readMinimapFrame() ?? {
 			waypoint: null,
 			cameraFovRadians: 0,
 			cameraHeadingRadians: 0,
@@ -1446,7 +1532,7 @@
 				lifecycle.kind === "in-world" &&
 					session !== null &&
 					!session.mirror.isAwaitingSnapshot() &&
-					presentationSession?.status().kind === "ready",
+					gameplayPresentation?.status().kind === "ready",
 			),
 		};
 	}
@@ -1461,8 +1547,8 @@
 				);
 	}
 
-	function readDiagnostics(): ClientPresentationDiagnostics | null {
-		return presentationSession?.readDiagnostics() ?? null;
+	function readDiagnostics(): ClientGameplayPresentationDiagnostics | null {
+		return gameplayPresentation?.readDiagnostics() ?? null;
 	}
 
 	function readFrameRates(): FrameRates | null {
@@ -1470,7 +1556,7 @@
 	}
 
 	function readTargetIndicatorFrame(): ClientTargetIndicatorFrame | null {
-		return presentationSession?.readTargetIndicatorFrame() ?? null;
+		return gameplayPresentation?.readTargetIndicatorFrame() ?? null;
 	}
 
 	function readSelectedEntityDisplay(): ClientSelectedEntityDisplay {
@@ -1491,29 +1577,25 @@
 
 	function setShowRetailHiddenGeometry(visible: boolean): void {
 		frameSettings = { ...frameSettings, showRetailHiddenGeometry: visible };
-		presentationSession?.setFrameSettings(frameSettings);
+		presentationRoot?.setFrameSettings(frameSettings);
 	}
 
-	/** Build and drive the renderer after Svelte mounts the world-presentation canvas. */
+	/** World resources follow app/content identity; gameplay only borrows them. */
 	$effect(() => {
 		const currentSession = session;
 		const currentTransport = hostTransport;
 		const currentAssets = presentationAssets;
-		const shouldInstall = usesWorldPresentation;
 		const canvas = canvasElement;
 		if (
 			currentSession === null ||
 			currentTransport === null ||
 			currentAssets === null ||
-			canvas === null ||
-			!shouldInstall
-		) {
+			canvas === null
+		)
 			return;
-		}
-
+		backdropStatus = { kind: "loading" };
 		let cancelled = false;
-		let stopFrameLoop: (() => void) | null = null;
-		let lastStatus: ClientPresentationStatus | null = null;
+		let lastStatus: ClientGameplayPresentationStatus | null = null;
 		let lastErrorMessage: string | null = null;
 		const reportPresentationError = (error: unknown): void => {
 			if (cancelled) return;
@@ -1524,7 +1606,7 @@
 			appendChatError(error);
 		};
 		const reportPresentationStatus = (
-			nextStatus: ClientPresentationStatus,
+			nextStatus: ClientGameplayPresentationStatus,
 		): void => {
 			if (
 				nextStatus.kind === lastStatus?.kind &&
@@ -1546,157 +1628,202 @@
 				tone: "status",
 			});
 		};
-		const presentation = new ClientPresentationSession({
+
+		let ownedGameplay: ClientGameplayPresentation | null = null;
+		const clearGameplay = () => {
+			if (gameplayPresentation !== ownedGameplay) return;
+			ownedGameplay = null;
+			gameplayPresentation = null;
+			cameraController = null;
+			nearbySceneMembership = null;
+			nearby?.setSceneMembership(null);
+			weatherPresets = [];
+			environmentIssue = null;
+		};
+		const root = new ClientPresentationRoot({
 			canvas,
-			hostTransport: currentTransport,
-			ownerFactory: async (dependencies) =>
+			build: async (signal) =>
 				GamePresentationOwner.build({
-					...dependencies,
+					canvas,
+					hostTransport: currentTransport,
 					presentationResources: await currentAssets.resources(),
+					signal,
+					frameSettings: untrack(() => frameSettings),
+					portalWarpDriveTuning: CLIENT_TUNING.portalTransition.visual,
+					audioTuning: CLIENT_TUNING.audio,
+					tickProfiler: debugEnabled ? new RuntimeTickProfiler() : undefined,
 				}),
-			session: currentSession,
-			onError: reportPresentationError,
-			onSceneMembership: (source) => {
+			createGameplay: (resources) => {
+				const presentation = new ClientGameplayPresentation({
+					canvas,
+					resources,
+					session: currentSession,
+					onError: reportPresentationError,
+					onSceneMembership: (source) => {
+						if (cancelled) return;
+						nearbySceneMembership = source;
+						nearby?.setSceneMembership(source);
+					},
+					onWeatherPresets: (presets) => {
+						if (!cancelled) weatherPresets = presets;
+					},
+					onEnvironmentIssue: (issue) => {
+						if (cancelled || issue === environmentIssue) return;
+						environmentIssue = issue;
+						if (issue !== null)
+							toastCenter.publish({ message: issue, tone: "warning" });
+					},
+				});
+				// Cold preferences seed each gameplay adapter; edits use the live setters above.
+				presentation.setEnvironmentOverrides(
+					untrack(() => userSettings.environmentOverrides),
+				);
+				presentation.setSceneInterestRadii(
+					clientSceneInterestRadii(
+						untrack(() => userSettings.graphics.viewDistance),
+					),
+				);
+				presentation.setFieldOfView(
+					untrack(() => userSettings.graphics.verticalFovDegrees),
+				);
+				if (combatAppearance !== null)
+					presentation.setCombatEffectsAppearance(combatAppearance);
+				ownedGameplay = presentation;
+				gameplayPresentation = presentation;
+				cameraController = presentation.camera;
+				presentation.setSelectedEntityGuid(untrack(() => selectedEntityGuid));
+				presentation.setHoveredEntityGuid(
+					untrack(() => pointerSelection?.hoveredGuid() ?? null),
+				);
+				if (preciseJumpSession !== null)
+					presentation.setPreciseJumpPresentation(
+						preciseJumpSession.snapshot(),
+					);
+				return presentation;
+			},
+			onGameplayRetired: clearGameplay,
+			onReady: (owner) => {
 				if (cancelled) return;
-				nearbySceneMembership = source;
-				nearby?.setSceneMembership(source);
+				textureFilteringCapabilities = owner.textureFilteringCapabilities;
+				root.setAudioSettings(userSettings.audio);
+				applyFrameGraphics(userSettings.graphics);
 			},
-			onWeatherPresets: (presets) => {
-				if (!cancelled) weatherPresets = presets;
-			},
-			onEnvironmentIssue: (issue) => {
-				if (cancelled || issue === environmentIssue) return;
-				environmentIssue = issue;
-				if (issue !== null)
-					toastCenter.publish({ message: issue, tone: "warning" });
-			},
-			onTextureFilteringCapabilities: (capabilities) => {
-				textureFilteringCapabilities = capabilities;
-				if (capabilities !== null) applyFrameGraphics(userSettings.graphics);
-			},
-			enablePerformanceProfiling: debugEnabled,
+			onError: reportPresentationError,
 		});
-		// Frame settings are cold presentation policy, not renderer identity. The control handler
-		// updates the live owner directly; this snapshot only initializes a genuinely new owner.
-		presentation.setFrameSettings(untrack(() => frameSettings));
-		// Audio preferences are initialization snapshots, never presentation lifecycle dependencies.
-		presentation.setAudioSettings(untrack(() => userSettings.audio));
-		// Cold preferences seed a new owner once; edits use the live setter above.
-		presentation.setEnvironmentOverrides(
-			untrack(() => userSettings.environmentOverrides),
-		);
-		presentation.setSceneInterestRadii(
-			clientSceneInterestRadii(
-				untrack(() => userSettings.graphics.viewDistance),
-			),
-		);
-		presentation.setFieldOfView(
-			untrack(() => userSettings.graphics.verticalFovDegrees),
-		);
-		if (combatAppearance !== null)
-			presentation.setCombatEffectsAppearance(combatAppearance);
-		const currentFrameRateSampler = createFrameRateSampler(
+		presentationRoot = root;
+		const sampler = createFrameRateSampler(
 			CLIENT_TUNING.diagnostics.frameMetricsEmaWindowMs,
 		);
+		frameRateSampler = sampler;
+		let previousFrameTime: number | null = null;
 		let sampledFrameWorkMs = 0;
 		let sampledFrameCount = 0;
 		const performanceProbe: ClientPerformanceProbe = {
-			reset: (): void => {
+			reset: () => {
 				sampledFrameWorkMs = 0;
 				sampledFrameCount = 0;
-				presentation.resetRendererFrameProfile();
+				gameplayPresentation?.resetRendererFrameProfile();
 			},
-			setRendererProfilingEnabled: (enabled): void => {
-				presentation.setRendererFrameProfilingEnabled(enabled);
-			},
+			setRendererProfilingEnabled: (enabled) =>
+				gameplayPresentation?.setRendererFrameProfilingEnabled(enabled),
 			snapshot: () => ({
-				diagnostics: presentation.readDiagnostics(),
-				frameRates: currentFrameRateSampler.readFrameRates(),
+				diagnostics: gameplayPresentation?.readDiagnostics() ?? null,
+				frameRates: sampler.readFrameRates(),
 				meanFrameWorkMs:
-					sampledFrameCount === 0
-						? null
-						: sampledFrameWorkMs / sampledFrameCount,
+					sampledFrameCount === 0 ? 0 : sampledFrameWorkMs / sampledFrameCount,
 				sampledFrameCount,
 			}),
 		};
-		presentationSession = presentation;
-		presentation.setSelectedEntityGuid(untrack(() => selectedEntityGuid));
-		// Seed a replacement presentation once; hover changes must not own its lifecycle.
-		presentation.setHoveredEntityGuid(
-			untrack(() => pointerSelection?.hoveredGuid() ?? null),
-		);
-		frameRateSampler = currentFrameRateSampler;
 		(window as ClientPerformanceWindow).__holtburgerClientPerformance =
 			performanceProbe;
-		cameraController = presentation.camera;
-		reportPresentationStatus({ kind: "starting", diagnostic: null });
-
-		let previousFrameTime: number | null = null;
-		const frame = (timeMs: number): void => {
+		const stopFrameLoop = startPresentationFrameLoop((timeMs) => {
 			if (cancelled) return;
 			const elapsedSeconds =
 				previousFrameTime === null
 					? 0
 					: Math.max(0, timeMs - previousFrameTime) / 1000;
 			previousFrameTime = timeMs;
-			preciseJumpSession?.adjustHeldPower(
-				inputArbiter?.precisePowerDirection ?? 0,
-				elapsedSeconds,
-			);
-			const frameStartedAt = performance.now();
-			const nextStatus = presentation.frame(timeMs).status;
-			const frameFinishedAt = performance.now();
-			sampledFrameWorkMs += frameFinishedAt - frameStartedAt;
-			sampledFrameCount += 1;
-			currentFrameRateSampler.recordFrame({
+			if (usesGameplayPresentation)
+				preciseJumpSession?.adjustHeldPower(
+					inputArbiter?.precisePowerDirection ?? 0,
+					elapsedSeconds,
+				);
+			const startedAtMs = performance.now();
+			const result = root.frame(timeMs);
+			const workMs = performance.now() - startedAtMs;
+			sampledFrameWorkMs += workMs;
+			sampledFrameCount++;
+			sampler.recordFrame({
 				animationFrameTimeMs: timeMs,
-				startedAtMs: frameStartedAt,
-				workMs: frameFinishedAt - frameStartedAt,
+				startedAtMs,
+				workMs,
 			});
-			reportPresentationStatus(nextStatus);
-		};
-		void presentation
-			.start()
-			.then(() => {
-				if (!cancelled) {
-					// The imperative owner remains authoritative; this snapshot only closes the
-					// race between marker publication and presentation startup.
-					if (preciseJumpSession !== null) {
-						presentation.setPreciseJumpPresentation(
-							preciseJumpSession.snapshot(),
-						);
-					}
-					stopFrameLoop = startPresentationFrameLoop(frame);
-				}
-			})
-			.catch(reportPresentationError);
-
+			const visible =
+				result.kind === "gameplay"
+					? result.frame.rendered
+					: result.kind === "pregame" && result.rendered;
+			if (worldCanvasVisible !== visible) worldCanvasVisible = visible;
+			if (result.kind === "gameplay")
+				reportPresentationStatus(result.frame.status);
+			else if (result.kind === "failed") {
+				if (
+					backdropStatus.kind !== "failed" ||
+					backdropStatus.message !== result.message ||
+					backdropStatus.canRetry !== result.canRetry
+				)
+					backdropStatus = {
+						kind: "failed",
+						message: result.message,
+						canRetry: result.canRetry,
+					};
+			} else if (result.kind === "pregame") {
+				if (backdropStatus.kind !== result.status.kind)
+					backdropStatus =
+						result.status.kind === "failed"
+							? { ...result.status, canRetry: true }
+							: result.status;
+			} else if (backdropStatus.kind !== "loading")
+				backdropStatus = { kind: "loading" };
+		});
 		return () => {
 			cancelled = true;
-			weatherPresets = [];
-			environmentIssue = null;
-			stopFrameLoop?.();
-			retirePresentation(presentation);
-			if (cameraController === presentation.camera) cameraController = null;
-			if (presentationSession === presentation) {
-				presentationSession = null;
-				nearbySceneMembership = null;
-				nearby?.setSceneMembership(null);
-			}
-			if (frameRateSampler === currentFrameRateSampler) frameRateSampler = null;
+			stopFrameLoop();
+			worldCanvasVisible = false;
+			const retirement = root.destroy();
+			presentationRootRetirements.add(retirement);
+			void retirement.then(
+				() => presentationRootRetirements.delete(retirement),
+				(error) => {
+					presentationRootRetirements.delete(retirement);
+					console.error(error);
+				},
+			);
+			if (presentationRoot === root) presentationRoot = null;
+			if (frameRateSampler === sampler) frameRateSampler = null;
 			const performanceWindow = window as ClientPerformanceWindow;
-			if (
-				performanceWindow.__holtburgerClientPerformance === performanceProbe
-			) {
+			if (performanceWindow.__holtburgerClientPerformance === performanceProbe)
 				delete performanceWindow.__holtburgerClientPerformance;
-			}
 		};
+	});
+
+	/** Cold mode changes choose inputs without becoming resource-lifetime dependencies. */
+	$effect(() => {
+		void presentationRoot?.setMode(
+			lifecycle.kind === "exiting"
+				? "idle"
+				: usesGameplayPresentation
+					? "gameplay"
+					: "pregame",
+		);
+	});
+	$effect(() => {
+		presentationRoot?.setBackdropVisible(!creatingCharacter);
 	});
 
 	/** Owns one browser-to-host movement controller per active world-input lifetime. */
 	$effect(() => {
 		const currentSession = session;
-		const shouldOwnInput = worldInputEnabled;
+		const shouldOwnInput = gameplayInputEnabled;
 		if (currentSession === null || !shouldOwnInput) {
 			inputController?.releaseOwnership();
 			inputController = null;
@@ -1783,7 +1910,7 @@
 			keydown: handleGameKeydown,
 			keyup: handleGameKeyup,
 			cancel: (reason) => {
-				worldView?.cancelMouseInput();
+				gameplayView?.cancelMouseInput();
 				itemInteractions?.cancelTargeting();
 				selectionInput?.cancel();
 				characterInput.reset();
@@ -1928,13 +2055,13 @@
 		preciseJumpSession = precise;
 		const selection = new ClientEntitySelection({
 			lifecycle: owner,
-			presentation: () => presentationSession,
+			presentation: () => gameplayPresentation,
 		});
 		entitySelection = selection;
 		const pointer = new ClientPointerSelectionController({
 			selection,
 			lifecycle: owner,
-			presentation: () => presentationSession,
+			presentation: () => gameplayPresentation,
 			onSelectionSubmissionFailed: appendChatError,
 		});
 		pointerSelection = pointer;
@@ -1945,7 +2072,7 @@
 				sampleCycleCandidates(
 					owner.entities,
 					owner.mirror,
-					presentationSession?.targetingView() ?? null,
+					gameplayPresentation?.targetingView() ?? null,
 					category,
 					CLIENT_TUNING.entitySelection.cycle,
 				),
@@ -1982,16 +2109,16 @@
 		const unsubscribeSelection = selection.subscribe((guid) => {
 			selectedEntityGuid = guid;
 			refreshSelectedChatRecipient();
-			presentationSession?.setSelectedEntityGuid(guid);
+			gameplayPresentation?.setSelectedEntityGuid(guid);
 		});
 		const unsubscribeHover = pointer.subscribeHovered((guid) => {
 			hoveredEntityGuid = guid;
-			presentationSession?.setHoveredEntityGuid(guid);
+			gameplayPresentation?.setHoveredEntityGuid(guid);
 		});
 		const unsubscribePrecise = precise.subscribe((snapshot) => {
 			if (preciseJumpActive !== snapshot.active)
 				preciseJumpActive = snapshot.active;
-			presentationSession?.setPreciseJumpPresentation(snapshot);
+			gameplayPresentation?.setPreciseJumpPresentation(snapshot);
 			if (!snapshot.active) {
 				preciseEscapeContext?.release();
 				preciseEscapeContext = null;
@@ -2006,11 +2133,16 @@
 			disposed = true;
 			unsubscribeVisualCacheFailure();
 			presentationAssets = null;
-			if (presentationSession !== null) retirePresentation(presentationSession);
+			if (presentationRoot !== null) {
+				const retirement = presentationRoot.destroy();
+				presentationRootRetirements.add(retirement);
+			}
 			const retirement = new PresentationTeardownStack();
 			retirement.add("presentation-assets", () => assets.destroy());
-			retirement.add("world-presentations", async () => {
-				const results = await Promise.allSettled([...presentationRetirements]);
+			retirement.add("presentation-roots", async () => {
+				const results = await Promise.allSettled([
+					...presentationRootRetirements,
+				]);
 				const failures = results.filter(
 					(result): result is PromiseRejectedResult =>
 						result.status === "rejected",
@@ -2018,7 +2150,7 @@
 				if (failures.length > 0)
 					throw new AggregateError(
 						failures.map((result) => result.reason),
-						"World presentation retirement failed.",
+						"Presentation root retirement failed.",
 					);
 			});
 			retirement.add("object-previews", () => objectPreviewService.destroy());
@@ -2101,6 +2233,7 @@
 </script>
 
 <div
+	bind:this={interactionRoot}
 	class="client-appearance-scope ui-theme"
 	use:observeCombatAppearance
 	style:--ui-text-scale={userSettings.ui.textScale}
@@ -2119,13 +2252,25 @@
 			}}
 		/>
 	{/each}
-	{#if !usesWorldPresentation}
+	<canvas
+		bind:this={canvasElement}
+		class="client-canvas"
+		class:gameplay={usesGameplayPresentation}
+		aria-label={usesGameplayPresentation ? "Game world" : "Pre-game backdrop"}
+		tabindex="-1"
+		data-game-viewport={usesGameplayPresentation ? true : undefined}
+		style:visibility={worldCanvasVisible &&
+		(usesGameplayPresentation || pregameSelection !== null)
+			? "visible"
+			: "hidden"}
+	></canvas>
+	{#if !usesGameplayPresentation}
 		<ClientToastOverlay {toast} persistentMessage={null} />
 	{/if}
 
-	{#if usesWorldPresentation && startupError === null && commandFailure === null}
-		<ClientWorldView
-			bind:this={worldView}
+	{#if usesGameplayPresentation && canvasElement !== null && interactionRoot !== null && startupError === null && commandFailure === null}
+		<ClientGameplayView
+			bind:this={gameplayView}
 			{mouseMovement}
 			itemSession={session}
 			{partyHudPresent}
@@ -2161,7 +2306,7 @@
 			{weatherPresets}
 			{environmentIssue}
 			readServerEnvironment={() =>
-				presentationSession?.readServerEnvironment() ?? null}
+				gameplayPresentation?.readServerEnvironment() ?? null}
 			onClockFormatChange={(format) =>
 				changeUserSection("clockFormat", clientClockFormatSchema.parse(format))}
 			onEnvironmentOverridesChange={changeEnvironmentOverrides}
@@ -2193,7 +2338,7 @@
 			{combatProfileSelectionRevision}
 			onCombatProfileSelect={selectCombatProfile}
 			combatEnabled={lifecycle.kind === "in-world"}
-			emotesEnabled={worldInputEnabled}
+			emotesEnabled={gameplayInputEnabled}
 			onToggleCombat={() => void toggleCombatMode()}
 			onCastSpell={(spellId) => void castSpell(spellId)}
 			{entityMetadata}
@@ -2371,79 +2516,65 @@
 			{sentChatHistory}
 			onSendChat={sendChat}
 			onSendChatError={appendChatError}
-			onCanvas={(canvas) => (canvasElement = canvas)}
+			{canvasElement}
+			{interactionRoot}
 		/>
-	{:else}
-		<main class="client-screen ui-theme" aria-label="Holtburger client">
-			<section
-				class="client-panel ui-panel"
-				class:character-selection={lifecycle.kind === "character-selection"}
-			>
-				<header class="ui-frame">
-					<span>Client</span>
-				</header>
-
+	{:else if pregameSelection !== null}
+		<main
+			class="client-screen ui-theme"
+			class:show-backdrop={!creatingCharacter}
+			aria-label="Holtburger client"
+			use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
+		>
+			<section class="client-panel ui-panel">
+				<header class="ui-frame">Client</header>
 				<div class="client-panel-body ui-body">
 					<p class="ui-muted">Holtburger 3D Client</p>
-					{#if startupError !== null}
-						<h1>Client unavailable</h1>
-						<p class="client-status ui-error" role="alert">
-							{startupError}
-						</p>
-					{:else if commandFailure !== null}
-						<h1>Client stopped</h1>
-						<p class="client-status client-status-error" role="alert">
-							{commandFailure}
-						</p>
-					{:else if lifecycle.kind === "connecting"}
-						<h1>Connecting</h1>
-						<p class="client-status" aria-live="polite">
-							Opening the game session…
-						</p>
-					{:else if lifecycle.kind === "authenticating"}
-						<h1>Authenticating</h1>
-						<p class="client-status" aria-live="polite">
-							Checking the launch account…
-						</p>
-					{:else if lifecycle.kind === "character-selection"}
+					{#each [pregameSelection] as selection}
 						<ClientCharacterSelect
-							state={lifecycle}
+							state={selection}
 							{entryPending}
 							management={characterManagement}
 							creation={creationServices}
 							previewService={objectPreviewService}
 							visualCache={startupVisualCacheTransport}
+							onCreatingChange={(creating) => (creatingCharacter = creating)}
 							onChoose={chooseCharacter}
 							onEnter={enterWorld}
 							onDisconnect={disconnect}
 						/>
-					{:else if lifecycle.kind === "entering-world"}
-						<h1>Entering world</h1>
-						<p class="client-status" aria-live="polite">
-							Preparing character 0x{lifecycle.characterGuid
-								.toString(16)
-								.padStart(8, "0")}…
-						</p>
-					{:else}
-						<h1>Disconnecting</h1>
-						<p class="client-status" aria-live="polite">
-							{lifecycle.kind === "exiting" && lifecycle.diagnostic !== null
-								? lifecycle.diagnostic
-								: "Closing the game session…"}
-						</p>
-					{/if}
+					{/each}
 				</div>
 			</section>
 		</main>
+	{:else}
+		<ClientLoadingPage
+			state={loadingPage}
+			onDisconnect={session !== null && lifecycle.kind !== "exiting"
+				? disconnect
+				: null}
+		/>
 	{/if}
 </div>
 
 <style>
 	@layer components {
+		.client-screen.show-backdrop {
+			background: transparent;
+		}
+		.show-backdrop .client-panel {
+			background: transparent;
+			border-color: transparent;
+			box-shadow: none;
+		}
+		.show-backdrop .client-panel > header {
+			display: none;
+		}
 		.client-appearance-scope {
 			display: contents;
 		}
 		.client-screen {
+			position: relative;
 			display: grid;
 			min-height: 100vh;
 			place-items: start center;
@@ -2451,9 +2582,6 @@
 			background: var(--ui-color-well);
 		}
 		.client-panel {
-			width: min(100%, 640px);
-		}
-		.client-panel.character-selection {
 			width: min(100%, 1080px);
 		}
 		.client-panel-body {

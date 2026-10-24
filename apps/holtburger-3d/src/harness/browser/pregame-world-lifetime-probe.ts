@@ -1,3 +1,7 @@
+import { probePregameOutdoorEnvironment } from "./pregame-outdoor-probe";
+import { ClientPresentationRoot } from "../../client/client-presentation-root";
+import { ClientGameplayPresentation } from "../../client/client-gameplay-presentation";
+import { pregameGameplayFixture } from "./pregame-gameplay-fixture";
 import { EXPLORER_TUNING } from "../../explorer/explorer-tuning";
 import { GamePresentationOwner } from "../../lib/game/runtime/game-presentation-owner";
 import type { HostPresentationAssets } from "../../lib/game/runtime/host-presentation-assets";
@@ -13,31 +17,15 @@ import { observePreviewDevice } from "./preview-device-probe";
 export async function probePregameWorldLifetime(
 	assets: HostPresentationAssets,
 	staticTransport: HostTransport,
-	contentUrl: string,
 	source: ObjectPreviewSource,
 ) {
 	const resources = await assets.resources();
 	const commands: HostCommandName[] = [];
-	const endpoints: Partial<Record<HostCommandName, string>> = {
-		load_active_region_data: "/active-region-data",
-		load_sky_source: "/sky-source",
-		load_audio: "/audio",
-		load_sound_table: "/sound-table",
-		load_physics_script_table: "/physics-script-table",
-	};
 	const transport: HostTransport = {
 		listen: staticTransport.listen,
-		invoke: async (command, args) => {
+		invoke: (command, args) => {
 			commands.push(command);
-			const endpoint = endpoints[command];
-			if (endpoint === undefined) return staticTransport.invoke(command, args);
-			const response = await fetch(new URL(endpoint, contentUrl), {
-				method: "POST",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify(args?.request ?? {}),
-			});
-			if (!response.ok) throw new Error(await response.text());
-			return new Uint8Array(await response.arrayBuffer());
+			return staticTransport.invoke(command, args);
 		},
 	};
 	const canvas = document.createElement("canvas");
@@ -56,8 +44,109 @@ export async function probePregameWorldLifetime(
 			return context;
 		},
 	};
+	const constructionStartedAtMs = performance.now();
 	const world = await GamePresentationOwner.build(dependencies);
-	await world.destroy();
+	const worldConstructionMs = performance.now() - constructionStartedAtMs;
+	const authority = pregameGameplayFixture(source.body);
+	await authority.session.start();
+	let worldBuilds = 0;
+	let gameplayAdapters = 0;
+	const errors: unknown[] = [];
+	const root = new ClientPresentationRoot({
+		canvas,
+		build: async () => {
+			worldBuilds++;
+			return world;
+		},
+		createGameplay: (resources) => {
+			gameplayAdapters++;
+			return new ClientGameplayPresentation({
+				canvas,
+				session: authority.session,
+				resources,
+				onError: (error) => errors.push(error),
+			});
+		},
+		onGameplayRetired: () => {},
+		onReady: () => {},
+		onError: (error) => errors.push(error),
+	});
+	// The offscreen diagnostic canvas still supplies a real drawing extent to both drivers.
+	Object.defineProperties(canvas, {
+		clientWidth: { value: 512 },
+		clientHeight: { value: 512 },
+	});
+	const settle = async (kind: "pregame" | "gameplay") => {
+		const deadline = performance.now() + 60_000;
+		for (;;) {
+			const frame = root.frame(performance.now());
+			if (frame.kind === "failed") throw new Error(frame.message);
+			if (frame.kind === "pregame" && frame.status.kind === "failed")
+				throw new Error(frame.status.message);
+			if (errors.length > 0)
+				throw new AggregateError(errors, "World driver failed");
+			if (
+				(kind === "pregame" && frame.kind === "pregame" && frame.rendered) ||
+				(kind === "gameplay" &&
+					frame.kind === "gameplay" &&
+					frame.frame.status.kind === "ready" &&
+					frame.frame.rendered &&
+					authority.session.state().lifecycle?.kind === "in-world")
+			)
+				return;
+			if (performance.now() > deadline)
+				throw new Error(
+					`Persistent world did not reach ${kind}: ${JSON.stringify(frame)}`,
+				);
+			await new Promise<void>((resolve) =>
+				requestAnimationFrame(() => resolve()),
+			);
+		}
+	};
+	let backdropFrames = 0;
+	let firstCyclePrograms = 0;
+	let candidatePreparationMs: number;
+	let outdoor: Awaited<ReturnType<typeof probePregameOutdoorEnvironment>>;
+	try {
+		const preparationStartedAtMs = performance.now();
+		await root.setMode("pregame");
+		await settle("pregame");
+		candidatePreparationMs = performance.now() - preparationStartedAtMs;
+		backdropFrames++;
+		root.setBackdropVisible(false);
+		const hidden = root.frame(performance.now());
+		if (hidden.kind !== "pregame" || hidden.rendered)
+			throw new Error("Hidden backdrop drew a frame");
+		root.setBackdropVisible(true);
+		await settle("pregame");
+		backdropFrames++;
+		await root.setMode("idle");
+		outdoor = await probePregameOutdoorEnvironment(world);
+		for (let cycle = 0; cycle < 2; cycle++) {
+			await authority.enter();
+			await root.setMode("gameplay");
+			await settle("gameplay");
+			if (authority.acknowledgements() !== cycle + 1)
+				throw new Error("Gameplay did not acknowledge its portal reveal");
+			authority.selection();
+			await root.setMode("pregame");
+			await settle("pregame");
+			if ([...world.runtime.listPresentedSpawnedEntities()].length !== 0)
+				throw new Error("Gameplay actors leaked into pre-game");
+			if (cycle === 0) firstCyclePrograms = device.read().programs.created;
+		}
+		if (
+			device.read().contextRequests !== 1 ||
+			worldBuilds !== 1 ||
+			gameplayAdapters !== 2
+		)
+			throw new Error("Mode handoff rebuilt world resources");
+		if (device.read().programs.created !== firstCyclePrograms)
+			throw new Error("Repeated handoff recompiled world programs");
+	} finally {
+		await root.destroy();
+		authority.session.stop();
+	}
 	const retired = device.read();
 	// Factory assignment is intentionally imperative; inspect the context through an accessor.
 	const audioClosed = (): boolean => audio !== null && audio.state === "closed";
@@ -127,6 +216,21 @@ export async function probePregameWorldLifetime(
 	return {
 		commands,
 		worldRetired: true,
+		// Diagnostic cold-start spans exclude shared CPU bootstrap and later preview/weather work.
+		startup: {
+			worldConstructionMs,
+			candidatePreparationMs,
+			width: 512,
+			height: 512,
+			renderScale: EXPLORER_TUNING.frameSettings.quality.renderScale,
+		},
+		candidateBackdropFrames: backdropFrames,
+		backdropPausedAndResumed: true,
+		persistentWorldBuilds: worldBuilds,
+		outdoor,
+		gameplayAdapters,
+		portalReveals: authority.acknowledgements(),
+		repeatedHandoffRetainedPrograms: true,
 		canceledWorldRetired: true,
 		previewDrewAfterWorldRetirement: true,
 		remainingWorldGpuResources: 0,

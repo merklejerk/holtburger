@@ -374,7 +374,7 @@
 			{/if}
 
 			{#snippet hud(name: HudSurface, children: Snippet)}
-				<!-- Match ClientWorldView: these surfaces rely on their wrapper to receive input. -->
+				<!-- Match ClientGameplayView: these surfaces rely on their wrapper to receive input. -->
 				<ClientHudPanel
 					{children}
 					{editable}

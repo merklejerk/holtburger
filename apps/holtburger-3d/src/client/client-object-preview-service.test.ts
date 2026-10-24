@@ -1,14 +1,15 @@
+import { Mat4 } from "../lib/game/math/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
 	ObjectPreviewResources,
 	ObjectPreviewViewport,
 } from "../lib/game/preview/object-preview-controller";
 import type { ObjectPreviewSource } from "../lib/game/runtime/object-preview-source";
-import { acquireObjectPreviewAssets } from "../lib/game/preview/object-preview-assets";
+import { acquireObjectPreviewAssets } from "../lib/game/preview/object-preview-composition";
 import { WebGL2PreviewRenderer } from "../lib/game/renderer/webgl2-preview-renderer";
 import { StandardClientObjectPreviewService } from "./client-object-preview-service";
 
-vi.mock("../lib/game/preview/object-preview-assets", () => ({
+vi.mock("../lib/game/preview/object-preview-composition", () => ({
 	acquireObjectPreviewAssets: vi.fn(),
 }));
 vi.mock("../lib/game/renderer/webgl2-preview-renderer", () => ({
@@ -22,22 +23,26 @@ vi.mock("../lib/game/preview/object-preview-presentation", () => ({
 }));
 
 const SOURCE: ObjectPreviewSource = {
-	appearance: {
-		paletteDid: null,
-		partChanges: [],
-		subPalettes: [],
-		textureChanges: [],
+	attachments: [],
+	background: null,
+	body: {
+		appearance: {
+			paletteDid: null,
+			partChanges: [],
+			subPalettes: [],
+			textureChanges: [],
+		},
+		pose: { kind: "setup-pose" },
+		scale: 1,
+		setupDid: 0x02000001,
+		translucency: 0,
 	},
-	guid: 0x60000002,
-	pose: { kind: "setup-pose" },
-	scale: 1,
-	setupDid: 0x02000001,
-	translucency: 0,
 };
 const VIEWPORT: ObjectPreviewViewport = {
 	extent: { height: 180, width: 240 },
 	minimumFrameIntervalSeconds: 1 / 30,
-	yawRadians: 0.5,
+	rotation: { kind: "orbit", yawRadians: 0.5 },
+	framing: { kind: "body" },
 };
 // Only the external preparation/device boundaries are faked; the production mount owns lifecycle.
 const RESOURCES = {
@@ -71,12 +76,22 @@ function lease() {
 function device() {
 	const draw = vi.fn();
 	const destroy = vi.fn(async () => {});
+	const clear = vi.fn(async () => undefined);
+	const commit = vi.fn(async (): Promise<void> => {});
+	const dispose = vi.fn(async () => undefined);
+	const prepareReplacement = vi.fn(async () => ({ commit, dispose }));
 	return {
 		draw,
 		destroy,
+		clear,
+		commit,
+		dispose,
+		prepareReplacement,
 		renderer: {
 			draw,
 			destroy,
+			clear,
+			prepareReplacement,
 			getDiagnostics: () => null,
 		} as unknown as WebGL2PreviewRenderer,
 	};
@@ -108,6 +123,202 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("preview mount lifecycle through the client service", () => {
+	it("admits an empty surface without preparing resources and later draws its first source", async () => {
+		const resources = vi.fn(async () => RESOURCES);
+		const owner = new StandardClientObjectPreviewService({
+			resolveResources: resources,
+		});
+		const handle = owner.open({ ...REQUEST, source: null });
+		handle.setViewport(VIEWPORT);
+		await flush();
+		expect(resources).not.toHaveBeenCalled();
+		expect(build).not.toHaveBeenCalled();
+		expect(callbacks.size).toBe(0);
+		await expect(handle.replaceSource(SOURCE)).resolves.toEqual({
+			kind: "installed",
+		});
+		frame(100);
+		await handle.ready;
+		expect(build).toHaveBeenCalledOnce();
+		await handle.withdrawSource();
+		await handle.replaceSource(SOURCE);
+		expect(build).toHaveBeenCalledOnce();
+		await owner.destroy();
+	});
+	it("coalesces edits and releases stale preparation while retaining the device", async () => {
+		const renderer = device();
+		build.mockResolvedValue(renderer.renderer);
+		const first = lease();
+		const stale = lease();
+		const latest = lease();
+		const pending = deferred<ReturnType<typeof lease>>();
+		acquire
+			.mockResolvedValueOnce(first)
+			.mockReturnValueOnce(pending.promise)
+			.mockResolvedValueOnce(latest);
+		const owner = service();
+		const handle = owner.open(REQUEST);
+		handle.setViewport(VIEWPORT);
+		await flush();
+		frame(100);
+		await handle.ready;
+		const b = handle.replaceSource({
+			...SOURCE,
+			body: { ...SOURCE.body, scale: 2 },
+		});
+		await flush();
+		const c = handle.replaceSource({
+			...SOURCE,
+			body: { ...SOURCE.body, scale: 3 },
+		});
+		const d = handle.replaceSource({
+			...SOURCE,
+			body: { ...SOURCE.body, scale: 4 },
+		});
+		await expect(c).resolves.toEqual({ kind: "superseded" });
+		pending.resolve(stale);
+		await expect(b).resolves.toEqual({ kind: "superseded" });
+		await expect(d).resolves.toEqual({ kind: "installed" });
+		expect(acquire).toHaveBeenCalledTimes(3);
+		expect(build).toHaveBeenCalledOnce();
+		expect(renderer.prepareReplacement).toHaveBeenCalledExactlyOnceWith(
+			latest.assets,
+		);
+		expect(renderer.commit).toHaveBeenCalledOnce();
+		expect(first.release).toHaveBeenCalledOnce();
+		expect(stale.release).toHaveBeenCalledOnce();
+		expect(latest.release).not.toHaveBeenCalled();
+		await owner.destroy();
+		expect(latest.release).toHaveBeenCalledOnce();
+	});
+
+	it("preserves the installed visual when GPU replacement preparation fails", async () => {
+		const renderer = device();
+		build.mockResolvedValue(renderer.renderer);
+		const first = lease();
+		const rejected = lease();
+		acquire.mockResolvedValueOnce(first).mockResolvedValueOnce(rejected);
+		const owner = service();
+		const handle = owner.open(REQUEST);
+		handle.setViewport(VIEWPORT);
+		await flush();
+		frame(100);
+		await handle.ready;
+		renderer.prepareReplacement.mockRejectedValueOnce(
+			new Error("texture upload failed"),
+		);
+		await expect(
+			handle.replaceSource({ ...SOURCE, body: { ...SOURCE.body, scale: 2 } }),
+		).rejects.toThrow("texture upload failed");
+		expect(first.release).not.toHaveBeenCalled();
+		expect(rejected.release).toHaveBeenCalledOnce();
+		frame(200);
+		expect(renderer.draw).toHaveBeenCalledTimes(2);
+		expect(renderer.commit).not.toHaveBeenCalled();
+		await owner.destroy();
+		expect(first.release).toHaveBeenCalledOnce();
+	});
+
+	it("retains an obsolete source's cleanup failure until shutdown", async () => {
+		const renderer = device();
+		build.mockResolvedValue(renderer.renderer);
+		const pending = deferred<ReturnType<typeof lease>>();
+		const first = lease();
+		const stale = lease();
+		const latest = lease();
+		const cause = new Error("lease cleanup failed");
+		vi.mocked(stale.release).mockImplementationOnce(() => {
+			throw cause;
+		});
+		acquire
+			.mockResolvedValueOnce(first)
+			.mockReturnValueOnce(pending.promise)
+			.mockResolvedValueOnce(latest);
+		const owner = service();
+		const handle = owner.open(REQUEST);
+		handle.setViewport(VIEWPORT);
+		await flush();
+		frame(100);
+		await handle.ready;
+		const b = handle.replaceSource({
+			...SOURCE,
+			body: { ...SOURCE.body, scale: 2 },
+		});
+		await flush();
+		const c = handle.replaceSource({
+			...SOURCE,
+			body: { ...SOURCE.body, scale: 3 },
+		});
+		pending.resolve(stale);
+		await expect(b).resolves.toEqual({ kind: "superseded" });
+		await expect(c).resolves.toEqual({ kind: "installed" });
+		await expect(owner.destroy()).rejects.toMatchObject({ errors: [cause] });
+		expect(latest.release).toHaveBeenCalledOnce();
+		expect(renderer.destroy).toHaveBeenCalledOnce();
+	});
+
+	it("withdraws the subject during commit retirement without double-releasing its transferred lease", async () => {
+		const renderer = device();
+		build.mockResolvedValue(renderer.renderer);
+		const first = lease();
+		const next = lease();
+		acquire.mockResolvedValueOnce(first).mockResolvedValueOnce(next);
+		const owner = service();
+		const handle = owner.open(REQUEST);
+		handle.setViewport(VIEWPORT);
+		await flush();
+		frame(100);
+		await handle.ready;
+		const retirement = deferred<void>();
+		renderer.commit.mockReturnValueOnce(retirement.promise);
+		const replacement = handle.replaceSource({
+			...SOURCE,
+			body: { ...SOURCE.body, scale: 2 },
+		});
+		await flush();
+		expect(renderer.commit).toHaveBeenCalledOnce();
+		await handle.withdrawSource();
+		expect(renderer.clear).toHaveBeenCalledOnce();
+		expect(next.release).toHaveBeenCalledOnce();
+		retirement.resolve();
+		await expect(replacement).resolves.toEqual({ kind: "superseded" });
+		await owner.destroy();
+		expect(first.release).toHaveBeenCalledOnce();
+		expect(next.release).toHaveBeenCalledOnce();
+	});
+
+	it("disposes a late staged replacement before closing its device", async () => {
+		const renderer = device();
+		build.mockResolvedValue(renderer.renderer);
+		const first = lease();
+		const next = lease();
+		acquire.mockResolvedValueOnce(first).mockResolvedValueOnce(next);
+		const owner = service();
+		const handle = owner.open(REQUEST);
+		handle.setViewport(VIEWPORT);
+		await flush();
+		frame(100);
+		await handle.ready;
+		const staging =
+			deferred<Awaited<ReturnType<typeof renderer.prepareReplacement>>>();
+		renderer.prepareReplacement.mockReturnValueOnce(staging.promise);
+		const replacement = handle.replaceSource({
+			...SOURCE,
+			body: { ...SOURCE.body, scale: 2 },
+		});
+		await flush();
+		const closing = handle.dispose();
+		expect(renderer.destroy).not.toHaveBeenCalled();
+		staging.resolve({ commit: renderer.commit, dispose: renderer.dispose });
+		await closing;
+		await expect(replacement).resolves.toEqual({ kind: "superseded" });
+		expect(renderer.dispose).toHaveBeenCalledOnce();
+		expect(renderer.commit).not.toHaveBeenCalled();
+		expect(first.release).toHaveBeenCalledOnce();
+		expect(next.release).toHaveBeenCalledOnce();
+		expect(renderer.destroy).toHaveBeenCalledOnce();
+		await owner.destroy();
+	});
 	it("uses the latest pending viewport, suspends, and resumes before settling ready", async () => {
 		const resources = deferred<ObjectPreviewResources>();
 		const renderer = device();
@@ -115,20 +326,28 @@ describe("preview mount lifecycle through the client service", () => {
 		const owner = service(() => resources.promise);
 		const handle = owner.open(REQUEST);
 		handle.setViewport(VIEWPORT);
-		handle.setViewport({ ...VIEWPORT, yawRadians: 1 });
+		handle.setViewport({
+			...VIEWPORT,
+			rotation: { kind: "orbit", yawRadians: 1 },
+		});
 		resources.resolve(RESOURCES);
 		await flush();
 		handle.setViewport(null);
 		frame(100);
 		expect(renderer.draw).not.toHaveBeenCalled();
-		handle.setViewport({ ...VIEWPORT, yawRadians: 2 });
+		handle.setViewport({
+			...VIEWPORT,
+			rotation: { kind: "orbit", yawRadians: 2 },
+		});
 		frame(200);
 		await handle.ready;
 		expect(renderer.draw).toHaveBeenCalledExactlyOnceWith(
 			{},
 			{
 				extent: VIEWPORT.extent,
-				yawRadians: 2,
+				cameraYawRadians: 2,
+				subjectTransform: Mat4.identity(),
+				framing: { kind: "body" },
 			},
 		);
 		await owner.destroy();

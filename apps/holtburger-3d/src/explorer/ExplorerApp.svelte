@@ -20,6 +20,7 @@
 	} from "../lib/game/runtime/game-presentation-runtime";
 	import { RuntimeTickProfiler } from "../lib/game/runtime/runtime-tick-profiler";
 	import { GamePresentationOwner } from "../lib/game/runtime/game-presentation-owner";
+	import { HostPresentationAssets } from "../lib/game/runtime/host-presentation-assets";
 	import {
 		createProjectionClearanceRevision,
 		type ProjectionClearanceRevision,
@@ -1773,6 +1774,8 @@
 
 		let destroyed = false;
 		let teardown: Promise<void> | undefined;
+		const presentationAssets = new HostPresentationAssets(hostTransport);
+		const construction = new AbortController();
 
 		let stopFrameLoop: (() => void) | null = null;
 
@@ -1831,7 +1834,11 @@
 					try {
 						await physicalSession?.stop();
 					} finally {
-						await presentation?.destroy();
+						try {
+							await presentation?.destroy();
+						} finally {
+							await presentationAssets.destroy();
+						}
 					}
 				}
 			})();
@@ -1859,6 +1866,8 @@
 				const presentation = await GamePresentationOwner.build({
 					canvas,
 					hostTransport,
+					presentationResources: await presentationAssets.resources(),
+					signal: construction.signal,
 					frameSettings: EXPLORER_TUNING.frameSettings,
 					portalWarpDriveTuning: EXPLORER_TUNING.portalTransition.visual,
 					audioTuning: {
@@ -2029,10 +2038,11 @@
 
 				stopFrameLoop = startPresentationFrameLoop(step);
 			} catch (error) {
-				startupError =
-					error instanceof Error
-						? error.message
-						: "Failed to initialize renderer.";
+				if (!destroyed)
+					startupError =
+						error instanceof Error
+							? error.message
+							: "Failed to initialize renderer.";
 				await destroySystems();
 			}
 		};
@@ -2041,6 +2051,7 @@
 
 		return () => {
 			destroyed = true;
+			construction.abort();
 			clearInterval(clockTimer);
 			clockTimer = undefined;
 			void startup

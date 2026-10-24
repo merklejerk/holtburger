@@ -1,26 +1,45 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import type { ObjectPreviewSource } from "./client-object-preview-contract";
+	import type { ObjectPreviewSource } from "../lib/game/runtime/object-preview-source";
+	import type { ObjectPreviewViewport } from "../lib/game/preview/object-preview-viewport";
 	import type { ObjectPreviewHandle } from "../lib/game/preview/object-preview-controller";
 	import type { ClientObjectPreviewService } from "./client-object-preview-service";
 	import { CLIENT_TUNING } from "./client-tuning";
 
 	interface Props {
-		readonly source: ObjectPreviewSource;
+		readonly source: ObjectPreviewSource | null;
+		/** Consumer wording while no subject is admitted, including missing cached captures. */
+		readonly emptyMessage: string;
 		readonly service: ClientObjectPreviewService;
+		/** Inspector orbits the camera; creator turns the subject independently of its backdrop. */
+		readonly rotation: "orbit" | "subject";
+		/** Frontend-owned focus policy, independent of model part numbering. */
+		readonly framing: ObjectPreviewViewport["framing"];
 	}
 
-	const { source, service }: Props = $props();
+	const { source, service, rotation, framing, emptyMessage }: Props = $props();
 	const tuning = CLIENT_TUNING.objectPreview;
 	let surface: HTMLDivElement;
 	let canvas: HTMLCanvasElement;
-	let status = $state<"loading" | "ready" | "failed">("loading");
+	let status = $state<"empty" | "loading" | "ready" | "failed">("loading");
 	let diagnostic = $state<string | null>(null);
-	let yaw = $state<number>(tuning.initialYawRadians);
+	// Pointer-rate heading stays with the imperative viewport owner, outside Svelte's UI graph.
+	let yaw: number = tuning.initialYawRadians;
+	const initialYawDegrees = yawDegrees(tuning.initialYawRadians);
 	let pointer: { readonly id: number; x: number } | null = null;
 	let preview: ObjectPreviewHandle | null = null;
+	let installedSource: ObjectPreviewSource | null = null;
+	let sourceRevision = 0;
 
 	function publishViewport(): void {
+		if (surface) {
+			const degrees = yawDegrees(yaw);
+			surface.setAttribute("aria-valuenow", String(degrees));
+			surface.setAttribute(
+				"aria-valuetext",
+				`${degrees} degrees horizontal rotation`,
+			);
+		}
 		if (!surface || document.visibilityState !== "visible") {
 			preview?.setViewport(null);
 			return;
@@ -47,12 +66,23 @@
 				height: Math.max(1, Math.round(desiredHeight * scale)),
 			},
 			minimumFrameIntervalSeconds: 1 / tuning.maximumFramesPerSecond,
-			yawRadians: yaw,
+			rotation:
+				rotation === "orbit"
+					? { kind: "orbit", yawRadians: yaw }
+					: // Retail creator camera is at negative AC Y (render +Z), with the body
+						// initially facing 180 degrees (acclient.c:177525,180040). Keep the
+						// inspector's orbit policy independent from this fixed backdrop viewpoint.
+						{
+							kind: "subject",
+							headingRadians: Math.PI + yaw,
+							cameraYawRadians: Math.PI,
+						},
+			framing,
 		});
 	}
 
-	function yawDegrees(): number {
-		const degrees = (yaw * 180) / Math.PI;
+	function yawDegrees(radians: number): number {
+		const degrees = (radians * 180) / Math.PI;
 		return Math.round(((((degrees + 180) % 360) + 360) % 360) - 180);
 	}
 
@@ -102,7 +132,12 @@
 
 	onMount(() => {
 		let current = true;
-		const handle = service.open({ canvas, source });
+		installedSource = source;
+		status = source === null ? "empty" : "loading";
+		const handle = service.open({
+			canvas,
+			source,
+		});
 		preview = handle;
 		const observer = new ResizeObserver(publishViewport);
 		observer.observe(surface);
@@ -114,16 +149,18 @@
 		publishViewport();
 		void handle.ready.then(
 			() => {
-				if (current) status = "ready";
+				if (current && sourceRevision === 0)
+					status = source === null ? "empty" : "ready";
 			},
 			(error: unknown) => {
-				if (!current) return;
+				if (!current || sourceRevision !== 0) return;
 				status = "failed";
 				diagnostic = error instanceof Error ? error.message : String(error);
 			},
 		);
 		return () => {
 			current = false;
+			sourceRevision++;
 			preview = null;
 			cancelPointer();
 			observer.disconnect();
@@ -136,6 +173,44 @@
 				);
 		};
 	});
+
+	// Cold source publication replaces only the visual bundle. Mount owns the device lifetime.
+	$effect(() => {
+		const next = source;
+		const handle = preview;
+		if (handle === null || next === installedSource) return;
+		installedSource = next;
+		const revision = ++sourceRevision;
+		diagnostic = null;
+		if (next === null) {
+			status = "empty";
+			void handle.withdrawSource().catch((error: unknown) => {
+				if (preview !== handle || revision !== sourceRevision) return;
+				status = "failed";
+				diagnostic = error instanceof Error ? error.message : String(error);
+			});
+			return;
+		}
+		if (status !== "ready") status = "loading";
+		void handle.replaceSource(next).then(
+			(result) => {
+				if (preview !== handle || revision !== sourceRevision) return;
+				if (result.kind === "installed") status = "ready";
+			},
+			(error: unknown) => {
+				if (preview !== handle || revision !== sourceRevision) return;
+				if (status !== "ready") status = "failed";
+				diagnostic = error instanceof Error ? error.message : String(error);
+			},
+		);
+	});
+
+	$effect(() => {
+		// These are explicit cold controls; gestures publish directly to the retained handle.
+		void rotation;
+		void framing;
+		publishViewport();
+	});
 </script>
 
 <div
@@ -146,8 +221,8 @@
 	aria-label="Rotatable creature model. Drag horizontally or use the left and right arrow keys."
 	aria-valuemin={-180}
 	aria-valuemax={180}
-	aria-valuenow={yawDegrees()}
-	aria-valuetext={`${yawDegrees()} degrees horizontal rotation`}
+	aria-valuenow={initialYawDegrees}
+	aria-valuetext={`${initialYawDegrees} degrees horizontal rotation`}
 	onpointerdown={handlePointerDown}
 	onpointermove={handlePointerMove}
 	onpointerup={finishPointer}
@@ -157,13 +232,20 @@
 	onkeydown={handleKeydown}
 >
 	<canvas bind:this={canvas} aria-hidden="true"></canvas>
+	{#if status === "ready" && diagnostic !== null}
+		<p class="creature-preview-error" role="alert">{diagnostic}</p>
+	{/if}
 	{#if status !== "ready"}
 		<div
 			class="creature-preview-status"
 			role={status === "failed" ? "alert" : "status"}
 		>
 			<span aria-hidden="true">◆</span>
-			{status === "failed" ? "Preview unavailable" : "Loading model…"}
+			{status === "empty"
+				? emptyMessage
+				: status === "failed"
+					? "Preview unavailable"
+					: "Loading model…"}
 			{#if diagnostic !== null}<small>{diagnostic}</small>{/if}
 		</div>
 	{/if}
@@ -206,6 +288,15 @@
 			text-align: center;
 			color: var(--ui-color-muted);
 			background: color-mix(in srgb, var(--ui-color-well) 88%, transparent);
+		}
+		.creature-preview-error {
+			position: absolute;
+			inset-inline: 0;
+			bottom: 0;
+			margin: 0;
+			padding: 6px;
+			color: var(--ui-color-danger);
+			background: var(--ui-color-well);
 		}
 		.creature-preview-status > span {
 			font-size: 1.6rem;

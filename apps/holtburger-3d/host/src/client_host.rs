@@ -449,6 +449,8 @@ mod tests {
 
     fn snapshot_event() -> ClientViewEvent {
         ClientViewEvent::ApplicationSnapshot(Box::new(ClientApplicationSnapshot {
+            character_management: holtburger_core::client::types::CharacterManagementState::Idle,
+            player_visual_capture: None,
             fellowship: None,
             friends: None,
             contracts: None,
@@ -487,6 +489,36 @@ mod tests {
             ),
             runtime_bodies: Vec::new().into(),
         }))
+    }
+
+    #[test]
+    fn player_visual_delta_and_recovery_preserve_the_same_complete_equipment_capture() {
+        use holtburger_core::client::player_visual::PlayerVisualCapture;
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../src/client/fixtures/object-preview-wire.json"
+        ))
+        .unwrap();
+        let capture: PlayerVisualCapture = serde_json::from_value(serde_json::json!({
+            "guid": fixture["equipped"]["guid"],
+            "source": fixture["equipped"]["outcome"]["source"],
+        }))
+        .unwrap();
+        let ClientViewEvent::ApplicationSnapshot(mut snapshot) = snapshot_event() else {
+            panic!("snapshot fixture");
+        };
+        snapshot.player_visual_capture = Some(capture.clone());
+        let baseline = ClientCurrentState::from(snapshot.as_ref());
+        let delta =
+            project_client_event(ClientViewEvent::PlayerVisualCaptureChanged(Some(capture)))
+                .expect("capture projection");
+        let ClientHostEvent::PlayerVisualCaptureChanged(delta) = delta else {
+            panic!("capture delta");
+        };
+        assert_eq!(baseline.player_visual_capture, delta);
+        assert_eq!(
+            serde_json::to_value(&baseline).unwrap()["playerVisualCapture"]["source"],
+            fixture["equipped"]["outcome"]["source"]
+        );
     }
 
     #[test]
@@ -691,6 +723,12 @@ mod tests {
             },
         );
         snapshot.housing.access.generation = 7;
+        snapshot.character_management =
+            holtburger_core::client::types::CharacterManagementState::Rejected {
+                operation: holtburger_core::client::types::CharacterManagementOperation::Create,
+                message: "Name is already in use.".into(),
+            };
+        let expected_management = snapshot.character_management.clone();
         snapshot.housing.search.pending_type = Some(4);
         let expected_housing = snapshot.housing.clone();
         snapshot.character_sheet = Some(Box::new(holtburger_core::ClientCharacterSheet {
@@ -719,6 +757,7 @@ mod tests {
             panic!("missing lag replacement");
         };
         assert_eq!(current.housing, expected_housing);
+        assert_eq!(current.character_management, expected_management);
         let sheet = current
             .character_sheet
             .expect("lag replacement lost character sheet");
@@ -1112,6 +1151,7 @@ mod tests {
     #[test]
     fn lifecycle_projects_character_selection_while_snapshot_owns_local_identity() {
         let lifecycle = ClientLifecycleWire::from(&ClientLifecycleState::CharacterSelection {
+            max_slots: 11,
             characters: vec![holtburger_core::ClientCharacterSummary {
                 guid: Guid(0x5000_0007),
                 name: "Mira".to_string(),
@@ -1123,6 +1163,7 @@ mod tests {
             serde_json::to_value(lifecycle).expect("wire lifecycle should serialize"),
             serde_json::json!({
                 "kind": "character-selection",
+                "maxSlots": 11,
                 "characters": [{
                     "guid": 0x5000_0007u64,
                     "name": "Mira",
@@ -1133,6 +1174,8 @@ mod tests {
         );
 
         let snapshot = ClientApplicationSnapshot {
+            character_management: holtburger_core::client::types::CharacterManagementState::Idle,
+            player_visual_capture: None,
             fellowship: None,
             friends: None,
             contracts: None,

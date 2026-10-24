@@ -40,6 +40,8 @@ async function fixture() {
 	};
 	const baseline: ClientCurrentState = {
 		lifecycle: { kind: "in-world" },
+		characterManagement: { kind: "idle" },
+		playerVisualCapture: null,
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
 		recallDestinations: [],

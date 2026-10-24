@@ -1,7 +1,7 @@
 use anyhow::Context;
 use holtburger_3d_host::{
     ExplorerPossessionEventWireRequest, ExplorerPossessionIntentWireRequest,
-    ExplorerPossessionReceipt, LandblockSourceLayer, LoadTexturePixelsRequest,
+    ExplorerPossessionReceipt, LandblockSourceLayer, LoadAudioRequest, LoadTexturePixelsRequest,
     PossessExplorerEntityRequest,
     explorer_entity_delivery::ExplorerEntityDelivery,
     explorer_entity_delivery::ExplorerFixedTickEnvelope,
@@ -16,10 +16,11 @@ use holtburger_3d_host::{
         HostKinematicBoomIntentRequest, HostKinematicBoomRuntime, HostKinematicBoomStartRequest,
     },
     host_simulation_runtime::{CollisionSource, HostSimulationRuntime, SimulationInterestRequest},
-    load_active_region_data_bytes, load_animation_bytes, load_landblock_profile_response,
-    load_landblock_source_batch_bytes, load_motion_table_closure_ids, load_particle_emitter_bytes,
-    load_particle_meshes_bytes, load_physics_script_bytes, load_physics_script_table_bytes,
-    load_sky_source_bytes, load_sound_table_bytes, load_texture_pixels_bytes,
+    load_active_region_data_bytes, load_animation_bytes, load_audio_bytes,
+    load_landblock_profile_response, load_landblock_source_batch_bytes,
+    load_motion_table_closure_ids, load_particle_emitter_bytes, load_particle_meshes_bytes,
+    load_physics_script_bytes, load_physics_script_table_bytes, load_sky_source_bytes,
+    load_sound_table_bytes, load_texture_pixels_bytes,
     setup_visual_source::load_setup_visual_source_bytes,
 };
 use holtburger_content::{ContentDecodeCache, ContentRepository};
@@ -128,6 +129,8 @@ struct ExplorerPossessionTickResponse {
 }
 
 struct DevHostState {
+    /// Static creation queries use the same repository as the production host adapter.
+    repository: Arc<ContentRepository>,
     /// Static world-map owner shared with production sidecar commands.
     world_map: holtburger_3d_host::world_map::WorldMapService,
     content: ContentAssetRuntime,
@@ -317,6 +320,74 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
             match load_sound_table_bytes(runtime, &request.sound_table_id).await {
                 Ok(bytes) => {
                     write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/audio") => {
+            let request = serde_json::from_slice::<LoadAudioRequest>(&request.body)?;
+            match load_audio_bytes(runtime, &request.sound_id).await {
+                Ok(bytes) => {
+                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("GET", "/character-creation-catalog") => {
+            let result = state
+                .repository
+                .read_character_gen_catalog()
+                .and_then(|catalog| {
+                    holtburger_3d_host::character_creation::CharacterCreationCatalog::from_catalog(
+                        &catalog,
+                    )
+                });
+            match result {
+                Ok(catalog) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&catalog)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        // Diagnostic validation only: build the production request without sending it to a server.
+        ("POST", "/character-creation-build") => {
+            let draft = serde_json::from_slice::<
+                holtburger_3d_host::character_creation::CharacterCreationDraft,
+            >(&request.body)?;
+            let result = state
+                .repository
+                .read_character_gen_catalog()
+                .and_then(|catalog| draft.build_request(Arc::new(catalog)));
+            match result {
+                Ok(request) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&serde_json::json!({ "name": request.name }))?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/character-creation-appearance") => {
+            let request: holtburger_3d_host::character_creation::CharacterCreationAppearanceRequest = serde_json::from_slice(&request.body)?;
+            match request.resolve(&state.repository) {
+                Ok(visual) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&visual)?,
+                    )
+                    .await
                 }
                 Err(error) => write_error(&mut stream, error).await,
             }
@@ -682,7 +753,9 @@ fn discover_host_state() -> anyhow::Result<DevHostState> {
     )));
     let entities = Arc::new(ExplorerEntityDriver::new(
         catalog,
-        Arc::new(DatExplorerEntityContentPreparer::new(repository)),
+        Arc::new(DatExplorerEntityContentPreparer::new(Arc::clone(
+            &repository,
+        ))),
         Arc::new(SystemExplorerEntityClock),
         Arc::clone(&runtime),
         Arc::clone(&simulation),
@@ -692,6 +765,7 @@ fn discover_host_state() -> anyhow::Result<DevHostState> {
         Arc::clone(&simulation),
     )?);
     Ok(DevHostState {
+        repository,
         world_map,
         content,
         motion: motion_catalog,

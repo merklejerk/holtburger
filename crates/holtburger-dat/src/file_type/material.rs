@@ -403,6 +403,22 @@ pub struct ObjDesc {
 }
 
 impl ObjDesc {
+    /// Overlay authored substitutions without changing this description's base palette.
+    ///
+    /// Retail `ObjDesc::operator+=` (acclient.c:448943) preserves the destination palette and
+    /// normalizes duplicates using the same rules as clothing and decoded part/texture changes.
+    pub fn overlay(&mut self, source: &Self) {
+        for palette in &source.sub_palettes {
+            add_sub_palette_retail(&mut self.sub_palettes, palette.clone());
+        }
+        for texture in &source.texture_changes {
+            add_texture_change_retail(&mut self.texture_changes, texture.clone());
+        }
+        for part in &source.anim_part_changes {
+            add_anim_part_change_retail(&mut self.anim_part_changes, part.clone());
+        }
+    }
+
     pub fn empty() -> Self {
         Self {
             palette_id: None,
@@ -976,6 +992,52 @@ mod tests {
     use std::io::Cursor;
 
     use super::*;
+
+    #[test]
+    fn overlay_preserves_base_palette_and_replaces_ordered_substitutions() {
+        let mut destination = ObjDesc {
+            palette_id: Some(1),
+            sub_palettes: vec![SubPalette {
+                sub_id: 2,
+                offset: 0,
+                num_colors: 192,
+            }],
+            texture_changes: vec![TextureMapChange {
+                part_index: 1,
+                old_texture: 3,
+                new_texture: 4,
+            }],
+            anim_part_changes: vec![AnimationPartChange {
+                part_index: 1,
+                part_id: 5,
+            }],
+        };
+        let source = ObjDesc {
+            palette_id: Some(99),
+            sub_palettes: vec![SubPalette {
+                sub_id: 6,
+                offset: 0,
+                num_colors: 192,
+            }],
+            texture_changes: vec![TextureMapChange {
+                part_index: 1,
+                old_texture: 3,
+                new_texture: 7,
+            }],
+            anim_part_changes: vec![AnimationPartChange {
+                part_index: 1,
+                part_id: 8,
+            }],
+        };
+        destination.overlay(&source);
+        assert_eq!(
+            destination,
+            ObjDesc {
+                palette_id: Some(1),
+                ..source
+            }
+        );
+    }
 
     #[test]
     fn parses_palette_argb_table() {

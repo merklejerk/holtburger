@@ -31,7 +31,7 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
         ClientViewEvent::StatusUpdate {
             state:
                 holtburger_core::ClientState::Disconnected
-                | holtburger_core::ClientState::CharacterSelection(_),
+                | holtburger_core::ClientState::CharacterSelection,
         } => {
             state.data.progression = Default::default();
             UpdateResult::redraw()

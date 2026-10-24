@@ -788,6 +788,7 @@
 		Extract<ClientLifecycleUiState, { kind: "character-selection" }>
 	>({
 		kind: "character-selection",
+		maxSlots: 11,
 		selectedGuid: null,
 		characters: [
 			{ guid: 1, name: "Wayfarer", slot: 0, deleteTime: 0 },
@@ -1355,6 +1356,8 @@
 		const playerName = playerGuid === 1 ? "Wayfarer" : "Wayfarer II";
 		emitInteractionEvent("client-current-state", {
 			lifecycle: { kind: "in-world" },
+			characterManagement: { kind: "idle" },
+			playerVisualCapture: null,
 			entityCollisionDisabled: false,
 			canTeleportFromMap: false,
 			recallDestinations: [],
@@ -2307,6 +2310,7 @@
 		try {
 			emitInteractionEvent("client-lifecycle-changed", {
 				kind: "character-selection",
+				maxSlots: 11,
 				characters: [],
 			});
 			emitInteractionEvent("client-popup-string", { message: longMessage });
@@ -4836,6 +4840,7 @@
 				emitInteractionEvent("client-housing-updated", emptyHousing());
 				emitInteractionEvent("client-lifecycle-changed", {
 					kind: "character-selection",
+					maxSlots: 11,
 					characters: [],
 				});
 				emitInteractionBaseline(playerGuid);
@@ -5282,6 +5287,8 @@
 					dispose: async () => undefined,
 					diagnostics: () => null,
 					ready: Promise.resolve(),
+					replaceSource: async () => ({ kind: "installed" }),
+					withdrawSource: async () => undefined,
 					setViewport: () => undefined,
 				}),
 			}}
@@ -5479,6 +5486,10 @@
 				<header class="ui-frame">Asheron’s Call</header>
 				<div class="ui-body">
 					<ClientCharacterSelect
+						visualCache={null}
+						management={{ kind: "idle" }}
+						creation={null}
+						previewService={null}
 						state={characterState}
 						{entryPending}
 						onChoose={(guid) =>

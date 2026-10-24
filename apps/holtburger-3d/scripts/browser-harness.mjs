@@ -178,6 +178,13 @@ try {
 			evidence: result.worldMapPanel,
 			consoleMessages: result.consoleMessages,
 		};
+	} else if (options.pregamePreview) {
+		report = {
+			suite: "pregame-preview",
+			passed: true,
+			evidence: result.pregamePreview,
+			browserErrors,
+		};
 	} else if (options.worldMap) {
 		report = {
 			suite: "world-map",
@@ -595,6 +602,7 @@ try {
 function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
+		pregamePreview: false,
 		worldMap: false,
 		clientWorldMap: false,
 		clientWaypoint: false,
@@ -763,6 +771,9 @@ function parseArgs(args) {
 			case "--client-connection":
 				parsed.clientHud = true;
 				parsed.clientConnection = true;
+				break;
+			case "--pregame-preview":
+				parsed.pregamePreview = true;
 				break;
 			case "--world-map":
 				parsed.worldMap = true;
@@ -1886,6 +1897,7 @@ Options:
                         Print only workload identity, particle/SAO metrics, timings, and errors.
   --nameplate-report-only
                         Print only renderer identity, errors, profiling, and nameplate evidence.
+  --pregame-preview    Exercise static asset ownership and direct preview draw before world startup.
   --object-preview-report-only
                         Print only renderer identity, errors, and object-preview evidence.
   --world-marker        Draw the depth-tested world marker and trajectory fixture.
@@ -5193,7 +5205,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const terrainGlTrace = options.traceTerrainGl ? "&traceTerrainGl=true" : "";
 	const worldMarker =
 		options.worldMarker === null ? "" : `&worldMarker=${options.worldMarker}`;
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}${options.worldMap ? "&world-map=1" : ""}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}${options.worldMap ? "&world-map=1" : ""}${options.pregamePreview ? "&pregame-preview=1" : ""}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -5247,6 +5259,8 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			});
 		});
 		await client.send("Runtime.enable");
+		if (options.pregamePreview)
+			return await probePregamePreview(client, consoleMessages);
 		if (options.worldMap)
 			return await probeWorldMap(client, consoleMessages, browserWebSocketUrl);
 		await waitForHarnessApi(client);
@@ -7245,6 +7259,47 @@ async function evaluateExpression(client, expression) {
 
 function delay(milliseconds) {
 	return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/** Isolated production preview preparation and draw without world startup. */
+async function probePregamePreview(client, consoleMessages) {
+	const deadline = Date.now() + 120_000;
+	while (Date.now() < deadline) {
+		const proof = await evaluateExpression(
+			client,
+			"globalThis.__HOLTBURGER_PREGAME_PREVIEW__?.read()",
+		);
+		if (proof?.kind === "failed") throw new Error(proof.message);
+		if (proof?.kind === "ready") {
+			if (
+				!proof.sharedAssetsSurvivedPreviewRetirement ||
+				proof.remainingSetupLeases !== 0
+			)
+				throw new Error(
+					"Pre-game preview broke shared asset ownership or leaked setup leases.",
+				);
+			if (
+				consoleMessages.some(
+					(message) =>
+						message.level === "error" || message.level === "exception",
+				)
+			)
+				throw new Error(
+					`Pre-game browser errors: ${JSON.stringify(consoleMessages)}`,
+				);
+			const screenshot = options.screenshotPath
+				? (await client.send("Page.captureScreenshot")).data
+				: "";
+			return {
+				pregamePreview: proof,
+				consoleMessages,
+				screenshot,
+				state: { error: null },
+			};
+		}
+		await delay(50);
+	}
+	throw new Error("Pre-game preview did not complete within 120 seconds.");
 }
 
 /** Production image decoding, Canvas2D rendering, retained-window ownership, and failure outcomes. */

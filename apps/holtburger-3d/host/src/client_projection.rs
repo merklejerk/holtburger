@@ -587,6 +587,8 @@ pub enum ClientLifecycleWire {
     Connecting,
     Authenticating,
     CharacterSelection {
+        /// Advertised account capacity, including occupied pending-deletion slots.
+        max_slots: u32,
         characters: Vec<ClientCharacterWire>,
     },
     EnteringWorld {
@@ -644,6 +646,10 @@ pub enum ClientWorldActivationCauseWire {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCurrentState {
+    /// Recoverable management operation and latest server-confirmed result.
+    pub character_management: holtburger_core::client::types::CharacterManagementState,
+    /// Latest complete gameplay visual, retained through event-stream recovery.
+    pub player_visual_capture: Option<holtburger_core::client::player_visual::PlayerVisualCapture>,
     /// Fellowship replacement baseline, independent of sibling events.
     pub party: Option<crate::client_party::ClientPartySnapshot>,
     /// Last accepted friend list; None until delivery or after retirement.
@@ -1364,6 +1370,10 @@ pub enum ClientHostEvent {
     /// Bounded-cadence shared transport observation.
     ConnectionUpdated(holtburger_core::client::connection::ConnectionSample),
     LifecycleChanged(ClientLifecycleWire),
+    /// Same retained management value as the current-state baseline.
+    CharacterManagementChanged(holtburger_core::client::types::CharacterManagementState),
+    /// Same complete visual level as the current-state recovery baseline.
+    PlayerVisualCaptureChanged(Option<holtburger_core::client::player_visual::PlayerVisualCapture>),
     CharacterMotionCapabilitiesUpdated(Option<ClientCharacterMotionCapabilitiesWire>),
     CharacterMotionFeedback(ClientCharacterMotionFeedbackWire),
     /// Accepted non-autonomous server movement for the local character.
@@ -1534,7 +1544,11 @@ impl From<&ClientLifecycleState> for ClientLifecycleWire {
         match state {
             ClientLifecycleState::Connecting => Self::Connecting,
             ClientLifecycleState::Authenticating => Self::Authenticating,
-            ClientLifecycleState::CharacterSelection { characters } => Self::CharacterSelection {
+            ClientLifecycleState::CharacterSelection {
+                characters,
+                max_slots,
+            } => Self::CharacterSelection {
+                max_slots: *max_slots,
                 characters: characters
                     .iter()
                     .map(|character| ClientCharacterWire {
@@ -1600,6 +1614,8 @@ impl From<holtburger_core::ClientPresentationDiscontinuityKind>
 impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
+            character_management: snapshot.character_management.clone(),
+            player_visual_capture: snapshot.player_visual_capture.clone(),
             party: snapshot.fellowship.as_ref().map(|party| {
                 crate::client_party::ClientPartySnapshot::project(party, snapshot.local_player_guid)
             }),
@@ -1741,6 +1757,12 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         }
         ClientViewEvent::LifecycleChanged(lifecycle) => {
             Some(ClientHostEvent::LifecycleChanged((&lifecycle).into()))
+        }
+        ClientViewEvent::CharacterManagementChanged(state) => {
+            Some(ClientHostEvent::CharacterManagementChanged(state))
+        }
+        ClientViewEvent::PlayerVisualCaptureChanged(capture) => {
+            Some(ClientHostEvent::PlayerVisualCaptureChanged(capture))
         }
         ClientViewEvent::CharacterMotionCapabilitiesUpdated { capabilities } => Some(
             ClientHostEvent::CharacterMotionCapabilitiesUpdated(capabilities.map(Into::into)),

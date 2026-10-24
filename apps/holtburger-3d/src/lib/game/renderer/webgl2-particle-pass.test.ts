@@ -200,6 +200,26 @@ const context = (
 });
 
 describe("WebGL2ParticlePass", () => {
+	it("retires replaced visual records while preserving the device's particle program", () => {
+		const { calls, gl } = fakeGl();
+		const create = vi.spyOn(gl, "createProgram");
+		const deleteProgram = vi.spyOn(gl, "deleteProgram");
+		const deleteTexture = vi.spyOn(gl, "deleteTexture");
+		const pass = new WebGL2ParticlePass(() => GEOMETRY);
+		const drawContext = context(gl);
+		const ranges = [batch(2, 1)];
+		pass.beginFrame(emptyRecordFrame());
+		pass.draw(drawContext, ranges);
+		pass.resetRecords();
+		expect(deleteTexture).toHaveBeenCalledOnce();
+		expect(deleteProgram).not.toHaveBeenCalled();
+		pass.beginFrame(emptyRecordFrame());
+		pass.draw(drawContext, ranges);
+		expect(calls.texImage2D).toHaveBeenCalledTimes(2);
+		expect(create).toHaveBeenCalledOnce();
+		pass.destroy();
+		expect(deleteProgram).toHaveBeenCalledOnce();
+	});
 	it("uploads once across sky and world draws, then consumes changes on the same mirror next frame", () => {
 		const { calls, draws, gl } = fakeGl();
 		const pass = new WebGL2ParticlePass(() => GEOMETRY);

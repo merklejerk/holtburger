@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { PresentationTeardownStack } from "./game-presentation-owner";
+import { PresentationTeardownStack } from "./presentation-teardown";
 
 describe("PresentationTeardownStack", () => {
 	it("releases every operation in reverse order and aggregates failures", async () => {
@@ -18,11 +18,13 @@ describe("PresentationTeardownStack", () => {
 			throw new Error("third failed");
 		});
 
-		await expect(stack.close()).rejects.toMatchObject({
+		const completion = stack.close();
+		await expect(completion).rejects.toMatchObject({
 			message: "Presentation teardown failed for: third, second.",
 		});
 		expect(order).toEqual(["third", "second", "first"]);
-		await stack.close();
+		expect(stack.close()).toBe(completion);
+		await expect(stack.close()).rejects.toBeInstanceOf(AggregateError);
 		expect(order).toEqual(["third", "second", "first"]);
 	});
 });

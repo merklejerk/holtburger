@@ -10,6 +10,7 @@ export type ClientLifecycleUiState =
 	| { readonly kind: "authenticating" }
 	| {
 			readonly kind: "character-selection";
+			readonly maxSlots: number;
 			readonly characters: readonly ClientCharacter[];
 			readonly selectedGuid: number | null;
 	  }

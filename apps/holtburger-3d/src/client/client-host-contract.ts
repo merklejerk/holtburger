@@ -1,3 +1,4 @@
+import { playerVisualCaptureSchema } from "./client-object-preview-contract";
 import { contractsSnapshotSchema } from "./client-contracts-contract";
 import {
 	allegianceSnapshotSchema,
@@ -375,6 +376,7 @@ const lifecycleSchema = z.discriminatedUnion("kind", [
 	z
 		.object({
 			kind: z.literal("character-selection"),
+			maxSlots: z.number().int().nonnegative(),
 			characters: z.array(characterSchema),
 		})
 		.strict(),
@@ -508,8 +510,30 @@ export const connectionSampleSchema = z
 	.strict();
 export type ClientConnectionSample = z.infer<typeof connectionSampleSchema>;
 
+/** Recoverable character-management level; no invented server request identifier. */
+export const characterManagementSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("idle") }).strict(),
+	z.object({ kind: z.literal("creating"), name: z.string() }).strict(),
+	z.object({ kind: z.literal("deleting") }).strict(),
+	z.object({ kind: z.literal("restoring"), guid }).strict(),
+	z.object({ kind: z.literal("created"), guid, name: z.string() }).strict(),
+	z
+		.object({
+			kind: z.literal("rejected"),
+			operation: z.enum(["create", "delete", "restore"]),
+			message: z.string(),
+		})
+		.strict(),
+	z.object({ kind: z.literal("uncertain"), message: z.string() }).strict(),
+]);
+export type CharacterManagementState = z.infer<
+	typeof characterManagementSchema
+>;
+
 const currentStateSchema = z
 	.object({
+		characterManagement: characterManagementSchema,
+		playerVisualCapture: playerVisualCaptureSchema.nullable(),
 		housing: housingSnapshotSchema,
 		canTeleportFromMap: z.boolean(),
 		recallDestinations: recallDestinationsSchema,

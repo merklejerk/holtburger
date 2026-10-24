@@ -113,7 +113,7 @@ describe("housing management review and receipt ownership", () => {
 		await Promise.resolve();
 		f.emit({
 			type: "lifecycle",
-			lifecycle: { kind: "character-selection", characters: [] },
+			lifecycle: { kind: "character-selection", maxSlots: 11, characters: [] },
 		});
 		f.emit({
 			type: "housing-management-finished",

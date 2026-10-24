@@ -39,10 +39,13 @@ import {
 	clientUserDataPath,
 } from "./client-user-data.js";
 import { clientWindowBoundsReachable } from "./client-window-settings.js";
+import { ClientVisualCacheStore } from "./client-visual-cache-store.js";
+import { playerVisualCaptureSchema } from "../src/client/client-object-preview-contract.js";
 
 const WINDOW_BACKGROUND_COLOR = "#0b0a08";
 const INITIAL_WINDOW_CONTENT_SIZE = Object.freeze({ width: 1440, height: 900 });
 const WINDOW_SETTINGS_WRITE_DELAY_MS = 250;
+const VISUAL_CACHE_WRITE_DELAY_MS = 500;
 
 if (!app.isPackaged) {
 	const developmentUserData = clientUserDataPath(
@@ -60,6 +63,7 @@ let quitting = false;
 let exitCode = 0;
 let fatalReported = false;
 let flushClientSettings: (() => Promise<void>) | undefined;
+let visualCache: ClientVisualCacheStore | undefined;
 const hostReady = createHostReadyGate<SidecarHostClient>();
 
 // The client dev entry uses a separate default port so two worktrees cannot silently share a
@@ -565,6 +569,25 @@ app.whenReady().then(async () => {
 		);
 	const window = createWindow(entry, restoredWindow?.settings ?? null);
 	if (settingsStore !== undefined && entry.clientStartup !== undefined) {
+		visualCache = new ClientVisualCacheStore(
+			join(app.getPath("userData"), "character-visuals"),
+			entry.clientStartup,
+			VISUAL_CACHE_WRITE_DELAY_MS,
+			(message) => {
+				console.error(message);
+				if (!window.isDestroyed() && !window.webContents.isDestroyed())
+					window.webContents.send("visual-cache:failure", message);
+			},
+		);
+		const cache = visualCache;
+		ipcMain.handle("visual-cache:read", (event, guid: unknown) => {
+			requireApplicationFrame(event, window);
+			return cache.read(requireCharacterGuid(guid));
+		});
+		ipcMain.handle("visual-cache:stage", (event, capture: unknown) => {
+			requireApplicationFrame(event, window);
+			cache.stage(playerVisualCaptureSchema.parse(capture));
+		});
 		installSettingsIpcBridge(
 			window,
 			settingsStore,
@@ -589,13 +612,28 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
-	if (quitting || (!hostClient && flushClientSettings === undefined)) return;
+	if (
+		quitting ||
+		(!hostClient &&
+			flushClientSettings === undefined &&
+			visualCache === undefined)
+	)
+		return;
 	quitting = true;
 	event.preventDefault();
-	Promise.all([
+	Promise.allSettled([
 		hostClient?.shutdown() ?? Promise.resolve(),
 		flushClientSettings?.() ?? Promise.resolve(),
+		visualCache?.close() ?? Promise.resolve(),
 	])
+		.then((results) => {
+			const failures = results.filter((result) => result.status === "rejected");
+			if (failures.length > 0)
+				throw new AggregateError(
+					failures.map((result) => result.reason),
+					"Application shutdown failed",
+				);
+		})
 		.catch((error) => {
 			exitCode = 1;
 			console.error("application shutdown failed", error);

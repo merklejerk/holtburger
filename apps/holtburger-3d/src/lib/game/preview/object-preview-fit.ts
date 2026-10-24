@@ -1,8 +1,14 @@
 import type { PlayingClip } from "../animation/animation-playback";
-import { sampleAnimationPoseOver } from "../animation/animation-playback";
-import { transformPoint3 } from "../math/matrices";
-import { type AABB3, type Mat4, Vec3 } from "../math/types";
-import { composeObjectPartTransform } from "../resolution/object-part-transform";
+import {
+	sampleAnimationPoseOver,
+	sampleAuthoredRootTransform,
+} from "../animation/animation-playback";
+import { transformPoint3, multiplyMat4 } from "../math/matrices";
+import { type AABB3, Mat4, Vec3 } from "../math/types";
+import {
+	composeObjectPartFrame,
+	composeObjectPartTransform,
+} from "../resolution/object-part-transform";
 import type { PartVisualTemplate } from "../systems/object-visual-template-repository";
 
 /** Stable articulated support volume consumed by the analytic preview camera. */
@@ -10,6 +16,76 @@ export interface ObjectPreviewFit {
 	readonly center: Vec3;
 	/** Packed XYZ triples; immutable after preparation and scanned only when camera policy changes. */
 	readonly supportPoints: Float32Array;
+}
+
+/** Narrow subject facts needed to sweep directly attached equipment through its animation. */
+interface FitSubject {
+	/** Already computed body support. */
+	readonly fit: ObjectPreviewFit;
+	/** Authored body pose used when no clip animates a part. */
+	readonly setupPose: readonly Mat4[];
+	/** Source scale affects rigid part translation independently from geometry scale. */
+	readonly scale: Vec3;
+	/** Ordered authored preview clips. */
+	readonly clips: readonly PlayingClip[];
+	/** Repeatable authored turns require a heading-invariant support envelope. */
+	readonly rotatesVisualRoot: boolean;
+}
+
+/** One child's independent animation envelope carried by a resolved holding location. */
+interface FitAttachment {
+	/** Subject part carrying the item. */
+	readonly parentPartIndex: number;
+	/** Authored rigid holding offset. */
+	readonly offsetTransform: Mat4;
+	/** Child support already includes its own source/default scales and placement. */
+	readonly fit: ObjectPreviewFit;
+}
+
+/** Fit body and held geometry together; callers deliberately exclude background models. */
+export function composeObjectPreviewFit(
+	body: FitSubject,
+	attachments: readonly FitAttachment[],
+): ObjectPreviewFit {
+	if (attachments.length === 0) return body.fit;
+	const points = Array.from(body.fit.supportPoints);
+	const visit = (pose: readonly Mat4[], root: Mat4): void => {
+		for (const attachment of attachments) {
+			const part = pose[attachment.parentPartIndex];
+			if (part === undefined)
+				throw new Error(
+					"Preview holding location names an absent subject part.",
+				);
+			const rigid = composeObjectPartFrame(part, body.scale, Mat4.identity());
+			const frame = multiplyMat4(
+				root,
+				multiplyMat4(rigid, attachment.offsetTransform),
+			);
+			const support = attachment.fit.supportPoints;
+			for (let index = 0; index < support.length; index += 3) {
+				const x = support[index];
+				const y = support[index + 1];
+				const z = support[index + 2];
+				if (x === undefined || y === undefined || z === undefined)
+					throw new Error(
+						"Preview equipment support is not composed of XYZ triples.",
+					);
+				const point = transformPoint3(frame, new Vec3(x, y, z));
+				points.push(point.x, point.y, point.z);
+			}
+		}
+	};
+	visit(body.setupPose, Mat4.identity());
+	for (const clip of body.clips)
+		for (let frame = clip.lowFrame; frame <= clip.highFrame; frame += 0.25) {
+			visit(
+				sampleAnimationPoseOver(clip, frame, body.setupPose),
+				sampleAuthoredRootTransform(clip, frame) ?? Mat4.identity(),
+			);
+		}
+	return body.rotatesVisualRoot
+		? horizontalRotationInvariantFit(points)
+		: fitFromSupportPoints(points);
 }
 
 /**

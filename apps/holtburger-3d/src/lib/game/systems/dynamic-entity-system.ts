@@ -231,7 +231,9 @@ export class DynamicEntitySystem<
 > {
 	readonly #scene: SceneGraph;
 	readonly #placements: DynamicEntityPlacementSystem;
+	/** World-owned GPU templates are borrowed; this system retires only its resident handles. */
 	readonly #templates: ObjectVisualTemplateRepositoryPort<TTemplateOwnerId>;
+	/** App-owned CPU animation repository also serves isolated previews after world retirement. */
 	readonly #animations: AnimationAssetRepository;
 	readonly #scripts: PhysicsScriptRepository;
 	readonly #emitters: ParticleEmitterRepository;
@@ -1301,8 +1303,6 @@ export class DynamicEntitySystem<
 		this.#pendingTemplateStages.clear();
 		for (const ownerId of [...this.#owners.keys()]) this.removeOwner(ownerId);
 		await Promise.allSettled([...this.#pendingPreparations]);
-		await this.#templates.destroy();
-		this.#animations.destroy();
 	}
 
 	/**

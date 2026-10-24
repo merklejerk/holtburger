@@ -110,6 +110,29 @@ See the [DDD Documentation](data_download.md) for detailed packet structures and
 - `uint32` `use_turbine_chat`.
 - `uint32` `has_tod_expansion`.
 
+This roster has no level, setup/model, appearance, or equipment description. Each entry's server
+slot is its ordinal in this list, independent of frontend sorting. Offline model previews require
+client-owned observations from a prior world session; the roster does not supply reconstruction
+data. See `ACE/Source/ACE.Server/Network/GameMessages/Messages/GameMessageCharacterList.cs`.
+
+### 4.3 Character Creation Confirmation
+
+Creation uses `0xF656` (`CharacterCreate`, C2S) and `0xF643` (`CharacterCreateResponse`, S2C).
+The response starts with a `uint32` verification result. On success only, it continues with the
+`uint32` character GUID, `String16L` confirmed name, and a trailing `uint32` (ACE writes zero).
+Failure responses contain only the result. There is no client request ID in this response.
+
+ACE sends successful creation confirmation without resending `CharacterList`. A client must
+reconcile the confirmed identity into its retained roster and preserve capacity/slot metadata.
+Sending a request does not imply success or world entry. A closed/shutting-down world can reject
+creation through `CharacterError::LogonServerFull` instead of `CharacterCreateResponse`, so that
+error path must also resolve the pending operation. A disconnect before a conclusive response
+does not establish whether creation succeeded; do not automatically retry it.
+
+References: `ACE/Source/ACE.Server/Network/Handlers/CharacterHandler.cs`,
+`ACE/Source/ACE.Server/Network/GameMessages/Messages/GameMessageCharacterCreateResponse.cs`,
+and `crates/holtburger-protocol/src/messages/character/types.rs`.
+
 ## Step 5: Character Selection & World Entry
 Entering the world is a multi-stage process that synchronizes the client and server world-state.
 

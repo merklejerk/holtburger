@@ -80,6 +80,28 @@ pub(super) enum ScenePlacementScope {
 }
 
 impl WorldState {
+    /// Direct attachment identities, including parent announcements awaiting child descriptions.
+    /// Consumers proving a complete capture must inspect every identity rather than only hydrated
+    /// entities. This borrows the existing retention policy; it neither extends deadlines nor retains
+    /// another child registry. The ordered set also makes cold capture order deterministic.
+    pub fn expected_attachment_children(&self, parent: Guid) -> BTreeSet<Guid> {
+        self.entities
+            .iter()
+            .filter(|entity| {
+                entity
+                    .attachment()
+                    .is_some_and(|link| link.parent == parent)
+            })
+            .map(|entity| entity.guid)
+            .chain(
+                self.attachments
+                    .announcements
+                    .iter()
+                    .filter_map(|(guid, link)| (link.parent == parent).then_some(*guid)),
+            )
+            .collect()
+    }
+
     /// End missing-endpoint lifetimes before new input can refer to a fresh placeholder.
     pub(crate) fn expire_missing_placement_dependencies(&mut self) {
         let now = self.current_server_time();

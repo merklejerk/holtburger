@@ -8,8 +8,41 @@ use holtburger_core::{ActionResultReason, ClientCommand, ClientState, ClientView
 use holtburger_protocol::errors::CharacterError;
 
 impl AppState {
-    fn handle_setup_event(&mut self, event: &ClientViewEvent, _result: &mut UpdateResult) {
+    fn handle_setup_event(&mut self, event: &ClientViewEvent, result: &mut UpdateResult) {
         match event {
+            ClientViewEvent::LifecycleChanged(
+                holtburger_core::ClientLifecycleState::CharacterSelection { characters, .. },
+            ) => {
+                if let Page::Selection(selection) = &mut self.page {
+                    let selected = selection
+                        .characters
+                        .get(selection.selected_character_index)
+                        .map(|entry| entry.character.guid);
+                    selection.characters = characters
+                        .iter()
+                        .map(|character| CharacterDashboardEntry {
+                            slot: character.slot,
+                            character: holtburger_protocol::messages::CharacterEntry {
+                                guid: character.guid,
+                                name: character.name.clone(),
+                                delete_time: character.delete_time,
+                            },
+                        })
+                        .collect();
+                    selection
+                        .characters
+                        .sort_by_key(|entry| entry.character.name.to_lowercase());
+                    selection.selected_character_index = selected
+                        .and_then(|guid| {
+                            selection
+                                .characters
+                                .iter()
+                                .position(|entry| entry.character.guid == guid)
+                        })
+                        .unwrap_or(0);
+                    result.merge(UpdateResult::redraw());
+                }
+            }
             ClientViewEvent::WorldNameUpdated(name) => {
                 self.world_name = name.clone();
                 if let Page::Game(ref mut game) = self.page {
@@ -43,7 +76,6 @@ impl AppState {
                     account_name: self.account_name.clone(),
                     screen: Default::default(),
                     creation: CharacterCreationState::from_repository(self.content.as_ref()),
-                    pending_create: None,
                     delete_confirmation: None,
                 }));
             }
@@ -122,6 +154,7 @@ impl AppState {
         // Handle setup and chat events regardless of being locally in-game
         match &event {
             ClientViewEvent::CharacterList(_)
+            | ClientViewEvent::LifecycleChanged(_)
             | ClientViewEvent::ServerTimeUpdated { .. }
             | ClientViewEvent::WorldNameUpdated(_) => {
                 self.handle_setup_event(&event, &mut result);

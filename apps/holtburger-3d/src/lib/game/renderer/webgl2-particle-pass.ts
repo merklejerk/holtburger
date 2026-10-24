@@ -362,13 +362,24 @@ export class WebGL2ParticlePass {
 		return this.#diagnostics;
 	}
 
-	destroy(): void {
+	/** Retire one visual's spawn records while retaining the context's lazily compiled program. */
+	resetRecords(): void {
 		this.#pendingFrame = null;
 		this.#records?.destroy();
 		this.#records = null;
+		this.#worldBatches.length = 0;
+		this.#diagnostics = {
+			drawnBatchCount: 0,
+			uploadedRecordRowCount: 0,
+			drawnParticleCount: 0,
+			unresolvedBatchCount: 0,
+		};
+	}
+
+	destroy(): void {
+		this.resetRecords();
 		if (this.#program) this.#gl?.deleteProgram(this.#program.program);
 		this.#program = null;
 		this.#gl = null;
-		this.#worldBatches.length = 0;
 	}
 }

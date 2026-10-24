@@ -1,3 +1,4 @@
+import type { DatAssetId } from "../game-types";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import { ParticleMeshCache } from "../behavior/particle-mesh-cache";
@@ -11,8 +12,9 @@ import {
 	transformPoint3,
 } from "../math/matrices";
 import { Mat4, Vec3 } from "../math/types";
+import type { ResolvedObjectPreviewViewport } from "../preview/object-preview-viewport";
 import type { ObjectPreviewFrame } from "../preview/object-preview-presentation";
-import type { PreparedObjectPreviewAssets } from "../preview/object-preview-assets";
+import type { PreparedObjectPreviewAssets } from "../preview/object-preview-composition";
 import type { PartRenderState } from "../systems/components";
 import type { TexturePreparer } from "../textures/texture-preparer";
 import {
@@ -29,7 +31,7 @@ import {
 } from "./webgl2-lighting";
 import {
 	OBJECT_PREVIEW_VERTICAL_FOV_DEGREES,
-	resolveObjectPreviewViewTransform,
+	resolveObjectPreviewCompositionView,
 	type ObjectPreviewViewTransform,
 } from "./object-preview-camera";
 import { ParticleMeshResidency } from "./particle-mesh-residency";
@@ -95,7 +97,8 @@ interface PreviewDynamicPart {
 }
 
 interface PreviewRendererDependencies {
-	readonly particleMeshSource: ParticleMeshSource;
+	/** Fresh source per staged visual; the bundle's particle cache owns its retirement. */
+	readonly particleMeshSource: () => ParticleMeshSource;
 	/** Diagnostic harness only; production leaves the composited default buffer discardable. */
 	readonly preserveDrawingBuffer?: boolean;
 	readonly texturePreparer: TexturePreparer;
@@ -105,14 +108,14 @@ interface PreviewCameraCache {
 	readonly height: number;
 	readonly transform: ObjectPreviewViewTransform;
 	readonly width: number;
-	readonly yawRadians: number;
+	readonly viewport: ObjectPreviewRenderViewport;
 }
 
 /** Device pixels and yaw supplied by the controller for one admitted preview frame. */
-export interface ObjectPreviewRenderViewport {
-	readonly extent: RenderExtent;
-	readonly yawRadians: number;
-}
+export type ObjectPreviewRenderViewport = Pick<
+	ResolvedObjectPreviewViewport,
+	"extent" | "cameraYawRadians" | "subjectTransform" | "framing"
+>;
 
 /** Cold probe facts for lifecycle verification; ordinary UI never samples these per frame. */
 export interface ObjectPreviewRendererDiagnostics {
@@ -125,8 +128,229 @@ export interface ObjectPreviewRendererDiagnostics {
 	readonly transparentRangeCount: number;
 }
 
-/** Dedicated transparent WebGL2 device for one mounted object preview. */
+/** Staged GPU resources; committing transfers ownership to the retained renderer synchronously. */
+export interface ObjectPreviewRendererReplacement {
+	/** Install this visual immediately and await retirement of the previous visual. */
+	commit(): Promise<void>;
+	/** Release an uncommitted visual; an installed visual belongs to the renderer. */
+	dispose(): Promise<void>;
+}
+
+/** Mounted device/program lifetime, independent of the currently installed visual bundle. */
 export class WebGL2PreviewRenderer {
+	readonly #canvas: HTMLCanvasElement;
+	readonly #gl: WebGL2RenderingContext;
+	readonly #program: WebGL2DynamicObjectProgram;
+	readonly #particles: WebGL2ParticlePass;
+	readonly #dependencies: PreviewRendererDependencies;
+	readonly #retirements = new Set<Promise<void>>();
+	#visual: WebGL2PreviewVisual | null;
+	#staging: Promise<WebGL2PreviewVisual> | null = null;
+	#retirement: Promise<void> | null = null;
+	#retirementFailure: unknown = null;
+	#destroyed = false;
+	#contextLost = false;
+	#frameCount = 0;
+
+	readonly #onContextLost = (event: Event): void => {
+		event.preventDefault();
+		this.#contextLost = true;
+	};
+
+	private constructor(
+		canvas: HTMLCanvasElement,
+		gl: WebGL2RenderingContext,
+		program: WebGL2DynamicObjectProgram,
+		dependencies: PreviewRendererDependencies,
+		visual: WebGL2PreviewVisual,
+	) {
+		this.#canvas = canvas;
+		this.#gl = gl;
+		this.#program = program;
+		this.#dependencies = dependencies;
+		this.#visual = visual;
+		this.#particles = new WebGL2ParticlePass(
+			(id) => this.#visual?.resolveParticleMesh(id) ?? null,
+		);
+		canvas.addEventListener("webglcontextlost", this.#onContextLost);
+	}
+
+	static async build(
+		canvas: HTMLCanvasElement,
+		assets: PreparedObjectPreviewAssets,
+		dependencies: PreviewRendererDependencies,
+	): Promise<WebGL2PreviewRenderer> {
+		const gl = canvas.getContext("webgl2", {
+			alpha: true,
+			antialias: true,
+			depth: true,
+			premultipliedAlpha: true,
+			preserveDrawingBuffer: dependencies.preserveDrawingBuffer ?? false,
+			stencil: false,
+		});
+		if (!gl) throw new Error("WebGL2 is not available for object previews.");
+		const program = createWebGL2ObjectProgram(gl, {
+			distanceFog: false,
+			materialSource: "table",
+			outdoorPssm: false,
+			portalVisibility: false,
+			transformSource: "pose-table",
+		});
+		try {
+			const visual = await WebGL2PreviewVisual.build(
+				canvas,
+				gl,
+				assets,
+				dependencies,
+				program,
+			);
+			return new WebGL2PreviewRenderer(
+				canvas,
+				gl,
+				program,
+				dependencies,
+				visual,
+			);
+		} catch (cause) {
+			gl.deleteProgram(program.program);
+			throw cause;
+		}
+	}
+
+	/** Prepare a disjoint bundle without altering the resources consumed by the installed draw. */
+	async prepareReplacement(
+		assets: PreparedObjectPreviewAssets,
+	): Promise<ObjectPreviewRendererReplacement> {
+		this.#assertUsable();
+		if (this.#staging !== null)
+			throw new Error("A preview visual is already being staged.");
+		const pending = WebGL2PreviewVisual.build(
+			this.#canvas,
+			this.#gl,
+			assets,
+			this.#dependencies,
+			this.#program,
+		);
+		this.#staging = pending;
+		let visual: WebGL2PreviewVisual;
+		try {
+			visual = await pending;
+		} catch (cause) {
+			if (this.#staging === pending) this.#staging = null;
+			throw cause;
+		}
+		if (this.#destroyed || this.#contextLost) {
+			await visual.destroy();
+			if (this.#staging === pending) this.#staging = null;
+			throw new DOMException(
+				"Preview device closed during visual staging.",
+				"AbortError",
+			);
+		}
+		let state: "staged" | "installed" | "disposed" = "staged";
+		return {
+			commit: () => {
+				this.#assertUsable();
+				if (state !== "staged" || this.#staging !== pending)
+					throw new Error("Preview visual replacement is no longer staged.");
+				state = "installed";
+				this.#staging = null;
+				this.#particles.resetRecords();
+				const previous = this.#visual;
+				this.#visual = visual;
+				return previous === null ? Promise.resolve() : this.#retire(previous);
+			},
+			dispose: () => {
+				if (state === "installed") return Promise.resolve();
+				state = "disposed";
+				if (this.#staging === pending) this.#staging = null;
+				return this.#retire(visual);
+			},
+		};
+	}
+
+	draw(frame: ObjectPreviewFrame, viewport: ObjectPreviewRenderViewport): void {
+		this.#assertUsable();
+		if (this.#visual === null) return;
+		this.#visual.draw(frame, viewport, this.#particles);
+		this.#frameCount++;
+	}
+
+	getDiagnostics(): ObjectPreviewRendererDiagnostics | null {
+		if (this.#visual === null) return null;
+		return {
+			...this.#visual.getDiagnostics(),
+			frameCount: this.#frameCount,
+			particle: this.#particles.getDiagnostics(),
+		};
+	}
+
+	/** Withdraw the visible subject immediately while retaining the mounted device and program. */
+	clear(): Promise<void> {
+		this.#assertUsable();
+		this.#particles.resetRecords();
+		const previous = this.#visual;
+		this.#visual = null;
+		this.#gl.clearColor(0, 0, 0, 0);
+		this.#gl.colorMask(true, true, true, true);
+		this.#gl.depthMask(true);
+		this.#gl.clear(this.#gl.COLOR_BUFFER_BIT | this.#gl.DEPTH_BUFFER_BIT);
+		return previous === null ? Promise.resolve() : this.#retire(previous);
+	}
+
+	destroy(): Promise<void> {
+		if (this.#retirement !== null) return this.#retirement;
+		this.#destroyed = true;
+		this.#canvas.removeEventListener("webglcontextlost", this.#onContextLost);
+		return (this.#retirement = this.#destroy());
+	}
+
+	async #destroy(): Promise<void> {
+		const staged = this.#staging;
+		const visual = this.#visual;
+		this.#staging = null;
+		this.#visual = null;
+		const completions = [...this.#retirements];
+		if (visual !== null) completions.push(visual.destroy());
+		if (staged !== null)
+			completions.push(staged.then((value) => value.destroy()));
+		const results = await Promise.allSettled(completions);
+		this.#particles.destroy();
+		this.#gl.deleteProgram(this.#program.program);
+		const failures = results.flatMap((result) =>
+			result.status === "rejected" ? [result.reason] : [],
+		);
+		if (this.#retirementFailure !== null)
+			failures.push(this.#retirementFailure);
+		if (failures.length > 0)
+			throw new AggregateError(failures, "Preview visual retirement failed.");
+	}
+
+	#retire(visual: WebGL2PreviewVisual): Promise<void> {
+		const completion = visual.destroy();
+		this.#retirements.add(completion);
+		void completion.then(
+			() => this.#retirements.delete(completion),
+			(cause: unknown) => {
+				this.#retirements.delete(completion);
+				this.#retirementFailure ??= cause;
+			},
+		);
+		return completion;
+	}
+
+	#assertUsable(): void {
+		if (this.#destroyed)
+			throw new Error("Cannot use a destroyed preview renderer.");
+		if (this.#contextLost)
+			throw new Error(
+				"Object preview WebGL2 context was lost; remount is required.",
+			);
+	}
+}
+
+/** Replaceable GPU visual bundle borrowing the mounted preview device and object program. */
+class WebGL2PreviewVisual {
 	readonly #canvas: HTMLCanvasElement;
 	readonly #gl: WebGL2RenderingContext;
 	readonly #assets: PreparedObjectPreviewAssets;
@@ -138,7 +362,6 @@ export class WebGL2PreviewRenderer {
 	readonly #poses: WebGL2DynamicPosePages<typeof PREVIEW_POSE_KEY>;
 	readonly #particleResidency: ParticleMeshResidency;
 	readonly #particleMeshes: ParticleMeshCache;
-	readonly #particles: WebGL2ParticlePass;
 	readonly #program: WebGL2DynamicObjectProgram;
 	readonly #geometryResource: GeometryResourceKey;
 	readonly #geometry: ReturnType<WebGL2ResourceManager["getGeometry"]>;
@@ -160,15 +383,9 @@ export class WebGL2PreviewRenderer {
 	readonly #matrixScratch = new Float32Array(16);
 	readonly #depthScratch = Vec3.zero();
 	#destroyed = false;
-	#contextLost = false;
+	#retirement: Promise<void> | null = null;
 	#drawnObjectRangeCount = 0;
-	#frameCount = 0;
 	#cameraCache: PreviewCameraCache | null = null;
-
-	readonly #onContextLost = (event: Event): void => {
-		event.preventDefault();
-		this.#contextLost = true;
-	};
 
 	private constructor(
 		canvas: HTMLCanvasElement,
@@ -182,7 +399,6 @@ export class WebGL2PreviewRenderer {
 		poses: WebGL2DynamicPosePages<typeof PREVIEW_POSE_KEY>,
 		particleResidency: ParticleMeshResidency,
 		particleMeshes: ParticleMeshCache,
-		particles: WebGL2ParticlePass,
 		program: WebGL2DynamicObjectProgram,
 		geometryResource: GeometryResourceKey,
 		appearance: Extract<PreparedDynamicAppearance, { kind: "drawable" }>,
@@ -201,7 +417,6 @@ export class WebGL2PreviewRenderer {
 		this.#poses = poses;
 		this.#particleResidency = particleResidency;
 		this.#particleMeshes = particleMeshes;
-		this.#particles = particles;
 		this.#program = program;
 		this.#geometryResource = geometryResource;
 		this.#geometry = resources.getGeometry(geometryResource);
@@ -217,25 +432,15 @@ export class WebGL2PreviewRenderer {
 			renderState: { textureVelocity: [0, 0], translucency: 0 },
 		}));
 		this.#poseInput = new Map([[PREVIEW_POSE_KEY, this.#parts]]);
-		canvas.addEventListener("webglcontextlost", this.#onContextLost);
 	}
 
 	static async build(
 		canvas: HTMLCanvasElement,
+		gl: WebGL2RenderingContext,
 		assets: PreparedObjectPreviewAssets,
 		dependencies: PreviewRendererDependencies,
-	): Promise<WebGL2PreviewRenderer> {
-		const gl = canvas.getContext("webgl2", {
-			alpha: true,
-			antialias: true,
-			depth: true,
-			// Object and particle RGB is accumulated in premultiplied form; coverage-alpha blending
-			// below gives the DOM compositor the matching transparent-canvas contract.
-			premultipliedAlpha: true,
-			preserveDrawingBuffer: dependencies.preserveDrawingBuffer ?? false,
-			stencil: false,
-		});
-		if (!gl) throw new Error("WebGL2 is not available for object previews.");
+		program: WebGL2DynamicObjectProgram,
+	): Promise<WebGL2PreviewVisual> {
 		const resources = new WebGL2ResourceManager(gl);
 		const textures = new WebGL2PreviewTextureResidency(resources);
 		const samplers = new WebGL2TextureSamplerCatalog(
@@ -264,16 +469,13 @@ export class WebGL2PreviewRenderer {
 		const poses = new WebGL2DynamicPosePages<typeof PREVIEW_POSE_KEY>(gl);
 		const particleResidency = new ParticleMeshResidency(resources);
 		const particleMeshes = new ParticleMeshCache(
-			dependencies.particleMeshSource,
+			dependencies.particleMeshSource(),
 			(batch) => particleResidency.install(batch, dependencies.texturePreparer),
 		);
-		const particles = new WebGL2ParticlePass((id) =>
-			particleResidency.resolve(id),
-		);
+
 		let geometryResource: GeometryResourceKey | null = null;
 		let releaseAppearance: (() => void) | null = null;
 		let fallbackResource: Texture2DResourceKey | null = null;
-		let program: WebGL2DynamicObjectProgram | null = null;
 		try {
 			await textures.install(
 				assets.template.textureRequirements,
@@ -290,13 +492,7 @@ export class WebGL2PreviewRenderer {
 			if (appearance.kind === "empty")
 				throw new Error("Object preview visual has no drawable ranges.");
 			await particleMeshes.prepare(assets.particleMeshIds);
-			program = createWebGL2ObjectProgram(gl, {
-				distanceFog: false,
-				materialSource: "table",
-				outdoorPssm: false,
-				portalVisibility: false,
-				transformSource: "pose-table",
-			});
+
 			fallbackResource = resources.createTexture2D({
 				data: Uint8Array.of(255, 255, 255, 255),
 				format: TexturePixelFormat.RGBA8,
@@ -305,7 +501,7 @@ export class WebGL2PreviewRenderer {
 				width: 1,
 			});
 			const fallbackBinding = resources.getTexture2D(fallbackResource);
-			return new WebGL2PreviewRenderer(
+			return new WebGL2PreviewVisual(
 				canvas,
 				gl,
 				assets,
@@ -317,7 +513,6 @@ export class WebGL2PreviewRenderer {
 				poses,
 				particleResidency,
 				particleMeshes,
-				particles,
 				program,
 				geometryResource,
 				appearance,
@@ -335,10 +530,8 @@ export class WebGL2PreviewRenderer {
 				},
 			);
 		} catch (cause) {
-			if (program) gl.deleteProgram(program.program);
 			if (fallbackResource) resources.releaseResource(fallbackResource);
 			releaseAppearance?.();
-			particles.destroy();
 			particleMeshes.destroy();
 			particleResidency.destroy();
 			poses.destroy();
@@ -351,10 +544,14 @@ export class WebGL2PreviewRenderer {
 		}
 	}
 
-	draw(frame: ObjectPreviewFrame, viewport: ObjectPreviewRenderViewport): void {
+	draw(
+		frame: ObjectPreviewFrame,
+		viewport: ObjectPreviewRenderViewport,
+		particles: WebGL2ParticlePass,
+	): void {
 		this.#assertUsable();
 		validateRenderExtent(viewport.extent, "Object preview canvas");
-		if (!Number.isFinite(viewport.yawRadians))
+		if (!Number.isFinite(viewport.cameraYawRadians))
 			throw new Error("Object preview yaw must be finite.");
 		this.#resize(viewport.extent);
 		const camera = this.#resolveCamera(viewport);
@@ -378,8 +575,8 @@ export class WebGL2PreviewRenderer {
 		gl.disable(gl.CULL_FACE);
 		gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 		this.#drawObject(projection, view);
-		this.#particles.beginFrame(frame.particleRecords);
-		this.#particles.draw(
+		particles.beginFrame(frame.particleRecords);
+		particles.draw(
 			{
 				// Particle records remain in presentation coordinates. Re-anchoring by the
 				// fit center applies the same translation as objectRoot without rewriting them.
@@ -405,10 +602,19 @@ export class WebGL2PreviewRenderer {
 			},
 			frame.particleRanges,
 		);
-		this.#frameCount += 1;
 	}
 
-	getDiagnostics(): ObjectPreviewRendererDiagnostics {
+	/** The mounted particle pass borrows only the currently installed bundle's mesh residency. */
+	resolveParticleMesh(
+		id: DatAssetId,
+	): ReturnType<ParticleMeshResidency["resolve"]> {
+		return this.#particleResidency.resolve(id);
+	}
+
+	getDiagnostics(): Omit<
+		ObjectPreviewRendererDiagnostics,
+		"frameCount" | "particle"
+	> {
 		let minimumMaterialOpacity = 1;
 		let transparentRangeCount = 0;
 		for (const range of this.#appearance.plan.ranges) {
@@ -423,22 +629,21 @@ export class WebGL2PreviewRenderer {
 		return {
 			appearanceRangeCount: this.#appearance.plan.ranges.length,
 			drawnObjectRangeCount: this.#drawnObjectRangeCount,
-			frameCount: this.#frameCount,
 			minimumMaterialOpacity,
 			minimumPartOpacity: this.#parts.reduce(
 				(minimum, part) => Math.min(minimum, part.frameInstance.color.a),
 				1,
 			),
-			particle: this.#particles.getDiagnostics(),
 			transparentRangeCount,
 		};
 	}
 
-	async destroy(): Promise<void> {
-		if (this.#destroyed) return;
+	destroy(): Promise<void> {
+		return (this.#retirement ??= this.#destroy());
+	}
+
+	async #destroy(): Promise<void> {
 		this.#destroyed = true;
-		this.#canvas.removeEventListener("webglcontextlost", this.#onContextLost);
-		this.#particles.destroy();
 		this.#particleMeshes.destroy();
 		this.#particleResidency.destroy();
 		this.#releaseAppearance();
@@ -448,7 +653,6 @@ export class WebGL2PreviewRenderer {
 		this.#textures.destroy();
 		this.#resources.releaseResource(this.#fallbackResource);
 		this.#resources.releaseResource(this.#geometryResource);
-		this.#gl.deleteProgram(this.#program.program);
 		await this.#resources.destroy();
 	}
 
@@ -641,19 +845,21 @@ export class WebGL2PreviewRenderer {
 			cached !== null &&
 			cached.width === viewport.extent.width &&
 			cached.height === viewport.extent.height &&
-			cached.yawRadians === viewport.yawRadians
+			cached.viewport.cameraYawRadians === viewport.cameraYawRadians &&
+			cached.viewport.subjectTransform === viewport.subjectTransform &&
+			cached.viewport.framing === viewport.framing
 		)
 			return cached.transform;
-		const transform = resolveObjectPreviewViewTransform(
+		const transform = resolveObjectPreviewCompositionView(
 			this.#assets.fit,
-			viewport.yawRadians,
-			viewport.extent,
+			this.#assets.background?.visual.fit ?? null,
+			viewport,
 		);
 		this.#cameraCache = {
 			height: viewport.extent.height,
 			transform,
 			width: viewport.extent.width,
-			yawRadians: viewport.yawRadians,
+			viewport,
 		};
 		return transform;
 	}
@@ -661,9 +867,5 @@ export class WebGL2PreviewRenderer {
 	#assertUsable(): void {
 		if (this.#destroyed)
 			throw new Error("Cannot draw with a destroyed object preview renderer.");
-		if (this.#contextLost)
-			throw new Error(
-				"Object preview WebGL2 context was lost; remount is required.",
-			);
 	}
 }

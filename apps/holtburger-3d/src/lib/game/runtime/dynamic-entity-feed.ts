@@ -1,3 +1,4 @@
+import { parentLocationSchema, placementSchema } from "./attachment-contract";
 import { z } from "zod";
 import {
 	validateHostPlacedPath,
@@ -46,60 +47,6 @@ const spatialMembershipSchema = z.object({
 	reachesOutdoors: z.boolean(),
 	reachedEnvCellIds: z.array(cellIdSchema),
 });
-
-const parentLocationSchema = z.enum([
-	"none",
-	"right-hand",
-	"left-hand",
-	"shield",
-	"belt",
-	"quiver",
-	"heraldry",
-	"mouth",
-	"left-weapon",
-	"left-unarmed",
-]);
-
-const placementSchema = z.enum([
-	"default",
-	"right-hand-combat",
-	"right-hand-non-combat",
-	"left-hand",
-	"belt",
-	"quiver",
-	"shield",
-	"left-weapon",
-	"left-unarmed",
-	"unknown0-a",
-	"unknown0-f",
-	"unknown14",
-	"unknown1-e",
-	"unknown20",
-	"special-crossbow-bolt",
-	"missile-flight",
-	"unknown3-c",
-	"unknown63",
-	"resting",
-	"other",
-	"hook",
-	"unknown68",
-	"unknown69",
-	"unknown6-a",
-	"unknown78",
-	"random1",
-	"random2",
-	"random3",
-	"random4",
-	"random5",
-	"random6",
-	"random7",
-	"random8",
-	"random9",
-	"random10",
-	"unknown84",
-	"unknown-f0",
-	"unknown3-f2",
-]);
 
 const dynamicEntityPlacementSchema = z.discriminatedUnion("kind", [
 	z

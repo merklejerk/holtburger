@@ -6,6 +6,31 @@ import { Mat4, Quat, Vec3 } from "../math/types";
 import { ObjectPreviewSequence } from "./object-preview-sequence";
 
 describe("ObjectPreviewSequence", () => {
+	it("preserves phase for the same animation while rebasing fallback parts to the replacement setup", () => {
+		const clip = playingClip(preparedAnimation(), 0, 3, 2, "loop");
+		const original = new ObjectPreviewSequence([clip], 0, [
+			Mat4.identity(),
+			Mat4.identity(),
+		]);
+		original.advance(0.75, () => {});
+		const extra = Mat4.identity();
+		extra.m41 = 7;
+		const replacement = original.replacement([clip], 0, [
+			Mat4.identity(),
+			extra,
+		]);
+		expect(replacement.samplePose()[0]?.m41).toBeCloseTo(1.5);
+		expect(replacement.samplePose()[1]?.m41).toBe(7);
+		replacement.advance(0.25, () => {});
+		expect(replacement.samplePose()[0]?.m41).toBe(2);
+		expect(original.samplePose()[0]?.m41).toBeCloseTo(1.5);
+		const changed = original.replacement(
+			[playingClip(clip.animation, 0, 1, 2, "loop")],
+			0,
+			[Mat4.identity()],
+		);
+		expect(changed.samplePose()[0]?.m41).toBe(0);
+	});
 	it("crosses a captured prefix into its cyclic tail without losing traversed frames", () => {
 		const animation = preparedAnimation();
 		const prefix = playingClip(animation, 0, 1, 2, "hold");

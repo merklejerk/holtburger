@@ -1,3 +1,6 @@
+import { playerVisualCaptureSchema } from "./client-object-preview-contract";
+import previewFixture from "./fixtures/object-preview-wire.json";
+import { persistPlayerVisualCapture } from "./client-visual-capture";
 import {
 	resolvedJumpFixture,
 	predictedJumpFixture,
@@ -90,6 +93,66 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("forwards a one-time equipped visual delta and recovers it after stream loss without another gameplay change", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const stage = vi.fn().mockResolvedValue(undefined);
+		const failure = vi.fn();
+		session.subscribe((event) =>
+			persistPlayerVisualCapture(
+				event,
+				{ read: vi.fn(), stage, listenFailures: vi.fn() },
+				failure,
+			),
+		);
+		await session.start();
+		const capture = playerVisualCaptureSchema.parse({
+			guid: 1,
+			source: previewFixture.equipped.outcome.source,
+		});
+		transport.emit("client-player-visual-capture-changed", capture);
+		expect(session.state().playerVisualCapture).toEqual(capture);
+		expect(stage).toHaveBeenCalledWith(capture);
+		stage.mockClear();
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-current-state", {
+			...currentState(1),
+			playerVisualCapture: capture,
+		});
+		expect(session.state().playerVisualCapture).toEqual(capture);
+		expect(stage).toHaveBeenCalledExactlyOnceWith(capture);
+		transport.emit("client-player-visual-capture-changed", null);
+		expect(session.state().playerVisualCapture).toBeNull();
+		expect(stage).toHaveBeenCalledTimes(1);
+		expect(failure).not.toHaveBeenCalled();
+		session.stop();
+	});
+
+	it("recovers a creation result after its delta was lost during resync", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.emit("client-character-management-changed", {
+			kind: "creating",
+			name: "Amy",
+		});
+		expect(session.state().characterManagement).toEqual({
+			kind: "creating",
+			name: "Amy",
+		});
+		transport.emit("client-state-resyncing", null);
+		const result = {
+			kind: "rejected",
+			operation: "create",
+			message: "Name is already in use.",
+		} as const;
+		transport.emit("client-current-state", {
+			...currentState(1),
+			characterManagement: result,
+		});
+		expect(session.state().characterManagement).toEqual(result);
+		session.stop();
+	});
 	it("forwards typed membership activity without deriving it from snapshots or recovery", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -1030,7 +1093,11 @@ describe("ClientLifecycleSession", () => {
 	it("accepts the completed character-entry baseline and subsequent inventory deltas", async () => {
 		const transport = new FakeClientTransport();
 		const startup = currentState(9);
-		startup.lifecycle = { kind: "character-selection", characters: [] };
+		startup.lifecycle = {
+			kind: "character-selection",
+			maxSlots: 11,
+			characters: [],
+		};
 		startup.localPlayerGuid = null;
 		startup.entities = {
 			projectileSupply: { kind: "not-applicable" },
@@ -1136,6 +1203,7 @@ describe("ClientLifecycleSession", () => {
 			});
 			transport.emit("client-lifecycle-changed", {
 				kind: "character-selection",
+				maxSlots: 11,
 				characters: [],
 			});
 			expect(session.entities.read()).toBe(read);
@@ -1438,6 +1506,7 @@ describe("ClientLifecycleSession", () => {
 
 		const lifecycle: ClientLifecycle = {
 			kind: "character-selection",
+			maxSlots: 11,
 			characters: [{ guid: 7, name: "Mira", slot: 3, deleteTime: 0 }],
 		};
 		transport.emit("client-lifecycle-changed", lifecycle);
@@ -2017,6 +2086,8 @@ function currentState(playerGuid: number): ClientCurrentState {
 		characterSheet: null,
 		trade: { trade: null, pending_items: [] },
 		lifecycle: { kind: "in-world" },
+		characterManagement: { kind: "idle" },
+		playerVisualCapture: null,
 		entityCollisionDisabled: false,
 		canTeleportFromMap: false,
 		recallDestinations: [],

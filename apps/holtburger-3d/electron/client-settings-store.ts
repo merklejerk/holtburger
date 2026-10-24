@@ -1,5 +1,5 @@
-import { open, mkdir, readFile, rename, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
+import { replaceLocalFile } from "./replace-local-file.js";
 import type { ZodType } from "zod";
 import {
 	clientUserSettingsSchema,
@@ -50,7 +50,6 @@ export class ClientSettingsStore {
 	readonly #initialWindow: ClientWindowSettings;
 	#document: ClientSettingsCollection = emptyClientSettingsCollection();
 	#writeTail: Promise<void> = Promise.resolve();
-	#temporarySequence = 0;
 
 	constructor(path: string, initialWindow: ClientWindowSettings) {
 		this.#path = path;
@@ -263,7 +262,10 @@ export class ClientSettingsStore {
 			const current = await this.#readDocument();
 			const changed = change(current);
 			const document = "document" in changed ? changed.document : changed;
-			await this.#replace(document);
+			await replaceLocalFile(
+				this.#path,
+				`${JSON.stringify(document, null, 2)}\n`,
+			);
 			this.#document = document;
 			return ("document" in changed ? changed.result : undefined) as Result;
 		});
@@ -306,36 +308,6 @@ export class ClientSettingsStore {
 			});
 		}
 		return parsed.data;
-	}
-
-	async #replace(document: ClientSettingsCollection): Promise<void> {
-		await mkdir(dirname(this.#path), { recursive: true });
-		const temporaryPath = `${this.#path}.tmp-${process.pid}-${this.#temporarySequence++}`;
-		let temporaryCreated = false;
-		let replacementError: unknown;
-		try {
-			const file = await open(temporaryPath, "wx", 0o600);
-			temporaryCreated = true;
-			try {
-				await file.writeFile(`${JSON.stringify(document, null, 2)}\n`, "utf8");
-				await file.sync();
-			} finally {
-				await file.close();
-			}
-			await rename(temporaryPath, this.#path);
-			temporaryCreated = false;
-		} catch (error) {
-			replacementError = error;
-		}
-		if (temporaryCreated) {
-			try {
-				await unlink(temporaryPath);
-			} catch (error) {
-				if (!isNodeError(error) || error.code !== "ENOENT")
-					replacementError ??= error;
-			}
-		}
-		if (replacementError !== undefined) throw replacementError;
 	}
 }
 

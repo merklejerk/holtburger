@@ -122,7 +122,7 @@ impl ClientRuntime {
     async fn send_container_close(&mut self, root: Guid) -> Result<()> {
         if matches!(
             self.state,
-            ClientState::Disconnected | ClientState::CharacterSelection(_)
+            ClientState::Disconnected | ClientState::CharacterSelection
         ) {
             self.publish_entity_facts();
             return Ok(());
@@ -434,10 +434,7 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_sessions_revoke_access_without_sending_or_waiting_for_closes() {
-        for state in [
-            ClientState::Disconnected,
-            ClientState::CharacterSelection(Vec::new()),
-        ] {
+        for state in [ClientState::Disconnected, ClientState::CharacterSelection] {
             let mut client = fixture();
             use_root(&mut client, ROOT).await;
             receive(&mut client, roster(ROOT, &[PACK])).await;

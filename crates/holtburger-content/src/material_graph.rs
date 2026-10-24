@@ -610,7 +610,7 @@ impl ContentRepository {
     }
 }
 
-fn read_clothing_table(
+pub(crate) fn read_clothing_table(
     content: &ContentRepository,
     clothing_table_id: u32,
 ) -> Result<ClothingTable> {

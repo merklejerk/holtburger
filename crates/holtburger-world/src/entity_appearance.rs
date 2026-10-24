@@ -2,6 +2,7 @@
 
 use holtburger_common::properties::{EquipMask, ItemType};
 use holtburger_common::{Guid, ParentLocation, Placement};
+use holtburger_dat::file_type::material::ObjDesc;
 use holtburger_protocol::messages::object::types::ModelData;
 use serde::{Deserialize, Serialize};
 
@@ -228,6 +229,41 @@ pub struct EntityPartChange {
     pub gfx_obj_did: u32,
 }
 
+impl From<&ObjDesc> for EntityAppearance {
+    /// DAT descriptions already contain expanded color intervals; preserve them unchanged.
+    fn from(description: &ObjDesc) -> Self {
+        Self {
+            palette_did: description.palette_id,
+            sub_palettes: description
+                .sub_palettes
+                .iter()
+                .map(|palette| EntitySubPalette {
+                    palette_did: palette.sub_id,
+                    offset: palette.offset,
+                    color_count: palette.num_colors,
+                })
+                .collect(),
+            texture_changes: description
+                .texture_changes
+                .iter()
+                .map(|texture| EntityTextureChange {
+                    part_index: texture.part_index,
+                    old_texture_did: texture.old_texture,
+                    new_texture_did: texture.new_texture,
+                })
+                .collect(),
+            part_changes: description
+                .anim_part_changes
+                .iter()
+                .map(|part| EntityPartChange {
+                    part_index: part.part_index,
+                    gfx_obj_did: part.part_id,
+                })
+                .collect(),
+        }
+    }
+}
+
 impl From<&ModelData> for EntityAppearance {
     fn from(model: &ModelData) -> Self {
         Self {
@@ -273,6 +309,29 @@ impl From<&ModelData> for EntityAppearance {
 mod tests {
     use super::*;
     use holtburger_protocol::messages::object::types::{ModelChange, SubPalette, TextureChange};
+
+    #[test]
+    fn dat_appearance_preserves_already_expanded_palette_intervals() {
+        let input = ObjDesc {
+            palette_id: Some(1),
+            sub_palettes: vec![holtburger_dat::file_type::material::SubPalette {
+                sub_id: 2,
+                offset: 192,
+                num_colors: 64,
+            }],
+            ..ObjDesc::empty()
+        };
+        let result = EntityAppearance::from(&input);
+        assert_eq!(result.palette_did, Some(1));
+        assert_eq!(
+            result.sub_palettes,
+            vec![EntitySubPalette {
+                palette_did: 2,
+                offset: 192,
+                color_count: 64,
+            }]
+        );
+    }
 
     fn facts(
         valid_locations: i32,

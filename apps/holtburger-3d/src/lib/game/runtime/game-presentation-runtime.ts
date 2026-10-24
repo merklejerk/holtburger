@@ -1,3 +1,4 @@
+import { placementKey } from "./attachment-contract";
 import {
 	CombatEffectsSystem,
 	type CombatEffectOutcome,
@@ -229,7 +230,6 @@ import {
 	datAssetId,
 	dynamicEntityPresentationIdentity,
 	dynamicEntityPlacement,
-	dynamicEntityPlacementKey,
 	type DynamicEntityRealizationDisposition,
 	type DynamicEntityRealizationResults,
 } from "./dynamic-entity-presentation";
@@ -2787,7 +2787,7 @@ export class GamePresentationRuntime {
 					nodeId,
 					parent.nodeId,
 					entity.placement.parentLocation,
-					dynamicEntityPlacementKey(entity.placement.placement),
+					placementKey(entity.placement.placement),
 				);
 			} catch (cause) {
 				this.#retireDynamicOwner(ownerId);
@@ -4227,6 +4227,7 @@ export class GamePresentationRuntime {
 		this.#skyScripts.destroy();
 		// Dynamic residents own emitter and sound-table handles; release them before their repositories.
 		await this.#dynamics.destroy();
+		await this.#objectVisualTemplates.destroy();
 		for (const handle of this.#ambientSoundTableHandles.values()) {
 			handle.release();
 		}

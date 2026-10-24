@@ -313,6 +313,22 @@ pub struct MotionClip {
 }
 
 impl MotionClip {
+    /// Resolve a directly selected authored animation with the same validation and frame-window
+    /// semantics used by motion tables. Creation previews select animations through enum maps.
+    pub fn from_animation(
+        animation: Animation,
+        low: i32,
+        high: i32,
+        framerate: f32,
+    ) -> Result<Self, MotionContractError> {
+        Ok(Self::resolve(
+            Arc::new(MotionAnimation::project(animation)?),
+            low,
+            high,
+            framerate,
+        ))
+    }
+
     /// Resolves an authored window against the animation it traverses.
     ///
     /// Retail performs exactly these clamps when it installs an animation into a sequence node

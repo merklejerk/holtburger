@@ -3,12 +3,12 @@ use crate::client::progression::{
     ClientProgressionRejection,
 };
 use crate::client::types::{
-    ActionResultReason, ActionResultSource, ChatTellTarget, ClientCommand, ClientExitCause,
-    ClientViewEvent,
+    ActionResultReason, ActionResultSource, CharacterManagementOperation, ChatTellTarget,
+    ClientCommand, ClientExitCause, ClientViewEvent,
 };
 use crate::client::{ClientRuntime, ClientState};
 use crate::motion_command_for_soul_emote_pose;
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, ensure};
 use holtburger_common::CharacterOption;
 use holtburger_common::Guid;
 use holtburger_protocol::messages::game_action::*;
@@ -206,8 +206,7 @@ impl ClientRuntime {
             | ClientCommand::SelectCharacter(_)
             | ClientCommand::CreateCharacter(_)
             | ClientCommand::DeleteCharacter { .. }
-            | ClientCommand::RestoreCharacter(_)
-            | ClientCommand::EnterWorld => self.handle_auth_command(cmd).await,
+            | ClientCommand::RestoreCharacter(_) => self.handle_auth_command(cmd).await,
 
             ClientCommand::QueryDeathLocations(query) => {
                 self.query_death_locations(query);
@@ -448,8 +447,65 @@ impl ClientRuntime {
         result
     }
 
+    /// Admission failures are domain feedback, not fatal errors in the transport run loop.
+    fn admit_character_command(&self, command: &ClientCommand) -> Result<()> {
+        if matches!(command, ClientCommand::Login(_)) {
+            return Ok(());
+        }
+        ensure!(
+            self.state == ClientState::CharacterSelection,
+            "Character operations require character selection."
+        );
+        self.character_selection.ensure_available()?;
+        let characters = &self.character_selection.characters;
+        match command {
+            ClientCommand::CreateCharacter(_) => ensure!(
+                characters.len() < self.character_selection.max_slots as usize,
+                "The server's character slots are full."
+            ),
+            ClientCommand::DeleteCharacter { slot } => ensure!(
+                (*slot as usize) < characters.len(),
+                "Character deletion slot is outside the server roster."
+            ),
+            ClientCommand::RestoreCharacter(guid) => ensure!(
+                characters
+                    .iter()
+                    .any(|c| c.guid == *guid && c.delete_time != 0),
+                "Character is not pending deletion in the server roster."
+            ),
+            ClientCommand::SelectCharacter(guid) => ensure!(
+                characters
+                    .iter()
+                    .any(|c| c.guid == *guid && c.delete_time == 0),
+                "Character is not available in the server roster."
+            ),
+            _ => {}
+        }
+        Ok(())
+    }
+
     async fn handle_auth_command(&mut self, cmd: ClientCommand) -> Result<()> {
-        match cmd {
+        let management_operation = match &cmd {
+            ClientCommand::CreateCharacter(_) => Some(CharacterManagementOperation::Create),
+            ClientCommand::DeleteCharacter { .. } => Some(CharacterManagementOperation::Delete),
+            ClientCommand::RestoreCharacter(_) => Some(CharacterManagementOperation::Restore),
+            _ => None,
+        };
+        if let Err(error) = self.admit_character_command(&cmd) {
+            if let Some(operation) = management_operation
+                && !self.character_selection.management.blocks_submission()
+            {
+                self.character_selection
+                    .reject(operation, error.to_string());
+                self.emit_character_management();
+            }
+            self.emit_action_result(
+                ActionResultSource::Client,
+                ActionResultReason::General(error.to_string()),
+            );
+            return Ok(());
+        }
+        let result = match cmd {
             ClientCommand::Login(password) => {
                 self.authenticating = true;
                 self.send_status_event();
@@ -488,22 +544,12 @@ impl ClientRuntime {
                     .restore_character(guid, &mut self.session)
                     .await
             }
-            ClientCommand::EnterWorld => {
-                if let Some(char_id) = self.character_selection.character_id {
-                    log::info!(
-                        "Attempting to enter world with character: 0x{:08X}",
-                        char_id
-                    );
-                    self.begin_world_entry_transition().await?;
-                    self.character_selection
-                        .select_character(char_id, &mut self.session)
-                        .await
-                } else {
-                    Ok(())
-                }
-            }
             _ => unreachable!(),
+        };
+        if management_operation.is_some() {
+            self.emit_character_management();
         }
+        result
     }
 
     async fn handle_chat_command(&mut self, cmd: ClientCommand) -> Result<()> {
@@ -1831,6 +1877,7 @@ mod tests {
 
         client.world.player.guid = player_guid;
         client.world.set_local_player_runtime_pose(player_pose);
+        client.state = ClientState::CharacterSelection;
         client.character_selection.characters = vec![CharacterEntry {
             guid: player_guid,
             name: "Player".to_string(),
@@ -2061,68 +2108,170 @@ mod tests {
         assert!(saw_result);
     }
 
+    fn character_creation_request() -> CharacterCreateRequestData {
+        CharacterCreateRequestData {
+            account_name: String::new(),
+            unknown_constant: 1,
+            heritage: 6,
+            gender: 1,
+            appearance: CharacterCreateAppearanceData {
+                eyes: 0,
+                nose: 0,
+                mouth: 0,
+                hair_color: 0,
+                eye_color: 0,
+                hair_style: 0,
+                headgear_style: u32::MAX,
+                headgear_color: 0,
+                shirt_style: 0,
+                shirt_color: 0,
+                pants_style: 0,
+                pants_color: 0,
+                footwear_style: 0,
+                footwear_color: 0,
+                skin_hue: 1.0,
+                hair_hue: 1.0,
+                headgear_hue: 0.0,
+                shirt_hue: 0.0,
+                pants_hue: 0.0,
+                footwear_hue: 0.0,
+            },
+            template_option: 0,
+            strength_ability: 100,
+            endurance_ability: 10,
+            coordination_ability: 100,
+            quickness_ability: 100,
+            focus_ability: 10,
+            self_ability: 10,
+            character_slot: 0,
+            class_id: 1,
+            skill_advancement_classes: vec![SkillAdvancementClass::Untrained; 55],
+            name: "Bestie".to_string(),
+            start_area: 2,
+            is_admin: false,
+            is_sentinel: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn character_admission_rejections_do_not_disconnect_or_send() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+        client
+            .handle_command(ClientCommand::CreateCharacter(Box::new(
+                character_creation_request(),
+            )))
+            .await
+            .unwrap();
+        assert_eq!(client.state, ClientState::Connected);
+        assert_eq!(client.session.bytes_out, 0);
+        assert!(matches!(
+            client.application_snapshot().character_management,
+            super::super::types::CharacterManagementState::Rejected {
+                operation: CharacterManagementOperation::Create,
+                ..
+            }
+        ));
+
+        client.state = ClientState::CharacterSelection;
+        client.character_selection.max_slots = 0;
+        client
+            .handle_command(ClientCommand::CreateCharacter(Box::new(
+                character_creation_request(),
+            )))
+            .await
+            .unwrap();
+        assert_eq!(client.state, ClientState::CharacterSelection);
+        assert_eq!(client.session.bytes_out, 0);
+        assert!(matches!(
+            client.application_snapshot().character_management,
+            super::super::types::CharacterManagementState::Rejected { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn pending_creation_blocks_duplicate_management_and_entry_without_losing_progress() {
+        let mut client = builder::build_test_client(ClientState::CharacterSelection);
+        let pending = super::super::types::CharacterManagementState::Creating {
+            name: "Bestie".into(),
+        };
+        client.character_selection.management = pending.clone();
+        let guid = Guid(0x5000_0001);
+        for command in [
+            ClientCommand::CreateCharacter(Box::new(character_creation_request())),
+            ClientCommand::DeleteCharacter { slot: 0 },
+            ClientCommand::RestoreCharacter(guid),
+            ClientCommand::SelectCharacter(guid),
+        ] {
+            client.handle_command(command).await.unwrap();
+            assert_eq!(client.application_snapshot().character_management, pending);
+        }
+        assert_eq!(client.session.bytes_out, 0);
+        assert_eq!(client.state, ClientState::CharacterSelection);
+    }
+
+    #[tokio::test]
+    async fn failed_creation_send_releases_the_pending_operation() {
+        let mut client = builder::build_test_client(ClientState::CharacterSelection);
+        client.character_selection.max_slots = 1;
+        // Session binds IPv4; IPv6 is a deterministic send failure, as in other transport tests.
+        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
+            .await
+            .unwrap();
+        assert!(
+            client
+                .handle_command(ClientCommand::CreateCharacter(Box::new(
+                    character_creation_request()
+                )))
+                .await
+                .is_err()
+        );
+        assert!(matches!(
+            client.application_snapshot().character_management,
+            super::super::types::CharacterManagementState::Rejected {
+                operation: CharacterManagementOperation::Create,
+                ..
+            }
+        ));
+        assert!(!client.character_selection.management.blocks_submission());
+    }
+
     #[tokio::test]
     async fn create_character_command_sends_auth_message() {
-        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut client = builder::build_test_client(ClientState::CharacterSelection);
+        client.character_selection.max_slots = 4;
+        client.character_selection.characters = (0..3)
+            .map(|slot| CharacterEntry {
+                guid: Guid(0x5000_1234 + slot),
+                name: format!("Character {slot}"),
+                delete_time: 10,
+            })
+            .collect();
 
         client
             .handle_command(ClientCommand::CreateCharacter(Box::new(
-                CharacterCreateRequestData {
-                    account_name: String::new(),
-                    unknown_constant: 1,
-                    heritage: 6,
-                    gender: 1,
-                    appearance: CharacterCreateAppearanceData {
-                        eyes: 0,
-                        nose: 0,
-                        mouth: 0,
-                        hair_color: 0,
-                        eye_color: 0,
-                        hair_style: 0,
-                        headgear_style: u32::MAX,
-                        headgear_color: 0,
-                        shirt_style: 0,
-                        shirt_color: 0,
-                        pants_style: 0,
-                        pants_color: 0,
-                        footwear_style: 0,
-                        footwear_color: 0,
-                        skin_hue: 1.0,
-                        hair_hue: 1.0,
-                        headgear_hue: 0.0,
-                        shirt_hue: 0.0,
-                        pants_hue: 0.0,
-                        footwear_hue: 0.0,
-                    },
-                    template_option: 0,
-                    strength_ability: 100,
-                    endurance_ability: 10,
-                    coordination_ability: 100,
-                    quickness_ability: 100,
-                    focus_ability: 10,
-                    self_ability: 10,
-                    character_slot: 0,
-                    class_id: 1,
-                    skill_advancement_classes: vec![SkillAdvancementClass::Untrained; 55],
-                    name: "Bestie".to_string(),
-                    start_area: 2,
-                    is_admin: false,
-                    is_sentinel: false,
-                },
+                character_creation_request(),
             )))
             .await
             .unwrap();
 
         assert!(client.session.bytes_out > 0);
         assert_eq!(
-            client.character_selection.pending_character_operation,
+            client.character_selection.management.pending_operation(),
             Some(CharacterManagementOperation::Create)
         );
     }
 
     #[tokio::test]
     async fn delete_character_command_sends_auth_message() {
-        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut client = builder::build_test_client(ClientState::CharacterSelection);
+        client.character_selection.max_slots = 4;
+        client.character_selection.characters = (0..3)
+            .map(|slot| CharacterEntry {
+                guid: Guid(0x5000_1234 + slot),
+                name: format!("Character {slot}"),
+                delete_time: 10,
+            })
+            .collect();
 
         client
             .handle_command(ClientCommand::DeleteCharacter { slot: 2 })
@@ -2131,14 +2280,22 @@ mod tests {
 
         assert!(client.session.bytes_out > 0);
         assert_eq!(
-            client.character_selection.pending_character_operation,
+            client.character_selection.management.pending_operation(),
             Some(CharacterManagementOperation::Delete)
         );
     }
 
     #[tokio::test]
     async fn restore_character_command_sends_auth_message() {
-        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut client = builder::build_test_client(ClientState::CharacterSelection);
+        client.character_selection.max_slots = 4;
+        client.character_selection.characters = (0..3)
+            .map(|slot| CharacterEntry {
+                guid: Guid(0x5000_1234 + slot),
+                name: format!("Character {slot}"),
+                delete_time: 10,
+            })
+            .collect();
 
         client
             .handle_command(ClientCommand::RestoreCharacter(Guid(0x5000_1234)))
@@ -2147,7 +2304,7 @@ mod tests {
 
         assert!(client.session.bytes_out > 0);
         assert_eq!(
-            client.character_selection.pending_character_operation,
+            client.character_selection.management.pending_operation(),
             Some(CharacterManagementOperation::Restore)
         );
     }

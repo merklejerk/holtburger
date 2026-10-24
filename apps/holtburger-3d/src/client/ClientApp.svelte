@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { persistPlayerVisualCapture } from "./client-visual-capture";
+	import type { ClientVisualCacheTransport } from "./client-visual-cache-transport";
 	import { ClientFacingInputDispatch } from "./client-facing-input-dispatch";
 	import type { ClientMouseMovementInput } from "./client-viewport-mouse-controller";
 	import { loadSoulEmotes } from "./client-soul-emotes";
@@ -111,9 +113,17 @@
 		type ClientPresentationDiagnostics,
 		type ClientPresentationStatus,
 	} from "./client-presentation-session";
-	import type { ClientObjectPreviewService } from "./client-object-preview-service";
+	import { StandardClientObjectPreviewService } from "./client-object-preview-service";
+	import { HostPresentationAssets } from "../lib/game/runtime/host-presentation-assets";
+	import { GamePresentationOwner } from "../lib/game/runtime/game-presentation-owner";
+	import { PresentationTeardownStack } from "../lib/game/runtime/presentation-teardown";
 	import { clientDebugEnabled } from "./client-debug";
 	import ClientCharacterSelect from "./ClientCharacterSelect.svelte";
+	import {
+		loadCharacterCreationCatalog,
+		resolveCharacterCreationAppearance,
+	} from "./client-character-creation-contract";
+	import type { CharacterCreationServices } from "./client-character-creation";
 	import {
 		ClientSelectedEntityTracking,
 		type ClientSelectedEntityDisplay,
@@ -124,6 +134,7 @@
 	import type { MinimapFrame } from "../app/minimap-frame";
 	import type {
 		RecallDestination,
+		CharacterManagementState,
 		ClientCombatMode,
 		ClientMapPosition,
 		ClientAttackProfile,
@@ -218,17 +229,21 @@
 		/** Bootstrap settings issue captured before the app's toast owner exists. */
 		readonly initialSettingsIssue: string | null;
 		readonly settingsTransport: ClientSettingsTransport;
+		readonly visualCacheTransport: ClientVisualCacheTransport;
 	}
 
 	const {
 		initialUserSettings,
 		initialSettingsIssue,
 		settingsTransport,
+		visualCacheTransport,
 	}: Props = $props();
 	// Bootstrap completes before mount; later prop replacement cannot own live settings lifetime.
 	const startupUserSettings = untrack(() => initialUserSettings);
 	const startupSettingsIssue = untrack(() => initialSettingsIssue);
 	const startupSettingsTransport = untrack(() => settingsTransport);
+	const startupVisualCacheTransport = untrack(() => visualCacheTransport);
+
 	let userSettings = $state.raw<ClientUserSettings>(startupUserSettings);
 	const clientInput = provideClientInput(
 		new AppInput(clientInputConfiguration(startupUserSettings.input)),
@@ -242,6 +257,10 @@
 	let lifecycle = $state<ClientLifecycleUiState>(
 		initialClientLifecycleUiState(),
 	);
+	/** Cold authority-owned character-management admission and recoverable feedback. */
+	let characterManagement = $state.raw<CharacterManagementState>({
+		kind: "idle",
+	});
 	const debugEnabled = clientDebugEnabled(window.location.search);
 	let deathCommands: ClientDeathCommands | null = null;
 	let session = $state<ClientLifecycleSession | null>(null);
@@ -450,16 +469,57 @@
 	/** Cold content catalog and validation issue consumed by Settings. */
 	let weatherPresets = $state<readonly ClientWeatherPreset[]>([]);
 	let environmentIssue = $state<string | null>(null);
-	const objectPreviewService: ClientObjectPreviewService = {
-		open: (request) => {
-			const presentation = presentationSession;
-			if (!presentation)
+	let presentationAssets: HostPresentationAssets | null = null;
+	const presentationRetirements = new Set<Promise<void>>();
+	const retirePresentation = (
+		presentation: ClientPresentationSession,
+	): void => {
+		const retirement = presentation.destroy();
+		presentationRetirements.add(retirement);
+		void retirement.then(
+			() => presentationRetirements.delete(retirement),
+			(error: unknown) => {
+				presentationRetirements.delete(retirement);
+				console.error(error);
+			},
+		);
+	};
+	const objectPreviewService = new StandardClientObjectPreviewService({
+		resolveResources: () => {
+			const assets = presentationAssets;
+			if (assets === null)
 				throw new Error(
-					"Creature preview is unavailable before presentation starts.",
+					"Presentation content is not available before client startup.",
 				);
-			return presentation.objectPreviews.open(request);
+			return assets.resources();
+		},
+		onError: (error) => {
+			console.error(error);
+			if (presentationAssets !== null) commandFailure = diagnostic(error);
+		},
+	});
+
+	const creationServices: CharacterCreationServices = {
+		loadCatalog: async () => {
+			const transport = hostTransport;
+			if (transport === null)
+				throw new Error("Character creation content is unavailable.");
+			return loadCharacterCreationCatalog(transport);
+		},
+		resolveAppearance: async (request) => {
+			const transport = hostTransport;
+			if (transport === null)
+				throw new Error("Character creation content is unavailable.");
+			return resolveCharacterCreationAppearance(transport, request);
+		},
+		submit: async (draft) => {
+			const current = session;
+			if (current === null)
+				throw new Error("Character creation session is unavailable.");
+			await current.createCharacter(draft);
 		},
 	};
+
 	let frameRateSampler: FrameRateSampler | null = null;
 
 	/** CDP-facing bridge for explicit live-client performance probes. */
@@ -833,8 +893,15 @@
 	}
 
 	function receive(event: ClientLifecycleSessionEvent): void {
+		persistPlayerVisualCapture(event, startupVisualCacheTransport, (message) =>
+			toastCenter.publish({ message, tone: "warning" }),
+		);
 		contractNotifications.receive(event);
 		switch (event.type) {
+			case "character-management":
+				characterManagement = event.state;
+				return;
+
 			case "entities":
 				refreshSelectedChatRecipient();
 				return;
@@ -870,6 +937,7 @@
 				appearanceOptions = event.options;
 				return;
 			case "current-state":
+				characterManagement = event.state.characterManagement;
 				if (
 					event.state.lifecycle.kind === "character-selection" ||
 					event.state.lifecycle.kind === "exiting"
@@ -1430,11 +1498,13 @@
 	$effect(() => {
 		const currentSession = session;
 		const currentTransport = hostTransport;
+		const currentAssets = presentationAssets;
 		const shouldInstall = usesWorldPresentation;
 		const canvas = canvasElement;
 		if (
 			currentSession === null ||
 			currentTransport === null ||
+			currentAssets === null ||
 			canvas === null ||
 			!shouldInstall
 		) {
@@ -1479,6 +1549,11 @@
 		const presentation = new ClientPresentationSession({
 			canvas,
 			hostTransport: currentTransport,
+			ownerFactory: async (dependencies) =>
+				GamePresentationOwner.build({
+					...dependencies,
+					presentationResources: await currentAssets.resources(),
+				}),
 			session: currentSession,
 			onError: reportPresentationError,
 			onSceneMembership: (source) => {
@@ -1601,11 +1676,7 @@
 			weatherPresets = [];
 			environmentIssue = null;
 			stopFrameLoop?.();
-			void presentation.destroy().catch((error: unknown) => {
-				// The route is already leaving, so keep teardown failure visible to diagnostics
-				// without mutating an unmounted chat surface.
-				console.error(error);
-			});
+			retirePresentation(presentation);
 			if (cameraController === presentation.camera) cameraController = null;
 			if (presentationSession === presentation) {
 				presentationSession = null;
@@ -1726,8 +1797,14 @@
 	let entityMetadata = $state<WeenieCatalogCapability | null>(null);
 	onMount(() => {
 		let disposed = false;
+		const unsubscribeVisualCacheFailure =
+			startupVisualCacheTransport.listenFailures((message) =>
+				toastCenter.publish({ message, tone: "warning" }),
+			);
 		const unsubscribeToast = toastCenter.subscribe((next) => (toast = next));
 		const transport = createElectronHostTransport();
+		const assets = new HostPresentationAssets(transport);
+		presentationAssets = assets;
 		hostTransport = transport;
 		void loadSoulEmotes(transport)
 			.then((catalog) => {
@@ -1927,6 +2004,25 @@
 
 		return () => {
 			disposed = true;
+			unsubscribeVisualCacheFailure();
+			presentationAssets = null;
+			if (presentationSession !== null) retirePresentation(presentationSession);
+			const retirement = new PresentationTeardownStack();
+			retirement.add("presentation-assets", () => assets.destroy());
+			retirement.add("world-presentations", async () => {
+				const results = await Promise.allSettled([...presentationRetirements]);
+				const failures = results.filter(
+					(result): result is PromiseRejectedResult =>
+						result.status === "rejected",
+				);
+				if (failures.length > 0)
+					throw new AggregateError(
+						failures.map((result) => result.reason),
+						"World presentation retirement failed.",
+					);
+			});
+			retirement.add("object-previews", () => objectPreviewService.destroy());
+			void retirement.close().catch((error: unknown) => console.error(error));
 			spellState.destroy();
 			retireCombatEscapeContext();
 			spellReferences.dispose();
@@ -2279,7 +2375,10 @@
 		/>
 	{:else}
 		<main class="client-screen ui-theme" aria-label="Holtburger client">
-			<section class="client-panel ui-panel">
+			<section
+				class="client-panel ui-panel"
+				class:character-selection={lifecycle.kind === "character-selection"}
+			>
 				<header class="ui-frame">
 					<span>Client</span>
 				</header>
@@ -2310,6 +2409,10 @@
 						<ClientCharacterSelect
 							state={lifecycle}
 							{entryPending}
+							management={characterManagement}
+							creation={creationServices}
+							previewService={objectPreviewService}
+							visualCache={startupVisualCacheTransport}
 							onChoose={chooseCharacter}
 							onEnter={enterWorld}
 							onDisconnect={disconnect}
@@ -2349,6 +2452,9 @@
 		}
 		.client-panel {
 			width: min(100%, 640px);
+		}
+		.client-panel.character-selection {
+			width: min(100%, 1080px);
 		}
 		.client-panel-body {
 			display: grid;

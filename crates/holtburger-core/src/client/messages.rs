@@ -462,20 +462,18 @@ impl ClientRuntime {
                 self.described_character = None;
                 self.refresh_spell_inspection_context();
                 self.authenticating = false;
-                self.character_selection.characters = data.characters.clone();
+                self.character_selection.replace_roster(&data);
                 self.turbine_chat.enabled = data.use_turbine_chat;
                 if !data.use_turbine_chat {
                     self.turbine_chat.channels = None;
                 }
-                self.character_selection.pending_character_operation = None;
 
                 log::info!("Character List for account: {}", data.account_name);
                 for (i, c) in self.character_selection.characters.iter().enumerate() {
                     log::info!("  [{}] {} (0x{:08X})", i + 1, c.name, c.guid);
                 }
 
-                self.state =
-                    ClientState::CharacterSelection(self.character_selection.characters.clone());
+                self.state = ClientState::CharacterSelection;
                 self.send_status_event();
                 let _ = self
                     .client_view_event_tx
@@ -485,7 +483,11 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::CharacterCreateResponse(data) => {
-                let operation = self.character_selection.take_pending_character_operation();
+                let operation = self.character_selection.accept_character_response(&data);
+                if operation.is_some() {
+                    self.emit_character_management();
+                    self.send_status_event();
+                }
                 let _ =
                     self.client_view_event_tx
                         .send(ClientViewEvent::CharacterManagementResponse {
@@ -495,7 +497,13 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::CharacterDeleteResponse => {
-                self.character_selection.take_pending_character_operation();
+                if matches!(
+                    self.character_selection.management,
+                    CharacterManagementState::Deleting
+                ) {
+                    self.character_selection.management = CharacterManagementState::Idle;
+                    self.emit_character_management();
+                }
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::CharacterDeleteResponse);
@@ -914,6 +922,15 @@ impl ClientRuntime {
                 let error = self
                     .character_selection
                     .handle_character_error(data.error_id);
+                if self.state == ClientState::CharacterSelection
+                    && let Some(operation) = self.character_selection.management.pending_operation()
+                {
+                    self.character_selection.reject(
+                        operation,
+                        format!("Character operation rejected: {error:?}."),
+                    );
+                    self.emit_character_management();
+                }
                 self.emit_action_result(
                     ActionResultSource::Wire,
                     ActionResultReason::Character(error),
@@ -2323,8 +2340,9 @@ mod tests {
     async fn test_character_create_response_projects_pending_operation() {
         let mut client = build_test_client();
         let mut view_events = client.subscribe_client_view_events();
-        client.character_selection.pending_character_operation =
-            Some(CharacterManagementOperation::Create);
+        client.character_selection.management = CharacterManagementState::Creating {
+            name: "Bestie".into(),
+        };
 
         let encoded = encode_message(&GameMessage::CharacterCreateResponse(Box::new(
             CharacterCreateResponseData {
@@ -2357,11 +2375,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn selection_character_error_resolves_creation_in_the_recovery_snapshot() {
+        let mut client = build_test_client();
+        client.state = ClientState::CharacterSelection;
+        client.character_selection.management =
+            CharacterManagementState::Creating { name: "Amy".into() };
+        let encoded = encode_message(&GameMessage::CharacterError(Box::new(CharacterErrorData {
+            error_id: CharacterError::LogonServerFull as u32,
+        })));
+        client.handle_message(&encoded).await.unwrap();
+        assert_eq!(client.state, ClientState::CharacterSelection);
+        assert!(matches!(
+            client.application_snapshot().character_management,
+            CharacterManagementState::Rejected {
+                operation: CharacterManagementOperation::Create,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
     async fn test_character_delete_response_projects_event() {
         let mut client = build_test_client();
         let mut view_events = client.subscribe_client_view_events();
-        client.character_selection.pending_character_operation =
-            Some(CharacterManagementOperation::Delete);
+        client.character_selection.management = CharacterManagementState::Deleting;
 
         let encoded = encode_message(&GameMessage::CharacterDeleteResponse);
 

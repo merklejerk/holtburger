@@ -82,7 +82,7 @@ describe("contract notifications", () => {
 		owner.accept({ kind: "removed", id: 1, name: "Quest" });
 		owner.receive({
 			type: "lifecycle",
-			lifecycle: { kind: "character-selection", characters: [] },
+			lifecycle: { kind: "character-selection", maxSlots: 11, characters: [] },
 		});
 		flush();
 		expect(publish).not.toHaveBeenCalled();

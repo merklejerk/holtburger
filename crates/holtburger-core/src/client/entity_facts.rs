@@ -79,6 +79,13 @@ pub struct ClientEntityDelta {
     pub removed: Vec<Guid>,
 }
 
+/// One collection feeds both semantic publication and complete player-visual invalidation.
+struct CollectedEntityFacts {
+    delta: ClientEntityDelta,
+    /// Storage is drained once here; appearance capture observes the same completed mutation.
+    storage_changed: bool,
+}
+
 /// Last published facts plus invalidation; only core publication mutates this cache.
 #[derive(Default)]
 pub(super) struct EntityFactsPublication {
@@ -129,13 +136,14 @@ impl EntityFactsPublication {
         world: &mut WorldState,
     ) -> Result<ClientEntityDelta, ScenePlacementError> {
         self.collect_with_opened(world, &BTreeSet::new())
+            .map(|collected| collected.delta)
     }
 
     fn collect_with_opened(
         &mut self,
         world: &mut WorldState,
         opened_corpses: &BTreeSet<Guid>,
-    ) -> Result<ClientEntityDelta, ScenePlacementError> {
+    ) -> Result<CollectedEntityFacts, ScenePlacementError> {
         let revision = world.trade.as_ref().map(|trade| trade.revision);
         if self.trade_revision != revision {
             self.dirty.extend(self.records.keys().copied());
@@ -175,6 +183,7 @@ impl EntityFactsPublication {
                 ));
             self.dirty.extend(world.world_container_contents());
         }
+        let storage_changed = !storage_changes.is_empty();
         self.dirty.extend(storage_changes);
         // Prepare before mutating the published cache so invalid world graphs fail coherently.
         let mut prepared = Vec::new();
@@ -210,17 +219,24 @@ impl EntityFactsPublication {
         self.dirty.clear();
         self.container = world.world_container();
         self.projectile_supply = projectile_supply;
-        Ok(delta)
+        Ok(CollectedEntityFacts {
+            delta,
+            storage_changed,
+        })
     }
 }
 
 impl super::ClientRuntime {
     /// Publish completed semantic changes without coupling them to dynamic rendering events.
     pub(super) fn publish_entity_facts(&mut self) {
-        let delta = self
+        let collected = self
             .entity_facts
             .collect_with_opened(&mut self.world, self.opened_corpses.ids())
             .expect("accepted world relationships must project into coherent entity facts");
+        if collected.storage_changed {
+            self.player_visual.invalidate();
+        }
+        let delta = collected.delta;
         if delta.projectile_supply.is_some()
             || delta.world_container.is_some()
             || !delta.upserts.is_empty()
@@ -231,6 +247,17 @@ impl super::ClientRuntime {
             let _ = self
                 .client_view_event_tx
                 .send(super::ClientViewEvent::EntityFactsChanged(delta));
+        }
+        let active = matches!(
+            self.state,
+            super::ClientState::EnteringWorld | super::ClientState::InWorld
+        );
+        if self.player_visual.collect(&self.world, active) {
+            let _ =
+                self.client_view_event_tx
+                    .send(super::ClientViewEvent::PlayerVisualCaptureChanged(
+                        self.player_visual.snapshot(),
+                    ));
         }
     }
 

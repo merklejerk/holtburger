@@ -23,6 +23,53 @@ or ambient spawns. Terrain shading, fog, layer visibility, and outdoor portal ma
 the backdrop. Missing content inside the map remains an error. Boundary seam matching and an
 infinite ocean horizon are outside this presentation's scope.
 
+## Character creation and selection
+
+Character selection uses the server roster and slot capacity. Selecting a row does not enter the
+world. Create opens a staged appearance, Skills & Stats, and review flow; successful server
+confirmation selects the new character without entering automatically. The h3d creator always
+uses the shared Custom/default build for its heritage. Starter clothing is randomized, with a
+Randomize clothes action. Face framing hides headgear only in the preview and retains the same
+idle pose; the submitted outfit is unchanged.
+
+`HostPresentationAssets` owns lazy CPU/content capabilities at app scope. Isolated previews
+borrow these without starting world presentation, audio, sky, or portal traversal.
+`GamePresentationOwner` separately owns world GPU/audio resources and borrows the same content
+capabilities. Its teardown closes its browser audio context after the audio device retires.
+App shutdown drains previews and world borrowers before destroying shared assets.
+
+Creator, picker, and inspector share `ClientModelPreview` and the single-active
+`StandardClientObjectPreviewService`. Source changes retain the canvas device, coalesce pending
+preparation, and atomically replace body/equipment material bundles. Failed edits retain the
+previous complete visual; selecting a different character first withdraws the previous subject.
+Held equipment follows captured holding locations and placements. An optional creation backdrop
+stays independent of subject rotation and does not participate in character framing.
+
+The server roster contains no appearance. During gameplay core publishes a complete
+`PlayerVisualCapture` after containment and equipment readiness, retaining it in application
+snapshots for event-stream recovery. Saved visuals use default idle, accepted base scale, and
+opaque visibility, excluding movement, transient script scale, and portal/invisibility fades.
+Incomplete equipment updates retain the last complete capture; normal equipment removal can
+replace it with an empty equipment list.
+
+The renderer forwards captures immediately through the narrow visual-cache preload bridge.
+Electron main scopes each immutable capture to the launch endpoint and GUID, coalesces disk
+writes, and atomically replaces independent version-1 files in `userData/character-visuals`.
+Filenames hash the existing canonical endpoint/GUID profile key. This optional cache is separate
+from user settings. Missing, corrupt, unsupported, or unavailable previews never prevent entry.
+Only the selected roster character is read; cached appearances are labeled "Last observed
+appearance." A new character gets a placeholder until first observed during gameplay.
+
+Orderly quit closes cache admission and waits for accepted main-process captures to reach disk,
+even if the renderer closes before debounce fires. It cannot guarantee packets still in flight or
+captures lost to an unclean process exit. Failed writes report a warning, preserve the previous
+successful file, and leave the latest capture pending for retry.
+
+`npm run harness:browser -- --pregame-preview --brief` exercises production content, creator and
+picker controls with synthetic server/cache results, equipment transforms, replacement races,
+and world/preview resource lifetimes. It does not create a real server character. Visual
+acceptance remains a user check.
+
 ## Input configuration
 
 `src/lib/input/input-defaults.ts` owns the default character, Explorer fly, client shortcut, and

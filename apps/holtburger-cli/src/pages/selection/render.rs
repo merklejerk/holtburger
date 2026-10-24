@@ -2,7 +2,7 @@ use crate::pages::selection::SelectionState;
 use crate::pages::selection::render_widgets::render_character_selection;
 use crate::state::RenderContext;
 use holtburger_content::character_gen::CharacterGenSkillCosts;
-use holtburger_core::character_gen::is_unavailable_character_gen_skill_cost;
+use holtburger_content::character_gen::is_unavailable_character_gen_skill_cost;
 use holtburger_protocol::messages::SkillAdvancementClass;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -32,7 +32,7 @@ pub(crate) fn skill_raise_cost_label(
 
     let cost = match advancement {
         SkillAdvancementClass::Specialized => return "MAX".to_string(),
-        SkillAdvancementClass::Trained => costs.specialized_cost,
+        SkillAdvancementClass::Trained => costs.specialization_upgrade_cost,
         SkillAdvancementClass::Untrained | SkillAdvancementClass::Inactive => costs.trained_cost,
     };
 
@@ -71,7 +71,7 @@ mod tests {
     fn skill_raise_cost_label_uses_next_tier_costs() {
         let costs = Some(CharacterGenSkillCosts {
             trained_cost: 2,
-            specialized_cost: 4,
+            specialization_upgrade_cost: 4,
         });
 
         assert_eq!(
@@ -92,7 +92,7 @@ mod tests {
     fn skill_raise_cost_label_hides_unavailable_sentinel_costs() {
         let costs = Some(CharacterGenSkillCosts {
             trained_cost: 8,
-            specialized_cost: 999,
+            specialization_upgrade_cost: 999,
         });
 
         assert_eq!(

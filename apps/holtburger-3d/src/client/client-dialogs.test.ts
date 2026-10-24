@@ -36,6 +36,8 @@ async function fixture() {
 	const snapshot = (requestId: string | null) =>
 		emit("client-current-state", {
 			lifecycle: { kind: "in-world" },
+			characterManagement: { kind: "idle" },
+			playerVisualCapture: null,
 			entityCollisionDisabled: false,
 			canTeleportFromMap: false,
 			recallDestinations: [],

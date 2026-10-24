@@ -18,6 +18,11 @@ afterEach(() => vi.unstubAllGlobals());
 it("composes new HUD defaults with older saved placements at the real entry point", async () => {
 	const viewport = { width: 1440, height: 900 };
 	vi.stubGlobal("window", {
+		holtburgerVisualCache: {
+			read: vi.fn(),
+			stage: vi.fn(),
+			listenFailures: vi.fn(),
+		},
 		innerWidth: viewport.width,
 		innerHeight: viewport.height,
 		location: { search: "" },

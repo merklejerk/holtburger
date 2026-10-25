@@ -30,6 +30,8 @@ pub struct InspectionSource<'a> {
     pub supplement: Option<&'a InspectionSupplement>,
     /// Live public-description flags used for semantics that retail does not read from appraisal properties.
     pub public_flags: ObjectDescriptionFlag,
+    /// Display average resolved from appraised totals or separately retained public evidence.
+    pub display_workmanship: Option<f64>,
     /// Hooked-item classification supplied by appraisal, including healing-kit semantics.
     pub hook_profile: Option<&'a HookProfile>,
     /// Appraised armor protection profile.
@@ -74,6 +76,7 @@ impl<'a> InspectionSource<'a> {
             properties: &entity.properties,
             supplement: entity.inspection_supplement.as_ref(),
             public_flags: entity.flags,
+            display_workmanship: entity.display_workmanship(),
             hook_profile: entity.hook_profile.as_ref(),
             armor_profile: entity.armor_profile.as_ref(),
             creature_profile: entity.creature_profile.as_ref(),
@@ -95,6 +98,9 @@ impl<'a> InspectionSource<'a> {
             properties: &item.properties,
             supplement: item.inspection_supplement.as_ref(),
             public_flags: item.public_flags,
+            display_workmanship: item
+                .effective_workmanship()
+                .or(item.public_workmanship.map(f64::from)),
             hook_profile: item.hook_profile.as_ref(),
             armor_profile: item.armor_profile.as_ref(),
             creature_profile: item.creature_profile.as_ref(),
@@ -1583,7 +1589,7 @@ impl InscriptionInfo {
 impl MaterialInfo {
     fn from_object(object: &InspectionSource<'_>) -> Option<Self> {
         let mat_type = object.get_int_prop(PropertyInt::MaterialType)?;
-        let workmanship = object.effective_workmanship()? as f32;
+        let workmanship = object.display_workmanship? as f32;
 
         Some(MaterialInfo {
             material_type: MaterialType::from_repr(mat_type as u32)?,

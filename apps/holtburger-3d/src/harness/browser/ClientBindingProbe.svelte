@@ -77,6 +77,8 @@
 				canInteract: true,
 				interactionLabel: "Trade",
 			})}
+			readCanSalvage={() => false}
+			onSalvage={() => {}}
 			readCanSplit={() => menu}
 			readCanInvite={() => false}
 			readCanCorpsePermission={() => false}

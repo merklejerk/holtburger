@@ -26,6 +26,10 @@
 		readonly selectedGuid: number | null;
 		/** Bounded display read kept separate from frame-hot target projection. */
 		readonly readSelectedDisplay: () => ClientSelectedEntityDisplay;
+		/** Shared candidate admission, independent of Ust ownership. */
+		readonly readCanSalvage: () => boolean;
+		/** Capture the selected source and enter the session-owned salvage workflow. */
+		readonly onSalvage: () => void;
 		/** Bounded inventory-owned eligibility read sampled with the selected display. */
 		readonly readCanSplit: () => boolean;
 		/** Sample app-owned party eligibility alongside the selected display. */
@@ -62,6 +66,8 @@
 		displayPlatform,
 		selectedGuid,
 		readSelectedDisplay,
+		readCanSalvage,
+		onSalvage,
 		readCanSplit,
 		readCanInvite,
 		readCanAddFriend,
@@ -81,6 +87,7 @@
 	let display = $state<ClientSelectedEntityDisplay>(
 		EMPTY_CLIENT_SELECTED_DISPLAY,
 	);
+	let canSalvage = $state(false);
 	let canSplit = $state(false);
 	let canInvite = $state(false);
 	let canAddFriend = $state(false);
@@ -103,6 +110,7 @@
 			| { readonly action: "interact" | "split"; readonly description: string }
 			| {
 					readonly action:
+						| "salvage"
 						| "swear"
 						| "invite"
 						| "friend"
@@ -171,6 +179,14 @@
 				activate: () => onCorpsePermission(false),
 			});
 		}
+		if (canSalvage)
+			available.push({
+				action: "salvage",
+				label: "Salvage",
+				icon: "salvage",
+				disabled: false,
+				activate: onSalvage,
+			});
 		if (canSplit)
 			available.push({
 				action: "split",
@@ -216,6 +232,7 @@
 		untrack(() => {
 			display =
 				guid === null ? EMPTY_CLIENT_SELECTED_DISPLAY : readSelectedDisplay();
+			canSalvage = guid !== null && readCanSalvage();
 			canSplit = guid !== null && readCanSplit();
 			canInvite = guid !== null && readCanInvite();
 			canAddFriend = guid !== null && readCanAddFriend();
@@ -231,6 +248,7 @@
 				selectedGuid === null
 					? EMPTY_CLIENT_SELECTED_DISPLAY
 					: readSelectedDisplay();
+			canSalvage = selectedGuid !== null && readCanSalvage();
 			canSplit = selectedGuid !== null && readCanSplit();
 			canInvite = selectedGuid !== null && readCanInvite();
 			canAddFriend = selectedGuid !== null && readCanAddFriend();

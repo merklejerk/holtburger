@@ -30,6 +30,13 @@ function fixture() {
 		entities.prepareSnapshot(
 			{
 				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
 				worldContainer: { kind: "closed" },
 				entities: [entityFacts(1)],
 			},
@@ -251,6 +258,13 @@ describe("on-demand accepted candidate geometry", () => {
 			entities.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
+					salvage: {
+						skills: {
+							salvagingSkill: 0,
+							tinkeringSkill: 0,
+							augmentationBonusSalvage: 0,
+						},
+					},
 					worldContainer: { kind: "closed" },
 					entities: [
 						entityFacts(1, { targeting: "creature" }),
@@ -299,6 +313,13 @@ describe("on-demand accepted candidate geometry", () => {
 			entities.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
+					salvage: {
+						skills: {
+							salvagingSkill: 0,
+							tinkeringSkill: 0,
+							augmentationBonusSalvage: 0,
+						},
+					},
 					worldContainer: { kind: "closed" },
 					entities: [entityFacts(1), entityFacts(2)],
 				},
@@ -332,6 +353,13 @@ describe("on-demand accepted candidate geometry", () => {
 			entities.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
+					salvage: {
+						skills: {
+							salvagingSkill: 0,
+							tinkeringSkill: 0,
+							augmentationBonusSalvage: 0,
+						},
+					},
 					worldContainer: { kind: "closed" },
 					entities: [entityFacts(1), entityFacts(2)],
 				},

@@ -28,7 +28,10 @@ export function bindingAction(
 	) {
 		return { kind: "equipment", item: item.guid, replacement: null };
 	}
-	const kind = item.description.useCapability;
+	const kind =
+		item.description.useCapability === "salvage-tool"
+			? "direct"
+			: item.description.useCapability;
 	return kind === "direct" || kind === "targeted"
 		? {
 				kind,

@@ -615,7 +615,7 @@
 					{#if spellLoadError !== null}<p role="status" class="feedback">
 							{spellLoadError}
 						</p>{/if}
-					<h2>Attributes</h2>
+					<h2 class="ui-section-heading">Attributes</h2>
 					{#each sheet.attributes as stat (stat.attr_type)}
 						{@const target = { Attribute: stat.attr_type } as const}
 						{@const actions = raiseActions(target)}
@@ -644,7 +644,7 @@
 							{/if}
 						</details>
 					{/each}
-					<h2>Vitals</h2>
+					<h2 class="ui-section-heading">Vitals</h2>
 					{#each sheet.vitals as stat (stat.vital_type)}
 						{@const target = { Vital: stat.vital_type } as const}
 						{@const actions = raiseActions(target)}
@@ -674,17 +674,17 @@
 						</details>
 					{/each}
 					{#if specializedSkills.length > 0}
-						<h2>Specialized</h2>
+						<h2 class="ui-section-heading">Specialized</h2>
 						{@render skillRows(specializedSkills)}
 					{/if}
 					{#if trainedSkills.length > 0}
-						<h2>Trained</h2>
+						<h2 class="ui-section-heading">Trained</h2>
 						{@render skillRows(trainedSkills)}
 					{/if}
 					{#if untrainedSkills.length > 0}
 						<details class="skill-group">
 							<summary
-								><h2>
+								><h2 class="ui-section-heading">
 									Untrained <small>({untrainedSkills.length})</small>
 								</h2></summary
 							>
@@ -722,7 +722,7 @@
 			{#if spellLoadError !== null}<p role="status" class="feedback">
 					{spellLoadError}
 				</p>{/if}
-			<h2>Defenses</h2>
+			<h2 class="ui-section-heading">Defenses</h2>
 			<details
 				class="stat-row"
 				name="character-defense"
@@ -927,10 +927,8 @@
 			font-variant-numeric: tabular-nums;
 			overflow-wrap: anywhere;
 		}
-		h2 {
-			margin: 0.9rem 0 0.3rem;
-			font-size: calc(var(--ui-font-size-heading-3) * var(--ui-text-scale));
-			text-transform: uppercase;
+		.character-sheet .ui-section-heading {
+			margin-top: 0.9rem;
 		}
 		.stat-row {
 			border-top: 1px solid var(--ui-panel-border-color, var(--ui-color-border));
@@ -941,7 +939,7 @@
 			margin: 0.9rem 0 0.3rem;
 			padding: 0;
 		}
-		.skill-group > summary h2 {
+		.skill-group > summary .ui-section-heading {
 			margin: 0;
 		}
 		.stat-row::details-content {

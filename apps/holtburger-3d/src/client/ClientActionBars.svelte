@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ClientSalvageState } from "./client-salvage-state";
 	import type { ClientTradeState } from "./client-trade-state";
 	import type { ClientHouseCrystalState } from "./client-house-crystal-state";
 	import type { ClientVendorState } from "./client-vendor-state";
@@ -64,6 +65,7 @@
 		session: ItemDragSession;
 		vendor: ClientVendorState | null;
 		houseCrystal: ClientHouseCrystalState | null;
+		salvage: ClientSalvageState | null;
 		trade: ClientTradeState | null;
 		worldContainer: ClientWorldContainerPanelState | null;
 		/** Session use flow shared with inventory and selected-entity controls. */
@@ -85,6 +87,7 @@
 		worldContainer,
 		vendor,
 		houseCrystal,
+		salvage,
 		trade,
 		interactions,
 		editable,
@@ -248,6 +251,7 @@
 			onPickInventoryTarget,
 			onInventoryNotice,
 			vendor,
+			salvage,
 			trade,
 			houseCrystal,
 			(source, recipient) => interactions.give(source, recipient),

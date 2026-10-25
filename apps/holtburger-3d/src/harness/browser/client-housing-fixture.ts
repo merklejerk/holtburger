@@ -288,6 +288,7 @@ export function createHousingFixture(options: {
 			});
 			options.emit("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [entityFacts(crystal), ...sources],
 				removed: [],

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import SalvageIcon from "../assets/icons/hud-salvage.svg?component";
 	import EmotesIcon from "../assets/icons/hud-emotes.svg?component";
 	import BuffedIcon from "../assets/icons/hud-buffed.svg?component";
 	import DebuffedIcon from "../assets/icons/hud-debuffed.svg?component";
@@ -65,6 +66,8 @@
 		| "online"
 		/** Hollow presence dot for an offline character. */
 		| "offline"
+		/** Ust salvage interaction and work window. */
+		| "salvage"
 		| "split"
 		| "examine"
 		| "helmet"
@@ -99,6 +102,7 @@
 
 	const { name }: Props = $props();
 	const icons = {
+		salvage: SalvageIcon,
 		emotes: EmotesIcon,
 		buffed: BuffedIcon,
 		debuffed: DebuffedIcon,

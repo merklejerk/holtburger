@@ -7,6 +7,13 @@ import type {
 export function playerEntitySnapshot(playerGuid: number): ClientEntitySnapshot {
 	return {
 		projectileSupply: { kind: "not-applicable" },
+		salvage: {
+			skills: {
+				salvagingSkill: 0,
+				tinkeringSkill: 0,
+				augmentationBonusSalvage: 0,
+			},
+		},
 		worldContainer: { kind: "closed" },
 		entities: [entityFacts(playerGuid)],
 	};
@@ -25,6 +32,7 @@ export function entityFacts(
 		canReceiveGive: false,
 		canTrade: false,
 		canOfferTrade: false,
+		salvage: { kind: "ineligible", reason: "Fixture item cannot be salvaged." },
 		description: {
 			kind: "known",
 			name: `Item ${guid}`,

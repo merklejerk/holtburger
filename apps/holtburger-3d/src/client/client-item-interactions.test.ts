@@ -1,9 +1,7 @@
+import { LOCAL_CONFIRMATION_SUPPRESSION_MS } from "./client-confirmation-suppression";
 import { emptyHousing } from "./client-housing-contract";
 import { describe, expect, it, vi } from "vitest";
-import {
-	ClientItemInteractions,
-	GIVE_CONFIRMATION_SUPPRESSION_MS,
-} from "./client-item-interactions";
+import { ClientItemInteractions } from "./client-item-interactions";
 import { ClientEntitySelection } from "./client-entity-selection";
 import { CASTER_EQUIP_MASK } from "./client-inventory-equipment";
 import { ClientLifecycleSession } from "./client-lifecycle-session";
@@ -27,7 +25,9 @@ async function fixture() {
 	const failure = vi.fn();
 	const beginAcquisition = vi.fn();
 	const beginTrade = vi.fn();
+	const beginSalvage = vi.fn();
 	const interactions = new ClientItemInteractions({
+		beginSalvage,
 		beginTrade,
 		session: lifecycle,
 		selection,
@@ -95,6 +95,13 @@ async function fixture() {
 		dynamic: { hostTime: { seconds: 10 }, entities: [] },
 		entities: {
 			projectileSupply: { kind: "not-applicable" },
+			salvage: {
+				skills: {
+					salvagingSkill: 0,
+					tinkeringSkill: 0,
+					augmentationBonusSalvage: 0,
+				},
+			},
 			worldContainer: { kind: "closed" },
 			entities: [
 				entityFacts(1),
@@ -128,6 +135,7 @@ async function fixture() {
 		lifecycle,
 		failure,
 		beginAcquisition,
+		beginSalvage,
 		beginTrade,
 		submit,
 		query,
@@ -181,6 +189,7 @@ describe("shared frontend item interaction flow", () => {
 		const publish = (item: ClientEntityFacts) =>
 			f.emit("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [item],
 				removed: [],
@@ -229,6 +238,7 @@ describe("shared frontend item interaction flow", () => {
 		const publish = (ownedByPlayer: boolean, wearerGuid: number) =>
 			f.emit("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [
 					{
@@ -284,6 +294,7 @@ describe("shared frontend item interaction flow", () => {
 		};
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: [caster],
 			removed: [],
@@ -318,6 +329,7 @@ describe("shared frontend item interaction flow", () => {
 		expect(inventory).not.toHaveBeenCalled();
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: [
 				{
@@ -401,7 +413,7 @@ describe("shared frontend item interaction flow", () => {
 		try {
 			f.interactions.give(2, 4);
 			f.interactions.respond(f.question().requestId, true, true);
-			now.mockReturnValue(1_000 + GIVE_CONFIRMATION_SUPPRESSION_MS - 1);
+			now.mockReturnValue(1_000 + LOCAL_CONFIRMATION_SUPPRESSION_MS - 1);
 			f.select(3);
 			f.interactions.give(3, 5);
 			expect(f.interactions.question()).toBeNull();
@@ -409,7 +421,7 @@ describe("shared frontend item interaction flow", () => {
 				item: 3,
 				target: { kind: "give", guid: 5 },
 			});
-			now.mockReturnValue(1_000 + GIVE_CONFIRMATION_SUPPRESSION_MS);
+			now.mockReturnValue(1_000 + LOCAL_CONFIRMATION_SUPPRESSION_MS);
 			f.interactions.give(2, 4);
 			expect(f.interactions.question()).not.toBeNull();
 			expect(f.give).toHaveBeenCalledTimes(2);
@@ -466,6 +478,7 @@ describe("shared frontend item interaction flow", () => {
 			.mockResolvedValue(undefined);
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: [entityFacts(4, { canPickUp: true })],
 			removed: [],
@@ -499,6 +512,7 @@ describe("shared frontend item interaction flow", () => {
 		});
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: [entityFacts(4, { canPickUp: true })],
 			removed: [],
@@ -724,6 +738,7 @@ describe("shared frontend item interaction flow", () => {
 		const id = question();
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: [],
 			removed: [2],
@@ -767,6 +782,7 @@ it("player interaction initiates trade through the ordinary Interact flow", asyn
 	const f = await fixture();
 	f.emit("client-entity-facts-changed", {
 		projectileSupply: null,
+		salvage: null,
 		worldContainer: null,
 		removed: [],
 		upserts: [entityFacts(7, { canTrade: true })],
@@ -787,6 +803,7 @@ async function giveFixture() {
 		.mockResolvedValue(undefined);
 	f.emit("client-entity-facts-changed", {
 		projectileSupply: null,
+		salvage: null,
 		worldContainer: null,
 		upserts: [
 			entityFacts(4, { canReceiveGive: true }),
@@ -804,3 +821,35 @@ async function giveFixture() {
 		},
 	};
 }
+
+it("ordinary and bound Ust activation share the local workflow without generic Use or target acquisition", async () => {
+	const f = await fixture();
+	const read = f.lifecycle.entities.read();
+	if (read.kind !== "current") throw new Error("Expected entity snapshot.");
+	const tool = read.level.entities.get(2);
+	if (tool === undefined || tool.description.kind !== "known")
+		throw new Error("Expected known source.");
+	const changed = {
+		...tool,
+		description: {
+			...tool.description,
+			equipLocations: null,
+			useCapability: "salvage-tool" as const,
+		},
+	};
+	f.emit("client-entity-facts-changed", {
+		projectileSupply: null,
+		worldContainer: null,
+		salvage: null,
+		upserts: [changed],
+		removed: [],
+	});
+	f.interactions.use(2, false);
+	f.interactions.activate(2, "direct", false);
+	expect(f.beginSalvage).toHaveBeenNthCalledWith(1, 2);
+	expect(f.beginSalvage).toHaveBeenNthCalledWith(2, 2);
+	expect(f.submit).not.toHaveBeenCalled();
+	expect(f.query).not.toHaveBeenCalled();
+	expect(f.interactions.snapshot().kind).toBe("idle");
+	f.destroy();
+});

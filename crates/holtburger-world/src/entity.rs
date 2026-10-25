@@ -1670,6 +1670,12 @@ impl Entity {
         }
     }
 
+    /// Best disclosed display average; public descriptions never establish raw totals.
+    pub fn display_workmanship(&self) -> Option<f64> {
+        self.effective_workmanship()
+            .or_else(|| self.public_description.as_ref()?.workmanship.map(f64::from))
+    }
+
     pub fn apply_identify_response(&mut self, data: &IdentifyObjectResponseEventData) -> bool {
         identify::apply_identify_response(
             IdentifyTarget {

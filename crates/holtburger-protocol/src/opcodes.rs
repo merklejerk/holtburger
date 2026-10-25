@@ -734,8 +734,8 @@ pub enum GameEventOpcode {
     // BookDeletePageResponse = 0x00B7,
     /// S2C: Returns specific page data for a book.
     BookPageDataResponse = 0x00B8,
-    // /// S2C: Result of a salvaging operation.
-    // SalvageOperationsResult = 0x02B4,
+    /// S2C: Optional salvage yields and unsuitable sources, grouped by skill.
+    SalvageOperationsResult = 0x02B4,
 
     // --- Combat & Stats ---
     /// S2C: Notification that the current attack sequence is finished.

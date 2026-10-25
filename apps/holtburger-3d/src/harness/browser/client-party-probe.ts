@@ -114,6 +114,8 @@ export async function probeParty(options: {
 				interactionLabel: "Trade",
 				canInteract: true,
 			}),
+			readCanSalvage: () => false,
+			onSalvage: () => {},
 			readCanSplit: () => false,
 			readCanCorpsePermission: () => false,
 			onCorpsePermission: () => {},

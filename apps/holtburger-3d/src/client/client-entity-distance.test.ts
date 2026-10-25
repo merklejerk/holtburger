@@ -35,6 +35,13 @@ it("measures entity reach across adjacent landblock frames", () => {
 		entities.prepareSnapshot(
 			{
 				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
 				worldContainer: { kind: "closed" },
 				entities: [entityFacts(1), entityFacts(2)],
 			},

@@ -241,6 +241,24 @@ and the layout-lock button remain CSS-owned. User HUD sections persist placement
 fitting preserves the preferred geometry stored in those sections.
 Tests exercise geometry with explicit fixtures rather than pinning the current defaults.
 
+## Salvaging
+
+Use an Ust or choose Salvage on a carried item's selected-entity HUD to open the salvage window.
+Drag additional items into the queue; mixed materials have separate estimated output rows.
+Drag queued items outside the queue to remove them, or use their remove button. These gestures
+edit only the local draft; the physical items stay in inventory.
+Items with sufficient source facts preview immediately. Missing details are appraised automatically,
+one source at a time, through the session's shared appraisal requests. This does not open or
+retarget an inspector. Rejected, incomplete, or transport-failed appraisals keep the item queued
+and expose an item-specific explanation with Retry; they do not retry on every display sample.
+Removing items, clearing the queue, or closing the window retires only salvage's subscriptions.
+The whole batch must have a valid authoritative review before Salvage can be confirmed. Entire
+stacks are included, and the server remains authoritative for destruction and output inventory.
+The destruction warning appears in the confirmation modal, which offers the same one-hour
+suppression control as Give. Suppression is independent for each action, survives window closure
+and portal travel, and clears on logout. It skips only the modal; each batch still requires clicking
+Salvage and passing the current review checks.
+
 ## Object examination
 
 Select an entity and press `E`, use the magnifying-glass button in the selected-entity HUD, or
@@ -250,6 +268,16 @@ selection change does not retarget the pending request or an open inspection, an
 not open until a successful appraisal response arrives. Starting a request for another target
 replaces the previous pending/open inspection; duplicate requests for the same pending target are
 suppressed. Rejected, missing, and transport-failed requests remain distinct warning messages.
+
+App-local consumers acquire appraisal data through `session.appraisals.request(guid, receive)`.
+The session shares one in-flight request per GUID and gives each consumer a cancellable
+subscription. Cancelling an inspector subscription leaves other consumers and the outstanding
+wire reply intact. An inspector applies only results delivered through its own subscription;
+background results cannot open, retarget, or replace an otherwise idle/ready inspection. When
+both consumers are awaiting the same item, they intentionally share its result. Creature-preview
+updates are accepted only after an appraisal requested by that inspector. Portal/resync, character
+replacement, and teardown retire subscriptions. Raw appraisal events remain available as shared
+facts and diagnostics rather than instructions to open UI.
 
 Successful results open one independently draggable and resizable inspection window. Its placement
 survives snapshot replacement for the current mounted world view. Closing the window changes only

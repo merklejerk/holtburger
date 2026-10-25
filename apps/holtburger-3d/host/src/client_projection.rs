@@ -1353,6 +1353,10 @@ pub enum ClientHostEvent {
     SpellInspectionContext(holtburger_core::client::spell_inspection::SpellInspectionContext),
     /// Correlated character-bound spell facts.
     SpellInspectionResult(holtburger_core::client::spell_inspection::SpellInspectionResult),
+    /// Correlated salvage evaluation.
+    SalvagePreview(holtburger_core::client::salvage::SalvagePreviewResult),
+    /// Correlated salvage dispatch receipt.
+    SalvageResult(holtburger_core::client::salvage::SalvageSubmitResult),
     /// Correlated semantic item-use outcome.
     ItemUseResult(holtburger_core::client::item_use::ItemUseResult),
     ItemUseTargetResult(holtburger_core::client::item_use::ItemUseTargetResult),
@@ -1736,6 +1740,8 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             Some(ClientHostEvent::SpellInspectionResult(result))
         }
         ClientViewEvent::DeathLocations(result) => Some(ClientHostEvent::DeathLocations(result)),
+        ClientViewEvent::SalvagePreview(result) => Some(ClientHostEvent::SalvagePreview(result)),
+        ClientViewEvent::SalvageSubmitted(result) => Some(ClientHostEvent::SalvageResult(result)),
         ClientViewEvent::ItemUseResult(result) => Some(ClientHostEvent::ItemUseResult(result)),
         ClientViewEvent::ItemUseTargetResult(result) => {
             Some(ClientHostEvent::ItemUseTargetResult(result))
@@ -3339,6 +3345,128 @@ mod tests {
                 CombatFeedback::AttackCommenced
             ))
             .is_none()
+        );
+    }
+}
+
+#[cfg(test)]
+mod salvage_wire_tests {
+    use crate::host_event_sink::ClientEventSink;
+    use crate::protocol::{HostCommand, InboundFrame, StdioEventSink, encode_frame, read_frame};
+    use holtburger_common::{
+        Guid,
+        properties::{ItemType, MaterialType},
+    };
+    use holtburger_core::ClientViewEvent;
+    use holtburger_core::client::salvage::{
+        SalvagePreviewResult, SalvageSubmitOutcome, SalvageSubmitRequest, SalvageSubmitResult,
+    };
+    use holtburger_world::crafting::salvage::{
+        SalvageCandidate, SalvageContext, SalvageEvaluation, SalvageItemInput, SalvagePreviewBag,
+        SalvageReview, SalvageSkillProfile, SalvageSource, SalvageTool,
+    };
+    use serde_json::Value;
+    use std::{io::Cursor, sync::mpsc};
+
+    #[test]
+    fn salvage_contract_matches_browser_fixture_and_round_trips_the_review() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../src/client/fixtures/salvage-wire.json"))
+                .unwrap();
+        let source = SalvageSource {
+            guid: Guid(3),
+            instance: 1,
+            input: SalvageItemInput {
+                item_type: ItemType::MELEE_WEAPON,
+                material_type: MaterialType::Steel,
+                stack_size: 2,
+                structure: 0,
+                item_workmanship: 7,
+                num_items_in_material: 1,
+            },
+        };
+        let skills = SalvageSkillProfile {
+            salvaging_skill: 300,
+            tinkering_skill: 200,
+            augmentation_bonus_salvage: 0,
+        };
+        let review = SalvageReview {
+            player: Guid(1),
+            tool: SalvageTool {
+                guid: Guid(2),
+                instance: 1,
+            },
+            sources: vec![source.clone()],
+            skills,
+        };
+        assert_eq!(
+            serde_json::to_value(SalvageCandidate::Ready {
+                source: source.clone()
+            })
+            .unwrap(),
+            fixture["candidate"]
+        );
+        assert_eq!(
+            serde_json::to_value(SalvageContext { skills }).unwrap(),
+            fixture["context"]
+        );
+        let preview = SalvagePreviewResult {
+            sequence: 9,
+            evaluation: SalvageEvaluation::Ready {
+                review: review.clone(),
+                bags: vec![SalvagePreviewBag {
+                    material_type: MaterialType::Steel,
+                    units: 42,
+                    workmanship: 7.0,
+                }],
+            },
+        };
+        assert_eq!(serde_json::to_value(&preview).unwrap(), fixture["preview"]);
+        // Exercise the actual sidecar event framing, not just human-readable serde.
+        let event = super::project_client_event(ClientViewEvent::SalvagePreview(preview)).unwrap();
+        let (sender, receiver) = mpsc::sync_channel(1);
+        StdioEventSink::new(sender)
+            .publish_client_event(event)
+            .unwrap();
+        let bytes = encode_frame(&receiver.recv().unwrap()).unwrap();
+        let frame: Value = rmp_serde::from_slice(&bytes[4..]).unwrap();
+        assert_eq!(frame["event"]["payload"], fixture["preview"]);
+        let candidate = SalvageCandidate::Ready { source };
+        let bytes = rmp_serde::to_vec_named(&candidate).unwrap();
+        let candidate: Value = rmp_serde::from_slice(&bytes).unwrap();
+        assert_eq!(candidate, fixture["candidate"]);
+
+        let submit: SalvageSubmitRequest =
+            serde_json::from_value(fixture["submit"].clone()).unwrap();
+        assert_eq!(submit.review, review);
+        // HostCommand decodes MessagePack into JSON before deserializing its request.
+        // Returning the same numeric review must survive that production path too.
+        let payload = rmp_serde::to_vec_named(&serde_json::json!({
+            "kind": "request", "id": 1,
+            "command": { "command": "submit_client_salvage", "request": fixture["submit"] }
+        }))
+        .unwrap();
+        let mut bytes = u32::try_from(payload.len()).unwrap().to_le_bytes().to_vec();
+        bytes.extend(payload);
+        let Some(InboundFrame::Request {
+            command:
+                HostCommand::Client(crate::client_runtime::ClientHostCommand::SubmitClientSalvage {
+                    request,
+                }),
+            ..
+        }) = read_frame(&mut Cursor::new(bytes)).unwrap()
+        else {
+            panic!("salvage submission did not decode");
+        };
+        assert_eq!(request.review, review);
+
+        assert_eq!(
+            serde_json::to_value(SalvageSubmitResult {
+                sequence: 10,
+                outcome: SalvageSubmitOutcome::Dispatched
+            })
+            .unwrap(),
+            fixture["result"]
         );
     }
 }

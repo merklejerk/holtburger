@@ -609,30 +609,6 @@ pub trait WorldContextExt: WorldContext {
         self.get_suggested_combat_mode() == CombatMode::Magic
     }
 
-    fn is_salvage_candidate(&self, guid: Guid) -> bool {
-        let Some(entity) = self.get_entity(guid) else {
-            return false;
-        };
-
-        if entity.is_retained() {
-            return false;
-        }
-
-        let Some(item_type) = entity.item_type() else {
-            return false;
-        };
-
-        if item_type.contains(ItemType::TINKERING_MATERIAL) {
-            let structure = entity.structure().unwrap_or(0);
-            let max_structure = entity.max_structure().unwrap_or(0);
-            if structure >= max_structure && max_structure > 0 {
-                return false;
-            }
-        }
-
-        entity.material_type().is_some() && entity.workmanship().is_some()
-    }
-
     /// Finds a non-full container in the player's possession that can accept the item.
     /// If preferred_container_id is given, it is checked first.
     /// Then the player itself (main pack), then all items in the inventory that are containers.

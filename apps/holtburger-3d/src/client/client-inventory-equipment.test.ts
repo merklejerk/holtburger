@@ -19,6 +19,13 @@ const equipped = (guid: number, mask: number | null, wearerGuid = 1) =>
 const project = (...entities: ClientEntityFacts[]) =>
 	inventoryEquipment({
 		projectileSupply: { kind: "not-applicable" },
+		salvage: {
+			skills: {
+				salvagingSkill: 0,
+				tinkeringSkill: 0,
+				augmentationBonusSalvage: 0,
+			},
+		},
 		worldContainer: { kind: "closed" },
 		playerGuid: 1,
 		revision: 1,

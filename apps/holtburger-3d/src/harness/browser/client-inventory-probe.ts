@@ -23,6 +23,7 @@ function item(
 		canReceiveGive: false,
 		canTrade: false,
 		canOfferTrade: false,
+		salvage: { kind: "ineligible", reason: "Fixture item cannot be salvaged." },
 		description: {
 			kind: "known",
 			name: `Inventory item ${guid}`,
@@ -271,6 +272,13 @@ export async function probeClientInventory(options: {
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },
 			entities: {
 				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
 				worldContainer: { kind: "closed" },
 				entities: records,
 			},
@@ -281,6 +289,7 @@ export async function probeClientInventory(options: {
 		);
 		emit("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: [record],
 			removed: [],
@@ -1046,6 +1055,7 @@ export async function probeClientInventory(options: {
 	records = records.filter((record) => record.guid !== 21);
 	emit("client-entity-facts-changed", {
 		projectileSupply: null,
+		salvage: null,
 		worldContainer: null,
 		upserts: [],
 		removed: [21],
@@ -1255,7 +1265,7 @@ export async function probeClientInventory(options: {
 				throw new Error("Known structure fixture required.");
 			update({ ...record, description: { ...record.description, structure } });
 		};
-		for (const current of [40, 10, 0]) {
+		for (const current of [40, 10, 1, 0]) {
 			setStructure({ current, max: 50 });
 			await sample();
 			const label = `[${current}/50]`;
@@ -1272,6 +1282,23 @@ export async function probeClientInventory(options: {
 			const trackRect = track.getBoundingClientRect();
 			const fillRect = fill.getBoundingClientRect();
 			const box = cell(22).getBoundingClientRect();
+			const fillStyle = getComputedStyle(fill);
+			const minFill =
+				current === 0
+					? 0
+					: Math.min(
+							trackRect.height,
+							Number.parseFloat(
+								fillStyle.getPropertyValue("--ui-item-structure-min-fill"),
+							) *
+								Number.parseFloat(
+									fillStyle.getPropertyValue("--ui-icon-scale"),
+								),
+						);
+			const expectedHeight = Math.max(
+				(trackRect.height * current) / 50,
+				minFill,
+			);
 			const count = badge(22);
 			if (
 				count === null ||
@@ -1281,7 +1308,9 @@ export async function probeClientInventory(options: {
 					"Stack count is missing or overlaps the structure bar.",
 				);
 			if (
-				Math.abs(fillRect.height - (trackRect.height * current) / 50) > 1 ||
+				Math.abs(fillRect.height - expectedHeight) > 0.1 ||
+				(current === 0 && fillRect.height !== 0) ||
+				getComputedStyle(track).boxShadow === "none" ||
 				Math.abs(fillRect.bottom - trackRect.bottom) > 1 ||
 				trackRect.right > box.right ||
 				trackRect.left < box.left + box.width / 2 ||

@@ -80,6 +80,7 @@ export async function probeClientNearby(dependencies: {
 	];
 	emit("client-entity-facts-changed", {
 		projectileSupply: null,
+		salvage: null,
 		worldContainer: null,
 		upserts: facts,
 		removed: [],
@@ -164,6 +165,7 @@ export async function probeClientNearby(dependencies: {
 	require(staleRow !== null, "third entity is displayed before removal");
 	emit("client-entity-facts-changed", {
 		projectileSupply: null,
+		salvage: null,
 		worldContainer: null,
 		upserts: [],
 		removed: [9],
@@ -185,6 +187,7 @@ export async function probeClientNearby(dependencies: {
 		true, "unavailable row reports the existing selection error");
 	emit("client-entity-facts-changed", {
 		projectileSupply: null,
+		salvage: null,
 		worldContainer: null,
 		upserts: [facts[2]],
 		removed: [],
@@ -512,6 +515,7 @@ export async function probeClientNearby(dependencies: {
 	try {
 		emit("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: [nearbyFacts(10, "Gold Golem")],
 			removed: [],

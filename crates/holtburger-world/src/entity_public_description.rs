@@ -22,6 +22,8 @@ pub(crate) struct EntityPublicDescription {
     pub structure: Option<u32>,
     /// Public structure capacity displayed independently of remaining uses.
     pub max_structure: Option<u32>,
+    /// Public average workmanship, distinct from appraised integer total/count.
+    pub workmanship: Option<f32>,
 }
 
 impl EntityPublicDescription {
@@ -37,6 +39,7 @@ impl EntityPublicDescription {
             max_stack_count: description.max_stack_size,
             structure: description.structure,
             max_structure: description.max_structure,
+            workmanship: description.workmanship,
         }
     }
 

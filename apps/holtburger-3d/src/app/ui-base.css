@@ -302,6 +302,8 @@
 		--ui-item-structure-width: 3px;
 		--ui-item-structure-inset: 1px;
 		--ui-item-structure-background: #000b;
+		--ui-item-structure-outline: #fff6;
+		--ui-item-structure-min-fill: 3px;
 		--ui-item-strip-inset: 5px;
 		--ui-item-strip-block-inset: 5px;
 		--ui-item-strip-arrow-height: 18px;
@@ -450,6 +452,18 @@
 	}
 	.ui-theme h3 {
 		font-size: calc(var(--ui-font-size-heading-3) * var(--ui-text-scale));
+	}
+	/* Section hierarchy shared by inspection details and workflow panels. */
+	.ui-theme .ui-section-heading {
+		margin: 0 0 7px;
+		padding-bottom: 3px;
+		border-bottom: 1px solid
+			color-mix(in srgb, var(--ui-color-border) 55%, transparent);
+		font-size: calc(var(--ui-font-size-heading-3) * var(--ui-text-scale));
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--ui-color-accent);
+		flex-shrink: 0;
 	}
 	.ui-theme .ui-muted {
 		color: var(--ui-color-muted);

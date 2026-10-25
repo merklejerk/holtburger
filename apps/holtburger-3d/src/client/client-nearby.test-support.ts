@@ -77,6 +77,13 @@ export class NearbyTestSession {
 					entities: [entityFacts(1), ...facts],
 					worldContainer: { kind: "closed" },
 					projectileSupply: { kind: "not-applicable" },
+					salvage: {
+						skills: {
+							salvagingSkill: 0,
+							tinkeringSkill: 0,
+							augmentationBonusSalvage: 0,
+						},
+					},
 				},
 				1,
 			),
@@ -96,6 +103,7 @@ export class NearbyTestSession {
 			removed: [...removed],
 			worldContainer: null,
 			projectileSupply: null,
+			salvage: null,
 		});
 		if (prepared !== null) this.entities.commit(prepared);
 		this.emit({ type: "entities" });

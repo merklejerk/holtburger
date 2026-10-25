@@ -35,6 +35,7 @@
 	<span class="item-cell-meter" aria-hidden="true">
 		<span
 			class="item-cell-meter-fill"
+			class:nonempty={presentation.meter.fraction > 0}
 			style:height={`${presentation.meter.fraction * 100}%`}
 			style:background-color={`hsl(${presentation.meter.hue} 100% 45%)`}
 		></span>
@@ -66,12 +67,20 @@
 			bottom: calc(var(--ui-item-structure-inset) * var(--ui-icon-scale));
 			width: calc(var(--ui-item-structure-width) * var(--ui-icon-scale));
 			background: var(--ui-item-structure-background);
+			box-shadow: 0 0 0 1px var(--ui-item-structure-outline);
 			pointer-events: none;
 		}
 		.item-cell-meter-fill {
 			position: absolute;
 			bottom: 0;
 			width: 100%;
+		}
+		/* Keep small positive amounts visible without making exhausted items look usable. */
+		.item-cell-meter-fill.nonempty {
+			min-height: min(
+				100%,
+				calc(var(--ui-item-structure-min-fill) * var(--ui-icon-scale))
+			);
 		}
 		.item-equipped {
 			position: absolute;

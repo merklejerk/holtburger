@@ -272,17 +272,7 @@ impl ContentDecodeCache {
 
     pub fn palette(&self, content: &ContentRepository, palette_id: u32) -> Result<Arc<Palette>> {
         load_lru_record(&self.lru.palettes, palette_id, || {
-            let resource = content
-                .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, palette_id))
-                .with_context(|| {
-                    format!(
-                        "Could not read {}:0x{palette_id:08X} from content repository",
-                        EOR_PORTAL_NAMESPACE
-                    )
-                })?;
-            Palette::unpack(&mut Cursor::new(resource.bytes))
-                .map(Arc::new)
-                .with_context(|| format!("Could not decode Palette 0x{palette_id:08X}"))
+            content.read_palette(palette_id).map(Arc::new)
         })
     }
 }

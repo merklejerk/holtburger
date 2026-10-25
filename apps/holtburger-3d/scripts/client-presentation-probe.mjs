@@ -103,10 +103,15 @@ export async function probeClientPresentation(
 			const previous = screen.getAttribute('style');
 			const bodyColor = getComputedStyle(document.body).color;
 			const before = getComputedStyle(shade, '::before').backgroundImage;
+            const name = screen.querySelector('.creation-name');
+            const nameBefore = name === null ? null : getComputedStyle(name, '::before').background;
+            const inputBefore = name === null ? null : getComputedStyle(name.querySelector('input')).backgroundColor;
 			try {
 				screen.style.setProperty('--ui-color-highlight', 'rgb(17, 183, 209)');
 				screen.style.setProperty('--ui-font-heading', 'monospace');
 				screen.style.setProperty('--pregame-primary-shadow', 'none');
+                screen.style.setProperty('--pregame-name-background-color', 'rgb(24 48 72 / 80%)');
+                screen.style.setProperty('--pregame-name-input-background', 'rgb(36 72 108 / 60%)');
 				screen.style.setProperty('--pregame-backdrop-color', 'rgb(45 67 89 / 50%)');
 				screen.style.setProperty('--pregame-editor-backdrop-color', 'rgb(45 67 89 / 50%)');
 				// Palette changes use the shared button color transition.
@@ -119,6 +124,7 @@ export async function probeClientPresentation(
 					shadow: getComputedStyle(primary).boxShadow,
 					shadeChanged: getComputedStyle(shade, '::before').backgroundImage !== before,
 					isolated: getComputedStyle(document.body).color === bodyColor,
+                    nameThemed: name === null || (getComputedStyle(name, '::before').background !== nameBefore && getComputedStyle(name.querySelector('input')).backgroundColor !== inputBefore),
 				};
 			} finally {
 				if (previous === null) screen.removeAttribute('style');
@@ -132,6 +138,7 @@ export async function probeClientPresentation(
 			shadow: "none",
 			shadeChanged: true,
 			isolated: true,
+			nameThemed: true,
 		});
 	};
 	const checkBuildInformation = async () => {
@@ -324,6 +331,151 @@ export async function probeClientPresentation(
 			);
 		}
 
+		// Management belongs to each row and must not change the selected character.
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: 1,
+			y: 1,
+		});
+		assert.equal(
+			await read(
+				`getComputedStyle(document.querySelectorAll('.character-row-action')[1]).visibility`,
+			),
+			"hidden",
+		);
+		const deletePoint = await read(`(() => {
+            const button = document.querySelectorAll('.character-row-action')[1];
+            const rect = button.getBoundingClientRect();
+            return {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+        })()`);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			...deletePoint,
+		});
+		assert.equal(
+			await read(
+				`getComputedStyle(document.querySelectorAll('.character-row-action')[1]).visibility`,
+			),
+			"visible",
+		);
+		await read(`document.querySelectorAll('.character-row-action')[1].focus()`);
+		assert.equal(
+			await read(
+				`getComputedStyle(document.querySelectorAll('.character-row-action')[1]).visibility`,
+			),
+			"visible",
+		);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: 1,
+			y: 1,
+		});
+		assert.equal(
+			await read(
+				`getComputedStyle(document.querySelectorAll('.character-row-action')[1]).visibility`,
+			),
+			"hidden",
+		);
+		await read(`document.querySelectorAll('.character-row-action')[1].click()`);
+		await wait(
+			`document.querySelector('.character-deletion-dialog')?.open === true`,
+		);
+		assert.equal(
+			await read(
+				`document.activeElement === document.querySelector('.character-deletion-form input')`,
+			),
+			true,
+		);
+		assert.equal(
+			await read(
+				`document.querySelector('button[name=character]').getAttribute('aria-pressed')`,
+			),
+			"true",
+		);
+		assert.equal(
+			await read(
+				`document.querySelector('.character-deletion-form button[type=submit]').disabled`,
+			),
+			true,
+		);
+		await read(`(() => {
+            const input = document.querySelector('.character-deletion-form input');
+            input.value = 'Wrong name'; input.dispatchEvent(new Event('input', {bubbles: true}));
+        })()`);
+		assert.equal(
+			await read(
+				`document.querySelector('.character-deletion-form button[type=submit]').disabled`,
+			),
+			true,
+		);
+		await client.send("Input.dispatchKeyEvent", {
+			type: "keyDown",
+			key: "Escape",
+			code: "Escape",
+			windowsVirtualKeyCode: 27,
+		});
+		await client.send("Input.dispatchKeyEvent", {
+			type: "keyUp",
+			key: "Escape",
+			code: "Escape",
+			windowsVirtualKeyCode: 27,
+		});
+		await wait(`document.querySelector('.character-deletion-dialog') === null`);
+		await read(`document.querySelectorAll('.character-row-action')[1].click()`);
+		await wait(
+			`document.querySelector('.character-deletion-dialog')?.open === true`,
+		);
+		assert.equal(
+			await read(
+				`document.activeElement === document.querySelector('.character-deletion-form input')`,
+			),
+			true,
+		);
+		assert.equal(
+			await read(
+				`document.querySelector('.character-deletion-form input').value`,
+			),
+			"",
+		);
+		await read(`(() => {
+            const input = document.querySelector('.character-deletion-form input');
+            input.value = '  NO SAVED APPEARANCE  '; input.dispatchEvent(new Event('input', {bubbles: true}));
+        })()`);
+		await wait(
+			`!document.querySelector('.character-deletion-form button[type=submit]').disabled`,
+		);
+		assert.equal(
+			await read(`(async () => {
+            document.querySelector('.character-deletion-form button[type=submit]').click();
+            await new Promise(resolve => setTimeout(resolve, 0));
+            return document.querySelector('.client-character-list').disabled;
+        })()`),
+			true,
+		);
+		await wait(
+			`document.querySelector('.character-deletion-dialog') === null && document.querySelector('.character-deletion-status') !== null`,
+		);
+		assert.equal(
+			await read(
+				`document.querySelector('.character-deletion-status time').dateTime.length > 0`,
+			),
+			true,
+		);
+		await read(
+			`document.querySelectorAll('button[name=character]')[1].click()`,
+		);
+		assert.equal(
+			await read(`document.querySelector('.enter-world').disabled`),
+			true,
+		);
+		await read(
+			`document.querySelector('button[aria-label="Restore No saved appearance"]').click()`,
+		);
+		await wait(
+			`document.querySelector('.character-deletion-status') === null && !document.querySelector('.enter-world').disabled`,
+		);
+		await read(`document.querySelector('button[name=character]').click()`);
+
 		await click("Create character");
 		await wait(
 			`${visible} && document.body.innerText.includes('Create a character')`,
@@ -332,6 +484,264 @@ export async function probeClientPresentation(
 			"document.querySelector('.creation-settings select') !== null && document.querySelector('.creation-viewport .creature-preview-status') === null",
 		);
 		const creator = await read(`${api}.read()`);
+		assert.equal(
+			await read(
+				"document.getElementById('creation-race-tab').getAttribute('aria-selected')",
+			),
+			"true",
+		);
+
+		assert.equal(
+			await read(
+				`Math.abs(document.querySelector('.creation-name').getBoundingClientRect().top - document.querySelector('.creation-editor-heading').getBoundingClientRect().top) < 1`,
+			),
+			true,
+		);
+		const previewBoundsBeforeNameError = await read(
+			`document.querySelector('.creation-viewport').getBoundingClientRect().toJSON()`,
+		);
+		await read(`(() => {
+            const name = document.querySelector('.creation-name input');
+            name.value = 'Palette Tester1';
+            name.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+		await wait(
+			`document.querySelector('.creation-name input').getAttribute('aria-invalid') === 'true' && document.getElementById('creation-name-error') !== null`,
+		);
+
+		assert.deepEqual(
+			await read(
+				`document.querySelector('.creation-viewport').getBoundingClientRect().toJSON()`,
+			),
+			previewBoundsBeforeNameError,
+		);
+
+		assert.equal(
+			await read(
+				`document.querySelector('.creation-name-error-icon').title === document.getElementById('creation-name-error').textContent`,
+			),
+			true,
+		);
+		await click("Review");
+		assert.equal(
+			await read(
+				`document.querySelector('button[form="creation-review-form"]').disabled`,
+			),
+			true,
+		);
+		await read(
+			`document.getElementById('creation-review-form').requestSubmit()`,
+		);
+		assert.equal(
+			await read(
+				`document.querySelector('.creation-feedback').innerText.trim()`,
+			),
+			"",
+		);
+		await click("Race");
+		await read(`(() => {
+            const name = document.querySelector('.creation-name input');
+            name.value = 'Palette Tester';
+            name.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+		await wait(
+			`document.querySelector('.creation-name input').getAttribute('aria-invalid') === 'false' && document.getElementById('creation-name-error') === null`,
+		);
+
+		assert.deepEqual(
+			await read(
+				`document.querySelector('.creation-viewport').getBoundingClientRect().toJSON()`,
+			),
+			previewBoundsBeforeNameError,
+		);
+		await click("Appearance");
+		await wait(
+			`document.querySelector('button[aria-label^="Skin color:"]') !== null`,
+		);
+
+		const paletteGeometry = await read(`(() => {
+            // Fractional CSS pixels may differ after device-scale rounding.
+            const tolerance = 1;
+            return [...document.querySelectorAll('.palette-dropdown')].map(button => {
+                const outer = button.getBoundingClientRect();
+                const inner = button.querySelector('.palette-swatch').getBoundingClientRect();
+                return {
+                    square: Math.abs(outer.width - outer.height) < tolerance,
+                    centered: Math.abs((inner.left + inner.right) - (outer.left + outer.right)) < tolerance && Math.abs((inner.top + inner.bottom) - (outer.top + outer.bottom)) < tolerance,
+                    inset: inner.left > outer.left && inner.right < outer.right && inner.top > outer.top && inner.bottom < outer.bottom,
+                };
+            });
+        })()`);
+		assert.ok(paletteGeometry.length > 0);
+		for (const geometry of paletteGeometry)
+			assert.deepEqual(geometry, { square: true, centered: true, inset: true });
+		await read(`(() => {
+            const slider = document.querySelector('#creation-appearance input[type="range"]');
+            slider.value = slider.max;
+            slider.dispatchEvent(new Event('input', { bubbles: true }));
+        })()`);
+		await wait(`(() => {
+            const slider = document.querySelector('#creation-appearance input[type="range"]');
+            const ordinal = Number(slider.max) + 1;
+            return slider.getAttribute('aria-valuetext') === ordinal + ' of ' + ordinal;
+        })()`);
+
+		const readAppearanceControls = () =>
+			read(`(() => {
+            const panel = document.getElementById('creation-appearance');
+            return {
+                body: panel.querySelector('select').value,
+                features: [...panel.querySelectorAll('input[type="range"]')].map(input => input.value),
+                colors: [...panel.querySelectorAll('.palette-dropdown')].map(button => button.getAttribute('aria-label')),
+            };
+        })()`);
+		const firstBodyControls = await readAppearanceControls();
+		const secondBody = await read(`(() => {
+            const select = document.querySelector('#creation-appearance select');
+            return [...select.options].find(option => option.value !== select.value).value;
+        })()`);
+		const chooseBody = (value) =>
+			read(`(() => {
+            const select = document.querySelector('#creation-appearance select');
+            select.value = ${JSON.stringify(value)};
+            select.dispatchEvent(new Event('change', {bubbles: true}));
+        })()`);
+		await chooseBody(secondBody);
+		await read(`(() => {
+            const slider = document.querySelector('#creation-appearance input[type="range"]');
+            slider.value = slider.max;
+            slider.dispatchEvent(new Event('input', {bubbles: true}));
+        })()`);
+		const secondBodyControls = await readAppearanceControls();
+		await chooseBody(firstBodyControls.body);
+		assert.deepEqual(await readAppearanceControls(), firstBodyControls);
+		await chooseBody(secondBody);
+		assert.deepEqual(await readAppearanceControls(), secondBodyControls);
+		await chooseBody(firstBodyControls.body);
+		await click("Race");
+		const firstRace = await read(
+			`document.querySelector('#creation-race select').value`,
+		);
+		await read(`(() => {
+            const select = document.querySelector('#creation-race select');
+            select.value = [...select.options].find(option => option.value !== select.value).value;
+            select.dispatchEvent(new Event('change', {bubbles: true}));
+        })()`);
+		await read(`(() => {
+            const select = document.querySelector('#creation-race select');
+            select.value = ${JSON.stringify(firstRace)};
+            select.dispatchEvent(new Event('change', {bubbles: true}));
+        })()`);
+		await click("Appearance");
+		assert.deepEqual(await readAppearanceControls(), firstBodyControls);
+		await read(
+			`document.querySelector('button[aria-label^="Skin color:"]').click()`,
+		);
+		await wait(
+			`document.querySelector('[role="menu"][aria-label="Skin color"]') !== null`,
+		);
+
+		const paletteEntries = await read(`(() => {
+            const tolerance = 1; // Allow fractional CSS-pixel rounding.
+            return [...document.querySelectorAll('[role="menu"][aria-label="Skin color"] button')].map(button => {
+                const cell = button.getBoundingClientRect();
+                const swatch = button.querySelector('.palette-swatch').getBoundingClientRect();
+                return {
+                    square: Math.abs(cell.width - cell.height) < tolerance,
+                    centered: Math.abs((swatch.left + swatch.right) - (cell.left + cell.right)) < tolerance && Math.abs((swatch.top + swatch.bottom) - (cell.top + cell.bottom)) < tolerance,
+                    inset: swatch.left > cell.left && swatch.right < cell.right && swatch.top > cell.top && swatch.bottom < cell.bottom,
+                };
+            });
+        })()`);
+		assert.ok(paletteEntries.length > 0);
+		for (const geometry of paletteEntries)
+			assert.deepEqual(geometry, { square: true, centered: true, inset: true });
+		const paletteTheme = await read(`(() => {
+            const screen = document.querySelector('.client-pregame-screen');
+            const previous = screen.getAttribute('style');
+            try {
+                screen.style.setProperty('--ui-menu-grid-icon-size', '32px');
+                screen.style.setProperty('--ui-menu-grid-cell-size', '4rem');
+                screen.style.setProperty('--ui-menu-grid-padding', '6px');
+                const trigger = screen.querySelector('.palette-dropdown .palette-swatch').getBoundingClientRect();
+                const menu = screen.querySelector('[role="menu"][aria-label="Skin color"]');
+                const swatch = menu.querySelector('.palette-swatch').getBoundingClientRect();
+                return { triggerWidth: trigger.width, menuWidth: swatch.width, padding: getComputedStyle(menu.querySelector('button')).paddingTop };
+            } finally {
+                if (previous === null) screen.removeAttribute('style');
+                else screen.setAttribute('style', previous);
+            }
+        })()`);
+		assert.deepEqual(paletteTheme, {
+			triggerWidth: 32,
+			menuWidth: 32,
+			padding: "6px",
+		});
+		await read(
+			`document.querySelector('[role="menu"][aria-label="Skin color"] button').click()`,
+		);
+		await wait(
+			`document.querySelector('[role="menu"][aria-label="Skin color"]') === null`,
+		);
+
+		await read(
+			`document.querySelector('button[aria-label^="Hair color:"]').click()`,
+		);
+		await wait(
+			`document.querySelector('[role="menu"][aria-label="Hair color"]') !== null`,
+		);
+		assert.equal(
+			await read(`(() => {
+            const menu = document.querySelector('[role="menu"][aria-label="Hair color"]');
+            const entries = [...menu.querySelectorAll('button')];
+            const right = Math.max(...entries.map(entry => entry.getBoundingClientRect().right));
+            const style = getComputedStyle(menu);
+            const inset = parseFloat(style.paddingRight) + parseFloat(style.borderRightWidth);
+            return Math.abs(menu.getBoundingClientRect().right - right - inset) < 1;
+        })()`),
+			true,
+		);
+		await read(
+			`document.querySelector('[role="menu"][aria-label="Hair color"] button').click()`,
+		);
+		await wait(
+			`document.querySelector('[role="menu"][aria-label="Hair color"]') === null`,
+		);
+		await click("Randomize appearance");
+		await wait(
+			"document.querySelector('.creation-viewport .creature-preview-status') === null",
+		);
+		await click("Review");
+		assert.equal(
+			await read("document.querySelector('.creation-name input').value"),
+			"Palette Tester",
+		);
+		assert.equal(
+			await read("document.querySelector('.creation-summary dd').textContent"),
+			"Palette Tester",
+		);
+		assert.equal(
+			await read("document.querySelectorAll('.creation-summary dt').length"),
+			12,
+		);
+		// A valid name does not bypass the unspent-attribute policy through form submission.
+		assert.equal(
+			await read(
+				`document.querySelector('button[form="creation-review-form"]').disabled`,
+			),
+			true,
+		);
+		await read(
+			`document.getElementById('creation-review-form').requestSubmit()`,
+		);
+		assert.equal(
+			await read(
+				`document.querySelector('.creation-feedback').innerText.trim()`,
+			),
+			"",
+		);
+		await click("Race");
+
 		await checkPregameTheme();
 		await checkFooterLayout();
 		await checkBuildInformation();
@@ -389,19 +799,172 @@ export async function probeClientPresentation(
 		await wait(
 			"document.getElementById('creation-skills-stats-tab').getAttribute('aria-selected') === 'true' && document.activeElement.id === 'creation-skills-stats-tab'",
 		);
+
+		const skillTheme = await read(`(() => {
+            const screen = document.querySelector('.client-pregame-screen');
+            const label = screen.querySelector('.ui-stat-action-label');
+            const before = getComputedStyle(label, '::before').backgroundImage;
+            const previous = screen.getAttribute('style');
+            try {
+                screen.style.setProperty('--ui-color-shadow', 'rgb(35, 70, 105)');
+                screen.style.setProperty('--ui-text-scale', '2');
+                screen.style.setProperty('--ui-icon-scale', '1.5');
+                return {
+                    themedBackdrop: getComputedStyle(label, '::before').backgroundImage !== before,
+                    overflowRows: [...screen.querySelectorAll('.creation-skill-row')].flatMap(row => {
+                        const summary = row.querySelector('summary').getBoundingClientRect();
+                        const actions = row.querySelector('.creation-skill-actions').getBoundingClientRect();
+                        const bounds = row.getBoundingClientRect();
+                        // Feathered backdrops intentionally overhang; measure the interactive bounds.
+                        return summary.right <= actions.left + 1 && actions.right <= bounds.right + 1 ? [] : [{name: row.querySelector('summary').textContent, summaryRight: summary.right, actionsLeft: actions.left, actionsRight: actions.right, rowRight: bounds.right, scrollWidth: row.scrollWidth, clientWidth: row.clientWidth}];
+                    }),
+                    labelsFit: [...screen.querySelectorAll('.creation-skill-actions button')].every(button => {
+                        const bounds = button.getBoundingClientRect();
+                        const label = button.querySelector('.ui-stat-action-label').getBoundingClientRect();
+                        return label.left >= bounds.left && label.right <= bounds.right;
+                    }),
+                };
+            } finally {
+                if (previous === null) screen.removeAttribute('style');
+                else screen.setAttribute('style', previous);
+            }
+        })()`);
+		assert.deepEqual(skillTheme, {
+			themedBackdrop: true,
+			overflowRows: [],
+			labelsFit: true,
+		});
+
+		const attributeValues = await read(
+			`[...document.querySelectorAll('#creation-skills-stats input[type="range"]')].map(input => input.value)`,
+		);
+		for (let index = 0; index < attributeValues.length; index++) {
+			await read(`(() => {
+                const input = document.querySelectorAll('#creation-skills-stats input[type="range"]')[${index}];
+                input.value = input.max;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            })()`);
+		}
+		assert.equal(
+			await read(
+				`document.getElementById('creation-attribute-credits').textContent.trim()`,
+			),
+			"0",
+		);
+		assert.equal(
+			await read(
+				`[...document.querySelectorAll('#creation-skills-stats input[type="range"]')].every(input => input.value === input.max)`,
+			),
+			true,
+		);
+		assert.equal(
+			await read(
+				`[...document.querySelectorAll('.creation-attribute-range')].every(input => input.classList.contains('exhausted') && !input.disabled)`,
+			),
+			true,
+		);
+		await read(`(() => {
+            const input = [...document.querySelectorAll('.creation-attribute-range')].find(input => Number(input.value) > Number(input.min));
+            input.value = String(Number(input.value) - 1);
+            input.dispatchEvent(new Event('input', {bubbles: true}));
+        })()`);
+		assert.equal(
+			await read(
+				`Number(document.getElementById('creation-attribute-credits').textContent.trim())`,
+			),
+			1,
+		);
+		assert.equal(
+			await read(
+				`document.querySelector('.creation-attribute-range.exhausted') === null`,
+			),
+			true,
+		);
+		for (let index = 0; index < attributeValues.length; index++) {
+			await read(`(() => {
+                const input = document.querySelectorAll('#creation-skills-stats input[type="range"]')[${index}];
+                input.value = ${JSON.stringify(attributeValues[index])};
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            })()`);
+		}
+		const readCredits = () =>
+			read(
+				`Number(document.getElementById('creation-skill-credits').textContent.trim())`,
+			);
+		const originalCredits = await readCredits();
+		const originalTraining = await read(
+			`[...document.querySelectorAll('.creation-skill-row')].map(row => ({name: row.querySelector('summary').textContent.trim(), training: Number(row.closest('section').getAttribute('aria-labelledby').split('-').at(-1))}))`,
+		);
+		let spentCredits = 0;
+		while (
+			await read(
+				`document.querySelector('.creation-skill-actions button[data-direction="up"]:not(:disabled)') !== null`,
+			)
+		) {
+			const charge = await read(`(() => {
+                const button = document.querySelector('.creation-skill-actions button[data-direction="up"]:not(:disabled)');
+                const cost = Number(button.textContent.trim());
+                button.click();
+                return cost;
+            })()`);
+			spentCredits += charge;
+			assert.equal(await readCredits(), originalCredits - spentCredits);
+			assert.ok((await readCredits()) >= 0);
+		}
+		let skillMoves = 0;
+		while (
+			await read(`(() => {
+            const original = ${JSON.stringify(originalTraining)};
+            return [...document.querySelectorAll('.creation-skill-row')].some(row => Number(row.closest('section').getAttribute('aria-labelledby').split('-').at(-1)) > original.find(entry => entry.name === row.querySelector('summary').textContent.trim()).training);
+        })()`)
+		) {
+			await read(`(() => {
+                const original = ${JSON.stringify(originalTraining)};
+                const row = [...document.querySelectorAll('.creation-skill-row')].find(row => Number(row.closest('section').getAttribute('aria-labelledby').split('-').at(-1)) > original.find(entry => entry.name === row.querySelector('summary').textContent.trim()).training);
+                const button = row.querySelector('button[data-direction="down"]');
+                if (button.disabled) throw new Error('Purchased tier cannot be refunded');
+                button.click();
+            })()`);
+			skillMoves++;
+		}
+		assert.ok(skillMoves > 0);
+		assert.equal(await readCredits(), originalCredits);
+		assert.equal(
+			await read(`(() => {
+            const details = [...document.querySelectorAll('.creation-skill-row details')].find(details => details.querySelector('.ui-mono') !== null);
+            details.open = true;
+            return details.querySelector('.creation-skill-description p').textContent.trim().length > 0 && details.querySelector('.ui-mono').textContent.trim().startsWith('Formula: ');
+        })()`),
+			true,
+		);
 		const formScroll = await read(`(() => {
-			const panel = document.querySelector('.creation-settings .tab-panel:not([hidden])');
-			const settings = document.querySelector('.creation-settings');
-			const actions = document.querySelector('.creation-actions');
-			const before = actions.getBoundingClientRect();
-			panel.scrollTop = panel.scrollHeight;
-			const after = actions.getBoundingClientRect();
-			return {scrolled: panel.scrollTop > 0, stationary: before.top === after.top, separate: actions.closest('.creation-settings') === null, fillsSpace: Math.abs(settings.getBoundingClientRect().bottom - after.top) <= 1 && Math.abs(panel.getBoundingClientRect().height - settings.getBoundingClientRect().height) <= 1};
-		})()`);
+            const panel = document.querySelector('.creation-settings .tab-panel:not([hidden])');
+            const settings = document.querySelector('.creation-settings');
+            const footer = document.querySelector('.creation-build-balances');
+            const feedback = document.querySelector('.creation-feedback');
+            const actions = document.querySelector('.creation-actions');
+            const before = actions.getBoundingClientRect();
+            const footerBefore = footer.getBoundingClientRect();
+            panel.scrollTop = panel.scrollHeight;
+            const after = actions.getBoundingClientRect();
+            const footerAfter = footer.getBoundingClientRect();
+            return {
+                scrolled: panel.scrollTop > 0,
+                stationary: before.top === after.top,
+                separate: actions.closest('.creation-settings') === null,
+                footerStationary: footerBefore.top === footerAfter.top,
+                footerOutsideScroll: !panel.contains(footer),
+                footerAboveActions: footerAfter.bottom <= after.top,
+                fillsSpace: Math.abs(settings.getBoundingClientRect().bottom - after.top) <= 1 && Math.abs(panel.getBoundingClientRect().height + feedback.getBoundingClientRect().height - settings.getBoundingClientRect().height) <= 1,
+            };
+        })()`);
 		assert.deepEqual(formScroll, {
 			scrolled: true,
 			stationary: true,
 			separate: true,
+			footerStationary: true,
+			footerOutsideScroll: true,
+			footerAboveActions: true,
 			fillsSpace: true,
 		});
 		await read(
@@ -447,7 +1010,9 @@ export async function probeClientPresentation(
 				windowsVirtualKeyCode: 9,
 			});
 			assert.equal(
-				await read("document.activeElement.textContent.trim()"),
+				await read(
+					"document.activeElement.getAttribute('aria-label') ?? document.activeElement.textContent.trim()",
+				),
 				label,
 			);
 		}

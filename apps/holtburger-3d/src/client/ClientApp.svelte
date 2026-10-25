@@ -2494,6 +2494,18 @@
 				entryPending={appState.operation === "enter"}
 				management={characterManagement}
 				creation={creationServices}
+				characterActions={{
+					delete: async (guid) => {
+						if (session === null)
+							throw new Error("Character session is unavailable.");
+						await session.deleteCharacter(guid);
+					},
+					restore: async (guid) => {
+						if (session === null)
+							throw new Error("Character session is unavailable.");
+						await session.restoreCharacter(guid);
+					},
+				}}
 				previewService={objectPreviewService}
 				visualCache={startupVisualCacheTransport}
 				onChoose={chooseCharacter}

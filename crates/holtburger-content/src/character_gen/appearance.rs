@@ -5,7 +5,7 @@ use crate::ui_assets::{UiAssetReader, UiAssets};
 use crate::{ContentRepository, MotionClip};
 use anyhow::{Context, Result, bail};
 use holtburger_dat::file_type::char_gen::{CharacterGenGender, HeritageGroup};
-use holtburger_dat::file_type::material::{ObjDesc, PaletteSet, SubPalette};
+use holtburger_dat::file_type::material::{ObjDesc, SubPalette};
 use holtburger_dat::file_type::{Animation, CharGen};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use std::io::Cursor;
@@ -356,13 +356,7 @@ fn compose_appearance(
         result.overlay(&mouth.obj_desc);
     }
     let palette = |id, shade| -> Result<u32> {
-        let bytes = repository
-            .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, id))?
-            .bytes;
-        let set = PaletteSet::unpack(&mut Cursor::new(bytes))?;
-        if set.id != id {
-            bail!("creation palette set identity differs from requested 0x{id:08X}");
-        }
+        let set = repository.read_palette_set(id)?;
         set.palette_id_for_shade(shade)
             .with_context(|| format!("palette set 0x{id:08X} has no palette for shade {shade}"))
     };

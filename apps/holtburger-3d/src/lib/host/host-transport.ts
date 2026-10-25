@@ -159,6 +159,8 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"submit_client_housing_management",
 	"select_client_character",
 	"create_client_character",
+	"delete_client_character",
+	"restore_client_character",
 	"replace_client_drive",
 	"queue_client_character_motion_event",
 	"submit_client_party",

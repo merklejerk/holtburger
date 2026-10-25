@@ -283,7 +283,18 @@ export class KeyboardInputPolicy {
 	}
 
 	/** Svelte action: acquire modality, open safely, and restore the prior valid interaction. */
-	readonly modal = (element: HTMLDialogElement): { destroy: () => void } => {
+	readonly modal = (
+		element: HTMLDialogElement,
+		initialFocusSelector?: string,
+	): { destroy: () => void } => {
+		const initialFocus =
+			initialFocusSelector === undefined
+				? element
+				: element.querySelector<HTMLElement>(initialFocusSelector);
+		if (initialFocus === null)
+			throw new Error(
+				`Dialog initial focus target is missing: ${initialFocusSelector}`,
+			);
 		const previous = this.#owner;
 		const entry = {
 			element,
@@ -300,7 +311,7 @@ export class KeyboardInputPolicy {
 		this.#owner = element;
 		try {
 			element.showModal();
-			element.focus({ preventScroll: true });
+			initialFocus.focus({ preventScroll: true });
 		} catch (error) {
 			this.#modals.pop();
 			release();

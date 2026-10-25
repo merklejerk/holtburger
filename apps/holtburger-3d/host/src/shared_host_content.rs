@@ -281,6 +281,7 @@ pub async fn dispatch_shared_content(
                     .repository
                     .read_character_gen_catalog()
                     .map_err(application_error)?,
+                &runtime.content().repository,
             )
             .map_err(application_error)?,
         ),

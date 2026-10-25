@@ -453,6 +453,14 @@ pub enum ClientHostCommand {
     CreateClientCharacter {
         draft: crate::character_creation::CharacterCreationDraft,
     },
+    /// Delete a character at its current server roster slot.
+    DeleteClientCharacter {
+        slot: u32,
+    },
+    /// Restore a character still inside the server's recovery window.
+    RestoreClientCharacter {
+        guid: holtburger_common::Guid,
+    },
     ReplaceClientDrive {
         request: crate::client_host::ClientDriveRequest,
     },
@@ -598,6 +606,8 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "submit_client_housing_management",
     "select_client_character",
     "create_client_character",
+    "delete_client_character",
+    "restore_client_character",
     "replace_client_drive",
     "queue_client_character_motion_event",
     "submit_client_party",
@@ -1006,6 +1016,16 @@ pub async fn dispatch_client(
                 .map(|()| HostResponse::Unit)
                 .map_err(application_error)
         }
+        DeleteClientCharacter { slot } => runtime
+            .send_command(ClientCommand::DeleteCharacter { slot })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        RestoreClientCharacter { guid } => runtime
+            .send_command(ClientCommand::RestoreCharacter(guid))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         QueryClientHousingAccess => runtime
             .send_command(ClientCommand::QueryHousingAccess)
             .await

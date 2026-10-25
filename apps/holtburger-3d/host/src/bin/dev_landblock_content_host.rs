@@ -340,6 +340,7 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                 .and_then(|catalog| {
                     holtburger_3d_host::character_creation::CharacterCreationCatalog::from_catalog(
                         &catalog,
+                        &state.repository,
                     )
                 });
             match result {

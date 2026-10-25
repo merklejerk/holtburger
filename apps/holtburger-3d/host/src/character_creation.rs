@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow};
+use holtburger_common::stats::AttributeType;
 use holtburger_content::CharacterGenCatalog;
 use holtburger_content::character_gen::is_unavailable_character_gen_skill_cost;
 use holtburger_content::{ContentRepository, MotionClip};
@@ -208,12 +209,14 @@ struct GenderChoice {
     identity: NamedChoice,
     /// Number of authored hair/body styles.
     hair_styles: usize,
-    /// Number of authored hair-color palette sets.
-    hair_colors: usize,
+    /// Display swatches for each authored hair-color set, in shade order.
+    hair_colors: Vec<Vec<String>>,
+    /// Skin swatches in authored shade order.
+    skin_colors: Vec<String>,
     /// Number of authored eye strip choices.
     eyes: usize,
-    /// Number of authored eye palettes.
-    eye_colors: usize,
+    /// Display swatches in authored eye-palette order.
+    eye_colors: Vec<String>,
     /// Number of authored nose strips.
     noses: usize,
     /// Number of authored mouth strips.
@@ -266,6 +269,8 @@ struct SkillChoice {
     identity: NamedChoice,
     /// Authored explanatory text for the skill editor.
     description: String,
+    /// DAT-backed base-attribute expression for the expandable skill details.
+    formula: Option<CreationSkillFormula>,
     /// Training cost, or unavailable.
     trained_cost: Option<u32>,
     /// Additional specialization cost, or unavailable.
@@ -274,9 +279,88 @@ struct SkillChoice {
     minimum_advancement: u32,
 }
 
+/// Attribute names and divisor interpreted once from the static DAT formula.
+#[derive(Debug, Serialize)]
+struct CreationSkillFormula {
+    /// Required first attribute label.
+    first: String,
+    /// Optional second attribute label; DAT zero means no second input.
+    second: Option<String>,
+    /// Positive divisor applied to the sum, matching ACE AttributeFormula.cs:55–72.
+    divisor: u32,
+}
+
+impl CreationSkillFormula {
+    fn from_dat(formula: &holtburger_dat::file_type::skill_table::SkillFormula) -> Result<Self> {
+        let attribute = |id| {
+            AttributeType::from_repr(id)
+                .map(|attribute| attribute.to_string())
+                .with_context(|| {
+                    format!("Creation skill formula references unknown attribute {id}")
+                })
+        };
+        anyhow::ensure!(formula.z != 0, "Creation skill formula has a zero divisor");
+        Ok(Self {
+            first: attribute(formula.attr1)?,
+            second: (formula.attr2 != 0)
+                .then(|| attribute(formula.attr2))
+                .transpose()?,
+            divisor: formula.z,
+        })
+    }
+}
+
+/// Average the actual substituted color interval for an unlit UI swatch. The model still
+/// owns texture and lighting; retail substitutions use absolute palette offsets.
+fn palette_swatch(
+    repository: &ContentRepository,
+    id: u32,
+    range: std::ops::Range<usize>,
+) -> Result<String> {
+    let palette = repository.read_palette(id)?;
+    let colors = palette
+        .colors_argb
+        .get(range)
+        .context("Creation swatch exceeds palette colors")?;
+    anyhow::ensure!(!colors.is_empty(), "Creation swatch has no colors");
+    let channel = |shift: u32| {
+        colors
+            .iter()
+            .map(|color| u64::from((color >> shift) & 255_u32))
+            .sum::<u64>()
+            / colors.len() as u64
+    };
+    Ok(format!(
+        "#{:02x}{:02x}{:02x}",
+        channel(16),
+        channel(8),
+        channel(0)
+    ))
+}
+
+/// Keep palette-set ordering so the frontend can choose the corresponding wire shade.
+fn palette_set_swatches(
+    repository: &ContentRepository,
+    id: u32,
+    range: std::ops::Range<usize>,
+) -> Result<Vec<String>> {
+    let set = repository.read_palette_set(id)?;
+    anyhow::ensure!(
+        !set.palette_ids.is_empty(),
+        "Creation swatch palette set has no shades"
+    );
+    set.palette_ids
+        .iter()
+        .map(|id| palette_swatch(repository, *id, range.clone()))
+        .collect()
+}
+
 impl CharacterCreationCatalog {
     /// Project one static catalog without loading any world scene or browser assets.
-    pub fn from_catalog(catalog: &CharacterGenCatalog) -> Result<Self> {
+    pub fn from_catalog(
+        catalog: &CharacterGenCatalog,
+        repository: &ContentRepository,
+    ) -> Result<Self> {
         let heritages = catalog
             .heritage_groups
             .values()
@@ -286,24 +370,37 @@ impl CharacterCreationCatalog {
                     .values()
                     .map(|gender| {
                         let a = &gender.appearance;
-                        GenderChoice {
+                        Ok(GenderChoice {
                             identity: NamedChoice {
                                 id: gender.gender_id,
                                 name: gender.name.clone(),
                             },
                             hair_styles: a.hair_styles.len(),
-                            hair_colors: a.hair_color_ids.len(),
+                            hair_colors: a
+                                .hair_color_ids
+                                .iter()
+                                .map(|id| palette_set_swatches(repository, *id, 192..256))
+                                .collect::<Result<_>>()?,
+                            skin_colors: palette_set_swatches(
+                                repository,
+                                gender.skin_palette_set,
+                                0..192,
+                            )?,
                             eyes: a.eye_strips.len(),
-                            eye_colors: a.eye_color_ids.len(),
+                            eye_colors: a
+                                .eye_color_ids
+                                .iter()
+                                .map(|id| palette_swatch(repository, *id, 256..320))
+                                .collect::<Result<_>>()?,
                             noses: a.nose_strips.len(),
                             mouths: a.mouth_strips.len(),
                             headgear: a.headgear.iter().map(GarmentChoice::from).collect(),
                             shirts: a.shirts.iter().map(GarmentChoice::from).collect(),
                             pants: a.pants.iter().map(GarmentChoice::from).collect(),
                             footwear: a.footwear.iter().map(GarmentChoice::from).collect(),
-                        }
+                        })
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>>>()?;
                 let template = custom_template_for_heritage(heritage)
                     .context("Creation heritage has no custom/default template")?;
                 let defaults = CharacterCreationDefaults {
@@ -335,6 +432,11 @@ impl CharacterCreationCatalog {
                                 name: skill.name.clone(),
                             },
                             description: skill.description.clone(),
+                            formula: skill
+                                .formula
+                                .as_ref()
+                                .map(CreationSkillFormula::from_dat)
+                                .transpose()?,
                             trained_cost: cost(costs.trained_cost),
                             specialization_upgrade_cost: cost(costs.specialization_upgrade_cost),
                             minimum_advancement: minimum_skill_advancement_for_heritage(
@@ -383,6 +485,35 @@ impl CharacterCreationCatalog {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn skill_formula_projection_preserves_attribute_identity_and_rejects_invalid_inputs() {
+        let mut formula = holtburger_dat::file_type::skill_table::SkillFormula {
+            w: 0,
+            x: 1,
+            y: 0,
+            z: 3,
+            attr1: AttributeType::StrengthAttr as u32,
+            attr2: AttributeType::CoordinationAttr as u32,
+        };
+        let projected = CreationSkillFormula::from_dat(&formula).unwrap();
+        assert_eq!(
+            serde_json::to_value(projected).unwrap(),
+            json!({"first": "Strength", "second": "Coordination", "divisor": formula.z})
+        );
+        formula.attr2 = 0;
+        assert!(
+            CreationSkillFormula::from_dat(&formula)
+                .unwrap()
+                .second
+                .is_none()
+        );
+        formula.z = 0;
+        assert!(CreationSkillFormula::from_dat(&formula).is_err());
+        formula.z = 1;
+        formula.attr1 = u32::MAX;
+        assert!(CreationSkillFormula::from_dat(&formula).is_err());
+    }
 
     fn draft_value() -> serde_json::Value {
         json!({

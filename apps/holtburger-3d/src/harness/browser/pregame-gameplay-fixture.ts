@@ -159,7 +159,52 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 		if (command === "request_client_current_state")
 			emit("client-current-state", state);
 		else if (command === "select_client_character") await enter();
-		else if (command === "logout_client") {
+		else if (
+			command === "delete_client_character" ||
+			command === "restore_client_character"
+		) {
+			const lifecycle = state.lifecycle;
+			if (lifecycle.kind !== "character-selection")
+				throw new Error("Management fixture requires selection");
+			const deleting = command === "delete_client_character";
+			const target = deleting
+				? lifecycle.characters.find(
+						(character) => character.slot === z.number().parse(args?.slot),
+					)
+				: lifecycle.characters.find(
+						(character) => character.guid === z.number().parse(args?.guid),
+					);
+			if (target === undefined)
+				throw new Error("Unknown management fixture character");
+			// Authority admission can arrive after the host has accepted the command.
+			setTimeout(() => {
+				state = {
+					...state,
+					characterManagement: deleting
+						? { kind: "deleting" }
+						: { kind: "restoring", guid: target.guid },
+				};
+				emit("client-character-management-changed", state.characterManagement);
+				state = {
+					...state,
+					characterManagement: { kind: "idle" },
+					lifecycle: {
+						...lifecycle,
+						characters: lifecycle.characters.map((character) =>
+							character.guid === target.guid
+								? {
+										...character,
+										deleteTime: deleting
+											? Math.floor(Date.now() / 1000) + 3600
+											: 0,
+									}
+								: character,
+						),
+					},
+				};
+				emit("client-current-state", state);
+			}, 200);
+		} else if (command === "logout_client") {
 			logoutRequests++;
 			state = { ...state, lifecycle: { kind: "logging-out" } };
 			emit("client-lifecycle-changed", state.lifecycle);

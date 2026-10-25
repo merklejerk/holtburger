@@ -40,6 +40,7 @@ import type { ResolvedEnchantments } from "./client-enchantments-contract";
 import {
 	ClientLifecycleSession,
 	type ClientLifecycleTransport,
+	type ClientLifecycleSessionEvent,
 } from "./client-lifecycle-session";
 
 class FakeClientTransport implements ClientLifecycleTransport {
@@ -48,7 +49,7 @@ class FakeClientTransport implements ClientLifecycleTransport {
 		command: string;
 		args: Record<string, unknown> | undefined;
 	}> = [];
-	readonly handlers = new Map<string, (payload: unknown) => void>();
+	readonly handlers = new Map<string, Set<(payload: unknown) => void>>();
 	#currentState: ClientCurrentState = currentState(0x5000_0001);
 	#emitLaggedDeltaBeforeSnapshot = false;
 
@@ -57,10 +58,14 @@ class FakeClientTransport implements ClientLifecycleTransport {
 		handler: (payload: unknown) => void,
 	): Promise<() => void> {
 		this.calls.push(`listen:${event}`);
-		this.handlers.set(event, handler);
+		const handlers =
+			this.handlers.get(event) ?? new Set<(payload: unknown) => void>();
+		handlers.add(handler);
+		this.handlers.set(event, handlers);
 		return () => {
 			this.calls.push(`unlisten:${event}`);
-			this.handlers.delete(event);
+			handlers.delete(handler);
+			if (handlers.size === 0) this.handlers.delete(event);
 		};
 	}
 
@@ -88,11 +93,50 @@ class FakeClientTransport implements ClientLifecycleTransport {
 	}
 
 	emit(event: string, payload: unknown): void {
-		this.handlers.get(event)?.(payload);
+		for (const handler of this.handlers.get(event) ?? []) handler(payload);
 	}
 }
 
 describe("ClientLifecycleSession", () => {
+	it("starts authority only after listeners are installed and requests snapshots without relaunching", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const events: ClientLifecycleSessionEvent[] = [];
+		session.subscribe((event) => events.push(event));
+		const startAuthority = vi.fn(async () => {
+			expect(transport.handlers.has("client-dynamic-entity")).toBe(true);
+			expect(transport.handlers.has("client-lifecycle-changed")).toBe(true);
+			expect(transport.handlers.has("client-popup-string")).toBe(true);
+			expect(transport.handlers.has("client-exit-requested")).toBe(true);
+			expect(transport.invocations).toHaveLength(0);
+			transport.emit("client-lifecycle-changed", { kind: "authenticating" });
+		});
+		await session.start({ startAuthority });
+		expect(events).toContainEqual({
+			type: "lifecycle",
+			lifecycle: { kind: "authenticating" },
+		});
+		expect(transport.invocations[0]?.command).toBe(
+			"request_client_current_state",
+		);
+		await session.requestCurrentState();
+		expect(startAuthority).toHaveBeenCalledOnce();
+		session.stop();
+	});
+	it("retires every listener when explicit authority startup fails", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await expect(
+			session.start({
+				startAuthority: async () => {
+					throw new Error("Launch failed");
+				},
+			}),
+		).rejects.toThrow("Launch failed");
+		expect(transport.handlers.size).toBe(0);
+		expect(transport.invocations).toHaveLength(0);
+	});
+
 	it("forwards a one-time equipped visual delta and recovers it after stream loss without another gameplay change", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -1245,6 +1289,57 @@ describe("ClientLifecycleSession", () => {
 		session.stop();
 	});
 
+	it("replaces character identity and inventory together on logout before re-entry", async () => {
+		const transport = new FakeClientTransport();
+		const player = 9;
+		const item = player + 1;
+		const initial = currentState(player);
+		initial.entities.entities.push(
+			entityFacts(item, {
+				ownedByPlayer: true,
+				location: {
+					kind: "contained",
+					parentGuid: player,
+					slot: { kind: "item", index: 0 },
+				},
+			}),
+		);
+		transport.setCurrentState(initial);
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.emit("client-lifecycle-changed", { kind: "logging-out" });
+		const retired: ClientCurrentState = {
+			...initial,
+			lifecycle: { kind: "logging-out" },
+			worldGeneration: initial.worldGeneration + 1,
+			localPlayerGuid: null,
+			playerName: null,
+			entities: { ...initial.entities, entities: [] },
+			dynamic: { ...initial.dynamic, entities: [] },
+		};
+		transport.emit("client-current-state", retired);
+		const read = session.entities.read();
+		if (read.kind !== "current")
+			throw new Error("Logout must publish a complete baseline.");
+		expect(read.level.playerGuid).toBeNull();
+		expect([...read.level.entities.keys()]).toEqual([]);
+		expect(session.state().playerGuid).toBeNull();
+		transport.emit("client-current-state", {
+			...retired,
+			lifecycle: { kind: "character-selection", maxSlots: 1, characters: [] },
+		});
+		transport.emit("client-current-state", {
+			...currentState(player),
+			worldGeneration: retired.worldGeneration + 1,
+		});
+		const entered = session.entities.read();
+		if (entered.kind !== "current")
+			throw new Error("Re-entry must establish the new character baseline.");
+		expect(entered.level.playerGuid).toBe(player);
+		expect([...entered.level.entities.keys()]).toEqual([player]);
+		session.stop();
+	});
+
 	it("retires semantic state on stop and accepts reused GUIDs only from a new baseline", async () => {
 		const transport = new FakeClientTransport();
 		const initial = currentState(9);
@@ -1617,6 +1712,9 @@ describe("ClientLifecycleSession", () => {
 	it("validates the renderer drive before crossing the host command seam", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.calls.length = 0;
+		transport.invocations.length = 0;
 
 		await session.replaceDrive({
 			kind: "acquire",
@@ -1650,6 +1748,9 @@ describe("ClientLifecycleSession", () => {
 	it("validates and forwards ordered character-motion edges without reshaping them", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.calls.length = 0;
+		transport.invocations.length = 0;
 		const release = {
 			kind: "release-jump" as const,
 			sequence: 12,
@@ -2216,6 +2317,105 @@ function view(guid: number): DynamicEntityView {
 		motion: null,
 	};
 }
+
+it.each([0, 3])(
+	"retires listener installer %i after stop without launching authority",
+	async (heldIndex) => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		let release: () => void = () => {
+			throw new Error("Gate not initialized.");
+		};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const original = transport.listen.bind(transport);
+		let installIndex = 0;
+		const listen = vi
+			.spyOn(transport, "listen")
+			.mockImplementation(async (event, handler) => {
+				if (installIndex++ === heldIndex) await gate;
+				return original(event, handler);
+			});
+		const launch = vi.fn(async () => {});
+		const cancelled = expect(
+			session.start({ startAuthority: launch }),
+		).rejects.toMatchObject({ name: "AbortError" });
+		await vi.waitFor(() => expect(listen).toHaveBeenCalledTimes(heldIndex + 1));
+		session.stop();
+		await cancelled;
+		release();
+		await vi.waitFor(() =>
+			expect(
+				transport.calls.filter((call) => call.startsWith("unlisten:")),
+			).toHaveLength(heldIndex + 1),
+		);
+		expect(transport.handlers.size).toBe(0);
+		expect(launch).not.toHaveBeenCalled();
+		expect(transport.invocations).toHaveLength(0);
+	},
+);
+it("cancels the local native-launch wait while retaining terminal observation for retirement", async () => {
+	const transport = new FakeClientTransport();
+	const session = new ClientLifecycleSession(transport);
+	let release: () => void = () => {
+		throw new Error("Gate not initialized.");
+	};
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const launch = vi.fn(() => gate);
+	const cancelled = expect(
+		session.start({ startAuthority: launch }),
+	).rejects.toMatchObject({ name: "AbortError" });
+	await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce());
+	session.cancelStartup();
+	await cancelled;
+	expect(transport.handlers.has("client-exit-requested")).toBe(true);
+	transport.emit("client-exit-requested", {
+		cause: "explicit-disconnect",
+		diagnostic: "Startup cancelled",
+	});
+	expect(session.state().exit?.diagnostic).toBe("Startup cancelled");
+	release();
+	await Promise.resolve();
+	expect(transport.invocations).toHaveLength(0);
+	session.stop();
+	expect(transport.handlers.size).toBe(0);
+});
+it("does not let a late retired installer stop a fresh attachment", async () => {
+	const transport = new FakeClientTransport();
+	const session = new ClientLifecycleSession(transport);
+	let release: () => void = () => {
+		throw new Error("Gate not initialized.");
+	};
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const original = transport.listen.bind(transport);
+	const listen = vi
+		.spyOn(transport, "listen")
+		.mockImplementationOnce(async (event, handler) => {
+			await gate;
+			return original(event, handler);
+		});
+	const cancelled = expect(session.start()).rejects.toMatchObject({
+		name: "AbortError",
+	});
+	await vi.waitFor(() => expect(listen).toHaveBeenCalledOnce());
+	session.stop();
+	await cancelled;
+	await session.start();
+	release();
+	await vi.waitFor(() =>
+		expect(transport.calls).toContain("unlisten:client-dynamic-entity"),
+	);
+	transport.emit("client-world-name-updated", { name: "Fresh attachment" });
+	expect(session.state().worldName).toBe("Fresh attachment");
+	expect(transport.handlers.has("client-dynamic-entity")).toBe(true);
+	session.stop();
+	expect(transport.handlers.size).toBe(0);
+});
 
 it("delivers host-projected vendor contracts through the real session into the draft owner", async () => {
 	const transport = new FakeClientTransport();

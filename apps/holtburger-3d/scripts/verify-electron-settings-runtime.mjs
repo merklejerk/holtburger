@@ -16,3 +16,9 @@ await import(
 		import.meta.url,
 	).href
 );
+
+// Client close policy and its acknowledgement codec must also survive Node ESM emission.
+await import(
+	new URL("../dist-electron/electron/client-window-close.js", import.meta.url)
+		.href
+);

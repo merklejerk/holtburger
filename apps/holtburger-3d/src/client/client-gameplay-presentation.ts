@@ -1,3 +1,8 @@
+import {
+	abortError,
+	isAbortError,
+	awaitWithAbort,
+} from "../lib/async-lifetime";
 import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
 import type {
 	CombatEffectOutcome,
@@ -460,6 +465,8 @@ export class ClientGameplayPresentation {
 	/** Terminal visual failure retained until this presentation session is replaced. */
 	#terminalPresentationError: string | null = null;
 	#destroyed = false;
+	/** Withdraw waits whose mutable publication is fenced by driver/runtime ownership. */
+	readonly #lifetime = new AbortController();
 	#retirement: Promise<void> | null = null;
 	#cameraTarget: ClientCameraTarget | null = null;
 	#cameraProjection: ProjectionClearanceRevision | null = null;
@@ -1244,6 +1251,8 @@ export class ClientGameplayPresentation {
 		delete this.#canvas.dataset.preciseJump;
 		this.#preciseJumpMarker = null;
 		this.#destroyed = true;
+		this.#lifetime.abort(abortError("Gameplay presentation retired."));
+		this.#cameraTarget = null;
 		const failures: unknown[] = [];
 		const labels: string[] = [];
 		const attempt = async (
@@ -1257,6 +1266,8 @@ export class ClientGameplayPresentation {
 				labels.push(label);
 			}
 		};
+		// Revoke camera registration before joining work that may depend on its receipt.
+		await attempt("camera-stop", () => this.camera.stop());
 		// Withdraw desired entities before awaiting startup/realization so late visuals cannot publish.
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
@@ -1267,10 +1278,19 @@ export class ClientGameplayPresentation {
 				.then(() => undefined),
 		);
 		await attempt("pending-gameplay-work", () =>
-			Promise.all([...this.#pendingWork]).then(() => undefined),
+			Promise.allSettled([...this.#pendingWork]).then((results) => {
+				const failed = results.filter(
+					(result): result is PromiseRejectedResult =>
+						result.status === "rejected",
+				);
+				if (failed.length)
+					throw new AggregateError(
+						failed.map((result) => result.reason),
+						"Gameplay work retirement failed.",
+					);
+			}),
 		);
 		await attempt("camera-synchronization", () => this.#cameraSynchronization);
-		await attempt("camera-stop", () => this.camera.stop());
 		await attempt("camera-destroy", () => this.camera.destroy());
 		this.#sceneInterestCoordinator = null;
 		// Startup failure belongs to start()/onError; it must not prevent later scene retry.
@@ -1339,11 +1359,14 @@ export class ClientGameplayPresentation {
 				return;
 			}
 			this.#refreshEnvironment(performance.now());
-			await this.#requestDynamicSnapshotReplacement(
-				this.#session.mirror.entities(),
+			await awaitWithAbort(
+				this.#requestDynamicSnapshotReplacement(
+					this.#session.mirror.entities(),
+				),
+				this.#lifetime.signal,
 			);
 		} catch (error) {
-			if (this.#destroyed && isPresentationCancellation(error)) return;
+			if (this.#destroyed && isAbortError(error)) return;
 			this.#reportError(error);
 			throw error;
 		}
@@ -1416,13 +1439,8 @@ export class ClientGameplayPresentation {
 				this.#receivePresentationDiscontinuity(event.discontinuity);
 				return;
 			case "exit-requested":
-				this.#setStatus(
-					event.exit.cause === "explicit-disconnect" ||
-						event.exit.cause === "host-shutdown"
-						? "stopped"
-						: "error",
-					event.exit.diagnostic,
-				);
+				// Session outcomes belong to ClientApp; ending authority is not a renderer failure.
+				this.#setStatus("stopped", event.exit.diagnostic);
 				return;
 		}
 	}
@@ -1740,7 +1758,8 @@ export class ClientGameplayPresentation {
 		void this.camera
 			.start(target, CLIENT_TUNING.camera.distance, projection)
 			.catch((error: unknown) => {
-				if (this.#cameraTarget === target) this.#reportError(error);
+				if (this.#cameraTarget === target && !isAbortError(error))
+					this.#reportError(error);
 			});
 	}
 
@@ -1847,11 +1866,10 @@ export class ClientGameplayPresentation {
 
 	/** Observe asynchronous realization failures without ordering later accepted state behind them. */
 	#observePresentationCompletion(completion: Promise<unknown>): void {
-		const observed = completion
+		const observed = awaitWithAbort(completion, this.#lifetime.signal)
 			.then(() => undefined)
 			.catch((error: unknown) => {
-				if (!this.#destroyed || !isPresentationCancellation(error))
-					this.#reportError(error);
+				if (!this.#destroyed || !isAbortError(error)) this.#reportError(error);
 			});
 		this.#pendingWork.add(observed);
 		void observed.then(() => this.#pendingWork.delete(observed));
@@ -2214,8 +2232,4 @@ function audioListenerFor(camera: Camera): AudioListenerPlacement {
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : "Client presentation failed.";
-}
-
-function isPresentationCancellation(error: unknown): boolean {
-	return error instanceof Error && error.name === "AbortError";
 }

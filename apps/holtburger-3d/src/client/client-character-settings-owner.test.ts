@@ -42,6 +42,7 @@ describe("ClientCharacterSettingsOwner", () => {
 	it("rejects a late A load after switching to B", async () => {
 		const fixture = ownerFixture();
 		fixture.owner.acceptGuid(1);
+		await vi.waitFor(() => expect(fixture.loads.has(1)).toBe(true));
 		fixture.owner.acceptGuid(2);
 		await vi.waitFor(() => expect(fixture.loads.size).toBe(2));
 		fixture.loads.get(1)!.resolve({
@@ -63,6 +64,34 @@ describe("ClientCharacterSettingsOwner", () => {
 				characterGuid: 2,
 			}),
 		);
+	});
+
+	it("does not dispatch a load after retirement during the previous save", async () => {
+		const saving = deferred<void>();
+		const loadCharacter = vi.fn(async () => ({
+			sections: {},
+			unavailable: [],
+		}));
+		const saveCharacterPatch = vi.fn(() => saving.promise);
+		const owner = new ClientCharacterSettingsOwner({
+			transport: { loadCharacter, saveCharacterPatch },
+			publish: () => {},
+			loadFailed: () => {},
+			unavailable: () => {},
+			saveFailed: () => {},
+			saveDelayMs: 100,
+		});
+		owner.acceptGuid(1);
+		await vi.waitFor(() => expect(owner.state().kind).toBe("ready"));
+		owner.acceptName(1, "First");
+		owner.acceptGuid(2);
+		await vi.waitFor(() => expect(saveCharacterPatch).toHaveBeenCalledOnce());
+		owner.retire();
+		saving.resolve();
+		await owner.flush();
+		await Promise.resolve();
+		expect(loadCharacter).toHaveBeenCalledTimes(1);
+		expect(owner.state().kind).toBe("absent");
 	});
 
 	it("coalesces duplicate identity reports and captures a name during load", async () => {

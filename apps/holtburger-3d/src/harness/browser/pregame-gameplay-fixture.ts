@@ -1,3 +1,4 @@
+import type { PlayerVisualCapture } from "../../client/client-object-preview-contract";
 import type {
 	HostCommandName,
 	HostCommandArguments,
@@ -10,6 +11,7 @@ import {
 } from "../../client/client-lifecycle-session";
 import type {
 	ClientCurrentState,
+	ClientExitRequested,
 	ClientCameraTick,
 } from "../../client/client-host-contract";
 import type { ObjectPreviewVisual } from "../../lib/game/runtime/object-preview-source";
@@ -90,25 +92,38 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 	let state = currentState(player);
 	let cameraGeneration = 0;
 	let acknowledgements = 0;
+	let logoutRequests = 0;
 	const emit = (event: ClientEventName, payload: unknown) =>
 		handlers.get(event)?.(payload);
+	/** Retirement and selection share a complete playerless authority baseline. */
+	const playerlessState = (
+		lifecycle: ClientCurrentState["lifecycle"],
+		worldGeneration: number,
+	): ClientCurrentState => ({
+		...currentState(player),
+		lifecycle,
+		worldGeneration,
+		localPlayerGuid: null,
+		playerName: null,
+		entities: { ...playerEntitySnapshot(guid), entities: [] },
+		dynamic: { ...state.dynamic, entities: [] },
+	});
 	const enter = async () => {
+		const worldGeneration = state.worldGeneration + 1;
 		state = {
 			...currentState(player),
+			worldGeneration,
 			lifecycle: {
 				kind: "portal-space",
-				worldGeneration: 1,
+				worldGeneration,
 				cause: "initial-entry",
 			},
 		};
 		emit("client-current-state", state);
 	};
 	const selection = (empty = false) => {
-		state = {
-			...currentState(player),
-			localPlayerGuid: null,
-			playerName: null,
-			lifecycle: {
+		state = playerlessState(
+			{
 				kind: "character-selection",
 				maxSlots: 10,
 				characters: empty
@@ -123,9 +138,8 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 							},
 						],
 			},
-			entities: { ...playerEntitySnapshot(guid), entities: [] },
-			dynamic: { hostTime: { seconds: 75 }, entities: [] },
-		};
+			state.worldGeneration,
+		);
 		emit("client-current-state", state);
 	};
 
@@ -145,7 +159,17 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 		if (command === "request_client_current_state")
 			emit("client-current-state", state);
 		else if (command === "select_client_character") await enter();
-		else if (command === "start_client_camera") {
+		else if (command === "logout_client") {
+			logoutRequests++;
+			state = { ...state, lifecycle: { kind: "logging-out" } };
+			emit("client-lifecycle-changed", state.lifecycle);
+			state = playerlessState(
+				{ kind: "logging-out" },
+				state.worldGeneration + 1,
+			);
+			emit("client-current-state", state);
+			selection();
+		} else if (command === "start_client_camera") {
 			const request = z
 				.object({
 					playerGuid: z.number(),
@@ -204,23 +228,26 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 		enter,
 		selection,
 		// Progress can arrive before the held current-state response supplies the roster.
-		authenticate: () =>
-			emit("client-lifecycle-changed", { kind: "authenticating" }),
+		authenticate: () => {
+			state = { ...state, lifecycle: { kind: "authenticating" } };
+			emit("client-lifecycle-changed", state.lifecycle);
+		},
 		/** Exercise real notice delivery without changing lifecycle or transport readiness. */
 		notify: (message: string, tone: "status" | "warning") =>
 			emit("client-action-feedback", { message, tone }),
-		exit: () => {
+		capture: (capture: PlayerVisualCapture) =>
+			emit("client-player-visual-capture-changed", capture),
+		exit: (cause: ClientExitRequested["cause"], diagnostic: string) => {
 			state = {
 				...state,
-				lifecycle: { kind: "exiting", cause: "explicit-disconnect" },
+				lifecycle: { kind: "exiting", cause },
 			};
-			emit("client-exit-requested", {
-				cause: "explicit-disconnect",
-				diagnostic: "Fixture disconnected",
-			});
+			emit("client-lifecycle-changed", state.lifecycle);
+			emit("client-exit-requested", { cause, diagnostic });
 		},
 		snapshot: () => state,
 		acknowledgements: () => acknowledgements,
+		logoutRequests: () => logoutRequests,
 	};
 }
 

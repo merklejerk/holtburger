@@ -139,6 +139,8 @@ export class ClientCharacterSettingsOwner {
 		} catch {
 			this.#persistence.discardPending();
 		}
+		// Retirement can occur while the previous profile save is still draining.
+		if (!this.#isCurrentLoad(characterGuid, generation)) return;
 		let loaded: ClientCharacterSettingsLoad;
 		try {
 			loaded = await this.#transport.loadCharacter(characterGuid);

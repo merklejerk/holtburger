@@ -1,22 +1,6 @@
-<script module lang="ts">
-	/** App-owned page content; only recoverable failures carry a retry action. */
-	export type ClientLoadingPageState =
-		| {
-				readonly kind: "pending";
-				/** Frontend-owned activity distinguishes scene/connection work from session shutdown. */
-				readonly activity: "connection" | "scene" | "disconnect";
-				readonly title: string;
-				readonly message: string;
-		  }
-		| {
-				readonly kind: "failed";
-				readonly title: string;
-				readonly message: string;
-				readonly retry: (() => void) | null;
-		  };
-</script>
-
 <script lang="ts">
+	import { requestElectronClientClose } from "../lib/host/electron-host-transport";
+	import type { ClientLoadingPageState } from "./client-app-lifecycle";
 	import type { ClientToast } from "./client-toast-center";
 	import { CLIENT_LOADING_TUNING } from "./client-tuning";
 	import ClientPregameScreen from "./ClientPregameScreen.svelte";
@@ -26,14 +10,17 @@
 	import RetryIcon from "../assets/icons/hud-reset.svg?component";
 
 	interface Props {
-		/** Connection and scene admission policy is resolved by ClientApp. */
+		/** Connection and scene admission policy is resolved by the app lifecycle owner. */
 		readonly state: ClientLoadingPageState;
-		/** Active notices share the loading status area instead of a separate overlay. */
+		/** Notices share ordinary loading; character return retains its own progress text. */
 		readonly toast: ClientToast | null;
 		/** Null while no session exists or exit is already underway. */
 		readonly onDisconnect: (() => Promise<void>) | null;
 	}
 	const { state: page, toast, onDisconnect }: Props = $props();
+	const returning = $derived(
+		page.kind === "pending" && page.activity === "return",
+	);
 	const { quips, quipIdleDelayMs, quipIntervalMs } = CLIENT_LOADING_TUNING;
 	/** Real phase identity invalidates stale playful text synchronously with new page content. */
 	const phaseKey = $derived(
@@ -71,7 +58,8 @@
 		notice === null ? phaseKey : `toast:${notice.id}`,
 	);
 	const playfulAllowed = $derived(
-		page.kind === "pending" && page.activity !== "disconnect",
+		page.kind === "pending" &&
+			(page.activity === "connection" || page.activity === "scene"),
 	);
 	/** A playful line is valid only for the exact real update whose idle timer elapsed. */
 	let idleQuip = $state<{
@@ -97,48 +85,61 @@
 			if (interval !== null) window.clearInterval(interval);
 		};
 	});
-	const status = $derived(
-		page.kind === "failed"
-			? ({ kind: "failed", message: page.message } as const)
-			: playfulAllowed &&
-				  toast?.tone !== "warning" &&
-				  idleQuip?.updateKey === realUpdateKey
-				? ({ kind: "playful", message: quips[idleQuip.index] } as const)
-				: ({
-						kind: notice?.tone === "warning" ? "warning" : "real",
-						message: notice?.message ?? `${page.title} · ${page.message}`,
-					} as const),
+	const details = $derived(page.kind === "pending" ? null : page.details);
+	const failed = $derived(
+		page.kind === "failed" || (page.kind === "ended" && page.failed),
 	);
+	const status = $derived.by(() => {
+		if (failed) return { kind: "failed", message: page.message } as const;
+		if (returning || page.kind === "ended")
+			return { kind: "real", message: page.message } as const;
+		if (
+			playfulAllowed &&
+			toast?.tone !== "warning" &&
+			idleQuip?.updateKey === realUpdateKey
+		) {
+			return { kind: "playful", message: quips[idleQuip.index] } as const;
+		}
+		return {
+			kind: notice?.tone === "warning" ? "warning" : "real",
+			message: notice?.message ?? `${page.title} · ${page.message}`,
+		} as const;
+	});
 </script>
 
-<ClientPregameScreen branding="hero" backdrop={false}>
+<ClientPregameScreen branding={returning ? "corner" : "hero"} backdrop={false}>
 	{#snippet footer()}
-		<button
-			class="pregame-action pregame-quiet ui-button"
-			type="button"
-			disabled={onDisconnect === null}
-			onclick={() => void onDisconnect?.()}
-		>
-			<span class="pregame-icon" aria-hidden="true"><DisconnectIcon /></span>
-			Disconnect</button
-		>
+		{#if page.kind !== "ended"}
+			<button
+				class="pregame-action pregame-quiet ui-button"
+				type="button"
+				disabled={onDisconnect === null}
+				onclick={() => void onDisconnect?.()}
+			>
+				<span class="pregame-icon" aria-hidden="true"><DisconnectIcon /></span>
+				Disconnect</button
+			>
+		{/if}
 	{/snippet}
 	<div class="client-loading-page">
 		<section
 			class="loading-content"
-			class:ui-panel={page.kind === "failed"}
-			class:ui-body={page.kind === "failed"}
+			class:ui-panel={failed}
+			class:ui-body={failed}
 			aria-labelledby="client-loading-title"
 		>
-			<div
-				class="loading-status-icon"
-				class:scene-loading={page.kind === "pending"}
-				class:ui-error={page.kind === "failed"}
-				aria-hidden="true"
-			>
-				{#if page.kind === "pending"}<LoadingPortal />{:else}<WarningIcon
-					/>{/if}
-			</div>
+			{#if !returning}
+				<div
+					class="loading-status-icon"
+					class:scene-loading={page.kind === "pending"}
+					class:ui-error={failed}
+					aria-hidden="true"
+				>
+					{#if page.kind === "pending"}<LoadingPortal
+						/>{:else if page.kind === "ended" && !page.failed}<DisconnectIcon
+						/>{:else}<WarningIcon />{/if}
+				</div>
+			{/if}
 			<h1 id="client-loading-title" class:sr-only={page.kind === "pending"}>
 				{page.title}
 			</h1>
@@ -156,6 +157,24 @@
 			>
 				{status.message}
 			</p>
+			{#if details !== null}
+				{#key phaseKey}
+					<details class="loading-details ui-disclosure ui-disclosure-section">
+						<summary>Details</summary>
+						<div class="ui-disclosure-body"><pre>{details}</pre></div>
+					</details>
+				{/key}
+			{/if}
+			{#if page.kind === "ended"}
+				<button
+					class="pregame-primary pregame-action ui-button"
+					type="button"
+					onclick={() =>
+						void requestElectronClientClose().catch((error) =>
+							console.error(error),
+						)}>Quit application</button
+				>
+			{/if}
 			{#if page.kind === "failed" && page.retry !== null}
 				<button
 					class="pregame-action ui-button"
@@ -163,7 +182,7 @@
 					onclick={page.retry}
 				>
 					<span class="pregame-icon" aria-hidden="true"><RetryIcon /></span>
-					Retry scene</button
+					Try again</button
 				>
 			{/if}
 		</section>
@@ -174,6 +193,7 @@
 	@layer components {
 		.client-loading-page {
 			display: grid;
+			align-content: center;
 			justify-items: center;
 			min-width: 0;
 		}
@@ -205,6 +225,19 @@
 		}
 		.loading-message {
 			min-height: 3em;
+		}
+		.loading-details {
+			width: 100%;
+			text-align: left;
+		}
+		.loading-details pre {
+			max-height: 24dvh;
+			overflow: auto;
+			margin: 0;
+			white-space: pre-wrap;
+			overflow-wrap: anywhere;
+			font: inherit;
+			user-select: text;
 		}
 	}
 </style>

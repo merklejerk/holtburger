@@ -197,7 +197,9 @@ describe("ClientPresentationRoot", () => {
 		await root.setMode("gameplay");
 		expect(runtime.activateScene).not.toHaveBeenCalled();
 		expect(dependencies.createGameplay).toHaveBeenCalledOnce();
-		await root.destroy();
+		await expect(root.destroy()).rejects.toThrow(
+			"Presentation retirement failed",
+		);
 		expect(owner.destroy).toHaveBeenCalledOnce();
 	});
 
@@ -222,7 +224,9 @@ describe("ClientPresentationRoot", () => {
 		});
 		expect(runtime.activateScene).not.toHaveBeenCalled();
 		expect(dependencies.createGameplay).toHaveBeenCalledOnce();
-		await root.destroy();
+		await expect(root.destroy()).rejects.toThrow(
+			"Presentation retirement failed",
+		);
 	});
 
 	it("withdraws scene inputs on exit without starting another backdrop", async () => {
@@ -233,6 +237,64 @@ describe("ClientPresentationRoot", () => {
 		expect(gameplay.destroy).toHaveBeenCalledOnce();
 		expect(runtime.activateScene).not.toHaveBeenCalled();
 		await root.destroy();
+	});
+
+	it("joins gameplay already retiring during Return without waiting for pregame startup", async () => {
+		const { dependencies, gameplay, runtime } = fixture();
+		const root = new ClientPresentationRoot(dependencies);
+		await root.setMode("gameplay");
+		const gate = deferred<void>();
+		gameplay.destroy.mockReturnValue(gate.promise);
+		const returning = root.setMode("pregame");
+		await vi.waitFor(() => expect(gameplay.destroy).toHaveBeenCalledOnce());
+		let stopped = false;
+		const disconnecting = root.retireGameplay().then(() => {
+			stopped = true;
+		});
+		await Promise.resolve();
+		expect(stopped).toBe(false);
+		gate.resolve();
+		await Promise.all([returning, disconnecting]);
+		expect(gameplay.destroy).toHaveBeenCalledOnce();
+		expect(runtime.activateScene).not.toHaveBeenCalled();
+		await root.destroy();
+	});
+	it("cancels a pending gameplay start before joining its normal success wait", async () => {
+		const { dependencies, gameplay } = fixture();
+		const root = new ClientPresentationRoot(dependencies);
+		const gate = deferred<void>();
+		gameplay.start.mockReturnValue(gate.promise);
+		const starting = root.setMode("gameplay");
+		await vi.waitFor(() => expect(gameplay.start).toHaveBeenCalledOnce());
+		await root.retireGameplay();
+		await starting;
+		expect(gameplay.destroy).toHaveBeenCalledOnce();
+		gate.resolve();
+		await root.destroy();
+	});
+	it("does not wait for unrelated static owner construction to retire gameplay", async () => {
+		const { dependencies, owner } = fixture();
+		const gate = deferred<typeof owner>();
+		dependencies.build.mockReturnValue(gate.promise);
+		const root = new ClientPresentationRoot(dependencies);
+		const starting = root.setMode("gameplay");
+		await root.retireGameplay();
+		await starting;
+		expect(dependencies.createGameplay).not.toHaveBeenCalled();
+		gate.resolve(owner);
+		await root.destroy();
+	});
+	it("retains a failed retirement for every barrier and final root destruction", async () => {
+		const { dependencies, gameplay } = fixture();
+		const root = new ClientPresentationRoot(dependencies);
+		await root.setMode("gameplay");
+		gameplay.destroy.mockRejectedValue(new Error("camera stop failed"));
+		await expect(root.retireGameplay()).rejects.toThrow("camera stop failed");
+		await expect(root.retireGameplay()).rejects.toThrow("camera stop failed");
+		await expect(root.destroy()).rejects.toThrow(
+			"Presentation retirement failed",
+		);
+		expect(gameplay.destroy).toHaveBeenCalledOnce();
 	});
 
 	it("aborts pending resource construction and does not admit a driver afterward", async () => {

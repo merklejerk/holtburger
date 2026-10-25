@@ -209,6 +209,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"cancel_client_precise_jump",
 	"acknowledge_client_world_reveal",
 	"stop_client_camera",
+	"logout_client",
 	"disconnect_client",
 ] as const;
 

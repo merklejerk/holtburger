@@ -52,30 +52,32 @@ export class ClientSettingsPersistence<Snapshot> {
 	}
 
 	async #drain(): Promise<void> {
-		if (this.#inFlight !== null) {
-			await this.#inFlight;
-			if (this.#pending !== null) await this.#drain();
-			return;
+		// A concurrent flusher can start the next save before our previous await resumes.
+		// Recheck both facts until quiescent; checking only pending would miss that new in-flight save.
+		while (this.#inFlight !== null || this.#pending !== null) {
+			if (this.#inFlight !== null) {
+				await this.#inFlight;
+				continue;
+			}
+			const snapshot = this.#pending;
+			if (snapshot === null) return;
+			this.#pending = null;
+			try {
+				const save = this.#save(snapshot);
+				this.#inFlight = save;
+				await save;
+			} catch (error) {
+				this.#pending =
+					this.#pending === null
+						? snapshot
+						: this.#merge === undefined
+							? this.#pending
+							: this.#merge(snapshot, this.#pending);
+				this.#report(error);
+				throw error;
+			} finally {
+				this.#inFlight = null;
+			}
 		}
-		const snapshot = this.#pending;
-		if (snapshot === null) return;
-		this.#pending = null;
-		const save = this.#save(snapshot);
-		this.#inFlight = save;
-		try {
-			await save;
-		} catch (error) {
-			this.#pending =
-				this.#pending === null
-					? snapshot
-					: this.#merge === undefined
-						? this.#pending
-						: this.#merge(snapshot, this.#pending);
-			this.#report(error);
-			throw error;
-		} finally {
-			this.#inFlight = null;
-		}
-		if (this.#pending !== null) await this.#drain();
 	}
 }

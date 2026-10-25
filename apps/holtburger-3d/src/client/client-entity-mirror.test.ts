@@ -247,6 +247,15 @@ describe("ClientEntityMirror", () => {
 				removed: [],
 			}),
 		).toThrow("missing parent");
+		expect(() =>
+			store.prepareDelta({
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: [],
+				removed: [player],
+			}),
+		).toThrow("Semantic baseline is missing the local player identity.");
 		expect(store.read()).toBe(before);
 	});
 

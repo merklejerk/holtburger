@@ -50,6 +50,61 @@ contextBridge.exposeInMainWorld("holtburgerHost", {
 });
 
 if (process.argv.includes("--holtburger-mode=client")) {
+	// Preload is ready before Svelte: retain an early native close request until the app registers.
+	type PreparationHandler = () => Promise<unknown>;
+	let preparation:
+		| {
+				kind: "waiting";
+				requested: boolean;
+				handler: PreparationHandler | null;
+		  }
+		| { kind: "running" } = {
+		kind: "waiting",
+		requested: false,
+		handler: null,
+	};
+	const prepare = () => {
+		if (preparation.kind === "running") return;
+		preparation.requested = true;
+		const handler = preparation.handler;
+		if (handler === null) return;
+		preparation = { kind: "running" };
+		void Promise.resolve()
+			.then(handler)
+			.then(
+				(result) => ipcRenderer.invoke("client:prepared-close", result),
+				(error) =>
+					ipcRenderer.invoke("client:prepared-close", {
+						kind: "failed",
+						diagnostic: error instanceof Error ? error.message : String(error),
+					}),
+			)
+			.catch((error) =>
+				console.error("Client close acknowledgement failed", error),
+			);
+	};
+	ipcRenderer.on("client:prepare-close", prepare);
+
+	contextBridge.exposeInMainWorld("holtburgerClient", {
+		quit(): Promise<void> {
+			return ipcRenderer.invoke("client:request-close");
+		},
+		onPrepareClose(handler: PreparationHandler): () => void {
+			if (preparation.kind === "running" || preparation.handler !== null)
+				throw new Error(
+					"Client close preparation handler is already registered.",
+				);
+			preparation.handler = handler;
+			if (preparation.requested) prepare();
+			return () => {
+				if (preparation.kind === "waiting" && preparation.handler === handler)
+					preparation.handler = null;
+			};
+		},
+		start(): Promise<void> {
+			return ipcRenderer.invoke("client:start");
+		},
+	});
 	contextBridge.exposeInMainWorld("holtburgerVisualCache", {
 		read(guid: number): Promise<unknown> {
 			return ipcRenderer.invoke("visual-cache:read", guid);

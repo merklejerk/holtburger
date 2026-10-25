@@ -189,7 +189,15 @@ pub async fn run_client_task(
                         ClientLifecycleState::Exiting { cause } => cause,
                         _ => ClientExitCause::ServerDisconnect,
                     };
-                    (cause, "client session ended".to_string())
+                    let diagnostic = client.exit_diagnostic().map(str::to_owned).unwrap_or_else(
+                        || match cause {
+                            ClientExitCause::ExplicitDisconnect => {
+                                "Disconnected from the server.".into()
+                            }
+                            _ => "The server connection ended.".into(),
+                        },
+                    );
+                    (cause, diagnostic)
                 }
                 Err(error) => (ClientExitCause::RuntimeFailure, error.to_string()),
             };

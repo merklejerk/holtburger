@@ -134,14 +134,17 @@ export async function probeClientPresentation(
 			isolated: true,
 		});
 	};
+	const checkBuildInformation = async () => {
+		assert.match(
+			await read(
+				"document.querySelector('[aria-label=\"Build information\"]')?.textContent ?? ''",
+			),
+			/^DEV · v\S+ · [0-9a-f]{8,}(?: · modified)?$/,
+		);
+	};
 	const covered = async () => {
 		await checkFooterLayout();
-		assert.equal(
-			await read(
-				"document.querySelector('[aria-label=\"Build information\"]') === null",
-			),
-			true,
-		);
+		await checkBuildInformation();
 		assert.equal(
 			await read(
 				"document.querySelector('.client-loading-page') !== null && document.querySelector('.client-character-list') === null && document.querySelector('.creature-preview') === null",
@@ -186,7 +189,7 @@ export async function probeClientPresentation(
 	try {
 		await read(`${api}.authenticate()`);
 		await wait(
-			"document.querySelector('.loading-message[role=status]')?.textContent.includes('Authenticating')",
+			"document.querySelector('.loading-message[role=status]')?.textContent.includes('Signing in')",
 		);
 		assert.deepEqual(await read("globalThis.__LOADING_STATUS_CLOCK__.read()"), {
 			idle: 1,
@@ -221,7 +224,7 @@ export async function probeClientPresentation(
 		);
 		await covered();
 		await wait(
-			"document.querySelector('.loading-message[role=status]')?.textContent.includes('Preparing scene')",
+			"document.querySelector('.loading-message[role=status]')?.textContent.includes('Loading the world')",
 		);
 		assert.deepEqual(await read("globalThis.__LOADING_STATUS_CLOCK__.read()"), {
 			idle: 1,
@@ -294,12 +297,7 @@ export async function probeClientPresentation(
 		const selection = await read(`${api}.read()`);
 		await checkPregameTheme();
 		await checkFooterLayout();
-		assert.match(
-			await read(
-				"document.querySelector('[aria-label=\"Build information\"]')?.textContent ?? ''",
-			),
-			/^DEV · v\S+ · [0-9a-f]{8,}(?: · modified)?$/,
-		);
+		await checkBuildInformation();
 		assert.equal(
 			await read("globalThis.__PRESENTATION_REPEATED_TIMESTAMP__"),
 			true,
@@ -336,15 +334,10 @@ export async function probeClientPresentation(
 		const creator = await read(`${api}.read()`);
 		await checkPregameTheme();
 		await checkFooterLayout();
+		await checkBuildInformation();
 		assert.equal(
 			await read(
-				"document.querySelector('[aria-label=\"Build information\"]') === null",
-			),
-			true,
-		);
-		assert.equal(
-			await read(
-				"document.querySelector('.pregame-footer').textContent.trim() === 'Back'",
+				"document.querySelector('.pregame-footer button').textContent.trim() === 'Back'",
 			),
 			true,
 		);
@@ -502,11 +495,50 @@ export async function probeClientPresentation(
 			`${api}.read().portalReveals === 1 && ${visible} && document.querySelector('.client-world') !== null`,
 		);
 		const gameplay = await read(`${api}.read()`);
-		await read(`${api}.holdRetirement(); ${api}.returnSelection()`);
+		for (const type of ["keyDown", "keyUp"])
+			await client.send("Input.dispatchKeyEvent", {
+				type,
+				key: "Escape",
+				code: "Escape",
+			});
+		await wait(
+			"document.querySelector('[role=menu][aria-label=System]') !== null",
+		);
+		for (const type of ["keyDown", "keyUp"])
+			await client.send("Input.dispatchKeyEvent", {
+				type,
+				key: "Escape",
+				code: "Escape",
+			});
+		await wait(
+			"document.querySelector('[role=menu][aria-label=System]') === null",
+		);
+		await read(`${api}.holdRetirement()`);
+		await read(`document.querySelector('[aria-label="System menu"]').click()`);
+		await click("Return to main menu");
+		await wait(`${api}.read().logoutRequests === 1`);
 		await wait(
 			`${api}.read().gates.retirement.waiting > 0 && document.querySelector('.client-loading-page') !== null`,
 		);
 		await covered();
+		assert.equal(
+			await read(
+				"document.querySelector('.client-pregame-screen.hero-brand') === null",
+			),
+			true,
+		);
+		assert.equal(
+			await read("document.querySelector('.loading-status-icon') === null"),
+			true,
+		);
+		for (const tone of ["status", "warning"]) {
+			await read(
+				`${api}.notify('You have left the LFG channel.', ${JSON.stringify(tone)})`,
+			);
+			await wait(
+				"document.querySelector('.loading-message[role=status]')?.textContent.trim() === 'Returning to character selection…'",
+			);
+		}
 		await read(`${api}.releaseRetirement()`);
 		await wait(
 			`${visible} && document.querySelector('.client-character-list') !== null && !document.body.innerText.includes('Loading model')`,
@@ -515,6 +547,42 @@ export async function probeClientPresentation(
 			`({...${api}.read(), sameCanvas: document.querySelector('.client-canvas') === globalThis.__PRESENTATION_PROOF_CANVAS__})`,
 		);
 		assert.equal(returned.sameCanvas, true);
+		// A second character entry uses the retained session and renderer context.
+		await click("Enter World");
+		await wait(
+			`${api}.read().portalReveals === 2 && ${visible} && document.querySelector('.client-world') !== null`,
+		);
+		await read(`${api}.holdRetirement()`);
+		await read(`document.querySelector('[aria-label="System menu"]').click()`);
+		await click("Disconnect");
+		await wait(`${api}.read().gates.retirement.waiting > 0`);
+		assert.equal(
+			await read("document.querySelector('h1')?.textContent"),
+			"Disconnecting",
+		);
+		assert.equal((await read(`${api}.read()`)).disconnectRequests, 0);
+		await read(`${api}.releaseRetirement()`);
+		await wait("document.querySelector('h1')?.textContent === 'Disconnected'");
+		assert.equal((await read(`${api}.read()`)).disconnectRequests, 1);
+		await checkBuildInformation();
+		assert.equal(
+			await read(
+				"document.querySelector('.loading-content button.pregame-primary')?.textContent.trim()",
+			),
+			"Quit application",
+		);
+		assert.equal(
+			await read("document.querySelector('.pregame-footer button') === null"),
+			true,
+		);
+		assert.equal(
+			await read("document.querySelector('.loading-details') === null"),
+			true,
+		);
+		assert.equal(
+			await read("document.querySelector('.scene-loading') === null"),
+			true,
+		);
 		for (const phase of [selection, creator, gameplay, returned]) {
 			assert.equal(phase.worldCanvases, 1);
 			assert.equal(phase.worldContextRequests, 1);
@@ -546,7 +614,7 @@ export async function probeClientPresentation(
 		await wait(`${api}.read().worldDraws > 0`);
 		assert.equal(
 			await read("document.querySelector('h1').textContent"),
-			"Authenticating",
+			"Signing in",
 		);
 		await covered();
 		await physicalClick("Provide characters");
@@ -567,7 +635,7 @@ export async function probeClientPresentation(
 		await reload();
 		await read(`${api}.releaseConnection(); ${api}.failScene()`);
 		await wait(
-			"document.querySelector('.client-loading-page [role=alert]')?.textContent.includes('Presentation fixture: scene failed')",
+			"document.querySelector('.client-loading-page [role=alert]')?.textContent.includes('The game world could not be loaded')",
 		);
 		await covered();
 		assert.equal(
@@ -577,7 +645,7 @@ export async function probeClientPresentation(
 		assert.deepEqual(await read(`${api}.read().expectedErrors`), [
 			"Presentation fixture: scene failed",
 		]);
-		await click("Retry scene");
+		await click("Try again");
 		await wait(
 			`${visible} && document.querySelector('.client-character-list') !== null`,
 		);
@@ -586,13 +654,101 @@ export async function probeClientPresentation(
 		await reload();
 		await read(`${api}.failConnection()`);
 		await wait(
-			"document.querySelector('.client-loading-page [role=alert]')?.textContent.includes('Presentation fixture: connection failed')",
+			"document.querySelector('.client-loading-page [role=alert]')?.textContent.includes('The client could not start')",
 		);
 		await covered();
+		assert.equal(
+			await read(
+				"document.querySelector('.loading-details:not([open]) pre').textContent",
+			),
+			"Presentation fixture: connection failed",
+		);
 		await click("Disconnect");
-		await wait("document.querySelector('h1')?.textContent === 'Disconnecting'");
+		await wait(
+			"document.querySelector('h1')?.textContent === 'Session ended with errors'",
+		);
+		await checkBuildInformation();
+		assert.equal(
+			await read(
+				"document.querySelector('.loading-content button.pregame-primary')?.textContent.trim()",
+			),
+			"Quit application",
+		);
+		assert.equal(
+			await read("document.querySelector('.pregame-footer button') === null"),
+			true,
+		);
+		assert.equal(
+			await read(
+				"document.querySelector('.loading-details')?.textContent.includes('Presentation fixture: connection failed')",
+			),
+			true,
+		);
 		await read(`${api}.releaseScene()`);
 		await wait(`${api}.read().sceneResponses > 0`);
+		await read(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+		await covered();
+		await reload();
+		await read(`${api}.releaseConnection(); ${api}.releaseScene()`);
+		await wait(
+			`${visible} && document.querySelector('.client-character-list') !== null`,
+		);
+		await click("Enter World");
+		await wait(
+			`${api}.read().portalReveals === 1 && ${visible} && document.querySelector('.client-world') !== null`,
+		);
+		await read(`${api}.holdCaptureStaging(); ${api}.publishCapture()`);
+		await wait(`${api}.read().gates.captures.waiting > 0`);
+		await read(`${api}.failSession()`);
+		await wait(
+			"document.querySelector('h1')?.textContent === 'Connection lost'",
+		);
+		assert.equal(
+			await read(
+				"document.querySelector('.loading-message[role=alert]')?.textContent.trim()",
+			),
+			"The server closed the connection for maintenance.",
+		);
+		await read("document.querySelector('.loading-details summary').click()");
+		assert.equal(
+			await read(
+				"document.querySelector('.loading-details[open] pre').innerText.includes('Diagnostic: The server closed the connection for maintenance.')",
+			),
+			true,
+		);
+		assert.equal(
+			await read(
+				"document.querySelector('.client-loading-page').textContent.includes('Last session phase: in world')",
+			),
+			true,
+		);
+		assert.equal(
+			await read("document.querySelector('.scene-loading') === null"),
+			true,
+		);
+		await read(`${api}.beginClose()`);
+		await read(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+		assert.equal((await read(`${api}.read()`)).closeResult, null);
+		await read(`${api}.releaseCaptureStaging()`);
+		await wait(`${api}.read().closeResult?.kind === 'prepared'`);
+		await read(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+		await covered();
+		// Quit must retire the whole composition even while pregame content is still loading.
+		await reload();
+		await read(`${api}.releaseConnection()`);
+		await wait(`${api}.read().gates.scene.waiting > 0`);
+		await read(`${api}.beginClose()`);
+		await read(
+			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
+		);
+		await read(`${api}.releaseScene()`);
+		await wait(`${api}.read().closeResult?.kind === 'prepared'`);
 		await read(
 			"new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))",
 		);
@@ -603,6 +759,14 @@ export async function probeClientPresentation(
 			gameplay,
 			returned,
 			rosterKeyboardNavigation: true,
+			systemMenuEscape: true,
+			characterReentry: true,
+			connectionLossDiagnostic: true,
+			captureDrainedBeforeClose: true,
+			quitDuringPregameLoading: true,
+			pregameBuildInformation: true,
+			centeredQuitAction: true,
+			lightweightCharacterReturn: true,
 			loadingGate: {
 				rosterFirst: true,
 				repeatedTimestamp: true,

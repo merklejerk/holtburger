@@ -239,6 +239,7 @@ impl ClientRuntimeBuilder {
             described_character: None,
             spell_inspection: super::spell_inspection::SpellInspectionState::default(),
             exit_cause: None,
+            exit_diagnostic: None,
             client_view_event_tx,
             dynamic_entity_time_origin: Instant::now(),
             published_character_motion_capabilities:
@@ -310,6 +311,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         described_character: None,
         spell_inspection: super::spell_inspection::SpellInspectionState::default(),
         exit_cause: None,
+        exit_diagnostic: None,
         client_view_event_tx,
         dynamic_entity_time_origin: Instant::now(),
         published_character_motion_capabilities: PublishedCharacterMotionCapabilities::Unpublished,

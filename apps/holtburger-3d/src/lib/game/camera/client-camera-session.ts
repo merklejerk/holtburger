@@ -1,9 +1,9 @@
+import { abortError, isAbortError } from "../../async-lifetime";
 import {
 	type ClientCameraIdentity,
-	type ClientCameraStartReceipt,
 	type ClientCameraTick,
 } from "../../../client/client-host-contract";
-import { ClientLifecycleSession } from "../../../client/client-lifecycle-session";
+import type { ClientLifecycleSession } from "../../../client/client-lifecycle-session";
 import {
 	evaluateHostKinematicBoomPath,
 	type HostKinematicBoomPresentation,
@@ -87,11 +87,9 @@ export class ClientCameraSession {
 	readonly #lifecycle: ClientLifecycleSession;
 	readonly #unsubscribe: () => void;
 	#lifecycleRevision = 0;
-	#registrationPending = false;
+	/** Local registration wait; native receipt ownership remains with the session. */
+	#registration: AbortController | null = null;
 	#identity: ClientCameraIdentity | null = null;
-	#registrationTarget: ClientCameraTarget | null = null;
-	#registrationResolve: (() => void) | null = null;
-	#registrationReject: ((error: unknown) => void) | null = null;
 	#preRegistrationOutputs = new Map<number, ReceivedTick>();
 	#highestSequence = 0;
 	#active: ReceivedTick | null = null;
@@ -106,7 +104,23 @@ export class ClientCameraSession {
 	constructor(lifecycle: ClientLifecycleSession) {
 		this.#lifecycle = lifecycle;
 		this.#unsubscribe = lifecycle.subscribe((event) => {
-			if (event.type === "camera-started") this.#receiveStarted(event.receipt);
+			const phase =
+				event.type === "lifecycle"
+					? event.lifecycle.kind
+					: event.type === "current-state"
+						? event.state.lifecycle.kind
+						: null;
+			if (
+				phase === "exiting" ||
+				phase === "logging-out" ||
+				phase === "character-selection"
+			) {
+				++this.#lifecycleRevision;
+				this.#registration?.abort(
+					abortError("Camera generation retired by authority."),
+				);
+				this.#resetSession();
+			}
 			if (event.type === "camera") this.#receiveCurrentOutput(event.tick);
 			if (event.type === "presentation-tick" && event.tick.camera !== null)
 				this.#receiveCurrentOutput(event.tick.camera, event.receivedAtMs);
@@ -124,50 +138,42 @@ export class ClientCameraSession {
 		validateDistancePolicy(distance);
 		validateDirection(viewDirection);
 		validateProjection(projection);
-		const revision = ++this.#lifecycleRevision;
+		++this.#lifecycleRevision;
 		const previous = this.#identity;
-		this.#rejectRegistration(
-			new Error("Client camera registration was superseded."),
+		this.#registration?.abort(
+			abortError("Client camera registration was superseded."),
 		);
 		this.#resetSession();
-		this.#registrationPending = true;
-		this.#registrationTarget = target;
+		const registration = new AbortController();
+		this.#registration = registration;
 		this.#lastSubmittedDirection = [...viewDirection];
 		this.#lastRequestedProjectionRevision = projection.revision;
 		this.#projectionRevisions.set(projection.revision, projection);
-
-		if (previous !== null) {
-			await this.#lifecycle.stopCamera(previous);
-			if (revision !== this.#lifecycleRevision) return;
-		}
-
-		const registration = new Promise<void>((resolve, reject) => {
-			this.#registrationResolve = resolve;
-			this.#registrationReject = reject;
-		});
 		try {
-			await this.#lifecycle.startCamera({
-				playerGuid: target.playerGuid,
-				entityGeneration: target.entityGeneration,
-				initialReach: distance.initial,
-				minimumReach: distance.minimum,
-				maximumReach: distance.maximum,
-				inputSequence: 0,
-				viewDirection,
-				cumulativeZoomDisplacement: 0,
-				projectionRevision: projection.revision,
-				clearanceRadius: projection.clearanceRadius,
-			});
-			await registration;
-			if (revision !== this.#lifecycleRevision) return;
+			if (previous !== null) await this.#lifecycle.stopCamera(previous);
+			registration.signal.throwIfAborted();
+			const identity = await this.#lifecycle.registerCamera(
+				{
+					playerGuid: target.playerGuid,
+					entityGeneration: target.entityGeneration,
+					initialReach: distance.initial,
+					minimumReach: distance.minimum,
+					maximumReach: distance.maximum,
+					inputSequence: 0,
+					viewDirection,
+					cumulativeZoomDisplacement: 0,
+					projectionRevision: projection.revision,
+					clearanceRadius: projection.clearanceRadius,
+				},
+				registration.signal,
+			);
+			registration.signal.throwIfAborted();
+			this.#identity = identity;
 		} catch (error) {
-			if (revision === this.#lifecycleRevision) this.#resetSession();
+			if (this.#registration === registration) this.#resetSession();
 			throw error;
 		} finally {
-			if (this.#registrationResolve !== null) {
-				this.#registrationResolve = null;
-				this.#registrationReject = null;
-			}
+			if (this.#registration === registration) this.#registration = null;
 		}
 
 		const pending = [...this.#preRegistrationOutputs.values()].sort(
@@ -185,6 +191,7 @@ export class ClientCameraSession {
 		this.#lastRequestedProjectionRevision = projection.revision;
 		this.#projectionRevisions.set(projection.revision, projection);
 		const identity = this.#identity;
+		const revision = this.#lifecycleRevision;
 		if (identity === null) return;
 		try {
 			await this.#lifecycle.setCameraClearance({
@@ -193,6 +200,7 @@ export class ClientCameraSession {
 				clearanceRadius: projection.clearanceRadius,
 			});
 		} catch (error) {
+			if (revision !== this.#lifecycleRevision && isAbortError(error)) return;
 			if (
 				this.#identity !== null &&
 				sameIdentity(this.#identity, identity) &&
@@ -226,6 +234,7 @@ export class ClientCameraSession {
 			return;
 		if (!Number.isSafeInteger(this.#nextInputSequence))
 			throw new Error("Client camera input sequence exhausted.");
+		const revision = this.#lifecycleRevision;
 		const inputSequence = this.#nextInputSequence++;
 		const cumulativeZoomDisplacement = this.#cumulativeZoomDisplacement;
 		this.#lastSubmittedDirection = [...viewDirection];
@@ -238,6 +247,7 @@ export class ClientCameraSession {
 				cumulativeZoomDisplacement,
 			});
 		} catch (error) {
+			if (revision !== this.#lifecycleRevision && isAbortError(error)) return;
 			if (
 				this.#identity !== null &&
 				sameIdentity(this.#identity, identity) &&
@@ -277,7 +287,7 @@ export class ClientCameraSession {
 	status(): ClientCameraStatus {
 		const identity = this.#identity;
 		if (identity === null) {
-			return this.#registrationPending
+			return this.#registration !== null
 				? { kind: "awaiting-registration" }
 				: { kind: "stopped" };
 		}
@@ -306,15 +316,15 @@ export class ClientCameraSession {
 	}
 
 	get running(): boolean {
-		return this.#identity !== null || this.#registrationPending;
+		return this.#identity !== null || this.#registration !== null;
 	}
 
 	/** Stop the current generation and release all path/projection state. */
 	async stop(): Promise<void> {
 		++this.#lifecycleRevision;
 		const identity = this.#identity;
-		this.#rejectRegistration(
-			new Error("Client camera registration was cancelled."),
+		this.#registration?.abort(
+			abortError("Client camera registration was cancelled."),
 		);
 		this.#resetSession();
 		if (identity !== null) await this.#lifecycle.stopCamera(identity);
@@ -322,29 +332,10 @@ export class ClientCameraSession {
 
 	destroy(): void {
 		this.#unsubscribe();
-		this.#rejectRegistration(new Error("Client camera session was destroyed."));
+		this.#registration?.abort(
+			abortError("Client camera session was destroyed."),
+		);
 		this.#resetSession();
-	}
-
-	#receiveStarted(receipt: ClientCameraStartReceipt): void {
-		const target = this.#registrationTarget;
-		if (!this.#registrationPending || target === null) return;
-		if (
-			receipt.playerGuid !== target.playerGuid ||
-			receipt.entityGeneration !== target.entityGeneration
-		) {
-			this.#rejectRegistration(
-				new Error("Client camera registration receipt changed its target."),
-			);
-			return;
-		}
-		this.#identity = receipt;
-		this.#registrationPending = false;
-		this.#registrationTarget = null;
-		const resolve = this.#registrationResolve;
-		this.#registrationResolve = null;
-		this.#registrationReject = null;
-		resolve?.();
 	}
 
 	#receiveCurrentOutput(
@@ -354,7 +345,7 @@ export class ClientCameraSession {
 		const received = { tick, receivedAtMs };
 		const identity = this.#identity;
 		if (identity === null) {
-			if (this.#registrationPending) {
+			if (this.#registration !== null) {
 				this.#preRegistrationOutputs.set(tick.sequence, received);
 				this.#boundPreRegistrationOutputs();
 			}
@@ -409,17 +400,9 @@ export class ClientCameraSession {
 		this.#droppedPaths += 1;
 	}
 
-	#rejectRegistration(error: unknown): void {
-		const reject = this.#registrationReject;
-		this.#registrationResolve = null;
-		this.#registrationReject = null;
-		reject?.(error);
-	}
-
 	#resetSession(): void {
-		this.#registrationPending = false;
+		this.#registration = null;
 		this.#identity = null;
-		this.#registrationTarget = null;
 		this.#preRegistrationOutputs.clear();
 		this.#highestSequence = 0;
 		this.#active = null;

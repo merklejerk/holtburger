@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
+	import { APP_BUILD_LABEL } from "../app/app-build";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import "./client-pregame.css";
 	import "../app/themes/holtburger-pregame.css";
@@ -27,7 +28,12 @@
 >
 	<header class="pregame-brand">Holtburger</header>
 	<div class="pregame-content">{@render children()}</div>
-	<footer class="pregame-footer">{@render footer()}</footer>
+	<footer class="pregame-footer">
+		{@render footer()}
+		<span class="pregame-build" aria-label="Build information"
+			>{APP_BUILD_LABEL}</span
+		>
+	</footer>
 </main>
 
 <style>
@@ -81,6 +87,12 @@
 			gap: 24px;
 			min-width: 0;
 			padding-top: 12px;
+		}
+		.pregame-build {
+			margin-left: auto;
+			margin-right: calc(12px - clamp(20px, 4vw, 64px));
+			text-align: right;
+			overflow-wrap: anywhere;
 		}
 		@media (max-width: 850px) {
 			/* Stacked pages scroll as one area, with the footer remaining in place. */

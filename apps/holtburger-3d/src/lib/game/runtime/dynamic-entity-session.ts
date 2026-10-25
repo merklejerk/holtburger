@@ -1,3 +1,4 @@
+import { abortError, awaitWithAbort } from "../../async-lifetime";
 import {
 	decodeDynamicEntityEvent,
 	DynamicEntityMirror,
@@ -20,8 +21,18 @@ export interface DynamicEntitySessionDependencies {
 
 /** Optional work that an authority needs to install beside the dynamic-feed listener. */
 export interface DynamicEntitySessionStartOptions {
+	/** Optional owning startup lifetime; cancellation cannot install a late feed listener. */
+	readonly signal?: AbortSignal;
 	/** Install any additional authority listeners before the snapshot request is sent. */
 	beforeRequest?(): void | Promise<void>;
+}
+
+/** One subscription attempt retains its disposer even while sibling startup is pending. */
+interface FeedAttachment {
+	readonly lifetime: AbortController;
+	readonly signal: AbortSignal;
+	readonly completion: Promise<void>;
+	unlisten: (() => void) | null;
 }
 
 /**
@@ -35,7 +46,7 @@ export class DynamicEntitySession {
 	readonly mirror: DynamicEntityMirror;
 	readonly #dependencies: DynamicEntitySessionDependencies;
 	readonly #listeners = new Set<(event: DynamicEntityEvent) => void>();
-	#unlisten: (() => void) | null = null;
+	#attachment: FeedAttachment | null = null;
 
 	constructor(
 		dependencies: DynamicEntitySessionDependencies,
@@ -46,28 +57,68 @@ export class DynamicEntitySession {
 	}
 
 	/** Register the feed first, install any sibling listeners, then request replacement state. */
-	async start(options: DynamicEntitySessionStartOptions = {}): Promise<void> {
-		if (this.#unlisten !== null) return;
+	start(options: DynamicEntitySessionStartOptions = {}): Promise<void> {
+		if (this.#attachment !== null) return this.#attachment.completion;
 		this.invalidate();
-		const unlisten = await this.#dependencies.subscribe((payload) =>
-			this.#receive(payload),
-		);
+		const lifetime = new AbortController();
+		const attachment: FeedAttachment = {
+			lifetime,
+			signal:
+				options.signal === undefined
+					? lifetime.signal
+					: AbortSignal.any([lifetime.signal, options.signal]),
+			unlisten: null,
+			completion: Promise.resolve().then(() =>
+				this.#attach(attachment, options),
+			),
+		};
+		this.#attachment = attachment;
+		return attachment.completion;
+	}
+	async #attach(
+		attachment: FeedAttachment,
+		options: DynamicEntitySessionStartOptions,
+	): Promise<void> {
+		const signal = attachment.signal;
 		try {
-			await options.beforeRequest?.();
-			this.#unlisten = unlisten;
-			await this.#dependencies.requestCurrentState();
+			signal.throwIfAborted();
+			const installing = this.#dependencies
+				.subscribe((payload) => {
+					if (!signal.aborted) this.#receive(payload);
+				})
+				.then((unlisten) => {
+					if (signal.aborted) {
+						unlisten();
+						throw signal.reason;
+					}
+					attachment.unlisten = unlisten;
+				});
+			await awaitWithAbort(installing, signal);
+			signal.throwIfAborted();
+			await awaitWithAbort(Promise.resolve(options.beforeRequest?.()), signal);
+			signal.throwIfAborted();
+			await awaitWithAbort(this.#dependencies.requestCurrentState(), signal);
 		} catch (error) {
-			unlisten();
-			this.#unlisten = null;
-			this.invalidate();
+			this.#release(attachment);
+			if (this.#attachment === attachment) {
+				this.#attachment = null;
+				this.invalidate();
+			}
 			throw error;
 		}
 	}
-
-	/** Stop receiving deltas and require a replacement snapshot on the next start. */
+	#release(attachment: FeedAttachment): void {
+		attachment.unlisten?.();
+		attachment.unlisten = null;
+	}
+	/** Stop receiving deltas and invalidate an installer that has not returned its disposer yet. */
 	stop(): void {
-		this.#unlisten?.();
-		this.#unlisten = null;
+		const attachment = this.#attachment;
+		this.#attachment = null;
+		if (attachment !== null) {
+			attachment.lifetime.abort(abortError("Dynamic feed retired."));
+			this.#release(attachment);
+		}
 		this.invalidate();
 	}
 

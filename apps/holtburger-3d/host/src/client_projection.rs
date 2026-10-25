@@ -601,6 +601,8 @@ pub enum ClientLifecycleWire {
         cause: ClientWorldActivationCauseWire,
     },
     InWorld,
+    /// Character logout retains the authenticated transport.
+    LoggingOut,
     Exiting {
         cause: ClientExitCauseWire,
     },
@@ -1302,9 +1304,9 @@ pub struct ClientPresentationDiscontinuity {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientExitRequested {
-    /// Typed terminal cause used by Electron exit policy.
+    /// Typed terminal cause used by the client outcome screen.
     pub cause: ClientExitCauseWire,
-    /// Redacted diagnostic suitable for the main-process error surface.
+    /// Redacted diagnostic suitable for the in-app error surface.
     pub diagnostic: String,
 }
 
@@ -1574,6 +1576,7 @@ impl From<&ClientLifecycleState> for ClientLifecycleWire {
                 cause: (*cause).into(),
             },
             ClientLifecycleState::InWorld => Self::InWorld,
+            ClientLifecycleState::LoggingOut => Self::LoggingOut,
             ClientLifecycleState::Exiting { cause } => Self::Exiting {
                 cause: (*cause).into(),
             },
@@ -1883,7 +1886,10 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
             if let ActionResultReason::Weenie(error, _) = &reason
                 && matches!(
                     error,
-                    WeenieError::TradeIgnoringRequests
+                    WeenieError::TurbineChatIsEnabled
+                        | WeenieError::YouHaveEnteredTheChannel
+                        | WeenieError::YouHaveLeftTheChannel
+                        | WeenieError::TradeIgnoringRequests
                         | WeenieError::TradeSquelched
                         | WeenieError::TradeMaxDistanceExceeded
                         | WeenieError::TradeAlreadyTrading
@@ -3088,6 +3094,29 @@ mod tests {
             encoded["equipment"],
             serde_json::json!([{ "item": binding.item, "target": binding.target.bits() }, { "item": null, "target": binding.target.bits() }])
         );
+    }
+
+    #[test]
+    fn channel_membership_acknowledgements_are_system_chat() {
+        for error in [
+            WeenieError::TurbineChatIsEnabled,
+            WeenieError::YouHaveEnteredTheChannel,
+            WeenieError::YouHaveLeftTheChannel,
+        ] {
+            let reason = ActionResultReason::Weenie(error, Some("LFG".into()));
+            let message = format_action_result_message(&reason);
+            let event = project_client_event(ClientViewEvent::ActionResult {
+                source: holtburger_core::ActionResultSource::Wire,
+                reason,
+            });
+            let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::System {
+                message: received,
+            })) = event
+            else {
+                panic!("channel membership must reach chat");
+            };
+            assert_eq!(received, message);
+        }
     }
 
     #[test]

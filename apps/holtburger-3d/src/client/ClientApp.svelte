@@ -82,6 +82,7 @@
 		clientInputConfiguration,
 		clientInputSettingsSchema,
 	} from "./client-input-settings";
+	import { clientFailureDiagnostic } from "./client-close-contract";
 	import { onMount, untrack } from "svelte";
 	import {
 		createFrameRateSampler,
@@ -101,7 +102,11 @@
 		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
 	} from "./client-tuning";
 	import { recordSentChat } from "./client-chat-input-history";
-	import { createElectronHostTransport } from "../lib/host/electron-host-transport";
+	import {
+		createElectronHostTransport,
+		startElectronClient,
+		registerElectronClientClose,
+	} from "../lib/host/electron-host-transport";
 	import type { HostTransport } from "../lib/host/host-transport";
 	import {
 		ClientLifecycleSession,
@@ -124,9 +129,7 @@
 	import { PresentationTeardownStack } from "../lib/game/runtime/presentation-teardown";
 	import { clientDebugEnabled } from "./client-debug";
 	import ClientCharacterSelect from "./ClientCharacterSelect.svelte";
-	import ClientLoadingPage, {
-		type ClientLoadingPageState,
-	} from "./ClientLoadingPage.svelte";
+	import ClientLoadingPage from "./ClientLoadingPage.svelte";
 	import {
 		loadCharacterCreationCatalog,
 		resolveCharacterCreationAppearance,
@@ -141,7 +144,6 @@
 	import { hostWorldMapSource } from "../lib/assets/world-map-source";
 	import type { MinimapFrame } from "../app/minimap-frame";
 	import type {
-		ClientLifecycle,
 		RecallDestination,
 		CharacterManagementState,
 		ClientCombatMode,
@@ -205,12 +207,10 @@
 	import type { ClientSettingsTransport } from "./client-settings-transport";
 	import { ClientSettingsPersistence } from "./client-settings-persistence";
 	import {
-		clientLifecycleEnablesGameplayInput,
-		clientLifecycleUsesGameplayPresentation,
-		initialClientLifecycleUiState,
-		reduceClientLifecycleUiState,
-		type ClientLifecycleUiState,
-	} from "./client-lifecycle-state";
+		ClientAppLifecycle,
+		initialClientAppLifecycleState,
+		clientAppPage,
+	} from "./client-app-lifecycle";
 	import { ClientInputArbiter } from "./client-input-arbiter";
 	import { ClientPreciseJumpSession } from "./client-precise-jump-session";
 	import { ClientNearby } from "./client-nearby";
@@ -252,6 +252,8 @@
 	const startupSettingsIssue = untrack(() => initialSettingsIssue);
 	const startupSettingsTransport = untrack(() => settingsTransport);
 	const startupVisualCacheTransport = untrack(() => visualCacheTransport);
+	/** Capture staging must cross IPC before native close seals cache admission. */
+	const pendingVisualCaptures = new Set<Promise<void>>();
 
 	let userSettings = $state.raw<ClientUserSettings>(startupUserSettings);
 	const clientInput = provideClientInput(
@@ -263,9 +265,22 @@
 	let canTeleportFromMap = $state(false);
 	/** Core-filtered standard recall attempts, replaced after event loss. */
 	let recallDestinations = $state<readonly RecallDestination[]>([]);
-	let lifecycle = $state<ClientLifecycleUiState>(
-		initialClientLifecycleUiState(),
-	);
+	let appState = $state.raw(initialClientAppLifecycleState());
+	const lifecycle = $derived(appState.phase);
+	const appLifecycle = new ClientAppLifecycle({
+		session: () => session,
+		stopInput: async () => {
+			inputGate.cancel();
+			await inputDispatch;
+		},
+		retireGameplay: async () => {
+			await presentationRoot?.retireGameplay();
+		},
+		warn: (message) => toastCenter.publish({ message, tone: "warning" }),
+		onChange: (state) => {
+			appState = state;
+		},
+	});
 	/** Cold authority-owned character-management admission and recoverable feedback. */
 	let characterManagement = $state.raw<CharacterManagementState>({
 		kind: "idle",
@@ -431,10 +446,8 @@
 	const worldMapSource = $derived(
 		hostTransport === null ? null : hostWorldMapSource(hostTransport),
 	);
-	let startupError = $state<string | null>(null);
-	let commandFailure = $state<string | null>(null);
 	function reportCommandFailure(error: unknown): void {
-		commandFailure = diagnostic(error);
+		appLifecycle.fail("command", diagnostic(error));
 	}
 	async function setAppearanceOption(
 		option: ClientAppearanceOption,
@@ -467,98 +480,19 @@
 	let chatCharacterGuid: number | null = null;
 	let nextChatMessageId = 1;
 	const MAXIMUM_CHAT_LINES = 250;
-	let entryPending = $state(false);
 	let canvasElement = $state<HTMLCanvasElement | null>(null);
 	let interactionRoot = $state<HTMLElement | null>(null);
 	let presentationRoot =
 		$state.raw<ClientPresentationRoot<GamePresentationOwner> | null>(null);
-	/** Cold scene status also carries the root's decision about safe retry after failure. */
-	type BackdropUiStatus =
-		| { readonly kind: "loading" | "ready" | "stopped" }
-		| {
-				readonly kind: "failed";
-				readonly message: string;
-				readonly canRetry: boolean;
-		  };
-	let backdropStatus = $state<BackdropUiStatus>({ kind: "loading" });
-	let worldCanvasVisible = $state(false);
-	/** Cold page admission shares the current roster with markup and canvas reveal. */
-	const pregameSelection = $derived(
-		lifecycle.kind === "character-selection" &&
-			backdropStatus.kind === "ready" &&
-			startupError === null &&
-			commandFailure === null
-			? lifecycle
-			: null,
+	const page = $derived(
+		clientAppPage(appState, { worldName, playerName }, retryBackdrop),
 	);
-	const loadingPage = $derived.by((): ClientLoadingPageState => {
-		if (lifecycle.kind === "exiting")
-			return {
-				kind: "pending",
-				activity: "disconnect",
-				title: "Disconnecting",
-				message: lifecycle.diagnostic ?? "Closing the game session…",
-			};
-		if (startupError !== null)
-			return {
-				kind: "failed",
-				title: "Client unavailable",
-				message: startupError,
-				retry: null,
-			};
-		if (commandFailure !== null)
-			return {
-				kind: "failed",
-				title: "Client stopped",
-				message: commandFailure,
-				retry: null,
-			};
-		if (backdropStatus.kind === "failed")
-			return {
-				kind: "failed",
-				title: "Scene unavailable",
-				message: backdropStatus.canRetry
-					? backdropStatus.message
-					: `${backdropStatus.message} Restart client to retry.`,
-				retry: backdropStatus.canRetry ? retryBackdrop : null,
-			};
-		if (lifecycle.kind === "connecting")
-			return {
-				kind: "pending",
-				activity: "connection",
-				title: "Connecting",
-				message: "Opening the game session…",
-			};
-		if (lifecycle.kind === "authenticating")
-			return {
-				kind: "pending",
-				activity: "connection",
-				title: "Authenticating",
-				message: "Checking the launch account…",
-			};
-		return {
-			kind: "pending",
-			activity: "scene",
-			title: "Loading",
-			message: "Preparing scene…",
-		};
-	});
+	const pregameSelection = $derived(
+		page.kind === "selection" ? page.selection : null,
+	);
 	function retryBackdrop(): void {
-		backdropStatus = { kind: "loading" };
+		appLifecycle.acceptScene({ kind: "loading" }, false);
 		void presentationRoot?.retry();
-	}
-	/** Withdraw old scene readiness before authority changes can mount another pregame page. */
-	function acceptAuthorityLifecycle(next: ClientLifecycle): void {
-		const accepted = reduceClientLifecycleUiState(lifecycle, {
-			type: "authority",
-			lifecycle: next,
-		});
-		if (
-			clientLifecycleUsesGameplayPresentation(lifecycle) !==
-			clientLifecycleUsesGameplayPresentation(accepted)
-		)
-			backdropStatus = { kind: "loading" };
-		lifecycle = accepted;
 	}
 
 	onMount(() => keyboard.mount(document));
@@ -573,6 +507,10 @@
 	let environmentIssue = $state<string | null>(null);
 	let presentationAssets: HostPresentationAssets | null = null;
 	const presentationRootRetirements = new Set<Promise<void>>();
+	/** Permanent close admission prevents effects from constructing replacement owners. */
+	let compositionClosing = $state(false);
+	/** The mounted composition owns one retirement, shared by preparation and unmount. */
+	let retireClientComposition: (() => Promise<void>) | null = null;
 
 	const objectPreviewService = new StandardClientObjectPreviewService({
 		startFrameLoop: startPresentationFrameLoop,
@@ -586,7 +524,8 @@
 		},
 		onError: (error) => {
 			console.error(error);
-			if (presentationAssets !== null) commandFailure = diagnostic(error);
+			if (presentationAssets !== null)
+				appLifecycle.fail("command", diagnostic(error));
 		},
 	});
 
@@ -669,7 +608,10 @@
 			if (state.kind !== "ready") selectedSpellTab = 0;
 		},
 		loadFailed: (error) =>
-			(commandFailure = `Character settings could not be loaded: ${diagnostic(error)}`),
+			appLifecycle.fail(
+				"command",
+				`Character settings could not be loaded: ${diagnostic(error)}`,
+			),
 		unavailable: (reasons) =>
 			toastCenter.publish({
 				message: `Character settings unavailable: ${reasons.join("; ")}`,
@@ -685,6 +627,7 @@
 	function changeUserSection<
 		Key extends keyof Omit<ClientUserSettings, "hudLayout">,
 	>(key: Key, value: ClientUserSettings[Key]): void {
+		if (appState.operation === "quit") return;
 		userSettings = { ...userSettings, [key]: value };
 		userSettingsPersistence.publish({ sections: { [key]: value } });
 	}
@@ -692,6 +635,7 @@
 		surface: keyof ClientHudLayout,
 		placement: ClientHudPlacement,
 	): void {
+		if (appState.operation === "quit") return;
 		userSettings = {
 			...userSettings,
 			hudLayout: { ...userSettings.hudLayout, [surface]: placement },
@@ -701,6 +645,7 @@
 		});
 	}
 	function resetHudLayout(layout: ClientHudLayout): void {
+		if (appState.operation === "quit") return;
 		userSettings = { ...userSettings, hudLayout: layout };
 		userSettingsPersistence.publish({ hudPlacements: layout });
 	}
@@ -777,18 +722,45 @@
 		chatComposer.setSelection(selectedChatRecipient(guid, record));
 	}
 	onMount(() => {
-		const flush = () => {
-			void Promise.all([
+		const prepareResources = async () => {
+			compositionClosing = true;
+			characterSettingsOwner.retire();
+			// Withdrawal runs synchronously before flush takes its final producer snapshot.
+			const retirements =
+				retireClientComposition === null ? [] : [retireClientComposition()];
+			const results = await Promise.allSettled([
+				...retirements,
 				userSettingsPersistence.flush(),
 				characterSettingsOwner.flush(),
-			]).catch(() => undefined);
+				...pendingVisualCaptures,
+			]);
+			const errors = results.filter(
+				(result): result is PromiseRejectedResult =>
+					result.status === "rejected",
+			);
+			if (errors.length)
+				throw new AggregateError(
+					errors.map((result) => result.reason),
+					"Client resource preparation failed.",
+				);
 		};
-		window.addEventListener("beforeunload", flush);
+		const unregister = registerElectronClientClose(async () => {
+			try {
+				await appLifecycle.prepareClose(prepareResources);
+				return { kind: "prepared" };
+			} catch (error) {
+				return { kind: "failed", diagnostic: clientFailureDiagnostic(error) };
+			}
+		});
 		return () => {
-			window.removeEventListener("beforeunload", flush);
-			flush();
+			unregister();
+			// Normal native close has already awaited this operation; unmount joins the same owner.
+			void appLifecycle
+				.prepareClose(prepareResources)
+				.catch((error) => console.error(error));
 		};
 	});
+
 	// Controls replace this cold policy snapshot; frame-hot consumers must receive plain objects.
 	let frameSettings = $state.raw<FrameSettings>(
 		frameSettingsWithGraphics(
@@ -892,11 +864,9 @@
 	let preciseJumpActive = $state(false);
 	let inputDispatch: Promise<void> = Promise.resolve();
 	const usesGameplayPresentation = $derived(
-		clientLifecycleUsesGameplayPresentation(lifecycle),
+		appState.admission.mode === "gameplay",
 	);
-	const gameplayInputEnabled = $derived(
-		clientLifecycleEnablesGameplayInput(lifecycle),
-	);
+	const gameplayInputEnabled = $derived(appState.admission.gameplayInput);
 
 	function queueCharacterMotionEdge(
 		currentSession: ClientLifecycleSession,
@@ -928,7 +898,7 @@
 		inputDispatch = inputDispatch
 			.then(() => currentSession.queueCharacterMotionEvent(request))
 			.catch((error: unknown) => {
-				if (active()) commandFailure = diagnostic(error);
+				if (active()) appLifecycle.fail("command", diagnostic(error));
 			});
 	}
 
@@ -979,16 +949,28 @@
 		inputDispatch = inputDispatch
 			.then(() => currentSession.replaceDrive(request))
 			.catch((error: unknown) => {
-				if (active()) commandFailure = diagnostic(error);
+				if (active()) appLifecycle.fail("command", diagnostic(error));
 			});
 	}
 
 	function receive(event: ClientLifecycleSessionEvent): void {
-		persistPlayerVisualCapture(event, startupVisualCacheTransport, (message) =>
-			toastCenter.publish({ message, tone: "warning" }),
+		const staging = persistPlayerVisualCapture(
+			event,
+			startupVisualCacheTransport,
+			(message) => toastCenter.publish({ message, tone: "warning" }),
 		);
+		if (staging !== null) {
+			pendingVisualCaptures.add(staging);
+			void staging.then(
+				() => pendingVisualCaptures.delete(staging),
+				() => pendingVisualCaptures.delete(staging),
+			);
+		}
 		contractNotifications.receive(event);
 		switch (event.type) {
+			case "camera-error":
+				appLifecycle.fail("command", event.message);
+				return;
 			case "character-management":
 				characterManagement = event.state;
 				return;
@@ -1066,7 +1048,7 @@
 					inputController?.setFullChargeDurationMs(
 						characterMotion.fullChargeDurationMs,
 					);
-				acceptAuthorityLifecycle(event.state.lifecycle);
+				appLifecycle.acceptAuthority(event.state.lifecycle);
 				return;
 			case "resyncing":
 				canTeleportFromMap = false;
@@ -1098,7 +1080,7 @@
 				) {
 					retireCharacterSettings();
 				}
-				acceptAuthorityLifecycle(event.lifecycle);
+				appLifecycle.acceptAuthority(event.lifecycle);
 				return;
 			case "character-motion-capabilities":
 				characterMotion = event.capabilities;
@@ -1170,10 +1152,7 @@
 				retireChatCharacter();
 				navigationWaypoint.acceptCharacter(null);
 				inputGate.cancel();
-				lifecycle = reduceClientLifecycleUiState(lifecycle, {
-					type: "exit",
-					exit: event.exit,
-				});
+				appLifecycle.acceptExit(event.exit);
 				return;
 			case "presentation-discontinuity":
 				inputGate.cancel();
@@ -1197,54 +1176,16 @@
 	}
 
 	function chooseCharacter(guid: number): void {
-		lifecycle = reduceClientLifecycleUiState(lifecycle, {
-			type: "select",
-			guid,
-		});
+		appLifecycle.select(guid);
 	}
-
-	/** Enter, button activation, and double-click all converge on this one idempotent edge. */
 	async function enterWorld(): Promise<void> {
-		if (
-			entryPending ||
-			commandFailure !== null ||
-			session === null ||
-			lifecycle.kind !== "character-selection" ||
-			lifecycle.selectedGuid === null
-		) {
-			return;
-		}
-
-		entryPending = true;
-		try {
-			await session.enterWorld(lifecycle.selectedGuid);
-		} catch (error) {
-			// The host owns terminal failure policy. Keep this shell inert and diagnostic-only; there
-			// is deliberately no retry or editable configuration path in the first cut.
-			commandFailure = diagnostic(error);
-		} finally {
-			entryPending = false;
-		}
+		await appLifecycle.enter();
 	}
-
+	async function returnToMainMenu(): Promise<void> {
+		await appLifecycle.returnToSelection();
+	}
 	async function disconnect(): Promise<void> {
-		if (session === null || lifecycle.kind === "exiting") return;
-		try {
-			inputGate.cancel();
-			await inputDispatch;
-			await session.disconnect();
-			// Failed startup retires authority listeners. An accepted user disconnect must still
-			// retire this frontend attempt; a previously received authority exit remains absorbing.
-			lifecycle = reduceClientLifecycleUiState(lifecycle, {
-				type: "exit",
-				exit: {
-					cause: "explicit-disconnect",
-					diagnostic: "Closing the game session…",
-				},
-			});
-		} catch (error) {
-			commandFailure = diagnostic(error);
-		}
+		await appLifecycle.disconnect();
 	}
 
 	async function castSpell(spellId: number): Promise<void> {
@@ -1386,6 +1327,11 @@
 
 	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
+		if (event.key === "Escape") {
+			gameplayView?.openSystemMenu();
+			event.preventDefault();
+			return;
+		}
 		if (gameplayView?.handleSystemPanelKeydown(event)) return;
 		if (preciseJumpActive && !event.isComposing) {
 			if (
@@ -1502,18 +1448,15 @@
 	function presentationStatusText(
 		status: ClientGameplayPresentationStatus,
 	): string {
-		if (status.diagnostic !== null && status.kind !== "error") {
-			return status.diagnostic;
-		}
 		switch (status.kind) {
 			case "starting":
-				return "Preparing world presentation…";
+				return "Loading the world…";
 			case "awaiting-snapshot":
-				return "Waiting for an authoritative world snapshot…";
+				return "Waiting for the server…";
 			case "loading-player":
-				return "Waiting for the player presentation…";
+				return "Loading your character…";
 			case "loading-activation":
-				return "Loading the authoritative scene…";
+				return "Loading the world…";
 			case "ready":
 				return "World ready";
 			case "error":
@@ -1597,13 +1540,14 @@
 		const currentAssets = presentationAssets;
 		const canvas = canvasElement;
 		if (
+			compositionClosing ||
 			currentSession === null ||
 			currentTransport === null ||
 			currentAssets === null ||
 			canvas === null
 		)
 			return;
-		backdropStatus = { kind: "loading" };
+		appLifecycle.acceptScene({ kind: "loading" }, false);
 		let cancelled = false;
 		let lastStatus: ClientGameplayPresentationStatus | null = null;
 		let lastErrorMessage: string | null = null;
@@ -1769,39 +1713,16 @@
 					startedAtMs,
 					workMs,
 				});
-				const visible =
-					result.kind === "gameplay"
-						? result.frame.rendered
-						: result.kind === "pregame" && result.rendered;
-				if (worldCanvasVisible !== visible) worldCanvasVisible = visible;
 				if (result.kind === "gameplay")
 					reportPresentationStatus(result.frame.status);
-				else if (result.kind === "failed") {
-					if (
-						backdropStatus.kind !== "failed" ||
-						backdropStatus.message !== result.message ||
-						backdropStatus.canRetry !== result.canRetry
-					)
-						backdropStatus = {
-							kind: "failed",
-							message: result.message,
-							canRetry: result.canRetry,
-						};
-				} else if (result.kind === "pregame") {
-					if (backdropStatus.kind !== result.status.kind)
-						backdropStatus =
-							result.status.kind === "failed"
-								? { ...result.status, canRetry: true }
-								: result.status;
-				} else if (backdropStatus.kind !== "loading")
-					backdropStatus = { kind: "loading" };
+				appLifecycle.acceptPresentation(result);
 			},
 			() => 0,
 		);
 		return () => {
 			cancelled = true;
 			stopFrameLoop();
-			worldCanvasVisible = false;
+			appLifecycle.acceptScene({ kind: "stopped" }, false);
 			const retirement = root.destroy();
 			presentationRootRetirements.add(retirement);
 			void retirement.then(
@@ -1821,13 +1742,7 @@
 
 	/** Cold mode changes choose inputs without becoming resource-lifetime dependencies. */
 	$effect(() => {
-		void presentationRoot?.setMode(
-			lifecycle.kind === "exiting"
-				? "idle"
-				: usesGameplayPresentation
-					? "gameplay"
-					: "pregame",
-		);
+		void presentationRoot?.setMode(appState.admission.mode);
 	});
 
 	/** Owns one browser-to-host movement controller per active world-input lifetime. */
@@ -1852,7 +1767,7 @@
 						});
 				})
 				.catch((error: unknown) => {
-					if (isActive()) commandFailure = diagnostic(error);
+					if (isActive()) appLifecycle.fail("command", diagnostic(error));
 				});
 			return inputDispatch;
 		});
@@ -1949,7 +1864,10 @@
 			})
 			.catch((error: unknown) => {
 				if (!disposed)
-					commandFailure = `Soul-emote catalog could not be loaded: ${diagnostic(error)}`;
+					appLifecycle.fail(
+						"command",
+						`Soul-emote catalog could not be loaded: ${diagnostic(error)}`,
+					);
 			});
 		void transport
 			.invoke("host_status")
@@ -1960,7 +1878,7 @@
 				if (!disposed) entityMetadata = status.entityMetadata;
 			})
 			.catch((error: unknown) => {
-				if (!disposed) commandFailure = diagnostic(error);
+				if (!disposed) appLifecycle.fail("command", diagnostic(error));
 			});
 		const owner = new ClientLifecycleSession(
 			hostClientLifecycleTransport(transport),
@@ -2060,7 +1978,7 @@
 		);
 		const unsubscribe = owner.subscribe(receive);
 		const precise = new ClientPreciseJumpSession(owner, (error) => {
-			commandFailure = diagnostic(error);
+			appLifecycle.fail("command", diagnostic(error));
 		});
 		preciseJumpSession = precise;
 		const selection = new ClientEntitySelection({
@@ -2146,11 +2064,13 @@
 				inputArbiter?.deactivate();
 			}
 		});
-		void owner.start().catch((error: unknown) => {
-			startupError = diagnostic(error);
-		});
+		void appLifecycle.start(() =>
+			owner.start({ startAuthority: startElectronClient }),
+		);
 
-		return () => {
+		let completion: Promise<void> | null = null;
+		const retireComposition = (): Promise<void> => {
+			if (completion !== null) return completion;
 			disposed = true;
 			unsubscribeVisualCacheFailure();
 			presentationAssets = null;
@@ -2175,83 +2095,91 @@
 					);
 			});
 			retirement.add("object-previews", () => objectPreviewService.destroy());
-			void retirement.close().catch((error: unknown) => console.error(error));
-			spellState.destroy();
-			retireCombatEscapeContext();
-			spellReferences.dispose();
-			spells = null;
-			retireCharacterSettings();
-			navigationWaypoint.acceptCharacter(null);
-			nearbyOwner.destroy();
-			nearby = null;
-			unbindSalvage();
-			salvageOwner.destroy();
-			salvage = null;
-			inventoryOwner.destroy();
-			containerOwner.destroy();
-			tradeOwner.destroy();
-			trade = null;
-			vendorOwner.destroy();
-			partyOwner.destroy();
-			party = null;
-			unbindPartyDialogs();
-			unbindContractDialogs();
-			housingManagementOwner.destroy();
-			housingManagement = null;
-			houseCrystalOwner.destroy();
-			houseCrystal = null;
-			vendor = null;
-			worldContainer = null;
-			inventory = null;
-			icons.dispose();
-			unbindHousingDialogs();
-			unbindItems();
-			items.destroy();
-			itemInteractions = null;
-			unbindDeathDialogs();
-			deathOwner.destroy();
-			deathCommands = null;
-			dialogOwner.destroy();
-			unsubscribeDialogs();
-			dialogs = null;
-			unsubscribeToast();
-			unsubscribeInspection();
-			unsubscribeReader();
-			readerOwner.destroy();
-			if (bookReaderOwner === readerOwner) bookReaderOwner = null;
-			bookReader = { kind: "idle" };
-			inspectionOwner.destroy();
-			if (objectInspectionOwner === inspectionOwner)
-				objectInspectionOwner = null;
-			objectInspection = { kind: "idle" };
-			contractNotifications.reset();
-			toastCenter.destroy();
-			unsubscribePrecise();
-			unsubscribeSelection();
-			pointer.clearViewportHover();
-			unsubscribeHover();
-			interactions.destroy();
-			if (selectedEntityTracking === interactions)
-				selectedEntityTracking = null;
-			input.destroy();
-			cycle.destroy();
-			pointer.destroy();
-			if (selectionInput === input) selectionInput = null;
-			if (pointerSelection === pointer) pointerSelection = null;
-			selection.destroy();
-			if (entitySelection === selection) entitySelection = null;
-			precise.destroy();
-			if (preciseJumpSession === precise) preciseJumpSession = null;
-			unsubscribe();
-			owner.stop();
-			enchantments = null;
-			session = null;
-			chatComposer.reset();
-			chatCharacterGuid = null;
-			housing = emptyHousing();
-			canTeleportFromMap = false;
-			recallDestinations = [];
-			hostTransport = null;
+			// Include synchronous controller cleanup in the same retained failure outcome.
+			retirement.add("client-controllers", () => {
+				spellState.destroy();
+				retireCombatEscapeContext();
+				spellReferences.dispose();
+				spells = null;
+				retireCharacterSettings();
+				navigationWaypoint.acceptCharacter(null);
+				nearbyOwner.destroy();
+				nearby = null;
+				unbindSalvage();
+				salvageOwner.destroy();
+				salvage = null;
+				inventoryOwner.destroy();
+				containerOwner.destroy();
+				tradeOwner.destroy();
+				trade = null;
+				vendorOwner.destroy();
+				partyOwner.destroy();
+				party = null;
+				unbindPartyDialogs();
+				unbindContractDialogs();
+				housingManagementOwner.destroy();
+				housingManagement = null;
+				houseCrystalOwner.destroy();
+				houseCrystal = null;
+				vendor = null;
+				worldContainer = null;
+				inventory = null;
+				icons.dispose();
+				unbindHousingDialogs();
+				unbindItems();
+				items.destroy();
+				itemInteractions = null;
+				unbindDeathDialogs();
+				deathOwner.destroy();
+				deathCommands = null;
+				dialogOwner.destroy();
+				unsubscribeDialogs();
+				dialogs = null;
+				unsubscribeToast();
+				unsubscribeInspection();
+				unsubscribeReader();
+				readerOwner.destroy();
+				if (bookReaderOwner === readerOwner) bookReaderOwner = null;
+				bookReader = { kind: "idle" };
+				inspectionOwner.destroy();
+				if (objectInspectionOwner === inspectionOwner)
+					objectInspectionOwner = null;
+				objectInspection = { kind: "idle" };
+				contractNotifications.reset();
+				toastCenter.destroy();
+				unsubscribePrecise();
+				unsubscribeSelection();
+				pointer.clearViewportHover();
+				unsubscribeHover();
+				interactions.destroy();
+				if (selectedEntityTracking === interactions)
+					selectedEntityTracking = null;
+				input.destroy();
+				cycle.destroy();
+				pointer.destroy();
+				if (selectionInput === input) selectionInput = null;
+				if (pointerSelection === pointer) pointerSelection = null;
+				selection.destroy();
+				if (entitySelection === selection) entitySelection = null;
+				precise.destroy();
+				if (preciseJumpSession === precise) preciseJumpSession = null;
+				unsubscribe();
+				owner.stop();
+				enchantments = null;
+				session = null;
+				chatComposer.reset();
+				chatCharacterGuid = null;
+				housing = emptyHousing();
+				canTeleportFromMap = false;
+				recallDestinations = [];
+				hostTransport = null;
+			});
+			completion = retirement.close();
+			return completion;
+		};
+		retireClientComposition = retireComposition;
+		return () => {
+			void retireComposition().catch((error: unknown) => console.error(error));
 		};
 	});
 </script>
@@ -2283,10 +2211,7 @@
 		aria-label={usesGameplayPresentation ? "Game world" : "Pre-game backdrop"}
 		tabindex="-1"
 		data-game-viewport={usesGameplayPresentation ? true : undefined}
-		style:visibility={worldCanvasVisible &&
-		(usesGameplayPresentation || pregameSelection !== null)
-			? "visible"
-			: "hidden"}
+		style:visibility={appState.admission.canvasVisible ? "visible" : "hidden"}
 	></canvas>
 	{#if pregameSelection !== null}
 		<div class="pregame-notices">
@@ -2294,8 +2219,12 @@
 		</div>
 	{/if}
 
-	{#if usesGameplayPresentation && canvasElement !== null && interactionRoot !== null && startupError === null && commandFailure === null}
+	{#if page.kind === "gameplay" && canvasElement !== null && interactionRoot !== null}
 		<ClientGameplayView
+			onReturnToMainMenu={() => void returnToMainMenu()}
+			onDisconnect={() => void disconnect()}
+			canReturnToMenu={appState.admission.canReturn}
+			canDisconnect={appState.admission.canDisconnect}
 			bind:this={gameplayView}
 			{mouseMovement}
 			itemSession={session}
@@ -2550,7 +2479,7 @@
 		{#each [pregameSelection] as selection}
 			<ClientCharacterSelect
 				state={selection}
-				{entryPending}
+				entryPending={appState.operation === "enter"}
 				management={characterManagement}
 				creation={creationServices}
 				previewService={objectPreviewService}
@@ -2560,11 +2489,11 @@
 				onDisconnect={disconnect}
 			/>
 		{/each}
-	{:else}
+	{:else if page.kind === "loading"}
 		<ClientLoadingPage
-			state={loadingPage}
+			state={page.content}
 			{toast}
-			onDisconnect={session !== null && lifecycle.kind !== "exiting"
+			onDisconnect={session !== null && appState.admission.canDisconnect
 				? disconnect
 				: null}
 		/>

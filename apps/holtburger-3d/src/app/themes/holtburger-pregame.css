@@ -135,7 +135,7 @@
 		background: var(--ui-option-background, var(--ui-color-control));
 		border-color: var(--ui-option-border-color, var(--ui-color-accent));
 	}
-	.client-pregame-screen .selection-build {
+	.client-pregame-screen .pregame-build {
 		color: var(--ui-color-muted);
 		font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
 		text-shadow: 0 1px 4px var(--ui-color-well);

@@ -272,6 +272,15 @@ impl ClientDynamicScriptCoordinator {
         }
     }
 
+    /// Abort character-bound preparation before a new incarnation may reuse the same GUID.
+    pub(super) fn retire_character(&mut self) {
+        let source = Arc::clone(&self.source);
+        for guid in self.demands.keys().copied().collect::<Vec<_>>() {
+            self.retire_guid(guid);
+        }
+        *self = Self::new(source);
+    }
+
     /// Starts preparation only when content-relevant facts or instance identity changed.
     pub fn observe_entity(
         &mut self,

@@ -26,6 +26,7 @@ pub fn render_pulse_panel(
         ClientState::CharacterSelection => "👥",
         ClientState::EnteringWorld => "🚪",
         ClientState::InWorld => "🌍",
+        ClientState::LoggingOut => "🚪",
         ClientState::Disconnected => "💀",
     };
 

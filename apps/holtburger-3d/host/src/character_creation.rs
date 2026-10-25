@@ -9,7 +9,7 @@ use holtburger_content::{ContentRepository, MotionClip};
 use holtburger_core::character_gen::{
     CHARACTER_GEN_MAX_ATTRIBUTE, CHARACTER_GEN_MIN_ATTRIBUTE, CharacterGenBuild,
     CharacterGenBuilder, character_gen_appearance_choices, custom_template_for_heritage,
-    minimum_skill_advancement_for_heritage, minimum_skill_advancement_for_template,
+    minimum_skill_advancement_for_heritage,
 };
 use holtburger_core::client::object_preview::{
     ObjectPreviewClip, ObjectPreviewPose, ObjectPreviewVisual,
@@ -310,13 +310,9 @@ impl CharacterCreationCatalog {
                     attributes: template.attribute_values().map(|(_, value)| value),
                     skills: (0..catalog.expected_skill_slots as u32)
                         .map(|skill| {
-                            // Sparse SkillTable holes are inactive in the complete wire vector.
-                            if catalog.skill_definition(skill).is_none() {
-                                return SkillAdvancementClass::Inactive as u32;
-                            }
-                            minimum_skill_advancement_for_template(
-                                template,
-                                catalog.skill_costs_for_heritage(heritage.heritage_id, skill),
+                            minimum_skill_advancement_for_heritage(
+                                catalog,
+                                heritage.heritage_id,
                                 skill,
                             ) as u32
                         })
@@ -328,7 +324,7 @@ impl CharacterCreationCatalog {
                 let skills = catalog
                     .skill_definitions
                     .values()
-                    .filter(|skill| skill.chargen_use)
+                    .filter(|skill| skill.available_at_creation)
                     .map(|skill| {
                         let costs = catalog
                             .skill_costs_for_heritage(heritage.heritage_id, skill.skill_id)

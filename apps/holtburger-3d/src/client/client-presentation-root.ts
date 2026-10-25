@@ -80,7 +80,6 @@ export class ClientPresentationRoot<
 	#closed = false;
 	#failure: { readonly message: string; readonly canRetry: boolean } | null =
 		null;
-	#backdropVisible = true;
 	#retirement: Promise<void> | null = null;
 
 	constructor(dependencies: Dependencies<TOwner>) {
@@ -154,8 +153,6 @@ export class ClientPresentationRoot<
 				this.#active = active;
 				await active.driver.start();
 				if (this.#closed || revision !== this.#revision) return;
-				if (active.kind === "pregame")
-					active.driver.setVisible(this.#backdropVisible);
 				this.#switching = false;
 			})
 			.catch((error: unknown) => {
@@ -167,12 +164,6 @@ export class ClientPresentationRoot<
 					this.#report(error, true);
 			});
 		return this.#transition;
-	}
-
-	setBackdropVisible(visible: boolean): void {
-		this.#backdropVisible = visible;
-		if (this.#active?.kind === "pregame")
-			this.#active.driver.setVisible(visible);
 	}
 
 	setFrameSettings(settings: FrameSettings): void {

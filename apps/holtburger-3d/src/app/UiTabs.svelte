@@ -1,4 +1,5 @@
 <script lang="ts" generics="Value extends string">
+	import type { Snippet } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	interface Props {
 		/** Accessible name for this group of tabs. */
@@ -18,10 +19,21 @@
 		}[];
 		/** The feature owns selection and content lifetime. */
 		readonly selected: Value;
+		/** Vertical workflows use Up/Down; ordinary panel tabs use Left/Right. */
+		readonly orientation?: "horizontal" | "vertical";
+		/** Optional feature-owned artwork or other label content, retaining shared tab behavior. */
+		readonly tabLabel?: Snippet<[Value, string]>;
 		/** Both clicks and keyboard navigation use the same feature selection policy. */
 		readonly onSelect: (value: Value) => void;
 	}
-	const { label, tabs, selected, onSelect }: Props = $props();
+	const {
+		label,
+		tabs,
+		selected,
+		onSelect,
+		orientation = "horizontal",
+		tabLabel,
+	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	function navigate(event: KeyboardEvent): void {
 		if (!(event.target instanceof HTMLButtonElement)) return;
@@ -30,11 +42,20 @@
 		const index = enabled.findIndex((tab) => tab.id === focusedId);
 		if (index === -1) return;
 		let destination: number;
+		if (
+			(orientation === "vertical" &&
+				(event.key === "ArrowLeft" || event.key === "ArrowRight")) ||
+			(orientation === "horizontal" &&
+				(event.key === "ArrowUp" || event.key === "ArrowDown"))
+		)
+			return;
 		switch (event.key) {
 			case "ArrowLeft":
+			case "ArrowUp":
 				destination = (index + enabled.length - 1) % enabled.length;
 				break;
 			case "ArrowRight":
+			case "ArrowDown":
 				destination = (index + 1) % enabled.length;
 				break;
 			case "Home":
@@ -57,6 +78,7 @@
 	class="ui-tabs ui-panel-tabs"
 	role="tablist"
 	aria-label={label}
+	aria-orientation={orientation}
 	use:keyboard.scope={{ nativeControls: true, keydown: navigate }}
 >
 	{#each tabs as tab (tab.value)}
@@ -69,7 +91,11 @@
 			aria-selected={selected === tab.value}
 			tabindex={!tab.disabled && selected === tab.value ? 0 : -1}
 			disabled={tab.disabled}
-			onclick={() => onSelect(tab.value)}>{tab.label}</button
+			onclick={() => onSelect(tab.value)}
+			>{#if tabLabel}{@render tabLabel(
+					tab.value,
+					tab.label,
+				)}{:else}{tab.label}{/if}</button
 		>
 	{/each}
 </div>

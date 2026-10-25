@@ -114,11 +114,8 @@ export async function probePregameWorldLifetime(
 		await settle("pregame");
 		candidatePreparationMs = performance.now() - preparationStartedAtMs;
 		backdropFrames++;
-		root.setBackdropVisible(false);
-		const hidden = root.frame(performance.now());
-		if (hidden.kind !== "pregame" || hidden.rendered)
-			throw new Error("Hidden backdrop drew a frame");
-		root.setBackdropVisible(true);
+		// Creator and selector are foreground-only changes; the installed scene keeps drawing.
+		await root.setMode("pregame");
 		await settle("pregame");
 		backdropFrames++;
 		await root.setMode("idle");

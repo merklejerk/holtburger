@@ -1,0 +1,267 @@
+/* Pregame appearance is scoped independently of the active in-game theme.
+   Components own layout, scrolling, and behavior. This stylesheet owns their visual treatment.
+   The animated portal remains a self-contained asset with its own authored palette. */
+@layer overrides {
+	/* Shared controls and pregame palette. */
+	.client-pregame-screen {
+		--ui-color-text: #e9e1d0;
+		--ui-color-muted: #ada697;
+		--ui-color-accent: #c9aa70;
+		--ui-color-highlight: #f4dfaf;
+		--ui-color-focus: var(--ui-color-highlight);
+		--ui-color-border: #756244;
+		--ui-color-well: #000;
+		--ui-color-surface: #101211;
+		--ui-color-control: #191b18;
+		--ui-input-background: var(--ui-color-surface);
+		--ui-radius-control: 0;
+		--ui-radius-surface: 0;
+		--ui-font-heading: Georgia, "Times New Roman", serif;
+		--ui-font-body: Arial, Helvetica, sans-serif;
+		/* Backdrop shading and control decoration are independent of world scenery. */
+		--pregame-backdrop-color: rgb(0 0 0 / 90%);
+		--pregame-editor-backdrop-color: rgb(0 0 0 / 92%);
+		--pregame-button-background: rgb(8 10 9 / 65%);
+		--pregame-button-hover-background: color-mix(
+			in srgb,
+			var(--ui-color-accent) 12%,
+			transparent
+		);
+		--pregame-button-active-background: color-mix(
+			in srgb,
+			var(--ui-color-accent) 20%,
+			transparent
+		);
+		--pregame-primary-shadow:
+			inset 0 0 0 3px #080a09, inset 0 0 0 4px var(--ui-color-border);
+	}
+	.client-pregame-screen .ui-button {
+		--ui-button-background-color: var(--pregame-button-background);
+		--ui-button-border-color: var(--ui-color-border);
+		font-family: var(--ui-font-heading);
+	}
+	.client-pregame-screen .ui-button:where(:hover:not(:disabled)) {
+		--ui-button-background-color: var(--pregame-button-hover-background);
+		--ui-button-border-color: var(--ui-color-accent);
+		color: var(--ui-color-highlight);
+	}
+	.client-pregame-screen .ui-button:where(:active:not(:disabled)) {
+		--ui-button-background-color: var(--pregame-button-active-background);
+	}
+	.client-pregame-screen :is(.enter-world, .pregame-primary) {
+		border-color: var(--ui-color-accent);
+		color: var(--ui-color-highlight);
+		letter-spacing: 0.15em;
+		text-transform: uppercase;
+		box-shadow: var(--pregame-primary-shadow);
+	}
+	.client-pregame-screen .pregame-quiet {
+		--ui-button-background-color: transparent;
+		--ui-button-border-color: transparent;
+		color: var(--ui-color-muted);
+	}
+	.client-pregame-screen .pregame-quiet:where(:hover:not(:disabled)) {
+		--ui-button-background-color: transparent;
+		--ui-button-border-color: transparent;
+	}
+	.client-pregame-screen .client-character {
+		--ui-option-background: transparent;
+		--ui-option-border-color: transparent;
+		font-size: calc(22px * var(--ui-text-scale));
+	}
+	.client-pregame-screen .client-character strong {
+		font-weight: 400;
+	}
+	.client-pregame-screen .client-character[aria-pressed="true"] {
+		color: var(--ui-color-highlight);
+	}
+	.client-pregame-screen .client-character[aria-pressed="true"]::after {
+		background: linear-gradient(90deg, var(--ui-color-accent), transparent);
+	}
+	.client-pregame-screen .ui-button:disabled {
+		opacity: 0.5;
+		color: var(--ui-color-muted);
+	}
+
+	/* ClientPregameScreen. */
+	.client-pregame-screen {
+		background:
+			radial-gradient(
+				ellipse at 70% 35%,
+				color-mix(in srgb, var(--ui-color-accent) 10%, transparent),
+				transparent 65%
+			),
+			var(--ui-color-well);
+	}
+	.client-pregame-screen.with-backdrop {
+		background: transparent;
+	}
+	.client-pregame-screen.hero-brand .pregame-brand {
+		font-size: calc(clamp(26px, 7vw, 88px) * var(--ui-text-scale));
+	}
+	.client-pregame-screen .pregame-brand {
+		font-family: var(--ui-font-heading);
+		color: var(--ui-color-highlight);
+		font-size: calc(clamp(24px, 2.2vw, 34px) * var(--ui-text-scale));
+		letter-spacing: 0.24em;
+		text-transform: uppercase;
+		border-bottom: 1px solid var(--ui-color-border);
+		text-shadow: 0 2px 8px var(--ui-color-well);
+	}
+	.client-pregame-screen .pregame-footer {
+		border-top: 1px solid
+			color-mix(in srgb, var(--ui-color-border) 45%, transparent);
+	}
+
+	/* ClientCharacterSelect. */
+	.client-pregame-screen .character-roster::before {
+		background: linear-gradient(
+			90deg,
+			var(--pregame-backdrop-color) calc(100% - var(--roster-backdrop-fade)),
+			transparent
+		);
+	}
+	.client-pregame-screen .character-selection-marker {
+		opacity: 0.5;
+		color: var(--ui-color-muted);
+	}
+	.client-pregame-screen
+		.client-character[aria-pressed="true"]
+		.character-selection-marker {
+		opacity: 1;
+		color: var(--ui-color-accent);
+	}
+	.client-pregame-screen .client-character[aria-pressed="true"] {
+		background: var(--ui-option-background, var(--ui-color-control));
+		border-color: var(--ui-option-border-color, var(--ui-color-accent));
+	}
+	.client-pregame-screen .selection-build {
+		color: var(--ui-color-muted);
+		font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
+		text-shadow: 0 1px 4px var(--ui-color-well);
+	}
+	@media (max-width: 640px) {
+		.client-pregame-screen .character-roster::before {
+			background: linear-gradient(
+				180deg,
+				transparent,
+				var(--pregame-backdrop-color) 24px,
+				var(--pregame-backdrop-color) calc(100% - 24px),
+				transparent
+			);
+		}
+	}
+
+	/* ClientCharacterCreator. */
+	.client-pregame-screen .creation-navigation::before {
+		background: linear-gradient(
+			90deg,
+			var(--pregame-backdrop-color) calc(100% - 80px),
+			transparent
+		);
+	}
+	.client-pregame-screen :where(.creation-layout) h1 {
+		font-size: calc(clamp(28px, 2.8vw, 42px) * var(--ui-text-scale));
+		font-weight: 400;
+	}
+	.client-pregame-screen .creation-rotate {
+		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+	}
+	.client-pregame-screen .creation-focus button[aria-pressed="true"] {
+		color: var(--ui-color-highlight);
+		border-color: var(--ui-color-accent);
+	}
+	.client-pregame-screen .creation-editor::before {
+		background: linear-gradient(
+			90deg,
+			transparent,
+			var(--pregame-editor-backdrop-color) 32px
+		);
+	}
+	.client-pregame-screen .creation-editor-heading {
+		border-bottom: 1px solid var(--ui-color-border);
+	}
+	.client-pregame-screen .creation-editor-heading > span {
+		color: var(--ui-color-accent);
+		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+		letter-spacing: 0.15em;
+	}
+	.client-pregame-screen :where(.creation-layout) h2 {
+		font-weight: 400;
+		font-size: calc(24px * var(--ui-text-scale));
+	}
+	.client-pregame-screen .creation-fields > legend {
+		font-family: var(--ui-font-heading);
+		color: var(--ui-color-highlight);
+	}
+	.client-pregame-screen .creation-section {
+		font-size: calc(18px * var(--ui-text-scale));
+		border-top: 1px solid var(--ui-color-border);
+	}
+	.client-pregame-screen .creation-actions {
+		border-top: 1px solid var(--ui-color-border);
+	}
+	@media (max-width: 850px) {
+		.client-pregame-screen .creation-navigation::before {
+			background: linear-gradient(
+				transparent,
+				var(--pregame-backdrop-color) 80px,
+				var(--pregame-backdrop-color) calc(100% - 80px),
+				transparent
+			);
+		}
+		.client-pregame-screen .creation-editor::before {
+			background: linear-gradient(
+				180deg,
+				transparent,
+				var(--pregame-editor-backdrop-color) 24px,
+				var(--pregame-editor-backdrop-color) calc(100% - 24px),
+				transparent
+			);
+		}
+	}
+	.client-pregame-screen .creation-navigation .ui-tabs::before {
+		background: linear-gradient(
+			transparent,
+			var(--ui-color-border) 120px,
+			var(--ui-color-border) calc(100% - 72px),
+			transparent
+		);
+	}
+	.client-pregame-screen .creation-navigation .ui-tab {
+		background: transparent;
+		box-shadow: none;
+		font-family: var(--ui-font-heading);
+		font-size: calc(21px * var(--ui-text-scale));
+	}
+	.client-pregame-screen .creation-navigation .ui-tab::before {
+		border: 1px solid var(--ui-color-accent);
+		background: var(--ui-color-well);
+	}
+	.client-pregame-screen .creation-navigation .ui-tab[aria-selected="true"] {
+		box-shadow: none;
+		color: var(--ui-color-highlight);
+	}
+	.client-pregame-screen
+		.creation-navigation
+		.ui-tab[aria-selected="true"]::before {
+		background: var(--ui-color-highlight);
+		box-shadow: inset 0 0 0 2px var(--ui-color-well);
+	}
+	.client-pregame-screen .creation-navigation .ui-tab:hover:not(:disabled) {
+		background: transparent;
+		color: var(--ui-color-highlight);
+	}
+	@media (max-width: 850px) {
+		.client-pregame-screen .creation-navigation .ui-tabs::before {
+			background: var(--ui-color-border);
+		}
+	}
+
+	/* ClientLoadingPage. */
+	.client-pregame-screen .loading-flavor {
+		color: var(--ui-color-muted);
+		font-family: var(--ui-font-heading);
+		font-style: italic;
+	}
+}

@@ -206,6 +206,9 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 		// Progress can arrive before the held current-state response supplies the roster.
 		authenticate: () =>
 			emit("client-lifecycle-changed", { kind: "authenticating" }),
+		/** Exercise real notice delivery without changing lifecycle or transport readiness. */
+		notify: (message: string, tone: "status" | "warning") =>
+			emit("client-action-feedback", { message, tone }),
 		exit: () => {
 			state = {
 				...state,

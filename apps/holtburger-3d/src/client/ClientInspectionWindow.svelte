@@ -165,6 +165,7 @@
 						: "Model preview unavailable"}
 					service={objectPreviewService}
 					rotation="orbit"
+					keyboardNavigation={true}
 					framing={{ kind: "body" }}
 				/>
 				<div

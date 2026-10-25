@@ -64,8 +64,6 @@ export class ClientPregameBackdrop {
 	#receipt: SceneActivationReceipt | null = null;
 	#completion: Promise<void> | null = null;
 	#closed = false;
-	#visible = true;
-	#resumeWithoutSound = false;
 	#previousTimeMs: number | null = null;
 	#elapsedSeconds = 0;
 	#lastEnvironmentSeconds = Number.NEGATIVE_INFINITY;
@@ -129,15 +127,6 @@ export class ClientPregameBackdrop {
 		}
 	}
 
-	/** Keep the installed backdrop while the opaque creator owns foreground presentation. */
-	setVisible(visible: boolean): void {
-		if (this.#closed || this.#visible === visible) return;
-		this.#visible = visible;
-		this.#resumeWithoutSound = visible;
-		this.#previousTimeMs = null;
-		if (!visible) this.#resources.runtime.setAudioListener(null);
-	}
-
 	/** Drain static work even while reveal is gated; return whether a background frame was drawn. */
 	frame(timeMs: number, width: number, height: number): boolean {
 		if (this.#closed || this.#status.kind === "failed") return false;
@@ -151,7 +140,7 @@ export class ClientPregameBackdrop {
 		}
 		if (status.kind !== "ready") return false;
 		if (this.#status.kind !== "ready") this.#status = { kind: "ready" };
-		if (!this.#visible || width <= 0 || height <= 0) return false;
+		if (width <= 0 || height <= 0) return false;
 		if (this.#previousTimeMs !== null)
 			this.#elapsedSeconds += Math.max(0, timeMs - this.#previousTimeMs) / 1000;
 		this.#previousTimeMs = timeMs;
@@ -182,12 +171,8 @@ export class ClientPregameBackdrop {
 			rotation,
 			envCellId,
 		};
-		// Existing script clocks perform bounded catch-up after a hidden interval. Suppress its
-		// historical sound hooks on that first frame; later authored events use normal audio policy.
-		runtime.setAudioListener(this.#resumeWithoutSound ? null : listener);
+		runtime.setAudioListener(listener);
 		runtime.frame(timeMs / 1000);
-		if (this.#resumeWithoutSound) runtime.setAudioListener(listener);
-		this.#resumeWithoutSound = false;
 		return true;
 	}
 

@@ -284,7 +284,7 @@
 				new SubmitEvent("submit", { bubbles: true, cancelable: true }),
 			);
 		await tick();
-		if (submissions !== count || !button("Cancel").disabled)
+		if (submissions !== count || !button("Back").disabled)
 			throw new Error(
 				"Pending creation admitted duplicate submission/cancellation.",
 			);
@@ -301,7 +301,9 @@
 		await until(() => management.kind === "creating", "retry admission");
 		confirmCreation();
 		await until(
-			() => root.querySelector('input[name="character"]:checked') !== null,
+			() =>
+				root.querySelector('button[name="character"][aria-pressed="true"]') !==
+				null,
 			"confirmed selection",
 		);
 		if (selection.selectedGuid !== 0x50000042 || automaticEntries !== 0)
@@ -333,19 +335,17 @@
 			],
 		};
 		async function choose(guid: number): Promise<void> {
-			const radio = root.querySelector<HTMLInputElement>(
-				`input[name="character"][value="${guid}"]`,
+			const row = root.querySelector<HTMLButtonElement>(
+				`button[name="character"][value="${guid}"]`,
 			);
-			if (radio === null) throw new Error("Picker probe missing roster entry");
-			radio.click();
+			if (row === null) throw new Error("Picker probe missing roster entry");
+			row.click();
 			await tick();
 		}
 		await tick();
 		await choose(cachedGuid);
 		await until(
-			() =>
-				root.textContent?.includes("Last observed appearance") === true &&
-				(currentHandle?.diagnostics()?.frameCount ?? 0) > 0,
+			() => (currentHandle?.diagnostics()?.frameCount ?? 0) > 0,
 			"cached equipment draw",
 		);
 		const pickerDevice = devices.at(-1);
@@ -380,10 +380,7 @@
 			capture: { ...cachedCapture, guid: slowGuid },
 		});
 		await tick();
-		if (
-			currentHandle?.diagnostics() !== null ||
-			root.textContent?.includes("Last observed appearance")
-		)
+		if (currentHandle?.diagnostics() !== null)
 			throw new Error("Stale cache completion restored an obsolete subject");
 		if (button("Enter World").disabled)
 			throw new Error("Unavailable capture prevented entry");
@@ -417,9 +414,12 @@
 			() => root.querySelector('input[type="range"]') !== null,
 			"reopened creator",
 		);
-		await click("Cancel");
-		if (root.querySelector('input[name="character"]:checked') === null)
-			throw new Error("Cancellation lost selection.");
+		await click("Back");
+		if (
+			root.querySelector('button[name="character"][aria-pressed="true"]') ===
+			null
+		)
+			throw new Error("Returning to the roster lost selection.");
 		await until(
 			() => (currentHandle?.diagnostics()?.frameCount ?? 0) > 0,
 			"picker returned from creator",
@@ -449,9 +449,11 @@
 		// a pending submitted operation and a late static-content failure still in flight.
 		management = { kind: "creating", name: "Synthetic pending exit" };
 		await tick();
-		if (!button("Cancel").disabled)
-			throw new Error("Pending creator remained cancellable");
-		await click("Disconnect");
+		if (!button("Back").disabled)
+			throw new Error("Pending creator allowed returning to the roster");
+		// Authority can end the session while creation is pending; the creator owns no disconnect action.
+		connected = false;
+		await tick();
 		const rejectRetired = (): void => {
 			if (rejectHeldResolution === null)
 				throw new Error("Missing held creator resolution");

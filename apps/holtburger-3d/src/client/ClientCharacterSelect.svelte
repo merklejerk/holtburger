@@ -1,5 +1,13 @@
 <script lang="ts">
+	import { APP_BUILD_LABEL } from "../app/app-build";
+	import ClientPregameScreen from "./ClientPregameScreen.svelte";
 	import { onMount } from "svelte";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
+	import SelectionMarker from "../assets/icons/pregame-selection.svg?component";
+	import EnterWorldIcon from "../assets/icons/hud-teleport.svg?component";
+	import CreateCharacterIcon from "../assets/icons/hud-invite.svg?component";
+	import DisconnectIcon from "../assets/icons/pregame-disconnect.svg?component";
+	import WarningIcon from "../assets/icons/pregame-warning.svg?component";
 	import ClientModelPreview from "./ClientModelPreview.svelte";
 	import {
 		ClientCharacterPreview,
@@ -39,8 +47,6 @@
 		readonly onEnter: () => void | Promise<void>;
 		/** Leave character selection and disconnect. */
 		readonly onDisconnect: () => void | Promise<void>;
-		/** Foreground creator pauses the retained world backdrop without owning its lifetime. */
-		readonly onCreatingChange?: (creating: boolean) => void;
 	}
 
 	let {
@@ -53,13 +59,9 @@
 		onChoose,
 		onEnter,
 		onDisconnect,
-		onCreatingChange,
 	}: Props = $props();
+	const { keyboard } = useAppInputPolicy();
 	let creating = $state(false);
-	$effect(() => {
-		onCreatingChange?.(creating);
-	});
-	onMount(() => () => onCreatingChange?.(false));
 	let previewState = $state.raw<CharacterPreviewState>({ kind: "none" });
 	let previewOwner: ClientCharacterPreview | null = null;
 	const selectedGuid = $derived(
@@ -119,13 +121,47 @@
 		}
 	});
 	function focusCharacter(form: HTMLFormElement): void {
-		const selected = form.querySelector<HTMLInputElement>(
-			'input[name="character"]:checked',
+		const selected = form.querySelector<HTMLButtonElement>(
+			'button[name="character"][aria-pressed="true"]',
 		);
-		const first = form.querySelector<HTMLInputElement>(
-			'input[name="character"]',
+		const first = form.querySelector<HTMLButtonElement>(
+			'button[name="character"]',
 		);
 		(selected ?? first)?.focus({ preventScroll: true });
+	}
+
+	/** Arrow navigation selects a row; Enter/Space retain native button activation. */
+	function navigateCharacters(event: KeyboardEvent): void {
+		if (!(event.target instanceof HTMLButtonElement) || blocked) return;
+		const focused = event.target;
+		const options = Array.from(
+			focused.form?.querySelectorAll<HTMLButtonElement>(
+				'button[name="character"]:not(:disabled)',
+			) ?? [],
+		);
+		const index = options.indexOf(focused);
+		if (index === -1) return;
+		let destination: number;
+		switch (event.key) {
+			case "ArrowUp":
+				destination = (index + options.length - 1) % options.length;
+				break;
+			case "ArrowDown":
+				destination = (index + 1) % options.length;
+				break;
+			case "Home":
+				destination = 0;
+				break;
+			case "End":
+				destination = options.length - 1;
+				break;
+			default:
+				return;
+		}
+		event.preventDefault();
+		const next = options[destination];
+		next.focus();
+		next.click();
 	}
 
 	function handleSubmit(event: SubmitEvent): void {
@@ -139,172 +175,214 @@
 		services={creation}
 		{previewService}
 		{management}
-		onCancel={() => (creating = false)}
+		onBack={() => (creating = false)}
 	/>
-	<button class="ui-button" type="button" onclick={() => void onDisconnect()}
-		>Disconnect</button
-	>
 {:else}
-	<h1>Choose a character</h1>
-	<p class="client-status">
-		Select a character, then explicitly enter the world.
-	</p>
-
-	<div class="character-selection-content">
-		{#if visualCache !== null && previewService !== null}
-			<div class="character-preview-column">
-				<div class="character-preview-viewport">
-					<ClientModelPreview
-						source={previewSource}
-						emptyMessage={previewMessage}
-						service={previewService}
-						rotation="subject"
-						framing={{ kind: "body" }}
-					/>
-				</div>
-				{#if previewSource !== null}<p class="client-status">
-						Last observed appearance
-					</p>{/if}
-				{#if previewState.kind === "unavailable" && previewState.guid === previewGuid}<p
-						class="ui-error"
-						role="alert"
-					>
-						{previewState.message}
-					</p>{/if}
-			</div>
-		{/if}
-		<form
-			class="character-roster ui-panel ui-body"
-			use:focusCharacter
-			onsubmit={handleSubmit}
-		>
-			<fieldset
-				class="client-character-list"
-				aria-label="Characters"
-				disabled={blocked}
+	<ClientPregameScreen branding="corner" backdrop={true}>
+		{#snippet footer()}
+			<button
+				type="button"
+				class="pregame-action pregame-quiet ui-button"
+				disabled={entryPending}
+				onclick={() => void onDisconnect()}
 			>
-				{#each selection.characters as character (character.guid)}
-					<label class="client-character ui-option">
-						<input
-							type="radio"
+				<span class="pregame-icon" aria-hidden="true"><DisconnectIcon /></span>
+				Disconnect
+			</button>
+			<span class="selection-build" aria-label="Build information"
+				>{APP_BUILD_LABEL}</span
+			>
+		{/snippet}
+		<div class="character-selection-content">
+			<form class="character-roster" use:focusCharacter onsubmit={handleSubmit}>
+				<h1 class="sr-only">Characters</h1>
+				<fieldset
+					class="client-character-list"
+					aria-label="Characters"
+					disabled={blocked}
+					use:keyboard.scope={{
+						nativeControls: true,
+						keydown: navigateCharacters,
+					}}
+				>
+					{#each selection.characters as character, index (character.guid)}
+						<button
+							type="button"
+							class="client-character ui-button ui-option"
 							name="character"
 							value={character.guid}
-							checked={selection.selectedGuid === character.guid}
-							onchange={() => onChoose(character.guid)}
-						/>
-						<strong>{character.name}</strong>
-						<span>Slot {character.slot + 1}</span>
-					</label>
-				{/each}
-			</fieldset>
+							aria-pressed={selectedGuid === character.guid}
+							tabindex={selectedGuid === character.guid ||
+							(selectedGuid === null && index === 0)
+								? 0
+								: -1}
+							onclick={() => onChoose(character.guid)}
+						>
+							<span class="character-selection-marker"><SelectionMarker /></span
+							>
+							<strong>{character.name}</strong>
+						</button>
+					{:else}
+						<p class="ui-muted">
+							Your adventure starts here. Create your first character.
+						</p>
+					{/each}
+				</fieldset>
 
-			<div class="client-actions">
-				<button
-					type="submit"
-					class="client-action ui-button"
-					disabled={selectedGuid === null || blocked}
-				>
-					{entryPending ? "Entering…" : "Enter World"}
-				</button>
-				<button
-					type="button"
-					class="client-action ui-button"
-					disabled={blocked ||
-						selection.characters.length >= selection.maxSlots ||
-						creation === null ||
-						previewService === null}
-					onclick={() => {
-						creationBaseline = management;
-						creating = true;
-					}}>Create character</button
-				>
-				<button
-					type="button"
-					class="client-action ui-button"
-					disabled={entryPending}
-					onclick={() => void onDisconnect()}
-				>
-					Disconnect
-				</button>
-			</div>
-		</form>
-	</div>
-	{#if management.kind === "uncertain"}<p class="ui-error" role="alert">
-			{management.message}
-		</p>{/if}
+				<div class="client-actions">
+					<button
+						type="submit"
+						class="enter-world pregame-action ui-button"
+						disabled={selectedGuid === null || blocked}
+					>
+						<span class="pregame-icon" aria-hidden="true"
+							><EnterWorldIcon /></span
+						>
+						{entryPending ? "Entering…" : "Enter World"}
+					</button>
+					<button
+						type="button"
+						class="pregame-action ui-button"
+						disabled={blocked ||
+							selection.characters.length >= selection.maxSlots ||
+							creation === null ||
+							previewService === null}
+						onclick={() => {
+							creationBaseline = management;
+							creating = true;
+						}}
+					>
+						<span class="pregame-icon" aria-hidden="true"
+							><CreateCharacterIcon /></span
+						>
+						Create character</button
+					>
+				</div>
+				{#if management.kind === "uncertain"}<p class="ui-error" role="alert">
+						<span class="pregame-icon" aria-hidden="true"><WarningIcon /></span>
+						{management.message}
+					</p>{/if}
+			</form>
+			{#if visualCache !== null && previewService !== null}
+				<div class="character-preview-column">
+					<div class="character-preview-viewport">
+						<ClientModelPreview
+							source={previewSource}
+							emptyMessage={previewMessage}
+							service={previewService}
+							rotation="subject"
+							keyboardNavigation={false}
+							framing={{ kind: "body" }}
+						/>
+					</div>
+					{#if previewState.kind === "unavailable" && previewState.guid === previewGuid}<p
+							class="ui-error"
+							role="alert"
+						>
+							{previewState.message}
+						</p>{/if}
+				</div>
+			{/if}
+		</div>
+	</ClientPregameScreen>
 {/if}
 
 <style>
 	@layer components {
 		.character-selection-content {
-			display: flex;
-			flex-wrap: wrap;
-			gap: 24px;
-			align-items: start;
+			/* Keep the roster's backdrop behind this page's controls and preview. */
+			isolation: isolate;
+			display: grid;
+			grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+			grid-template-rows: minmax(0, 1fr);
+			gap: 32px clamp(24px, 5vw, 80px);
+			min-width: 0;
+			min-height: 0;
 		}
-		.character-selection-content > form {
-			flex: 1;
-			min-width: 260px;
-			max-width: 480px;
-			margin-left: auto;
+		.character-roster {
+			position: relative;
+			display: grid;
+			align-content: center;
+			gap: 24px;
+			min-width: 0;
+		}
+		.character-roster::before {
+			/* Anchor the fade to the actual roster edge; the screen clips the overscan. */
+			--roster-backdrop-fade: 160px;
+			content: "";
+			position: absolute;
+			inset: -100vh calc(-1 * var(--roster-backdrop-fade)) -100vh -100vw;
+			z-index: -1;
+			pointer-events: none;
 		}
 		.character-preview-column {
-			width: min(42vw, 420px);
+			grid-column: 2;
+			grid-row: 1;
 			display: grid;
+			grid-template-rows: minmax(0, 1fr) auto;
+			min-width: 0;
 			gap: 8px;
+			min-height: 0;
 		}
 		.character-preview-viewport {
-			width: 100%;
-			aspect-ratio: 3 / 4;
-		}
-		.client-status {
-			margin: 0;
-			color: var(--ui-color-muted);
-			line-height: 1.45;
+			min-width: 0;
+			min-height: 0;
 		}
 		.client-character-list {
 			display: grid;
-			gap: 0;
-			max-height: min(45vh, 360px);
+			gap: 4px;
+			max-height: 40vh;
 			overflow-y: auto;
-			padding: 6px;
+			padding: 4px;
 			margin: 0;
 			border: 0;
 		}
 		.client-character {
 			display: grid;
-			grid-template-columns: auto 1fr auto;
-			align-items: baseline;
+			grid-template-columns: auto minmax(0, 1fr);
+			align-items: center;
 			gap: 14px;
-			min-height: 32px;
-			padding: 4px 8px;
 			text-align: left;
-			border-bottom: 1px solid
-				var(--ui-option-border-color, var(--ui-color-border));
 			cursor: pointer;
 			user-select: none;
 		}
-		.client-character:has(input:checked) {
-			background: var(--ui-option-background, var(--ui-color-control));
-			border-color: var(--ui-option-border-color, var(--ui-color-accent));
+		.client-character strong {
+			overflow-wrap: anywhere;
 		}
-		.client-character:has(input:focus-visible) {
-			outline: 2px solid var(--ui-color-accent);
-			outline-offset: -2px;
+		.character-selection-marker {
+			display: grid;
+			place-items: center;
 		}
 		.client-character-list:disabled .client-character {
 			cursor: not-allowed;
 		}
-		.client-character span {
-			color: var(--ui-color-muted);
-		}
 		.client-actions {
-			display: flex;
-			flex-wrap: wrap;
-			gap: 8px;
+			display: grid;
+			gap: 12px;
 		}
-		.client-action {
-			min-width: 120px;
+		.selection-build {
+			margin-left: auto;
+			margin-right: calc(12px - clamp(20px, 4vw, 64px));
+			text-align: right;
+			overflow-wrap: anywhere;
+		}
+		@media (max-width: 640px) {
+			.character-roster::before {
+				/* Stacked controls shade their own rows rather than the preview below. */
+				inset: -24px -100vw;
+			}
+			.character-selection-content {
+				grid-template-columns: minmax(0, 1fr);
+				grid-template-rows: auto auto;
+				overflow: clip;
+			}
+			.character-preview-column {
+				grid-column: 1;
+				grid-row: 2;
+			}
+			.character-preview-viewport {
+				height: 50vh;
+			}
 		}
 	}
 </style>

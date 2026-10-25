@@ -99,29 +99,11 @@ export function creationFaceFraming(
 	};
 }
 
-/** Creator-only backdrop composed before the common preview boundary; zoom never changes pose. */
+/** Composite the editable body over the shared pregame scene, independent of preview framing. */
 export function creationPreviewSource(
 	preview: CharacterCreationPreview,
 ): ObjectPreviewSource {
-	return {
-		body: preview.body,
-		attachments: [],
-		background:
-			preview.backgroundSetupDid === null
-				? null
-				: {
-						setupDid: preview.backgroundSetupDid,
-						scale: 1,
-						translucency: 0,
-						appearance: {
-							paletteDid: null,
-							subPalettes: [],
-							textureChanges: [],
-							partChanges: [],
-						},
-						pose: { kind: "setup-pose" },
-					},
-	};
+	return { body: preview.body, attachments: [], background: null };
 }
 
 /** Hide headgear only in the face-preview request; retain the actual outfit for submission. */

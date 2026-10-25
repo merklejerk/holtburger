@@ -128,7 +128,7 @@ try {
 	await installEvidenceCollector(client);
 	await waitFor(
 		client,
-		`() => document.body?.innerText.includes("Choose a character")`,
+		`() => document.querySelector(".client-character-list") !== null`,
 		timeoutMs,
 		"character selection",
 	);

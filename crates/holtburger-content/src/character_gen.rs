@@ -79,14 +79,16 @@ impl CharacterGenCatalog {
             .skill_base_hash
             .iter()
             .map(|(skill_id, skill)| {
+                let skill_type = SkillType::from_repr(*skill_id);
                 (
                     *skill_id,
                     CharacterGenSkillDefinition {
                         skill_id: *skill_id,
-                        skill_type: SkillType::from_repr(*skill_id),
+                        skill_type,
                         name: skill.name.clone(),
                         description: skill.description.clone(),
-                        chargen_use: skill.chargen_use != 0,
+                        available_at_creation: skill.chargen_use != 0
+                            && skill_type.is_some_and(|skill| skill.is_eor()),
                         trained_cost: skill.trained_cost,
                         specialization_total_cost: skill.specialized_cost,
                     },
@@ -283,7 +285,9 @@ pub struct CharacterGenSkillDefinition {
     pub skill_type: Option<SkillType>,
     pub name: String,
     pub description: String,
-    pub chargen_use: bool,
+    /// Resolved creation eligibility: the authored flag and ACE's active EOR skill set.
+    /// Retired, unimplemented, and unknown definitions remain available for wire-slot lookup.
+    pub available_at_creation: bool,
     pub trained_cost: i32,
     /// Raw SkillTable total, including training; interpreted only by skill_costs_for_heritage.
     pub specialization_total_cost: i32,
@@ -563,6 +567,75 @@ fn read_clothing_tables<'a>(
 }
 
 #[cfg(test)]
+mod skill_availability_tests {
+    use super::*;
+    use holtburger_dat::file_type::skill_table::{SkillBase, SkillFormula};
+    use std::collections::HashMap;
+
+    #[test]
+    fn creation_eligibility_combines_authored_flags_with_eor_membership_without_removing_slots() {
+        let unknown_id = SkillType::Summoning as u32 + 1;
+        let cases = [
+            (SkillType::MeleeDefense as u32, 1, true),
+            (SkillType::MissileDefense as u32, 0, false),
+            (SkillType::Axe as u32, 1, false),
+            (SkillType::Gearcraft as u32, 1, false),
+            (SkillType::Spellcraft as u32, 1, false),
+            (0, 1, false), // The inactive wire slot has no SkillType variant.
+            (unknown_id, 1, false),
+        ];
+        let skills = SkillTable {
+            skill_base_hash: cases
+                .iter()
+                .map(|(id, flag, _)| (*id, skill(*flag)))
+                .collect(),
+            ..SkillTable::default()
+        };
+        let char_gen = CharGen {
+            id: CharGen::FILE_ID,
+            starter_areas: Vec::new(),
+            heritage_groups: HashMap::new(),
+        };
+        let catalog = CharacterGenCatalog::from_assets(&char_gen, &skills, &BTreeMap::new())
+            .expect("synthetic catalog should assemble");
+
+        for (id, _, expected) in cases {
+            let definition = catalog.skill_definition(id).expect("wire slot must remain");
+            assert_eq!(definition.available_at_creation, expected, "skill {id}");
+            assert_eq!(definition.trained_cost, 0);
+        }
+        assert_eq!(catalog.expected_skill_slots, unknown_id as usize + 1);
+    }
+
+    fn skill(chargen_use: u32) -> SkillBase {
+        SkillBase {
+            name: "Skill".into(),
+            description: String::new(),
+            _align1: (),
+            _align2: (),
+            icon_id: 0,
+            // Match the zero-cost definitions synthesized for retired skills by the DAT reader.
+            trained_cost: 0,
+            specialized_cost: 0,
+            category: 0,
+            chargen_use,
+            min_level: 0,
+            formula: SkillFormula {
+                w: 0,
+                x: 0,
+                y: 0,
+                z: 0,
+                attr1: 0,
+                attr2: 0,
+            },
+            upper_bound: 0.0,
+            lower_bound: 0.0,
+            learn_mod: 0.0,
+        }
+    }
+}
+
+#[cfg(test)]
 mod skill_cost_tests {
     use super::*;
 
@@ -577,7 +650,7 @@ mod skill_cost_tests {
                     skill_type: None,
                     name: "Skill".into(),
                     description: String::new(),
-                    chargen_use: true,
+                    available_at_creation: true,
                     trained_cost: 6,
                     specialization_total_cost: total,
                 },

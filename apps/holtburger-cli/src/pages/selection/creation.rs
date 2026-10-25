@@ -272,7 +272,7 @@ impl CharacterCreationFormState {
         self.catalog
             .skill_definitions
             .values()
-            .filter(|definition| definition.chargen_use)
+            .filter(|definition| definition.available_at_creation)
             .map(|definition| {
                 self.skill_delta_cost(
                     definition.skill_id,
@@ -312,12 +312,7 @@ impl CharacterCreationFormState {
             .catalog
             .skill_definitions
             .values()
-            .filter(|definition| {
-                definition.chargen_use
-                    && definition
-                        .skill_type
-                        .is_some_and(|skill_type| skill_type.is_eor())
-            })
+            .filter(|definition| definition.available_at_creation)
             .map(|definition| definition.skill_id)
             .collect::<Vec<_>>();
 
@@ -893,9 +888,9 @@ mod tests {
                         skill_type: Some(SkillType::Axe),
                         name: "Axe".to_string(),
                         description: String::new(),
-                        chargen_use: true,
-                        trained_cost: 2,
-                        specialization_total_cost: 6,
+                        available_at_creation: false,
+                        trained_cost: 0,
+                        specialization_total_cost: 0,
                     },
                 ),
                 (
@@ -905,7 +900,7 @@ mod tests {
                         skill_type: Some(SkillType::Run),
                         name: "Run".to_string(),
                         description: String::new(),
-                        chargen_use: true,
+                        available_at_creation: true,
                         trained_cost: 2,
                         specialization_total_cost: 6,
                     },
@@ -917,7 +912,7 @@ mod tests {
                         skill_type: Some(SkillType::Jump),
                         name: "Jump".to_string(),
                         description: String::new(),
-                        chargen_use: true,
+                        available_at_creation: true,
                         trained_cost: 2,
                         specialization_total_cost: 6,
                     },
@@ -936,6 +931,10 @@ mod tests {
         assert_eq!(form.start_area_id, 0);
         assert_eq!(form.remaining_attribute_points(), 6);
         assert_eq!(form.remaining_skill_points(), 6);
+        assert_eq!(
+            form.skill_advancement_classes[SkillType::Axe as usize],
+            SkillAdvancementClass::Inactive
+        );
         assert_eq!(
             form.skill_advancement_classes[SkillType::Run as usize],
             SkillAdvancementClass::Trained
@@ -961,7 +960,7 @@ mod tests {
     }
 
     #[test]
-    fn skill_ids_for_display_filters_to_end_of_retail_skills() {
+    fn skill_ids_for_display_uses_catalog_creation_availability() {
         let form = CharacterCreationFormState::new(test_catalog());
 
         let skill_ids = form.skill_ids_for_display();
@@ -1057,7 +1056,7 @@ mod tests {
                 skill_type: Some(SkillType::Salvaging),
                 name: "Salvaging".to_string(),
                 description: String::new(),
-                chargen_use: true,
+                available_at_creation: true,
                 trained_cost: 8,
                 specialization_total_cost: 999,
             },

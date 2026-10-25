@@ -110,7 +110,7 @@ export async function probeClientTheme(
 			),
 	);
 	await read(() => {
-		const option = document.querySelector('input[name="character"]');
+		const option = document.querySelector('button[name="character"]');
 		option.click();
 		option.focus();
 	});
@@ -135,14 +135,14 @@ export async function probeClientTheme(
 		const valid = await evaluateExpression(
 			client,
 			`(() => {
-			const options = [...document.querySelectorAll('input[name="character"]')];
-			return options.at(${index}).checked &&
+			const options = [...document.querySelectorAll('button[name="character"]')];
+			return options.at(${index}).getAttribute("aria-pressed") === "true" &&
 				document.activeElement === options.at(${index});
 		})()`,
 		);
 		if (!valid)
 			throw new Error(
-				`Character selection did not handle ${key} through its native radio group.`,
+				`Character selection did not handle ${key} through its character rows.`,
 			);
 	}
 	// Character selection is an ordinary page: Tab reaches its native action buttons.
@@ -159,7 +159,7 @@ export async function probeClientTheme(
 		windowsVirtualKeyCode: 9,
 	});
 	await read(() => {
-		if (!document.activeElement?.classList.contains("client-action"))
+		if (!document.activeElement?.classList.contains("enter-world"))
 			throw new Error(
 				"Character selection did not allow native Tab navigation.",
 			);
@@ -178,21 +178,27 @@ export async function probeClientTheme(
 		windowsVirtualKeyCode: 13,
 	});
 	await read(async () => {
-		const enter = [...document.querySelectorAll(".client-action")].find(
+		const enter = [...document.querySelectorAll(".enter-world")].find(
 			(button) => button.textContent.trim().startsWith("Enter"),
 		);
 		if (!enter) throw new Error("Character entry control is absent.");
 		await new Promise((resolve) => requestAnimationFrame(resolve));
 		if (!enter.disabled || !enter.textContent.includes("Entering"))
 			throw new Error("Character entry did not publish its pending state.");
-		const selected = document.querySelector('input[name="character"]:checked');
+		const selected = document.querySelector(
+			'button[name="character"][aria-pressed="true"]',
+		);
 		const other = [
-			...document.querySelectorAll('input[name="character"]'),
+			...document.querySelectorAll('button[name="character"]'),
 		].find((option) => option !== selected);
 		other.click();
 		other.focus();
 		await new Promise((resolve) => requestAnimationFrame(resolve));
-		if (document.querySelector('input[name="character"]:checked') !== selected)
+		if (
+			document.querySelector(
+				'button[name="character"][aria-pressed="true"]',
+			) !== selected
+		)
 			throw new Error("Pending character entry allowed selection to change.");
 	});
 	// Exercise the actual startup/error shell without opening a live server connection.
@@ -236,7 +242,9 @@ export async function probeClientTheme(
 	await loaded;
 	const startup = await read(async () => {
 		for (let attempt = 0; attempt < 100; attempt++) {
-			const error = document.querySelector(".client-screen [role='alert']");
+			const error = document.querySelector(
+				".client-pregame-screen [role='alert']",
+			);
 			if (error?.textContent.includes("Theme harness: no live connection"))
 				return true;
 			await new Promise((resolve) => setTimeout(resolve, 50));

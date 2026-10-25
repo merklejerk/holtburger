@@ -35,6 +35,16 @@ export async function verifyElectronPackage(packageRoot) {
 	await access(archivePath, constants.R_OK);
 	await requireNonEmptyFile(licensePath, constants.R_OK);
 	await requireNonEmptyFile(
+		join(resourcesDirectory, "icon.png"),
+		constants.R_OK,
+	);
+	if (process.platform === "darwin") {
+		await requireNonEmptyFile(
+			join(resourcesDirectory, "holtburger.icns"),
+			constants.R_OK,
+		);
+	}
+	await requireNonEmptyFile(
 		join(electronNoticeRoot, "LICENSE"),
 		constants.R_OK,
 	);
@@ -51,6 +61,7 @@ export async function verifyElectronPackage(packageRoot) {
 		"/package.json",
 		"/dist/client/index.html",
 		"/dist/explorer/index.html",
+		"/dist/favicon.svg",
 		"/dist-electron/electron/host-protocol.js",
 		"/dist-electron/electron/main.js",
 		"/dist-electron/electron/preload.cjs",

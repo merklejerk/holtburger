@@ -1,3 +1,5 @@
+<img src="../../assets/branding/portal-static.svg" width="96" height="96" alt="Holtburger portal logo" />
+
 # Holtburger 3D
 
 Electron-backed development surface for Holtburger's replacement 3D client. Authoritative app-local
@@ -730,9 +732,15 @@ passive mode; choose a verified entirely-water location for the water check.
 
 ## Packaging and platform status
 
+The app uses the repository's portal logo for browser tabs, native windows, and packaged
+Windows/macOS application icons. `assets/branding/portal.svg` at the repository root owns the
+animated artwork; `npm run generate:branding` exports the static SVG, PNG, ICO, and ICNS plus
+the browser and Flatpak copies. Commit these exports after artwork changes and run
+`npm run check:branding` to detect drift. Regular builds consume the checked-in icons.
+
 `npm run package` builds an unpacked application and `npm run make` creates the configured ZIP.
 Both commands build the frontend, Electron main/preload code, and release Rust sidecar first.
-`npm run check:package` verifies the native host, compiled entries, application license, and
+`npm run check:package` verifies the native host, compiled entries, branding assets, application license, and
 Electron/Chromium notices in the unpacked package. After `npm run make`, `npm run check:archive`
 extracts the ZIP and applies the same inspection to the downloadable shape.
 

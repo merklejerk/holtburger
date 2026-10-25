@@ -80,6 +80,8 @@ ci = "github"
 installers = ["shell", "powershell"]
 # Extra static files to include in distributions
 include = [
+    "assets/branding/portal-static.svg",
+    "assets/branding/icon.png",
     "dats/README.md",
     "scripts/fighter.js",
     "scripts/mage.js",

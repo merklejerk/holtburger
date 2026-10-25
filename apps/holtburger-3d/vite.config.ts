@@ -18,7 +18,10 @@ export default defineConfig(({ command, isPreview }) => ({
 		svelte(),
 		// Keep editor-authored artwork intact and leave cursor/nameplate asset loading alone.
 		svg({
-			includePaths: [resolve(rootDir, "src/assets/icons")],
+			includePaths: [
+				resolve(rootDir, "src/assets/icons"),
+				resolve(rootDir, "../../assets/branding"),
+			],
 			svgoOptions: false,
 		}),
 	],
@@ -34,6 +37,7 @@ export default defineConfig(({ command, isPreview }) => ({
 		},
 	},
 	server: {
+		fs: { allow: [rootDir, resolve(rootDir, "../../assets/branding")] },
 		host: "127.0.0.1",
 		port: 1420,
 		strictPort: true,

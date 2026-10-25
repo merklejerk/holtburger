@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	extractContentArguments,
 	buildEntryPath,
 	collapseRendererArguments,
 	extractElectronLaunchArguments,
@@ -10,6 +11,79 @@ import {
 } from "./entry-paths.mjs";
 import { parseVitePort, resolveVitePort } from "./dev-port.mjs";
 import { clientDebugEnabled } from "../src/client/client-debug";
+import { resolve } from "node:path";
+
+describe("shared content arguments", () => {
+	it("consumes independent desktop controls before the entry and leaves explicit content intact", () => {
+		expect(
+			extractContentArguments(
+				[
+					"--no-content-search",
+					"client",
+					"--clear-content",
+					"--content=AC data",
+					"--debug",
+				],
+				"/invocation",
+			),
+		).toEqual({
+			contentPath: resolve("/invocation", "AC data"),
+			noContentSearch: true,
+			clearContent: true,
+			args: ["client", "--debug"],
+		});
+	});
+	it.each(["--no-content-search", "--clear-content"])(
+		"rejects values and duplicates for %s",
+		(flag) => {
+			expect(() =>
+				extractContentArguments([`${flag}=false`], "/invocation"),
+			).toThrow("does not take a value");
+			expect(() =>
+				extractContentArguments([flag, flag], "/invocation"),
+			).toThrow("more than once");
+		},
+	);
+
+	it.each(["client", "explorer"])(
+		"keeps %s content paths out of renderer arguments",
+		(entry) => {
+			const result = extractContentArguments(
+				[entry, "--content", "AC data", "--debug"],
+				"/invocation",
+			);
+			expect(result).toEqual({
+				contentPath: resolve("/invocation", "AC data"),
+				noContentSearch: false,
+				clearContent: false,
+				args: [entry, "--debug"],
+			});
+			expect(buildEntryPath("index.html", result.args.slice(1))).toBe(
+				"index.html?debug=true",
+			);
+		},
+	);
+	it("consumes an override before an optional entry name", () => {
+		expect(
+			extractContentArguments(["--content=AC data"], "/invocation"),
+		).toEqual({
+			contentPath: resolve("/invocation", "AC data"),
+			noContentSearch: false,
+			clearContent: false,
+			args: [],
+		});
+	});
+	it.each([
+		["--content"],
+		["--content="],
+		["--content", "--debug"],
+		["--content=a", "--content=b"],
+	])("rejects invalid content selection: %j", (...args) => {
+		expect(() => extractContentArguments(args, "/invocation")).toThrow(
+			"--content",
+		);
+	});
+});
 
 describe("development launcher arguments", () => {
 	it.each([[], ["--debug=false"]])(

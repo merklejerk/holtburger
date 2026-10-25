@@ -4,11 +4,15 @@ import {
 } from "./client-window-close.js";
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from "electron";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildEntryPath, requireEntry } from "../scripts/entry-paths.mjs";
+import {
+	buildEntryPath,
+	requireEntry,
+	extractContentArguments,
+} from "../scripts/entry-paths.mjs";
 import { applicationMenuTemplate } from "./application-menu.js";
 import {
 	electronApplicationArguments,
@@ -16,8 +20,12 @@ import {
 	parseClientLaunchArguments,
 	type ClientLaunchConfiguration,
 } from "./client-launch.js";
-import { SidecarHostClient, SidecarProtocolError } from "./host-protocol.js";
-import { createHostReadyGate } from "./host-ready.js";
+import { SidecarHostClient } from "./host-protocol.js";
+import {
+	ContentStartup,
+	type HostContentSelection,
+} from "./content-startup.js";
+import { ContentPreferenceStore } from "./content-preference-store.js";
 import { isAllowedNavigation } from "./navigation-policy.js";
 import {
 	hostCommandNamesForMode,
@@ -62,7 +70,7 @@ if (!app.isPackaged) {
 }
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
-let hostClient: SidecarHostClient | undefined;
+let contentStartup: ContentStartup<SidecarHostClient> | undefined;
 let quitting = false;
 /** Client window close joins renderer preparation before native store/process shutdown. */
 let clientWindowClose: ClientWindowClose | undefined;
@@ -70,7 +78,12 @@ let exitCode = 0;
 let fatalReported = false;
 let flushClientSettings: (() => Promise<void>) | undefined;
 let visualCache: ClientVisualCacheStore | undefined;
-const hostReady = createHostReadyGate<SidecarHostClient>();
+function requireActiveHost(): SidecarHostClient {
+	const host = contentStartup?.activeHost;
+	if (host === undefined || host === null)
+		throw new Error("Game commands are unavailable during asset setup");
+	return host;
+}
 
 // The client dev entry uses a separate default port so two worktrees cannot silently share a
 // renderer server. The launcher may override it for an explicit isolated diagnostic run.
@@ -89,13 +102,20 @@ function entryArguments(): {
 	ignorePersistedConfig: boolean;
 	ignoreWorldMapCache: boolean;
 	settingsFile: string | null;
+	contentPath: string | null;
+	noContentSearch: boolean;
+	clearContent: boolean;
 } {
 	const entryArguments = electronApplicationArguments(
 		process.argv,
 		!app.isPackaged,
 		app.getAppPath(),
 	);
-	const [entryName, ...rawArgs] = entryArguments;
+	const extracted = extractContentArguments(entryArguments, process.cwd());
+	const hasEntry =
+		extracted.args[0] !== undefined && !extracted.args[0].startsWith("--");
+	const entryName = hasEntry ? extracted.args[0] : "explorer";
+	const rawArgs = hasEntry ? extracted.args.slice(1) : extracted.args;
 	const release = rawArgs.includes("--release");
 	const entryArgs = rawArgs.filter((arg) => arg !== "--release");
 	const selectedEntryName = entryName ?? "explorer";
@@ -129,6 +149,9 @@ function entryArguments(): {
 		ignorePersistedConfig,
 		ignoreWorldMapCache,
 		settingsFile,
+		contentPath: extracted.contentPath,
+		noContentSearch: extracted.noContentSearch,
+		clearContent: extracted.clearContent,
 	};
 }
 
@@ -158,19 +181,21 @@ function hostEnvironment(ignoreWorldMapCache: boolean): NodeJS.ProcessEnv {
 		"cache",
 		"world-map",
 	);
-	if (environment.HOLTBURGER_DATS === undefined && !app.isPackaged) {
-		const workspaceDats = join(workspaceRoot(), "dats");
-		if (existsSync(workspaceDats)) environment.HOLTBURGER_DATS = workspaceDats;
-	}
+	// Content is supplied explicitly in the host launch contract, never inherited as an override.
+	delete environment.HOLTBURGER_DATS;
 	return environment;
 }
 
-async function startHost(
-	window: BrowserWindow,
+function launchHost(
 	mode: HostMode,
 	ignoreWorldMapCache: boolean,
-): Promise<void> {
-	const child = spawn(hostBinaryPath(), [`--mode=${mode}`], {
+	selection: HostContentSelection,
+): SidecarHostClient {
+	const args =
+		selection.kind === "explicit"
+			? ["--content", selection.path]
+			: ["--discovery-root", selection.root];
+	const child = spawn(hostBinaryPath(), [`--mode=${mode}`, ...args], {
 		env: hostEnvironment(ignoreWorldMapCache),
 		stdio: "pipe",
 		windowsHide: true,
@@ -178,26 +203,68 @@ async function startHost(
 	child.stderr?.on("data", (chunk) =>
 		console.error(`[holtburger-host] ${chunk.toString()}`),
 	);
-	const client = new SidecarHostClient(child, mode);
-	hostClient = client;
-	let connected = false;
-	child.on("exit", (code, signal) => {
-		if (quitting || !connected) return;
-		const error = new SidecarProtocolError(
-			"host_exit",
-			`host exited unexpectedly (code=${code ?? "none"}, signal=${signal ?? "none"})`,
-		);
-		reportFatalError("Holtburger 3D host stopped", error);
+	return new SidecarHostClient(child, mode);
+}
+
+function installContentStartup(
+	window: BrowserWindow,
+	entry: ReturnType<typeof entryArguments>,
+): ContentStartup<SidecarHostClient> {
+	const startup = new ContentStartup({
+		store: new ContentPreferenceStore(
+			join(app.getPath("userData"), "content-selection.json"),
+		),
+		overridePath: entry.contentPath,
+		noContentSearch: entry.noContentSearch,
+		clearContent: entry.clearContent,
+		portableRoot: join(
+			app.isPackaged ? dirname(process.execPath) : workspaceRoot(),
+			"dats",
+		),
+		launch: (selection) =>
+			launchHost(entry.mode, entry.ignoreWorldMapCache, selection),
+		admit: async (client) => {
+			for (const event of hostEventNamesForMode(entry.mode)) {
+				await client.listen(event, (payload) => {
+					if (!window.isDestroyed())
+						window.webContents.send("host:event", { event, payload });
+				});
+			}
+		},
+		pickFolder: async (previous) => {
+			const result = await dialog.showOpenDialog(window, {
+				title: "Choose Asheron's Call assets",
+				properties: ["openDirectory"],
+				...(previous === null ? {} : { defaultPath: previous }),
+			});
+			if (result.canceled) return null;
+			const [path] = result.filePaths;
+			if (path === undefined)
+				throw new Error("Folder picker returned no selection");
+			return path;
+		},
 	});
-	await client.connect();
-	connected = true;
-	for (const event of hostEventNamesForMode(mode)) {
-		await client.listen(event, (payload) => {
-			if (!window.isDestroyed())
-				window.webContents.send("host:event", { event, payload });
-		});
-	}
-	hostReady.resolve(client);
+	startup.listen((snapshot) => {
+		if (!window.isDestroyed())
+			window.webContents.send("content:state", snapshot);
+	});
+	ipcMain.handle("content:snapshot", (event) => {
+		requireApplicationFrame(event, window);
+		return startup.snapshot;
+	});
+	ipcMain.handle("content:choose", (event) => {
+		requireApplicationFrame(event, window);
+		return startup.choose();
+	});
+	ipcMain.handle("content:retry", (event) => {
+		requireApplicationFrame(event, window);
+		return startup.retry();
+	});
+	ipcMain.handle("content:quit", (event) => {
+		requireApplicationFrame(event, window);
+		app.quit();
+	});
+	return startup;
 }
 
 function isHostCommandName(
@@ -228,7 +295,7 @@ function installIpcBridge(
 			);
 		if (mode !== "client" || startup === undefined)
 			throw new Error("Client startup is unavailable in this application mode");
-		const client = await hostReady.promise;
+		const client = requireActiveHost();
 		if (quitting)
 			throw new Error("Client launch was cancelled by application close.");
 		// Memoize the sole launch attempt; credentials remain private to the Electron main process.
@@ -253,7 +320,7 @@ function installIpcBridge(
 		const args = "args" in request ? request.args : undefined;
 		if (!isHostCommandArguments(args))
 			throw new Error("host command arguments must be an object");
-		const client = await hostReady.promise;
+		const client = requireActiveHost();
 		return client.invoke(request.command, args);
 	});
 }
@@ -601,6 +668,10 @@ app.whenReady().then(async () => {
 		const close = new ClientWindowClose({
 			deadlineMs: CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
 			prepareRenderer: () => {
+				if (contentStartup?.activeHost === null) {
+					close.acceptPreparation({ kind: "prepared" });
+					return;
+				}
 				if (
 					window.isDestroyed() ||
 					window.webContents.isDestroyed() ||
@@ -613,7 +684,7 @@ app.whenReady().then(async () => {
 			},
 			shutdownNative: async () => {
 				const results = await Promise.allSettled([
-					hostClient?.shutdown() ?? Promise.resolve(),
+					contentStartup?.close() ?? Promise.resolve(),
 					flushClientSettings?.() ?? Promise.resolve(),
 					visualCache?.close() ?? Promise.resolve(),
 				]);
@@ -662,11 +733,11 @@ app.whenReady().then(async () => {
 		});
 	}
 	installIpcBridge(window, entry.mode, entry.clientStartup);
+	contentStartup = installContentStartup(window, entry);
 	try {
-		await startHost(window, entry.mode, entry.ignoreWorldMapCache);
 		await loadEntry(window, entry.path, entry.mode);
+		await contentStartup.start();
 	} catch (error) {
-		hostReady.reject(error);
 		reportFatalError("Holtburger 3D failed to start", error);
 	}
 });
@@ -685,7 +756,7 @@ app.on("before-quit", (event) => {
 	}
 	if (
 		quitting ||
-		(!hostClient &&
+		(!contentStartup &&
 			flushClientSettings === undefined &&
 			visualCache === undefined)
 	)
@@ -693,7 +764,7 @@ app.on("before-quit", (event) => {
 	quitting = true;
 	event.preventDefault();
 	Promise.allSettled([
-		hostClient?.shutdown() ?? Promise.resolve(),
+		contentStartup?.close() ?? Promise.resolve(),
 		flushClientSettings?.() ?? Promise.resolve(),
 		visualCache?.close() ?? Promise.resolve(),
 	])

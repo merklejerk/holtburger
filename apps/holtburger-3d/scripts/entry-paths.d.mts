@@ -3,6 +3,18 @@ export interface EntryPath {
 	readonly title: string;
 }
 
+export function extractContentArguments(
+	args: readonly string[],
+	invocationDirectory: string,
+): {
+	contentPath: string | null;
+	/** Suppress default discovery for this desktop launch. */
+	noContentSearch: boolean;
+	/** Forget the saved location before desktop startup. */
+	clearContent: boolean;
+	args: string[];
+};
+
 export function buildEntryPath(
 	basePath: string,
 	args: readonly string[],

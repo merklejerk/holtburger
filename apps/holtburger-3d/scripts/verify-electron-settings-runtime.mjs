@@ -22,3 +22,14 @@ await import(
 	new URL("../dist-electron/electron/client-window-close.js", import.meta.url)
 		.href
 );
+
+// Startup imports app-local codecs from native code; verify their emitted ESM graph too.
+await import(
+	new URL("../dist-electron/electron/content-startup.js", import.meta.url).href
+);
+await import(
+	new URL(
+		"../dist-electron/electron/content-preference-store.js",
+		import.meta.url,
+	).href
+);

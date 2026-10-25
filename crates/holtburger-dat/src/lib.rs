@@ -23,17 +23,58 @@ use std::sync::Arc;
 pub const DAT_HEADER_OFFSET: u64 = 0x140;
 pub const DIRECTORY_NODE_SIZE: usize = 1716;
 pub const DAT_MAGIC: u32 = 0x0000_5442;
+/// Retail portal and language archive sector size, including each sector's link word.
+pub const DAT_PORTAL_BLOCK_SIZE: u32 = 1024;
+/// Retail cell archive sector size, including each sector's link word.
+pub const DAT_CELL_BLOCK_SIZE: u32 = 256;
+/// Retail high-resolution portal subset (`CLCache::LoadHighResDat`, acclient.c:283607).
+pub const DAT_HIGHRES_SUBSET: u32 = 0x6946_6948;
 pub const RESOURCE_NAMESPACE_LEN: usize = 32;
 pub const EOR_PORTAL_NAMESPACE: &str = "eor/portal";
 pub const EOR_CELL_NAMESPACE: &str = "eor/cell";
 pub const EOR_LANGUAGE_NAMESPACE: &str = "eor/language";
 pub const HOLTBURGER_CORE_NAMESPACE: &str = "holtburger/core";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RetailDatKind {
+    /// Base portal records (dataset 1, subset 0).
     Portal,
+    /// Optional portal resources in the high-resolution subset of dataset 1.
+    HighResolutionPortal,
+    /// Region cell records (dataset 2).
     Cell,
+    /// Localized reference data (dataset 3).
     Language,
+}
+
+impl std::fmt::Display for RetailDatKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Portal => "base portal",
+            Self::HighResolutionPortal => "high-resolution portal",
+            Self::Cell => "cell",
+            Self::Language => "language",
+        })
+    }
+}
+
+impl RetailDatKind {
+    /// Namespace is determined by the validated retail layout, not the filename.
+    pub const fn namespace(self) -> &'static str {
+        match self {
+            Self::Portal | Self::HighResolutionPortal => EOR_PORTAL_NAMESPACE,
+            Self::Cell => EOR_CELL_NAMESPACE,
+            Self::Language => EOR_LANGUAGE_NAMESPACE,
+        }
+    }
+}
+
+/// Retail identification and its opened database are returned as one validated result.
+pub struct RetailDatArchive {
+    /// Identified layout, available without revalidating the same header.
+    pub kind: RetailDatKind,
+    /// Opened archive with its directory already loaded.
+    pub database: DatDatabase,
 }
 
 #[derive(Debug, Clone)]
@@ -193,21 +234,22 @@ pub struct DatHeader {
 
 impl DatHeader {
     pub fn retail_kind(&self) -> Option<RetailDatKind> {
-        match (self.magic, self.block_size, self.dataset) {
-            (DAT_MAGIC, 1024, 1) => Some(RetailDatKind::Portal),
-            (DAT_MAGIC, 256, 2) => Some(RetailDatKind::Cell),
-            (DAT_MAGIC, 1024, 3) => Some(RetailDatKind::Language),
+        // Sector links need room for a link word and payload. The header supplies the
+        // sector size; dataset/subset identify the retail role independently of it.
+        if self.magic != DAT_MAGIC || self.block_size <= size_of::<u32>() as u32 {
+            return None;
+        }
+        match (self.dataset, self.subset) {
+            (1, 0) => Some(RetailDatKind::Portal),
+            (1, DAT_HIGHRES_SUBSET) => Some(RetailDatKind::HighResolutionPortal),
+            (2, _) => Some(RetailDatKind::Cell),
+            (3, _) => Some(RetailDatKind::Language),
             _ => None,
         }
     }
 
     pub fn retail_namespace_hint(&self) -> Option<&'static str> {
-        match self.retail_kind() {
-            Some(RetailDatKind::Portal) => Some(EOR_PORTAL_NAMESPACE),
-            Some(RetailDatKind::Cell) => Some(EOR_CELL_NAMESPACE),
-            Some(RetailDatKind::Language) => Some(EOR_LANGUAGE_NAMESPACE),
-            None => None,
-        }
+        self.retail_kind().map(RetailDatKind::namespace)
     }
 }
 
@@ -239,7 +281,29 @@ pub struct DatDatabase {
 }
 
 impl DatDatabase {
+    /// Filesystem revision captured from the same handle used for resource reads.
+    pub fn source_metadata(&self) -> Result<std::fs::Metadata> {
+        Ok(self.file.metadata()?)
+    }
+
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let mut db = Self::open_header(path)?;
+        db.read_directory()?;
+        Ok(db)
+    }
+
+    /// Identifies a retail layout before interpreting sector links in its directory.
+    pub fn open_retail<P: AsRef<Path>>(path: P) -> Result<RetailDatArchive> {
+        let mut db = Self::open_header(path)?;
+        let kind = db
+            .header
+            .retail_kind()
+            .ok_or_else(|| DatError::InvalidMagic("unrecognized retail DAT header".to_owned()))?;
+        db.read_directory()?;
+        Ok(RetailDatArchive { kind, database: db })
+    }
+
+    fn open_header<P: AsRef<Path>>(path: P) -> Result<Self> {
         let mut file = File::open(&path).map_err(|e| DatError::PathError {
             path: path.as_ref().to_path_buf(),
             source: e,
@@ -248,15 +312,11 @@ impl DatDatabase {
         file.seek(SeekFrom::Start(DAT_HEADER_OFFSET))?;
         let header = DatHeader::read(&mut file)?;
 
-        let mut db = DatDatabase {
+        Ok(DatDatabase {
             header,
             files: HashMap::new(),
             file,
-        };
-
-        db.read_directory()?;
-
-        Ok(db)
+        })
     }
 
     fn read_directory(&mut self) -> Result<()> {
@@ -697,8 +757,8 @@ mod tests {
     }
 
     #[test]
-    fn test_dat_header_retail_namespace_hint_for_portal() {
-        let header = DatHeader {
+    fn test_dat_header_retail_portal_and_highres_roles() {
+        let mut header = DatHeader {
             magic: DAT_MAGIC,
             block_size: 1024,
             file_size: 0,
@@ -719,6 +779,19 @@ mod tests {
         };
 
         assert_eq!(header.retail_namespace_hint(), Some(EOR_PORTAL_NAMESPACE));
+        assert_eq!(header.retail_kind(), Some(RetailDatKind::Portal));
+        header.subset = DAT_HIGHRES_SUBSET;
+        assert_eq!(
+            header.retail_kind(),
+            Some(RetailDatKind::HighResolutionPortal)
+        );
+        assert_eq!(header.retail_namespace_hint(), Some(EOR_PORTAL_NAMESPACE));
+        header.subset = DAT_HIGHRES_SUBSET + 1;
+        assert_eq!(header.retail_kind(), None);
+        header.subset = 0;
+        header.block_size = size_of::<u32>() as u32;
+        assert_eq!(header.retail_kind(), None);
+        header.block_size = DAT_PORTAL_BLOCK_SIZE * 2;
         assert_eq!(header.retail_kind(), Some(RetailDatKind::Portal));
     }
 

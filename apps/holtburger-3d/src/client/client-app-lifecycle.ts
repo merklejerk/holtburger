@@ -1,3 +1,4 @@
+import type { ClientLoadingPageState } from "./client-loading-page";
 import { clientFailureDiagnostic as errorMessage } from "./client-close-contract";
 import {
 	abortError,
@@ -11,32 +12,13 @@ import type {
 	ClientLifecycle,
 } from "./client-host-contract";
 
-/** App-owned page content; only recoverable failures carry a retry action. */
-export type ClientLoadingPageState =
-	| {
-			readonly kind: "pending";
-			/** Frontend-owned activity distinguishes loading, character return, and session shutdown. */
-			readonly activity: "connection" | "scene" | "disconnect" | "return";
-			readonly title: string;
-			readonly message: string;
-	  }
-	| {
-			/** Completed session outcome; never animates as pending work. */
-			readonly kind: "ended";
-			readonly failed: boolean;
-			readonly title: string;
-			readonly message: string;
-			/** Full failure context, absent for an intentional disconnect. */
-			readonly details: string | null;
-	  }
-	| {
-			readonly kind: "failed";
-			readonly title: string;
-			readonly message: string;
-			/** Original error retained for diagnosis without replacing the explanation. */
-			readonly details: string;
+/** Session recovery carries an admitted retry action in addition to display-only page content. */
+type ClientSessionLoadingPageState =
+	| Exclude<ClientLoadingPageState, { kind: "failed" }>
+	| (Extract<ClientLoadingPageState, { kind: "failed" }> & {
+			/** Only the session/scene owner can admit a retry. */
 			readonly retry: (() => void) | null;
-	  };
+	  });
 
 /** Authority phases plus app-owned roster selection and explicit shutdown completion. */
 export type ClientAppPhase =
@@ -575,7 +557,10 @@ export function clientAppPage(
 				{ kind: "character-selection" }
 			>;
 	  }
-	| { readonly kind: "loading"; readonly content: ClientLoadingPageState } {
+	| {
+			readonly kind: "loading";
+			readonly content: ClientSessionLoadingPageState;
+	  } {
 	if (state.admission.page.kind !== "loading") return state.admission.page;
 	return { kind: "loading", content: loadingPage(state, context, retry) };
 }
@@ -587,7 +572,7 @@ function loadingPage(
 		readonly playerName: string | null;
 	},
 	retry: () => void,
-): ClientLoadingPageState {
+): ClientSessionLoadingPageState {
 	const lifecycle = state.phase;
 	if (state.operation === "quit")
 		return {

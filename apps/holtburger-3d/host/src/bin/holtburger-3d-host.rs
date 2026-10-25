@@ -6,14 +6,14 @@ async fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn"))
         .target(env_logger::Target::Stderr)
         .init();
-    let mode = match holtburger_3d_host::runtime::HostMode::parse_args(std::env::args().skip(1)) {
+    let launch = match holtburger_3d_host::host_mode::HostLaunch::parse(std::env::args().skip(1)) {
         Ok(mode) => mode,
         Err(error) => {
             eprintln!("holtburger-3d-host argument error: {error:#}");
             std::process::exit(2);
         }
     };
-    if let Err(error) = holtburger_3d_host::protocol::run_stdio(mode).await {
+    if let Err(error) = holtburger_3d_host::protocol::run_stdio(launch).await {
         eprintln!("holtburger-3d-host failed: {error:#}");
         std::process::exit(1);
     }

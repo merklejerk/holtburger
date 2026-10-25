@@ -140,6 +140,13 @@ export const HELP_COMMAND: ClientCommandDefinition = {
 };
 
 export const LOCAL_COMMANDS = {
+	assets: {
+		...invocation(["assets"], ""),
+		description: "Print the active asset location.",
+		details: [
+			"Shows the location selected for this launch, including temporary command-line overrides. This command does not change asset sources.",
+		],
+	},
 	waypoint: {
 		...invocation(["waypoint", "wp"], "[coordinates|clear]"),
 		description: "Show, set, or clear your map waypoint.",

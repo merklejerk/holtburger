@@ -22,7 +22,7 @@ use crate::shared_host_content::{
 };
 
 /// Current sidecar protocol version.
-pub const PROTOCOL_VERSION: u16 = 1;
+pub const PROTOCOL_VERSION: u16 = 2;
 /// Maximum encoded MessagePack payload, excluding the four-byte length prefix.
 pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 /// Bounded writer queue. Producers block at capacity; no event is silently discarded.
@@ -276,6 +276,17 @@ pub enum ProtocolFrame {
         host_name: String,
         host_version: String,
         host_mode: HostMode,
+        /// Canonical selected installation identity for native preferences.
+        content_location: std::path::PathBuf,
+    },
+    /// Terminal content initialization failure, valid before the handshake.
+    StartupFailed {
+        protocol_version: u16,
+        failure: crate::content_failure::ContentFailure,
+    },
+    /// A necessary runtime load failed; native code records recovery independently of UI.
+    ContentFailed {
+        failure: crate::content_failure::ContentFailure,
     },
     Response {
         id: u64,
@@ -748,7 +759,8 @@ impl Drop for MapStopGuard {
 }
 
 /// Runs the framed sidecar protocol over stdin/stdout.
-pub async fn run_stdio(mode: HostMode) -> anyhow::Result<()> {
+pub async fn run_stdio(launch: crate::host_mode::HostLaunch) -> anyhow::Result<()> {
+    let mode = launch.mode;
     let (sender, receiver) = mpsc::sync_channel(WRITER_QUEUE_CAPACITY);
     let writer_thread = thread::spawn(move || -> anyhow::Result<()> {
         let stdout = io::stdout();
@@ -759,11 +771,47 @@ pub async fn run_stdio(mode: HostMode) -> anyhow::Result<()> {
         Ok(())
     });
     let event_sink = Arc::new(StdioEventSink::new(sender.clone()));
-    let runtime = Arc::new(HostRuntime::discover(
-        mode,
-        Arc::clone(&event_sink) as Arc<dyn ClientEventSink>,
-        event_sink as Arc<dyn ExplorerEventSink>,
-    )?);
+    let initialize = || -> anyhow::Result<_> {
+        let selection = match launch.content {
+            crate::host_mode::HostContentSelection::Explicit(path) => {
+                holtburger_content::ResolvedContent::open(path)?
+            }
+            crate::host_mode::HostContentSelection::Automatic(root) => {
+                holtburger_content::ResolvedContent::discover(root)?
+            }
+        };
+        let mut content = crate::shared_host_content::SharedHostContent::from_repository(
+            Arc::new(selection.repository),
+        )?;
+        content.failures = crate::content_failure::ContentFailureReporter::Stdio(sender.clone());
+        let runtime = HostRuntime::from_content(
+            mode,
+            content,
+            Arc::clone(&event_sink) as Arc<dyn ClientEventSink>,
+            Arc::clone(&event_sink) as Arc<dyn ExplorerEventSink>,
+        )?;
+        Ok((Arc::new(runtime), selection.location))
+    };
+    let (runtime, content_location) = match initialize() {
+        Ok(initialized) => initialized,
+        Err(error) => {
+            if let Some(frame) =
+                crate::content_failure::ContentFailureReporter::startup_frame(&error)
+            {
+                sender
+                    .send(frame)
+                    .context("sidecar writer stopped before startup failure")?;
+            }
+            // Dropping every sender and joining guarantees the terminal diagnostic is flushed.
+            drop(event_sink);
+            drop(sender);
+            writer_thread
+                .join()
+                .map_err(|_| anyhow::anyhow!("sidecar writer thread panicked"))??;
+            return Err(error);
+        }
+    };
+    drop(event_sink);
     let _map_stop = MapStopGuard(Arc::clone(&runtime.content().world_map));
     sender
         .send(ProtocolFrame::Handshake {
@@ -771,6 +819,7 @@ pub async fn run_stdio(mode: HostMode) -> anyhow::Result<()> {
             host_name: "holtburger-3d-host".to_string(),
             host_version: env!("CARGO_PKG_VERSION").to_string(),
             host_mode: mode,
+            content_location,
         })
         .context("sidecar writer stopped before handshake")?;
 

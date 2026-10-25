@@ -112,7 +112,6 @@
 		}
 		.pregame-build {
 			margin-left: auto;
-			margin-right: calc(12px - clamp(20px, 4vw, 64px));
 			text-align: right;
 			overflow-wrap: anywhere;
 		}

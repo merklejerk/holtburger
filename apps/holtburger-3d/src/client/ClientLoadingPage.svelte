@@ -1,23 +1,38 @@
 <script lang="ts">
-	import { requestElectronClientClose } from "../lib/host/electron-host-transport";
-	import type { ClientLoadingPageState } from "./client-app-lifecycle";
+	import type { Snippet } from "svelte";
+	import type { ClientLoadingPageState } from "./client-loading-page";
 	import type { ClientToast } from "./client-toast-center";
 	import { CLIENT_LOADING_TUNING } from "./client-tuning";
 	import ClientPregameScreen from "./ClientPregameScreen.svelte";
 	import LoadingPortal from "../assets/icons/pregame-loading-portal.svg?component";
 	import DisconnectIcon from "../assets/icons/pregame-disconnect.svg?component";
 	import WarningIcon from "../assets/icons/pregame-warning.svg?component";
-	import RetryIcon from "../assets/icons/hud-reset.svg?component";
 
 	interface Props {
-		/** Connection and scene admission policy is resolved by the app lifecycle owner. */
+		/** Asset/session admission is resolved by the caller; this page only presents progress. */
 		readonly state: ClientLoadingPageState;
+		/** Selected asset source when known; discovery does not invent a location. */
+		readonly contentLocation: string | null;
 		/** Notices share ordinary loading; character return retains its own progress text. */
 		readonly toast: ClientToast | null;
-		/** Null while no session exists or exit is already underway. */
-		readonly onDisconnect: (() => Promise<void>) | null;
+		/** Peripheral actions belong to the active lifecycle owner. */
+		readonly footer: Snippet;
+		/** Recovery/session actions use the same pregame control composition. */
+		readonly actions: Snippet;
+		/** Optional asset-location guidance or temporary-selection information. */
+		readonly children?: Snippet;
 	}
-	const { state: page, toast, onDisconnect }: Props = $props();
+	const {
+		state: page,
+		contentLocation,
+		toast,
+		footer: footerActions,
+		actions,
+		children,
+	}: Props = $props();
+	// Recovery can cover a still-mounted session loading page; each label owns its identity.
+	const id = $props.id();
+	const titleId = `${id}-loading-title`;
 	const returning = $derived(
 		page.kind === "pending" && page.activity === "return",
 	);
@@ -113,15 +128,10 @@
 	backdrop={false}
 >
 	{#snippet footer()}
-		{#if page.kind !== "ended"}
-			<button
-				class="pregame-action pregame-quiet ui-button"
-				type="button"
-				disabled={onDisconnect === null}
-				onclick={() => void onDisconnect?.()}
-			>
-				<span class="pregame-icon" aria-hidden="true"><DisconnectIcon /></span>
-				Disconnect</button
+		{@render footerActions()}
+		{#if contentLocation !== null}
+			<span class="loading-assets" title={contentLocation}
+				>Assets: {contentLocation}</span
 			>
 		{/if}
 	{/snippet}
@@ -130,27 +140,32 @@
 			class="loading-content"
 			class:ui-panel={failed}
 			class:ui-body={failed}
-			aria-labelledby="client-loading-title"
+			aria-labelledby={titleId}
 		>
-			{#if !returning}
-				<div
-					class="loading-status-icon"
-					class:scene-loading={page.kind === "pending"}
-					class:ui-error={failed}
-					aria-hidden="true"
-				>
-					{#if page.kind === "pending"}<LoadingPortal
-						/>{:else if page.kind === "ended" && !page.failed}<DisconnectIcon
-						/>{:else}<WarningIcon />{/if}
+			{#if page.kind === "pending"}
+				{#if !returning}
+					<div class="loading-status-icon scene-loading" aria-hidden="true">
+						<LoadingPortal />
+					</div>
+				{/if}
+				<h1 id={titleId} class="sr-only">{page.title}</h1>
+			{:else}
+				<div class="loading-heading">
+					<span
+						class="loading-heading-icon"
+						class:loading-error={failed}
+						aria-hidden="true"
+					>
+						{#if page.kind === "ended" && !page.failed}<DisconnectIcon
+							/>{:else}<WarningIcon />{/if}
+					</span>
+					<h1 id={titleId}>{page.title}</h1>
 				</div>
 			{/if}
-			<h1 id="client-loading-title" class:sr-only={page.kind === "pending"}>
-				{page.title}
-			</h1>
 			<p
 				class="loading-message"
 				class:loading-flavor={status.kind === "playful"}
-				class:ui-error={status.kind === "failed"}
+				class:loading-error={status.kind === "failed"}
 				class:ui-warning={status.kind === "warning"}
 				role={status.kind === "failed" || status.kind === "warning"
 					? "alert"
@@ -161,6 +176,7 @@
 			>
 				{status.message}
 			</p>
+			{@render children?.()}
 			{#if details !== null}
 				{#key phaseKey}
 					<details class="loading-details ui-disclosure ui-disclosure-section">
@@ -169,26 +185,7 @@
 					</details>
 				{/key}
 			{/if}
-			{#if page.kind === "ended"}
-				<button
-					class="pregame-primary pregame-action ui-button"
-					type="button"
-					onclick={() =>
-						void requestElectronClientClose().catch((error) =>
-							console.error(error),
-						)}>Quit application</button
-				>
-			{/if}
-			{#if page.kind === "failed" && page.retry !== null}
-				<button
-					class="pregame-action ui-button"
-					type="button"
-					onclick={page.retry}
-				>
-					<span class="pregame-icon" aria-hidden="true"><RetryIcon /></span>
-					Try again</button
-				>
-			{/if}
+			{@render actions()}
 		</section>
 	</div>
 </ClientPregameScreen>
@@ -211,6 +208,41 @@
 		}
 		.loading-content > p {
 			margin: 0;
+		}
+		.loading-heading {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 10px;
+			font-size: calc(var(--ui-font-size-heading-1) * var(--ui-text-scale));
+		}
+		.loading-heading h1 {
+			margin: 0;
+			font-size: inherit;
+		}
+		.loading-heading-icon {
+			flex: none;
+			width: 1em;
+			height: 1em;
+		}
+		.loading-heading-icon > :global(svg) {
+			display: block;
+			width: 100%;
+			height: 100%;
+		}
+		.loading-error {
+			color: var(--ui-color-danger);
+		}
+		.loading-assets {
+			flex: 1;
+			min-width: 0;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
+			color: var(--ui-color-muted);
+			font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
+			user-select: text;
+			text-align: center;
 		}
 		.loading-status-icon {
 			position: relative;

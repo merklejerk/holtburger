@@ -2,7 +2,7 @@
 	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
 	import { type WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 
-	import { provideAppInputPolicy } from "../lib/input/app-input-policy-context";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { APP_INPUT } from "../lib/input/app-input";
 	import { onMount } from "svelte";
 	import FrameMetricsOverlay, {
@@ -154,8 +154,7 @@
 	} from "../lib/game/renderer/entity-shadow-policy";
 
 	let canvasElement: HTMLCanvasElement | null = $state(null);
-	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
-	onMount(() => keyboard.mount(document));
+	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	/** Scene activation owns one blocker independently of modal/UI blockers. */
 	let releaseSceneInput: (() => void) | null = null;
 	function setSceneInputBlocked(blocked: boolean): void {

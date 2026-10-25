@@ -49,6 +49,26 @@ contextBridge.exposeInMainWorld("holtburgerHost", {
 	},
 });
 
+contextBridge.exposeInMainWorld("holtburgerContent", {
+	snapshot(): Promise<unknown> {
+		return ipcRenderer.invoke("content:snapshot");
+	},
+	choose(): Promise<void> {
+		return ipcRenderer.invoke("content:choose");
+	},
+	retry(): Promise<void> {
+		return ipcRenderer.invoke("content:retry");
+	},
+	quit(): Promise<void> {
+		return ipcRenderer.invoke("content:quit");
+	},
+	listen(handler: (snapshot: unknown) => void): () => void {
+		const listener = (_event: unknown, snapshot: unknown) => handler(snapshot);
+		ipcRenderer.on("content:state", listener);
+		return () => ipcRenderer.removeListener("content:state", listener);
+	},
+});
+
 if (process.argv.includes("--holtburger-mode=client")) {
 	// Preload is ready before Svelte: retain an early native close request until the app registers.
 	type PreparationHandler = () => Promise<unknown>;

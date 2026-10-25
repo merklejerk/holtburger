@@ -36,6 +36,7 @@ const MAX_HEADER_BYTES: usize = 32 * 1024;
 
 #[derive(Debug)]
 struct Args {
+    content: holtburger_3d_host::host_mode::HostContentSelection,
     host: String,
     port: u16,
 }
@@ -146,7 +147,7 @@ struct DevHostState {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = parse_args()?;
-    let state = Arc::new(discover_host_state()?);
+    let state = Arc::new(discover_host_state(args.content)?);
     let listener = TcpListener::bind((args.host.as_str(), args.port)).await?;
     let address = listener.local_addr()?;
     println!(
@@ -725,8 +726,17 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
     }
 }
 
-fn discover_host_state() -> anyhow::Result<DevHostState> {
-    let repository = Arc::new(ContentRepository::discover(None)?);
+fn discover_host_state(
+    selection: holtburger_3d_host::host_mode::HostContentSelection,
+) -> anyhow::Result<DevHostState> {
+    use holtburger_3d_host::host_mode::HostContentSelection;
+    let resolved = match selection {
+        HostContentSelection::Explicit(path) => holtburger_content::ResolvedContent::open(path)?,
+        HostContentSelection::Automatic(root) => {
+            holtburger_content::ResolvedContent::discover(root)?
+        }
+    };
+    let repository = Arc::new(resolved.repository);
     let world_map = holtburger_3d_host::world_map::WorldMapService::new(
         Arc::clone(&repository),
         std::env::var_os(holtburger_3d_host::world_map::CACHE_ENV).map(std::path::PathBuf::from),
@@ -904,18 +914,33 @@ fn parse_args() -> anyhow::Result<Args> {
     let mut args = Args {
         host: DEFAULT_HOST.to_owned(),
         port: 0,
+        content: holtburger_3d_host::host_mode::HostContentSelection::Automatic(
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../dats"),
+        ),
     };
+    let mut content_args = vec!["--mode=explorer".to_owned()];
     let mut values = std::env::args().skip(1);
     while let Some(value) = values.next() {
         match value.as_str() {
+            "--content" | "--discovery-root" => {
+                let path = values
+                    .next()
+                    .with_context(|| format!("{value} requires a path"))?;
+                content_args.extend([value, path]);
+            }
             "--host" => args.host = values.next().context("--host requires a value")?,
             "--port" => args.port = values.next().context("--port requires a value")?.parse()?,
             "--help" | "-h" => {
-                println!("Usage: dev_landblock_content_host [--host <host>] [--port <port>]");
+                println!(
+                    "Usage: dev_landblock_content_host [--host <host>] [--port <port>] [--content <path> | --discovery-root <path>]"
+                );
                 return Ok(args);
             }
             _ => anyhow::bail!("unsupported argument {value}"),
         }
+    }
+    if content_args.len() > 1 {
+        args.content = holtburger_3d_host::host_mode::HostLaunch::parse(content_args)?.content;
     }
     Ok(args)
 }

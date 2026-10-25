@@ -39,6 +39,46 @@ function isKnownEntry(value) {
 	return Object.hasOwn(ENTRY_PATHS, value);
 }
 
+/** Consume shared content selection before entry, client, or renderer argument parsing. */
+export function extractContentArguments(args, invocationDirectory) {
+	let contentPath = null;
+	const flags = new Set();
+	const remaining = [];
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
+		if (argument === "--no-content-search" || argument === "--clear-content") {
+			if (flags.has(argument))
+				throw new Error(`${argument} was specified more than once`);
+			flags.add(argument);
+			continue;
+		}
+		if (
+			argument.startsWith("--no-content-search=") ||
+			argument.startsWith("--clear-content=")
+		)
+			throw new Error(`${argument.split("=", 1)[0]} does not take a value`);
+		if (argument !== "--content" && !argument.startsWith("--content=")) {
+			remaining.push(argument);
+			continue;
+		}
+		if (contentPath !== null)
+			throw new Error("--content was specified more than once");
+		const value =
+			argument === "--content"
+				? args[++index]
+				: argument.slice("--content=".length);
+		if (value === undefined || value.length === 0 || value.startsWith("--"))
+			throw new Error("--content requires a nonempty path");
+		contentPath = resolve(invocationDirectory, value);
+	}
+	return {
+		contentPath,
+		noContentSearch: flags.has("--no-content-search"),
+		clearContent: flags.has("--clear-content"),
+		args: remaining,
+	};
+}
+
 export function buildEntryPath(basePath, args) {
 	const params = new URLSearchParams();
 

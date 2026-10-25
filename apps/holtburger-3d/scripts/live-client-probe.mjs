@@ -2,7 +2,8 @@
 
 import { probeLiveSoulEmotes } from "./live-soul-emote-probe.mjs";
 import { spawn } from "node:child_process";
-import { constants, existsSync } from "node:fs";
+import { extractContentArguments } from "./entry-paths.mjs";
+import { constants } from "node:fs";
 import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -531,11 +532,22 @@ async function main() {
 	}
 	await access(hostPath, constants.X_OK);
 	const environment = { ...process.env };
-	if (environment.HOLTBURGER_DATS === undefined) {
-		const workspaceDats = join(workspaceRoot, "dats");
-		if (existsSync(workspaceDats)) environment.HOLTBURGER_DATS = workspaceDats;
-	}
-	const child = spawn(hostPath, ["--mode=client"], {
+	delete environment.HOLTBURGER_DATS;
+	const content = extractContentArguments(
+		process.argv.slice(2),
+		process.env.INIT_CWD ?? process.cwd(),
+	);
+	if (content.noContentSearch || content.clearContent)
+		throw new Error(
+			"--no-content-search and --clear-content apply only to desktop launches",
+		);
+	if (content.args.length > 0)
+		throw new Error(`Unsupported probe arguments: ${content.args.join(" ")}`);
+	const selection =
+		content.contentPath === null
+			? ["--discovery-root", join(workspaceRoot, "dats")]
+			: ["--content", content.contentPath];
+	const child = spawn(hostPath, ["--mode=client", ...selection], {
 		env: environment,
 		stdio: "pipe",
 		windowsHide: true,

@@ -286,12 +286,21 @@ impl ContentRepository {
         output_format: TexturePixelFormat,
     ) -> Result<ResolvedSurfaceTexturePixels> {
         let dependency = read_surface_texture_dependency(self, surface_texture_id)?;
-        let render_surface = dependency.render_surfaces.first().with_context(|| {
-            format!(
-                "SurfaceTexture 0x{surface_texture_id:08X} has no available RenderSurface levels"
-            )
+        let render_surface = dependency.render_surfaces.first().ok_or_else(|| crate::ContentResourceError {
+            kind: crate::ContentResourceErrorKind::Invalid,
+            namespace: EOR_PORTAL_NAMESPACE.to_owned(),
+            file_id: surface_texture_id,
+            source_description: self.source_description().map(str::to_owned),
+            source: anyhow!("SurfaceTexture 0x{surface_texture_id:08X} has no available RenderSurface levels"),
         })?;
-        let pixels = decode_render_surface_pixels(&render_surface.render_surface, output_format)?;
+        let pixels = decode_render_surface_pixels(&render_surface.render_surface, output_format)
+            .map_err(|source| crate::ContentResourceError {
+                kind: crate::ContentResourceErrorKind::Invalid,
+                namespace: EOR_PORTAL_NAMESPACE.to_owned(),
+                file_id: render_surface.render_surface.id,
+                source_description: self.source_description().map(str::to_owned),
+                source,
+            })?;
         Ok(ResolvedSurfaceTexturePixels {
             surface_texture_id: dependency.surface_texture.id,
             render_surface_id: render_surface.render_surface.id,
@@ -309,7 +318,8 @@ impl ContentRepository {
         let resource = self
             .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id))
             .with_context(|| format!("failed to read GfxObj 0x{gfx_obj_id:08X}"))?;
-        let gfx_obj = GfxObj::unpack(&mut Cursor::new(resource.bytes))
+        let gfx_obj = resource
+            .decode(|bytes| Ok(GfxObj::unpack(&mut Cursor::new(bytes))?))
             .with_context(|| format!("failed to parse GfxObj 0x{gfx_obj_id:08X}"))?;
 
         self.resolve_material_slots(gfx_obj.surfaces)
@@ -323,7 +333,8 @@ impl ContentRepository {
         let resource = self
             .read_resource(ResourceKey::new(EOR_CELL_NAMESPACE, env_cell_id))
             .with_context(|| format!("failed to read EnvCell 0x{env_cell_id:08X}"))?;
-        let env_cell = EnvCell::unpack(&mut Cursor::new(resource.bytes))
+        let env_cell = resource
+            .decode(|bytes| Ok(EnvCell::unpack(&mut Cursor::new(bytes))?))
             .with_context(|| format!("failed to parse EnvCell 0x{env_cell_id:08X}"))?;
 
         self.resolve_material_slots(
@@ -471,7 +482,8 @@ impl ContentRepository {
         let resource = self
             .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, REGION_DESC_FILE_ID))
             .with_context(|| format!("failed to read RegionDesc 0x{REGION_DESC_FILE_ID:08X}"))?;
-        let region = RegionDesc::unpack(&resource.bytes)
+        let region = resource
+            .decode(|bytes| Ok(RegionDesc::unpack(&bytes)?))
             .with_context(|| format!("failed to parse RegionDesc 0x{REGION_DESC_FILE_ID:08X}"))?;
         if region.region_number != region_number {
             anyhow::bail!(
@@ -491,7 +503,8 @@ impl ContentRepository {
         let resource = self
             .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, setup_model_id))
             .with_context(|| format!("failed to read SetupModel 0x{setup_model_id:08X}"))?;
-        let setup_model = SetupModel::unpack(&mut Cursor::new(resource.bytes))
+        let setup_model = resource
+            .decode(|bytes| Ok(SetupModel::unpack(&mut Cursor::new(bytes))?))
             .with_context(|| format!("failed to parse SetupModel 0x{setup_model_id:08X}"))?;
 
         let appearance = input.obj_desc.as_ref();
@@ -590,7 +603,8 @@ impl ContentRepository {
         let resource = self
             .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, gfx_obj_id))
             .with_context(|| format!("failed to read GfxObj 0x{gfx_obj_id:08X}"))?;
-        let gfx_obj = GfxObj::unpack(&mut Cursor::new(resource.bytes))
+        let gfx_obj = resource
+            .decode(|bytes| Ok(GfxObj::unpack(&mut Cursor::new(bytes))?))
             .with_context(|| format!("failed to parse GfxObj 0x{gfx_obj_id:08X}"))?;
 
         gfx_obj
@@ -615,7 +629,8 @@ pub(crate) fn read_clothing_table(
     clothing_table_id: u32,
 ) -> Result<ClothingTable> {
     let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, clothing_table_id)?;
-    ClothingTable::unpack(&mut Cursor::new(resource.bytes))
+    resource
+        .decode(|bytes| Ok(ClothingTable::unpack(&mut Cursor::new(bytes))?))
         .with_context(|| format!("failed to parse ClothingTable 0x{clothing_table_id:08X}"))
 }
 
@@ -623,14 +638,24 @@ fn read_palette_set_for_clothing(
     content: &ContentRepository,
     palette_set_id: u32,
 ) -> Result<PaletteSet, ClothingBuildObjDescError> {
-    let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, palette_set_id)
-        .map_err(|_| ClothingBuildObjDescError::MissingPaletteSet { palette_set_id })?;
-    PaletteSet::unpack(&mut Cursor::new(resource.bytes)).map_err(|error| {
-        ClothingBuildObjDescError::InvalidPaletteSet {
+    let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, palette_set_id).map_err(
+        |error| {
+            if is_missing_or_pruned_resource_error(&error) {
+                ClothingBuildObjDescError::MissingPaletteSet { palette_set_id }
+            } else {
+                ClothingBuildObjDescError::InvalidPaletteSet {
+                    palette_set_id,
+                    message: format!("{error:#}"),
+                }
+            }
+        },
+    )?;
+    resource
+        .decode(|bytes| Ok(PaletteSet::unpack(&mut Cursor::new(bytes))?))
+        .map_err(|error| ClothingBuildObjDescError::InvalidPaletteSet {
             palette_set_id,
-            message: error.to_string(),
-        }
-    })
+            message: format!("{error:#}"),
+        })
 }
 
 fn road_terrain_texture_id(terrain_types: &[ResolvedTerrainMaterialType]) -> u32 {
@@ -673,7 +698,8 @@ pub(crate) fn parse_material_dependency(
 
 fn read_c_surface(content: &ContentRepository, surface_id: u32) -> Result<CSurface> {
     let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, surface_id)?;
-    CSurface::unpack(&mut Cursor::new(resource.bytes))
+    resource
+        .decode(|bytes| Ok(CSurface::unpack(&mut Cursor::new(bytes))?))
         .with_context(|| format!("failed to parse CSurface 0x{surface_id:08X}"))
 }
 
@@ -682,7 +708,8 @@ fn read_surface_texture_dependency(
     surface_texture_id: u32,
 ) -> Result<ParsedSurfaceTextureDependency> {
     let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, surface_texture_id)?;
-    let surface_texture = SurfaceTexture::unpack(&mut Cursor::new(resource.bytes))
+    let surface_texture = resource
+        .decode(|bytes| Ok(SurfaceTexture::unpack(&mut Cursor::new(bytes))?))
         .with_context(|| format!("failed to parse SurfaceTexture 0x{surface_texture_id:08X}"))?;
 
     let mut render_surfaces = Vec::with_capacity(surface_texture.render_surface_ids.len());
@@ -705,7 +732,8 @@ fn read_render_surface_dependency(
     render_surface_id: u32,
 ) -> Result<ParsedRenderSurfaceDependency> {
     let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, render_surface_id)?;
-    let render_surface = RenderSurface::unpack(&mut Cursor::new(resource.bytes))
+    let render_surface = resource
+        .decode(|bytes| Ok(RenderSurface::unpack(&mut Cursor::new(bytes))?))
         .with_context(|| format!("failed to parse RenderSurface 0x{render_surface_id:08X}"))?;
     let default_palette = match render_surface.default_palette_id {
         Some(palette_id) => Some(read_palette(content, palette_id)?),
@@ -720,7 +748,8 @@ fn read_render_surface_dependency(
 
 fn read_palette(content: &ContentRepository, palette_id: u32) -> Result<Palette> {
     let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, palette_id)?;
-    Palette::unpack(&mut Cursor::new(resource.bytes))
+    resource
+        .decode(|bytes| Ok(Palette::unpack(&mut Cursor::new(bytes))?))
         .with_context(|| format!("failed to parse Palette 0x{palette_id:08X}"))
 }
 
@@ -730,21 +759,21 @@ fn read_available_resource(
     file_id: u32,
 ) -> Result<crate::repository::RepositoryResource> {
     let key = ResourceKey::new(namespace, file_id);
-    let metadata = content
-        .resource_metadata(key)
-        .ok_or_else(|| anyhow!("missing resource {namespace}:0x{file_id:08X}"))?;
-    if metadata.is_pruned {
-        return Err(anyhow!("resource {namespace}:0x{file_id:08X} is pruned"));
-    }
-
-    content
-        .read_resource(key)
-        .with_context(|| format!("failed to read {namespace}:0x{file_id:08X}"))
+    content.read_resource(key)?.require_full()
 }
 
 fn is_missing_or_pruned_resource_error(error: &anyhow::Error) -> bool {
-    let detail = format!("{error:#}");
-    detail.contains("missing resource ") || detail.contains(" is pruned")
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<crate::ContentResourceError>()
+            .is_some_and(|resource| {
+                matches!(
+                    resource.kind,
+                    crate::ContentResourceErrorKind::Missing
+                        | crate::ContentResourceErrorKind::Pruned
+                )
+            })
+    })
 }
 
 fn material_recipe_from_dependency(

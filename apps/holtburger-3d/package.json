@@ -1,7 +1,7 @@
 {
 	"name": "holtburger-3d",
 	"private": true,
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"license": "AGPL-3.0-only",
 	"type": "module",
 	"main": "dist-electron/electron/main.js",
@@ -24,6 +24,7 @@
 		"archive:package": "electron-forge make --skip-package",
 		"smoke:sidecar": "node scripts/sidecar-smoke.mjs",
 		"probe:client": "npm run build:electron:main && npm run build:host && node scripts/live-client-probe.mjs",
+		"probe:content": "npm run build:electron:main && cargo build -p holtburger-3d-host --bin holtburger-3d-host && node scripts/content-startup-probe.mjs",
 		"probe:client:settings": "node scripts/client-settings-startup-probe.mjs",
 		"probe:client:ui": "node scripts/live-client-ui-probe.mjs",
 		"probe:explorer:theme": "node scripts/explorer-theme-probe.mjs",

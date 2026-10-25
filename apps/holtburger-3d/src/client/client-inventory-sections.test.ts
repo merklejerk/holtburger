@@ -287,6 +287,7 @@ describe("sortContentsItems", () => {
 				equipLocations: null,
 				consumable: null,
 				useCapability: "direct" as const,
+				cooldown: null,
 				stackCount: null,
 				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },

@@ -15,9 +15,14 @@ export async function probeHudAttention(
 			throw new Error(`Missing attention element: ${selector}`);
 		return node;
 	};
-	const empty: ResolvedEnchantments = { instances: [], groups: [] };
+	const empty: ResolvedEnchantments = {
+		cooldowns: [],
+		instances: [],
+		groups: [],
+	};
 	const key = { spellId: 10, layer: 1 };
 	const baseline: ResolvedEnchantments = {
+		cooldowns: [],
 		instances: [
 			{
 				key,

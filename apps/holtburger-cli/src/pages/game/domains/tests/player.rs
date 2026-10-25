@@ -133,6 +133,7 @@ fn application_snapshot_restores_the_character_after_event_lag() {
                     ..Default::default()
                 }],
                 resolved: holtburger_world::enchantments::ResolvedEnchantments {
+                    cooldowns: Vec::new(),
                     instances: vec![holtburger_world::enchantments::ResolvedEnchantment {
                         key: holtburger_world::enchantments::EnchantmentKey {
                             spell_id: 123,

@@ -1530,7 +1530,7 @@ fn self_vector_update_records_server_facts_without_replacing_runtime_vectors() {
 }
 
 #[test]
-fn test_magic_purge_enchantments_preserves_vitae_only() {
+fn test_magic_purge_enchantments_preserves_vitae() {
     use crate::state::WorldState;
     use holtburger_protocol::messages::{
         GameEvent, GameEventMessage, GameMessage, MagicPurgeEnchantmentsEventData,
@@ -1596,6 +1596,32 @@ fn test_magic_purge_enchantments_preserves_vitae_only() {
         _ => None,
     });
     assert_eq!(latest_derived_vitae, Some(0.88));
+}
+
+#[test]
+fn death_purges_preserve_group_cooldown_clocks_and_permanent_item_effects() {
+    for keep_bad in [false, true] {
+        let mut player = PlayerState::new();
+        player.guid = Guid(1);
+        let cooldown = Enchantment {
+            spell_id: 0x8000 | 213,
+            layer: 1,
+            duration: 45.0,
+            start_time: -10.0,
+            ..Default::default()
+        };
+        let permanent = Enchantment {
+            spell_id: 12,
+            duration: -1.0,
+            ..Default::default()
+        };
+        player.enchantments.replace(&[cooldown, permanent]);
+        let now = std::time::Instant::now();
+        let before = player.enchantments.resolved(now);
+        assert!(player.purge_enchantments(player.guid, keep_bad, &mut Vec::new()));
+        assert_eq!(player.enchantments.resolved(now), before);
+        assert_eq!(player.enchantments.wire(), vec![cooldown, permanent]);
+    }
 }
 
 #[test]

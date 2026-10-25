@@ -78,6 +78,10 @@
 							"kind": "vital-change",
 							"vital": "Stamina",
 							"amount": 50
+						},
+						"cooldown": {
+							"groupId": 213,
+							"durationSeconds": 45.0
 						}
 					}
 				}

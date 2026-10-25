@@ -13,6 +13,12 @@ const item: ItemCellFacts = {
 };
 
 describe("item cell presentation", () => {
+	it("combines active shared cooldown with existing item status", () => {
+		expect(
+			itemCellPresentation({ ...item, equipped: true, cooldownSeconds: 23 })
+				.label,
+		).toBe("Tool (Equipped) (Ready in 23s; shared cooldown)");
+	});
 	it("places a consumer's configured action beside the stack quantity", () => {
 		expect(
 			itemCellPresentation({

@@ -892,6 +892,7 @@ describe("ClientLifecycleSession", () => {
 		const transport = new FakeClientTransport();
 		const key = { spellId: 10, layer: 2 };
 		const active: ResolvedEnchantments = {
+			cooldowns: [{ groupId: 213, remainingSeconds: 40 }],
 			instances: [
 				{
 					key,
@@ -931,11 +932,18 @@ describe("ClientLifecycleSession", () => {
 			cause: "teleport",
 		});
 		expect(session.state().enchantments?.receivedAtMs).toBe(firstAnchor);
+		expect(session.state().enchantments?.resolved.cooldowns).toEqual(
+			active.cooldowns,
+		);
 		transport.emit("client-player-enchantments-updated", {
+			cooldowns: [{ groupId: 213, remainingSeconds: 30 }],
 			instances: [],
 			groups: [],
 		});
 		expect(session.state().enchantments?.resolved.instances).toEqual([]);
+		expect(session.state().enchantments?.resolved.cooldowns).toEqual([
+			{ groupId: 213, remainingSeconds: 30 },
+		]);
 		transport.emit("client-lifecycle-changed", {
 			kind: "portal-space",
 			worldGeneration: 3,
@@ -1236,6 +1244,7 @@ describe("ClientLifecycleSession", () => {
 							equipLocations: null,
 							consumable: null,
 							useCapability: "direct" as const,
+							cooldown: null,
 							stackCount: null,
 							structure: { current: null, max: null },
 							icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -1266,6 +1275,7 @@ describe("ClientLifecycleSession", () => {
 				equipLocations: null,
 				consumable: null,
 				useCapability: "direct" as const,
+				cooldown: null,
 				stackCount: null,
 				structure: { current: null, max: null },
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -1389,6 +1399,7 @@ describe("ClientLifecycleSession", () => {
 						equipLocations: null,
 						consumable: null,
 						useCapability: "direct" as const,
+						cooldown: null,
 						stackCount: null,
 						structure: { current: null, max: null },
 						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -1419,6 +1430,7 @@ describe("ClientLifecycleSession", () => {
 			equipLocations: null,
 			consumable: null,
 			useCapability: "direct" as const,
+			cooldown: null,
 			stackCount: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },

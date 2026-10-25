@@ -1,4 +1,5 @@
 import type { ItemStructure } from "../app/item-structure";
+import type { ItemCooldownDefinition } from "../app/item-cooldowns.svelte";
 import type { ItemCapacity } from "../app/item-capacity";
 import type { UiIconDisplay } from "../app/ui-icon-repository";
 import type { ClientEntityFacts } from "./client-entity-mirror";
@@ -58,6 +59,8 @@ export function canInteractEquipment(item: ClientEntityFacts): boolean {
 
 /** Sampled bound-item presentation, independent of retained binding identity. */
 export interface ActionItemDisplay {
+	/** Bound item's shared reuse definition, resolved independently of remaining uses. */
+	readonly cooldown: ItemCooldownDefinition | null;
 	/** Known item name or explicit unavailable identity. */
 	readonly label: string;
 	/** Current bound stack quantity, independent of artwork and replacement identity. */

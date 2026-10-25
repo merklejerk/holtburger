@@ -222,6 +222,8 @@ pub enum ObjectInspectionError {
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemInspection {
+    /// Authored cooldown definition; live remaining time comes from the player's registry.
+    pub cooldown: Option<crate::item_cooldowns::ItemCooldownDefinition>,
     /// Appraised on-use effect, distinguishing direct vital changes from healing-kit bonuses.
     pub use_effect: Option<InspectionUseEffect>,
     /// Earned item level and XP thresholds, absent for items without progression.
@@ -1247,6 +1249,7 @@ impl ItemInspection {
             .then(|| object.spell().filter(|id| *id != Guid::NULL).map(|id| id.0))
             .flatten();
         Ok(Self {
+            cooldown: crate::item_cooldowns::ItemCooldownDefinition::from_properties(object),
             use_effect: InspectionUseEffect::from_object(object)?,
             progression: crate::item_progression::ItemProgression::from_properties(
                 object.properties,

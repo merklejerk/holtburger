@@ -1446,6 +1446,7 @@
 						equipLocations: null,
 						consumable: null,
 						useCapability: "direct",
+						cooldown: null,
 						stackCount: null,
 						structure: { current: null, max: null },
 						icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
@@ -2143,6 +2144,7 @@
 								unenchantable: true,
 							},
 							stack: { current: 3, max: 10 },
+							cooldown: null,
 							uses: { current: 42, max: 50 },
 							armor: {
 								effective: 315,

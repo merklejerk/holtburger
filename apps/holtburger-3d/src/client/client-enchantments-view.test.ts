@@ -33,6 +33,7 @@ function instance(
 }
 
 const resolved: ResolvedEnchantments = {
+	cooldowns: [],
 	instances: [
 		instance(ordinary, "beneficial", 80, 100),
 		instance(overridden, "harmful", 30, 80),
@@ -123,6 +124,7 @@ describe("enchantment presentation projection", () => {
 		const baseline = presentEnchantmentTray(resolved);
 		expect(
 			presentEnchantmentTray({
+				cooldowns: [],
 				instances: resolved.instances
 					.toReversed()
 					.map((item) => ({ ...item, remainingSeconds: 1 })),
@@ -150,6 +152,7 @@ describe("enchantment presentation projection", () => {
 		expect(withAddition.harmful).toEqual(baseline.harmful);
 		// Removing an overridden effect still notifies its category while another remains visible.
 		const removed = presentEnchantmentTray({
+			cooldowns: [],
 			instances: resolved.instances.filter((item) => item.key !== overridden),
 			groups: resolved.groups.map((group) => ({ ...group, overridden: [] })),
 		});
@@ -173,7 +176,11 @@ describe("enchantment presentation projection", () => {
 
 	it("rejects a contribution whose effective instance is missing", () => {
 		expect(() =>
-			presentEnchantmentTray({ instances: [], groups: resolved.groups }),
+			presentEnchantmentTray({
+				cooldowns: [],
+				instances: [],
+				groups: resolved.groups,
+			}),
 		).toThrow("Enchantment group references missing instance 10:1");
 	});
 
@@ -236,11 +243,8 @@ describe("enchantment presentation projection", () => {
 			kind: "vitae",
 			statModValue: 0.95,
 		};
-		const cooldown = {
-			...instance({ spellId: 0x8000, layer: 0 }, "harmful", 10, 1),
-			kind: "cooldown" as const,
-		};
-		const snapshot = { instances: [vitae, cooldown], groups: [] };
+		const cooldown = { groupId: 213, remainingSeconds: 10 };
+		const snapshot = { cooldowns: [cooldown], instances: [vitae], groups: [] };
 		const vitaeSpell: SpellRow = {
 			id: 666,
 			name: "Vitae",
@@ -253,7 +257,11 @@ describe("enchantment presentation projection", () => {
 			harmful: expect.objectContaining({ visible: true }),
 		});
 		expect(
-			presentEnchantmentTray({ instances: [cooldown], groups: [] }),
+			presentEnchantmentTray({
+				cooldowns: [cooldown],
+				instances: [],
+				groups: [],
+			}),
 		).toEqual({
 			beneficial: expect.objectContaining({ visible: false }),
 			harmful: expect.objectContaining({ visible: false }),
@@ -268,7 +276,11 @@ describe("enchantment presentation projection", () => {
 		expect(sections[0]?.groups[0]?.overridden).toEqual([]);
 		expect(
 			projectEnchantmentSections(
-				{ instances: [{ ...vitae, statModValue: 0.88 }], groups: [] },
+				{
+					cooldowns: [],
+					instances: [{ ...vitae, statModValue: 0.88 }],
+					groups: [],
+				},
 				references,
 				{ text: "", tags: ["harmful"] },
 				"name",
@@ -300,7 +312,7 @@ describe("enchantment presentation projection", () => {
 			group({ kind: "floatProperty", key: 999 }),
 		];
 		const sections = projectEnchantmentSections(
-			{ instances: resolved.instances, groups: propertyGroups },
+			{ cooldowns: [], instances: resolved.instances, groups: propertyGroups },
 			spells,
 			{ text: "", tags: [] },
 			"name",
@@ -314,7 +326,11 @@ describe("enchantment presentation projection", () => {
 		]);
 		expect(
 			projectEnchantmentSections(
-				{ instances: resolved.instances, groups: propertyGroups },
+				{
+					cooldowns: [],
+					instances: resolved.instances,
+					groups: propertyGroups,
+				},
 				spells,
 				{ text: "slash resistance", tags: [] },
 				"name",

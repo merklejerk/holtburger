@@ -92,6 +92,9 @@
 					<ItemGridCell
 						{label}
 						itemGuid={item?.guid ?? null}
+						cooldown={description?.kind === "known"
+							? description.cooldown
+							: null}
 						display={item === null ? undefined : iconFor(item.guid)}
 						equipped={item?.location.kind === "equipped"}
 						showEquipped={false}

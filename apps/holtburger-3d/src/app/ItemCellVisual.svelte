@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ItemCooldownFill from "./ItemCooldownFill.svelte";
+	import type { ItemCooldownAnimation } from "./item-cooldowns.svelte";
 	import UiIcon from "./UiIcon.svelte";
 	import ItemCountOverlay from "./ItemCountOverlay.svelte";
 	import type { UiIconDisplay } from "./ui-icon-repository";
@@ -14,6 +16,8 @@
 		readonly tooltipLabel: string;
 		/** Hide the redundant marker where the surrounding UI already identifies equipment. */
 		readonly showEquipped?: boolean;
+		/** Active fill inputs, independent of icon artwork and countdown text updates. */
+		readonly cooldownAnimation?: ItemCooldownAnimation | null;
 	}
 	const {
 		display,
@@ -21,12 +25,18 @@
 		presentation,
 		tooltipLabel,
 		showEquipped = true,
+		cooldownAnimation = null,
 	}: Props = $props();
 </script>
 
 <span class="item-cell-art" data-drag-preview
 	><UiIcon {display} {name} {tooltipLabel} /></span
 >
+{#if cooldownAnimation !== null}
+	{#key `${cooldownAnimation.deadlineMs}:${cooldownAnimation.durationSeconds}`}
+		<ItemCooldownFill animation={cooldownAnimation} />
+	{/key}
+{/if}
 <ItemCountOverlay
 	count={presentation.count}
 	besideStructure={presentation.meter !== null}

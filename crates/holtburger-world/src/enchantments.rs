@@ -298,27 +298,27 @@ pub enum EnchantmentChannel {
     DefenseSkills,
 }
 
-/// Classification of a live registry record before ordinary-spell stacking.
+/// Classification of an ordinary effect; item group cooldowns have their own contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EnchantmentKind {
     Beneficial,
     Harmful,
     Vitae,
-    Cooldown,
 }
 
 impl EnchantmentKind {
-    pub fn of(enchantment: &Enchantment) -> Self {
+    /// Cooldown records are represented exclusively by the separate group timer collection.
+    pub fn of(enchantment: &Enchantment) -> Option<Self> {
         let flags = Flags::from_bits_retain(enchantment.stat_mod_type);
         if flags.contains(Flags::VITAE) || enchantment.spell_id == 666 {
-            Self::Vitae
+            Some(Self::Vitae)
         } else if flags.contains(Flags::COOLDOWN) || enchantment.spell_id >= 0x8000 {
-            Self::Cooldown
+            None
         } else if flags.contains(Flags::BENEFICIAL) {
-            Self::Beneficial
+            Some(Self::Beneficial)
         } else {
-            Self::Harmful
+            Some(Self::Harmful)
         }
     }
 }
@@ -359,6 +359,8 @@ pub struct EnchantmentLayerGroup {
 pub struct ResolvedEnchantments {
     pub instances: Vec<ResolvedEnchantment>,
     pub groups: Vec<EnchantmentLayerGroup>,
+    /// Unique item reuse groups, separate from ordinary spell presentation and stacking.
+    pub cooldowns: Vec<crate::item_cooldowns::GroupCooldown>,
 }
 
 /// Authored set-spell membership used by ACE's tie rule.
@@ -424,18 +426,19 @@ pub fn resolve_enchantments(
 ) -> ResolvedEnchantments {
     let instances = observations
         .iter()
-        .map(|observation| {
+        .filter_map(|observation| {
             let enchantment = &observation.enchantment;
-            ResolvedEnchantment {
+            let kind = EnchantmentKind::of(enchantment)?;
+            Some(ResolvedEnchantment {
                 key: enchantment.into(),
                 spell_category: enchantment.spell_category,
                 power_level: enchantment.power_level,
-                kind: EnchantmentKind::of(enchantment),
+                kind,
                 remaining_seconds: observation.remaining_seconds(now),
                 stat_mod_type: enchantment.stat_mod_type,
                 stat_mod_key: enchantment.stat_mod_key,
                 stat_mod_value: enchantment.stat_mod_value,
-            }
+            })
         })
         .collect();
 
@@ -447,7 +450,7 @@ pub fn resolve_enchantments(
         let enchantment = &observation.enchantment;
         if !matches!(
             EnchantmentKind::of(enchantment),
-            EnchantmentKind::Beneficial | EnchantmentKind::Harmful
+            Some(EnchantmentKind::Beneficial | EnchantmentKind::Harmful)
         ) {
             continue;
         }
@@ -490,7 +493,11 @@ pub fn resolve_enchantments(
             },
         )
         .collect();
-    ResolvedEnchantments { instances, groups }
+    ResolvedEnchantments {
+        instances,
+        groups,
+        cooldowns: crate::item_cooldowns::resolve_cooldowns(observations, now),
+    }
 }
 
 /// Choose a category winner identically for gameplay queries and display groups.

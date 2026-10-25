@@ -1151,6 +1151,120 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn relog_restores_wire_cooldowns_before_inventory_descriptions_arrive() {
+        use holtburger_common::properties::{
+            InventoryEntryKind, ItemType, ObjectDescriptionFlag, WeenieHeaderFlag,
+            WeenieHeaderFlag2,
+        };
+        use holtburger_protocol::messages::magic::Enchantment;
+        use holtburger_protocol::messages::{
+            DescriptionVectorFlag, EnchantmentMask, ObjectDescriptionData,
+        };
+        use holtburger_protocol::opcodes::GameEventOpcode;
+        use holtburger_world::{
+            entity_facts::EntityDescription, item_cooldowns::ItemCooldownDefinition,
+        };
+
+        let player = Guid(0x5000_0001);
+        let item = Guid(0x8000_0001);
+        let mut client = build_test_client();
+        for start_time in [-12.0, -20.0] {
+            client.character_selection.character_id = Some(player);
+            client.begin_world_entry_transition().await.unwrap();
+            let mut events = client.subscribe_client_view_events();
+            let cooldown = Enchantment {
+                spell_id: 0x8000 | 213,
+                layer: 1,
+                spell_category: 0x8000,
+                has_spell_set_id: 1,
+                spell_set_id: Some(0),
+                start_time,
+                duration: 45.0,
+                ..Default::default()
+            };
+            // Author ACE's login registry explicitly: PlayerDescription's existing packer
+            // writes an empty registry, so a roundtrip through it cannot test this path.
+            // ACE GameEventPlayerDescription.cs and Network/Structure/EnchantmentRegistry.cs.
+            let mut body = Vec::new();
+            for word in [
+                0u32,
+                1,
+                DescriptionVectorFlag::ENCHANTMENT.bits(),
+                1,
+                EnchantmentMask::COOLDOWN.bits(),
+                1,
+            ] {
+                word.pack(&mut body);
+            }
+            cooldown.pack(&mut body);
+            // Empty options, options1, spell list, spell filters, then the owned-item roster.
+            for word in [0u32, 0, 0, 0, 1] {
+                word.pack(&mut body);
+            }
+            item.pack(&mut body);
+            (InventoryEntryKind::Item as u32).pack(&mut body);
+            0u32.pack(&mut body); // No equipped objects.
+            let message = GameMessage::GameEvent(Box::new(GameEventMessage {
+                target: player,
+                sequence: 1,
+                event: GameEvent::Unknown(GameEventOpcode::PlayerDescription as u32, body),
+            }));
+            client
+                .handle_message(&encode_message(&message))
+                .await
+                .unwrap();
+            let restored = client.application_snapshot().enchantments.unwrap();
+            assert_eq!(restored.records, vec![cooldown]);
+            assert_eq!(restored.resolved.cooldowns.len(), 1);
+            let timer = restored.resolved.cooldowns[0];
+            assert_eq!(timer.group_id, 213);
+            assert!(
+                timer.remaining_seconds > 0.0
+                    && timer.remaining_seconds <= cooldown.duration + start_time
+            );
+            assert!(std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+                event, ClientViewEvent::PlayerEnchantmentsUpdated { resolved, .. } if resolved.cooldowns.len() == 1
+            )));
+
+            let mut description = ObjectDescriptionData::with_guid(item);
+            let public = &mut description.public_weenie_desc;
+            public.name = Some("Essence".into());
+            public.item_type = ItemType::FOOD.bits();
+            public.obj_desc_flags = ObjectDescriptionFlag::INCLUDES_SECOND_HEADER;
+            public.weenie_flags = WeenieHeaderFlag::CONTAINER;
+            public.weenie_flags2 =
+                WeenieHeaderFlag2::COOLDOWN | WeenieHeaderFlag2::COOLDOWN_DURATION;
+            public.container_id = Some(player);
+            public.cooldown = Some(213);
+            public.cooldown_duration = Some(45.0);
+            client
+                .handle_message(&encode_message(&GameMessage::ObjectCreate(Box::new(
+                    description,
+                ))))
+                .await
+                .unwrap();
+            let snapshot = client.application_snapshot();
+            let record = snapshot
+                .entities
+                .entities
+                .iter()
+                .find(|record| record.guid == item)
+                .unwrap();
+            let EntityDescription::Known { cooldown, .. } = record.description else {
+                panic!("known item");
+            };
+            assert_eq!(
+                cooldown,
+                Some(ItemCooldownDefinition {
+                    group_id: Some(213),
+                    duration_seconds: Some(45.0)
+                })
+            );
+            client.retire_logged_out_character();
+        }
+    }
+
+    #[tokio::test]
     async fn fellowship_before_player_create_republishes_with_established_actor() {
         use holtburger_protocol::messages::{
             FellowshipFullUpdateEventData, FellowshipMemberData, PlayerCreateData,

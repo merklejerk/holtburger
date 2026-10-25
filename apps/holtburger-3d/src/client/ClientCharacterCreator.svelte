@@ -318,7 +318,7 @@
 	});
 </script>
 
-<ClientPregameScreen branding="corner" backdrop={true}>
+<ClientPregameScreen branding="corner" showPortalLogo={true} backdrop={true}>
 	{#snippet footer()}
 		<button
 			class="pregame-action pregame-quiet ui-button"

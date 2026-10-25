@@ -177,7 +177,7 @@
 		onBack={() => (creating = false)}
 	/>
 {:else}
-	<ClientPregameScreen branding="corner" backdrop={true}>
+	<ClientPregameScreen branding="corner" showPortalLogo={true} backdrop={true}>
 		{#snippet footer()}
 			<button
 				type="button"
@@ -297,9 +297,13 @@
 		.character-roster {
 			position: relative;
 			display: grid;
-			align-content: center;
+			/* The list owns the available height; actions retain their natural size. */
+			grid-template-rows: minmax(0, 1fr) auto;
+			align-self: start;
+			height: min(100%, 50dvh);
 			gap: 24px;
 			min-width: 0;
+			min-height: 0;
 		}
 		.character-roster::before {
 			/* Anchor the fade to the actual roster edge; the screen clips the overscan. */
@@ -325,8 +329,11 @@
 		}
 		.client-character-list {
 			display: grid;
+			/* Center compact rows, falling back to the top when the roster must scroll. */
+			align-content: safe center;
+			grid-auto-rows: max-content;
 			gap: 4px;
-			max-height: 40vh;
+			min-height: 0;
 			overflow-y: auto;
 			padding: 4px;
 			margin: 0;
@@ -356,6 +363,13 @@
 			gap: 12px;
 		}
 		@media (max-width: 640px) {
+			.character-roster {
+				grid-template-rows: auto auto;
+				height: auto;
+			}
+			.client-character-list {
+				max-height: 40vh;
+			}
 			.character-roster::before {
 				/* Stacked controls shade their own rows rather than the preview below. */
 				inset: -24px -100vw;

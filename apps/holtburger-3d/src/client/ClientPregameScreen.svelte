@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
+	import PortalLogo from "../assets/icons/pregame-loading-portal.svg?component";
 	import { APP_BUILD_LABEL } from "../app/app-build";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import "./client-pregame.css";
@@ -8,6 +9,8 @@
 	interface Props {
 		/** Loading foregrounds the wordmark; character selection keeps corner branding. */
 		readonly branding: "hero" | "corner";
+		/** Prepend the portal unless the page already features it in its content. */
+		readonly showPortalLogo: boolean;
 		/** Ready world scenery remains visible beneath the foreground composition. */
 		readonly backdrop: boolean;
 		/** The active page owns its controls, status, and recovery actions. */
@@ -15,7 +18,8 @@
 		/** Page-owned peripheral actions or metadata, kept outside the foreground content. */
 		readonly footer: Snippet;
 	}
-	const { branding, backdrop, children, footer }: Props = $props();
+	const { branding, showPortalLogo, backdrop, children, footer }: Props =
+		$props();
 	const { keyboard } = useAppInputPolicy();
 </script>
 
@@ -26,7 +30,12 @@
 	aria-label="Holtburger client"
 	use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
 >
-	<header class="pregame-brand">Holtburger</header>
+	<header class="pregame-brand">
+		{#if showPortalLogo}
+			<span class="pregame-logo" aria-hidden="true"><PortalLogo /></span>
+		{/if}
+		<span>Holtburger</span>
+	</header>
 	<div class="pregame-content">{@render children()}</div>
 	<footer class="pregame-footer">
 		{@render footer()}
@@ -68,8 +77,21 @@
 		.pregame-brand {
 			position: relative;
 			z-index: 1;
+			display: flex;
+			align-items: center;
+			gap: 0.3em;
 			width: fit-content;
 			padding-bottom: 16px;
+		}
+		.pregame-logo {
+			flex: none;
+			width: 1.12em;
+			height: 1.4em;
+		}
+		.pregame-logo > :global(svg) {
+			display: block;
+			width: 100%;
+			height: 100%;
 		}
 		.pregame-content {
 			display: grid;

@@ -20,6 +20,29 @@ export const CLIENT_NEARBY_TUNING = {
 	notificationBatchMs: 150,
 } as const;
 
+/** Decorative loading copy; real connection progress and failures remain lifecycle-owned. */
+export const CLIENT_LOADING_TUNING = {
+	/** Playful lines cycled beneath the loading hero. Keep at least one entry. */
+	quips: [
+		"Convincing the portal to hold still…",
+		"Untangling the ley lines…",
+		"Polishing the lifestones…",
+		"Negotiating with gravity…",
+		"Putting the world right-side up…",
+		"Checking the portal’s forwarding address…",
+		"Teaching the trees to stand still…",
+		"Looking for the other sock…",
+	],
+	/** Minimum time without a real loading update before playful copy may appear. */
+	quipIdleDelayMs: 5_000,
+	/** Display time per playful line after the real-update idle delay has elapsed. */
+	quipIntervalMs: 5_000,
+} as const satisfies {
+	readonly quips: readonly [string, ...string[]];
+	readonly quipIdleDelayMs: number;
+	readonly quipIntervalMs: number;
+};
+
 /** Local builder geometry; no new persisted HUD preference section. */
 export const CLIENT_LOADOUT_BUILDER_TUNING = {
 	width: 380,

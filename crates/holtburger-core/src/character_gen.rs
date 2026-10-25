@@ -36,6 +36,15 @@ pub fn minimum_skill_advancement_for_heritage(
     heritage_id: u32,
     skill_id: u32,
 ) -> SkillAdvancementClass {
+    // Unavailable definitions still occupy their original wire slots, but must not inherit
+    // a retired skill's zero-cost training or an obsolete template requirement.
+    if !catalog
+        .skill_definition(skill_id)
+        .is_some_and(|skill| skill.available_at_creation)
+    {
+        return SkillAdvancementClass::Inactive;
+    }
+
     let Some(heritage) = catalog.heritage_group(heritage_id) else {
         return SkillAdvancementClass::Untrained;
     };
@@ -378,7 +387,9 @@ impl CharacterGenBuilder {
                 continue;
             };
 
-            if !skill_definition.chargen_use && *advancement != SkillAdvancementClass::Untrained {
+            if !skill_definition.available_at_creation
+                && *advancement != SkillAdvancementClass::Untrained
+            {
                 errors.push(
                     CharacterGenValidationError::SkillUnavailableAtCharacterCreation { skill_id },
                 );
@@ -699,7 +710,7 @@ mod tests {
                         skill_type: None,
                         name: "Inactive".to_string(),
                         description: "Inactive".to_string(),
-                        chargen_use: true,
+                        available_at_creation: true,
                         trained_cost: 0,
                         specialization_total_cost: 0,
                     },
@@ -711,7 +722,7 @@ mod tests {
                         skill_type: None,
                         name: "Axe".to_string(),
                         description: "Axe".to_string(),
-                        chargen_use: true,
+                        available_at_creation: true,
                         trained_cost: 6,
                         specialization_total_cost: 10,
                     },
@@ -723,7 +734,7 @@ mod tests {
                         skill_type: None,
                         name: "Bow".to_string(),
                         description: "Bow".to_string(),
-                        chargen_use: true,
+                        available_at_creation: true,
                         trained_cost: 0,
                         specialization_total_cost: 4,
                     },
@@ -735,7 +746,7 @@ mod tests {
                         skill_type: None,
                         name: "Crossbow".to_string(),
                         description: "Crossbow".to_string(),
-                        chargen_use: true,
+                        available_at_creation: true,
                         trained_cost: 6,
                         specialization_total_cost: 10,
                     },
@@ -747,7 +758,7 @@ mod tests {
                         skill_type: None,
                         name: "Hidden".to_string(),
                         description: "Hidden".to_string(),
-                        chargen_use: false,
+                        available_at_creation: false,
                         trained_cost: 6,
                         specialization_total_cost: 10,
                     },
@@ -955,7 +966,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_non_chargen_skill() {
+    fn validate_rejects_unavailable_creation_skill() {
         let builder = CharacterGenBuilder::new(test_catalog());
         let mut build = test_build();
         build.skill_advancement_classes[4] = SkillAdvancementClass::Trained;
@@ -965,6 +976,35 @@ mod tests {
             error,
             CharacterGenValidationError::SkillUnavailableAtCharacterCreation { skill_id: 4 }
         )));
+    }
+
+    #[test]
+    fn unavailable_skills_stay_inactive_despite_zero_costs_or_obsolete_templates() {
+        let mut catalog = (*test_catalog()).clone();
+        let skill = catalog.skill_definitions.get_mut(&4).unwrap();
+        skill.trained_cost = 0;
+        skill.specialization_total_cost = 0;
+        for template in &mut catalog.heritage_groups.get_mut(&6).unwrap().templates {
+            template.primary_skills.push(4);
+        }
+        assert_eq!(
+            minimum_skill_advancement_for_heritage(&catalog, 6, 4),
+            SkillAdvancementClass::Inactive
+        );
+
+        let builder = CharacterGenBuilder::new(Arc::new(catalog));
+        for advancement in [
+            SkillAdvancementClass::Trained,
+            SkillAdvancementClass::Specialized,
+        ] {
+            let mut build = test_build();
+            build.skill_advancement_classes[4] = advancement;
+            let errors = builder.validate(&build).expect_err("unavailable training");
+            assert!(errors.iter().any(|error| matches!(
+                error,
+                CharacterGenValidationError::SkillUnavailableAtCharacterCreation { skill_id: 4 }
+            )));
+        }
     }
 
     #[test]

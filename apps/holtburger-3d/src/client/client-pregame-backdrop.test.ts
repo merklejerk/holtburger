@@ -79,22 +79,6 @@ describe("ClientPregameBackdrop", () => {
 		await backdrop.destroy();
 	});
 
-	it("pauses drawing and local calendar while creator is foreground, then resumes", async () => {
-		const { backdrop, runtime, receipt } = fixture();
-		await backdrop.start();
-		runtime.sceneActivationStatus.mockReturnValue({ kind: "ready", receipt });
-		backdrop.frame(1000, 800, 600);
-		const environment = runtime.setSceneEnvironment.mock.calls[0][0];
-		backdrop.setVisible(false);
-		expect(runtime.setAudioListener).toHaveBeenLastCalledWith(null);
-		expect(backdrop.frame(100000, 800, 600)).toBe(false);
-		backdrop.setVisible(true);
-		expect(backdrop.frame(200000, 800, 600)).toBe(true);
-		expect(runtime.setSceneEnvironment).toHaveBeenCalledTimes(1);
-		expect(runtime.setSceneEnvironment.mock.calls[0][0]).toBe(environment);
-		await backdrop.destroy();
-	});
-
 	it("reports failed layer installation without drawing and retires once", async () => {
 		const { backdrop, runtime, receipt } = fixture();
 		await backdrop.start();

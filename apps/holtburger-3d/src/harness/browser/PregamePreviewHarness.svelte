@@ -140,9 +140,9 @@
 					},
 					previewService: service,
 					management: { kind: "idle" },
-					onCancel: () => {
+					onBack: () => {
 						showcase = null;
-						status = "cancelled";
+						status = "returned";
 					},
 				};
 				status = "showcase";
@@ -678,6 +678,7 @@
 			emptyMessage="No probe subject"
 			service={surfaceProbe.service}
 			rotation="subject"
+			keyboardNavigation={false}
 			framing={{ kind: "body" }}
 		/>
 	</div>

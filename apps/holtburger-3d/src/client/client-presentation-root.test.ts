@@ -153,22 +153,20 @@ describe("ClientPresentationRoot", () => {
 		expect(owner.destroy).toHaveBeenCalledOnce();
 	});
 
-	it("pauses the backdrop for creator while retaining scene demand and owner", async () => {
+	it("retains the pregame scene and owner across foreground changes", async () => {
 		const { dependencies, owner, runtime } = fixture();
 		const root = new ClientPresentationRoot(dependencies);
 		await root.setMode("pregame");
 		root.frame(1000);
-		root.setBackdropVisible(false);
+		await root.setMode("pregame");
 		root.frame(2000);
-		expect(runtime.frame).toHaveBeenCalledOnce();
-		expect(runtime.setAudioListener).toHaveBeenLastCalledWith(null);
-		expect(runtime.clearSceneInterest).not.toHaveBeenCalled();
-		root.setBackdropVisible(true);
-		root.frame(3000);
 		expect(runtime.frame).toHaveBeenCalledTimes(2);
+		expect(runtime.activateScene).toHaveBeenCalledOnce();
+		expect(runtime.clearSceneInterest).not.toHaveBeenCalled();
 		expect(owner.destroy).not.toHaveBeenCalled();
 		await root.destroy();
 	});
+
 	it("retries a failed backdrop installation with fresh demand", async () => {
 		const { dependencies, runtime } = fixture();
 		runtime.activateScene.mockRejectedValueOnce(

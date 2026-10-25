@@ -480,7 +480,6 @@
 		  };
 	let backdropStatus = $state<BackdropUiStatus>({ kind: "loading" });
 	let worldCanvasVisible = $state(false);
-	let creatingCharacter = $state(false);
 	/** Cold page admission shares the current roster with markup and canvas reveal. */
 	const pregameSelection = $derived(
 		lifecycle.kind === "character-selection" &&
@@ -494,6 +493,7 @@
 		if (lifecycle.kind === "exiting")
 			return {
 				kind: "pending",
+				activity: "disconnect",
 				title: "Disconnecting",
 				message: lifecycle.diagnostic ?? "Closing the game session…",
 			};
@@ -523,16 +523,23 @@
 		if (lifecycle.kind === "connecting")
 			return {
 				kind: "pending",
+				activity: "connection",
 				title: "Connecting",
 				message: "Opening the game session…",
 			};
 		if (lifecycle.kind === "authenticating")
 			return {
 				kind: "pending",
+				activity: "connection",
 				title: "Authenticating",
 				message: "Checking the launch account…",
 			};
-		return { kind: "pending", title: "Loading", message: "Preparing scene…" };
+		return {
+			kind: "pending",
+			activity: "scene",
+			title: "Loading",
+			message: "Preparing scene…",
+		};
 	});
 	function retryBackdrop(): void {
 		backdropStatus = { kind: "loading" };
@@ -1820,9 +1827,6 @@
 					: "pregame",
 		);
 	});
-	$effect(() => {
-		presentationRoot?.setBackdropVisible(!creatingCharacter);
-	});
 
 	/** Owns one browser-to-host movement controller per active world-input lifetime. */
 	$effect(() => {
@@ -2268,8 +2272,10 @@
 			? "visible"
 			: "hidden"}
 	></canvas>
-	{#if !usesGameplayPresentation}
-		<ClientToastOverlay {toast} persistentMessage={null} />
+	{#if pregameSelection !== null}
+		<div class="pregame-notices">
+			<ClientToastOverlay {toast} persistentMessage={null} />
+		</div>
 	{/if}
 
 	{#if usesGameplayPresentation && canvasElement !== null && interactionRoot !== null && startupError === null && commandFailure === null}
@@ -2524,36 +2530,23 @@
 			{interactionRoot}
 		/>
 	{:else if pregameSelection !== null}
-		<main
-			class="client-screen ui-theme"
-			class:show-backdrop={!creatingCharacter}
-			aria-label="Holtburger client"
-			use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
-		>
-			<section class="client-panel ui-panel">
-				<header class="ui-frame">Client</header>
-				<div class="client-panel-body ui-body">
-					<p class="ui-muted">Holtburger 3D Client</p>
-					{#each [pregameSelection] as selection}
-						<ClientCharacterSelect
-							state={selection}
-							{entryPending}
-							management={characterManagement}
-							creation={creationServices}
-							previewService={objectPreviewService}
-							visualCache={startupVisualCacheTransport}
-							onCreatingChange={(creating) => (creatingCharacter = creating)}
-							onChoose={chooseCharacter}
-							onEnter={enterWorld}
-							onDisconnect={disconnect}
-						/>
-					{/each}
-				</div>
-			</section>
-		</main>
+		{#each [pregameSelection] as selection}
+			<ClientCharacterSelect
+				state={selection}
+				{entryPending}
+				management={characterManagement}
+				creation={creationServices}
+				previewService={objectPreviewService}
+				visualCache={startupVisualCacheTransport}
+				onChoose={chooseCharacter}
+				onEnter={enterWorld}
+				onDisconnect={disconnect}
+			/>
+		{/each}
 	{:else}
 		<ClientLoadingPage
 			state={loadingPage}
+			{toast}
 			onDisconnect={session !== null && lifecycle.kind !== "exiting"
 				? disconnect
 				: null}
@@ -2563,35 +2556,15 @@
 
 <style>
 	@layer components {
-		.client-screen.show-backdrop {
-			background: transparent;
-		}
-		.show-backdrop .client-panel {
-			background: transparent;
-			border-color: transparent;
-			box-shadow: none;
-		}
-		.show-backdrop .client-panel > header {
-			display: none;
-		}
 		.client-appearance-scope {
 			display: contents;
 		}
-		.client-screen {
-			position: relative;
-			display: grid;
-			min-height: 100vh;
-			place-items: start center;
-			padding: clamp(16px, 5vw, 48px);
-			background: var(--ui-color-well);
-		}
-		.client-panel {
-			width: min(100%, 1080px);
-		}
-		.client-panel-body {
-			display: grid;
-			gap: 12px;
-			padding: clamp(12px, 3vw, 24px);
+		.pregame-notices {
+			position: fixed;
+			inset: 24px 24px auto auto;
+			z-index: 2;
+			width: min(420px, calc(100vw - 48px));
+			pointer-events: none;
 		}
 	}
 </style>

@@ -147,6 +147,8 @@
 				failScene(): void;
 				failConnection(): void;
 				authenticate(): void;
+				/** Deliver a notice through the real session event path during loading. */
+				notify(message: string, tone: "status" | "warning"): void;
 			};
 		};
 		const content = pregameContentTransport(url);
@@ -284,6 +286,7 @@
 					connection.release();
 				},
 				authenticate: authority.authenticate,
+				notify: authority.notify,
 			};
 			props = {
 				initialUserSettings: createDefaultClientUserSettings(

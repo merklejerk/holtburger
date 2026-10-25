@@ -3,11 +3,17 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 import svg from "@poppanator/sveltekit-svg";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readAppBuild } from "./scripts/app-build.ts";
 
 const rootDir = fileURLToPath(new URL(".", import.meta.url));
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ command, isPreview }) => ({
+	define: {
+		__HOLTBURGER_APP_BUILD__: JSON.stringify(
+			readAppBuild(rootDir, command === "serve" && !isPreview),
+		),
+	},
 	plugins: [
 		svelte(),
 		// Keep editor-authored artwork intact and leave cursor/nameplate asset loading alone.
@@ -40,4 +46,4 @@ export default defineConfig({
 			"scripts/**/*.test.ts",
 		],
 	},
-});
+}));

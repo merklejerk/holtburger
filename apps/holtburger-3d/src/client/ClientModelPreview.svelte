@@ -13,11 +13,20 @@
 		readonly service: ClientObjectPreviewService;
 		/** Inspector orbits the camera; creator turns the subject independently of its backdrop. */
 		readonly rotation: "orbit" | "subject";
+		/** Inspectors support Tab focus; pregame previews keep dragging separate from keyboard ownership. */
+		readonly keyboardNavigation: boolean;
 		/** Frontend-owned focus policy, independent of model part numbering. */
 		readonly framing: ObjectPreviewViewport["framing"];
 	}
 
-	const { source, service, rotation, framing, emptyMessage }: Props = $props();
+	const {
+		source,
+		service,
+		rotation,
+		framing,
+		emptyMessage,
+		keyboardNavigation,
+	}: Props = $props();
 	const tuning = CLIENT_TUNING.objectPreview;
 	let surface: HTMLDivElement;
 	let canvas: HTMLCanvasElement;
@@ -90,7 +99,7 @@
 		if (event.button !== 0) return;
 		event.preventDefault();
 		event.stopPropagation();
-		surface.focus();
+		if (keyboardNavigation) surface.focus();
 		surface.setPointerCapture(event.pointerId);
 		pointer = { id: event.pointerId, x: event.clientX };
 	}
@@ -217,8 +226,10 @@
 	class="creature-preview"
 	bind:this={surface}
 	role="slider"
-	tabindex="0"
-	aria-label="Rotatable creature model. Drag horizontally or use the left and right arrow keys."
+	tabindex={keyboardNavigation ? 0 : -1}
+	aria-label={keyboardNavigation
+		? "Rotatable creature model. Drag horizontally or use the left and right arrow keys."
+		: "Rotatable creature model. Drag horizontally to rotate."}
 	aria-valuemin={-180}
 	aria-valuemax={180}
 	aria-valuenow={initialYawDegrees}

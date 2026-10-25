@@ -1,0 +1,52 @@
+/* Shared pregame control geometry and interaction cues; appearance lives in the pregame theme. */
+@layer components {
+	.pregame-action {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 10px;
+	}
+	.pregame-icon {
+		display: inline-grid;
+		place-items: center;
+		width: calc(1.15em * var(--ui-icon-scale));
+		height: calc(1.15em * var(--ui-icon-scale));
+		flex-shrink: 0;
+		vertical-align: middle;
+	}
+	.pregame-icon > svg {
+		display: block;
+		width: 100%;
+		height: 100%;
+	}
+}
+@layer overrides {
+	.client-pregame-screen .ui-button {
+		min-height: 40px;
+		padding: 10px 20px;
+	}
+	.client-pregame-screen :is(.enter-world, .pregame-primary) {
+		min-height: 56px;
+	}
+	.client-pregame-screen .pregame-quiet {
+		min-height: 36px;
+		padding: 8px 0;
+	}
+	.client-pregame-screen .client-character {
+		position: relative;
+		min-height: 56px;
+		padding: 12px 0;
+		border: 0;
+	}
+
+	/* Roster navigation selects the focused row; its diamond and underline carry the focus cue. */
+	.client-pregame-screen .client-character:focus-visible {
+		outline: none;
+	}
+	.client-pregame-screen .client-character[aria-pressed="true"]::after {
+		content: "";
+		position: absolute;
+		inset: auto 0 0 32px;
+		height: 1px;
+	}
+}

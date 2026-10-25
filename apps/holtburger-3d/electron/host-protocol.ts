@@ -1,5 +1,9 @@
 import { decode, encode } from "@msgpack/msgpack";
 import { z } from "zod";
+import {
+	contentFailureSchema,
+	type ContentFailure,
+} from "../src/app/content-startup-contract.js";
 import type { ClientLaunchConfiguration } from "./client-launch.js";
 import { MAX_PENDING_REQUESTS } from "../src/lib/host/host-limits.js";
 export { MAX_PENDING_REQUESTS } from "../src/lib/host/host-limits.js";
@@ -15,7 +19,7 @@ import type {
 /** Must match the Rust sidecar's encoded payload ceiling. */
 export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 /** Version negotiated before any command is accepted. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 /** Grace period before a sidecar that ignored shutdown is terminated. */
 const SHUTDOWN_GRACE_MS = 2_000;
 /** Startup bound for a child that spawned but never produced a handshake. */
@@ -37,7 +41,7 @@ export interface SidecarProcessLike {
 	stdin: WritableStreamLike;
 	stdout: ReadableStreamLike;
 	on(
-		event: "exit",
+		event: "exit" | "close",
 		listener: (code: number | null, signal: string | null) => void,
 	): this;
 	on(event: "error", listener: (error: Error) => void): this;
@@ -62,6 +66,16 @@ const wireFrameSchema = z.discriminatedUnion("kind", [
 		host_name: z.string(),
 		host_version: z.string(),
 		host_mode: z.enum(["explorer", "client"]),
+		content_location: z.string(),
+	}),
+	z.object({
+		kind: z.literal("startup_failed"),
+		protocol_version: z.number().int().nonnegative(),
+		failure: contentFailureSchema,
+	}),
+	z.object({
+		kind: z.literal("content_failed"),
+		failure: contentFailureSchema,
 	}),
 	z.object({
 		kind: z.literal("response"),
@@ -92,6 +106,16 @@ export class SidecarProtocolError extends Error {
 		super(message);
 		this.name = "SidecarProtocolError";
 		this.code = code;
+	}
+}
+
+/** Recoverable startup refusal; kept distinct from protocol and executable failures. */
+export class ContentStartupError extends SidecarProtocolError {
+	readonly failure: ContentFailure;
+	constructor(failure: ContentFailure) {
+		super("content_startup", failure.message);
+		this.name = "ContentStartupError";
+		this.failure = failure;
 	}
 }
 
@@ -222,6 +246,12 @@ export function wireCommand(
 
 /** Main-process client that owns one sidecar, request multiplexer, and event fanout. */
 export class SidecarHostClient {
+	/** Process completion includes stdout drainage, unlike a shutdown acknowledgement. */
+	readonly completed: Promise<{
+		readonly code: number | null;
+		readonly signal: string | null;
+	}>;
+	#closed = false;
 	readonly #process: SidecarProcessLike;
 	readonly #expectedMode: HostMode | undefined;
 	readonly #decoder = new SidecarFrameDecoder();
@@ -242,6 +272,9 @@ export class SidecarHostClient {
 	#rejectConnected!: (reason: unknown) => void;
 	#shutdown: Promise<void> | undefined;
 	#failure: SidecarProtocolError | undefined;
+	#contentLocation: string | undefined;
+	#latestContentFailure: ContentFailure | undefined;
+	readonly #contentListeners = new Set<(failure: ContentFailure) => void>();
 	#handshakeComplete = false;
 	readonly #handshakeTimeout: ReturnType<typeof setTimeout>;
 
@@ -277,21 +310,44 @@ export class SidecarHostClient {
 				false,
 			);
 		});
-		process.on("exit", (code, signal) => {
-			this.#fail(
-				new SidecarProtocolError(
-					"host_exit",
-					`host exited before completing the protocol (code=${code ?? "none"}, signal=${signal ?? "none"})`,
-				),
-				false,
-			);
-		});
+		this.completed = new Promise((resolve) =>
+			process.on("close", (code, signal) => {
+				this.#closed = true;
+				resolve({ code, signal });
+				this.#fail(
+					new SidecarProtocolError(
+						"host_exit",
+						`host exited before completing the protocol (code=${code ?? "none"}, signal=${signal ?? "none"})`,
+					),
+					false,
+				);
+			}),
+		);
 	}
 
 	/** Waits for the host handshake and acknowledges the negotiated protocol version. */
 	async connect(): Promise<void> {
 		await this.#connected;
 		if (this.#failure) throw this.#failure;
+	}
+
+	/** Canonical selection identity becomes available after a successful handshake. */
+	get contentLocation(): string {
+		if (this.#contentLocation === undefined)
+			throw new Error("Host content is not initialized");
+		return this.#contentLocation;
+	}
+
+	/** Register synchronously before connect; replay any diagnostic already received. */
+	listenContentFailures(
+		handler: (failure: ContentFailure) => void,
+	): () => void {
+		this.#contentListeners.add(handler);
+		if (this.#latestContentFailure !== undefined)
+			handler(this.#latestContentFailure);
+		return () => {
+			this.#contentListeners.delete(handler);
+		};
 	}
 
 	/** Sends one typed command and resolves its matching response. */
@@ -349,8 +405,55 @@ export class SidecarHostClient {
 	/** Requests an orderly host shutdown and force-kills only after the bounded grace period. */
 	async shutdown(): Promise<void> {
 		if (this.#shutdown) return this.#shutdown;
-		if (this.#failure) return;
-		this.#shutdown = new Promise<void>((resolve, reject) => {
+		this.#shutdown = this.#stop();
+		return this.#shutdown;
+	}
+
+	async #stop(): Promise<void> {
+		if (this.#closed) return;
+		if (!this.#handshakeComplete || this.#failure !== undefined) {
+			this.#process.kill();
+			await this.#waitForClose();
+			return;
+		}
+		try {
+			await this.#requestShutdown();
+		} finally {
+			await this.#waitForClose();
+		}
+	}
+
+	async #waitForClose(): Promise<void> {
+		if (this.#closed) return;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const bounded = () =>
+			Promise.race([
+				this.completed,
+				new Promise<never>((_resolve, reject) => {
+					timer = setTimeout(
+						() =>
+							reject(
+								new SidecarProtocolError(
+									"host_close_timeout",
+									"Host process did not terminate",
+								),
+							),
+						SHUTDOWN_GRACE_MS,
+					);
+				}),
+			]).finally(() => {
+				if (timer !== undefined) clearTimeout(timer);
+			});
+		try {
+			await bounded();
+		} catch {
+			this.#process.kill();
+			await bounded();
+		}
+	}
+
+	#requestShutdown(): Promise<void> {
+		return new Promise<void>((resolve, reject) => {
 			const id = this.#nextRequestId++;
 			const timeout = setTimeout(() => {
 				this.#pending.delete(id);
@@ -380,7 +483,6 @@ export class SidecarHostClient {
 				reject(error);
 			}
 		});
-		return this.#shutdown;
 	}
 
 	#write(frame: unknown): void {
@@ -404,6 +506,23 @@ export class SidecarHostClient {
 		}
 		try {
 			for (const frame of frames) {
+				if (frame.kind === "startup_failed") {
+					if (
+						this.#handshakeComplete ||
+						frame.protocol_version !== PROTOCOL_VERSION
+					) {
+						this.#fail(
+							new SidecarProtocolError(
+								"invalid_startup_failure",
+								"Host startup failure has an incompatible version or arrived after handshake",
+							),
+							true,
+						);
+						return;
+					}
+					this.#fail(new ContentStartupError(frame.failure), false);
+					return;
+				}
 				if (frame.kind === "handshake") {
 					if (this.#handshakeComplete) {
 						this.#fail(
@@ -443,6 +562,7 @@ export class SidecarHostClient {
 						protocol_version: PROTOCOL_VERSION,
 					});
 					this.#handshakeComplete = true;
+					this.#contentLocation = frame.content_location;
 					clearTimeout(this.#handshakeTimeout);
 					this.#resolveConnected();
 					continue;
@@ -456,6 +576,11 @@ export class SidecarHostClient {
 						true,
 					);
 					return;
+				}
+				if (frame.kind === "content_failed") {
+					this.#latestContentFailure = frame.failure;
+					for (const handler of this.#contentListeners) handler(frame.failure);
+					continue;
 				}
 				if (frame.kind === "response") {
 					const pending = this.#pending.get(frame.id);

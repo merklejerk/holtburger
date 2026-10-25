@@ -362,7 +362,7 @@ impl ContentAssetService {
                         format!("Could not load MotionTable 0x{motion_table_id:08X}")
                     })?;
                 Ok(ContentAsset::MotionTable(Arc::new(
-                    MotionTable::read(&mut Cursor::new(resource.bytes)).with_context(|| {
+                    resource.decode(|bytes| Ok(MotionTable::read(&mut Cursor::new(bytes))?)).with_context(|| {
                         format!("Could not parse MotionTable 0x{motion_table_id:08X}")
                     })?,
                 )))
@@ -375,7 +375,7 @@ impl ContentAssetService {
                         format!("Could not load PhysicsScript 0x{script_id:08X}")
                     })?;
                 Ok(ContentAsset::PhysicsScript(Box::new(
-                    PhysicsScript::read(&mut Cursor::new(resource.bytes)).with_context(|| {
+                    resource.decode(|bytes| Ok(PhysicsScript::read(&mut Cursor::new(bytes))?)).with_context(|| {
                         format!("Could not parse PhysicsScript 0x{script_id:08X}")
                     })?,
                 )))
@@ -388,7 +388,7 @@ impl ContentAssetService {
                         format!("Could not load PhysicsScriptTable 0x{table_id:08X}")
                     })?;
                 Ok(ContentAsset::PhysicsScriptTable(Box::new(
-                    PhysicsScriptTable::read(&mut Cursor::new(resource.bytes)).with_context(
+                    resource.decode(|bytes| Ok(PhysicsScriptTable::read(&mut Cursor::new(bytes))?)).with_context(
                         || format!("Could not parse PhysicsScriptTable 0x{table_id:08X}"),
                     )?,
                 )))
@@ -401,7 +401,7 @@ impl ContentAssetService {
                         format!("Could not load ParticleEmitterInfo 0x{emitter_info_id:08X}")
                     })?;
                 Ok(ContentAsset::ParticleEmitterInfo(Box::new(
-                    ParticleEmitterInfo::read(&mut Cursor::new(resource.bytes)).with_context(
+                    resource.decode(|bytes| Ok(ParticleEmitterInfo::read(&mut Cursor::new(bytes))?)).with_context(
                         || format!("Could not parse ParticleEmitterInfo 0x{emitter_info_id:08X}"),
                     )?,
                 )))
@@ -412,7 +412,7 @@ impl ContentAssetService {
                     .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, wave_id))
                     .with_context(|| format!("Could not load Wave 0x{wave_id:08X}"))?;
                 Ok(ContentAsset::Wave(Box::new(
-                    Wave::read(&mut Cursor::new(resource.bytes))
+                    resource.decode(|bytes| Ok(Wave::read(&mut Cursor::new(bytes))?))
                         .with_context(|| format!("Could not parse Wave 0x{wave_id:08X}"))?,
                 )))
             }
@@ -424,7 +424,7 @@ impl ContentAssetService {
                         format!("Could not load SoundTable 0x{sound_table_id:08X}")
                     })?;
                 Ok(ContentAsset::SoundTable(Box::new(
-                    SoundTable::read(&mut Cursor::new(resource.bytes)).with_context(|| {
+                    resource.decode(|bytes| Ok(SoundTable::read(&mut Cursor::new(bytes))?)).with_context(|| {
                         format!("Could not parse SoundTable 0x{sound_table_id:08X}")
                     })?,
                 )))
@@ -435,7 +435,7 @@ impl ContentAssetService {
                     .read_resource(ResourceKey::new(EOR_PORTAL_NAMESPACE, degrade_id))
                     .with_context(|| format!("Could not load DegradeInfo 0x{degrade_id:08X}"))?;
                 Ok(ContentAsset::DegradeInfo(Box::new(
-                    GfxObjDegradeInfo::read(&mut Cursor::new(resource.bytes)).with_context(
+                    resource.decode(|bytes| Ok(GfxObjDegradeInfo::read(&mut Cursor::new(bytes))?)).with_context(
                         || format!("Could not parse DegradeInfo 0x{degrade_id:08X}"),
                     )?,
                 )))
@@ -504,7 +504,7 @@ impl ContentAssetService {
                         format!("Could not load RenderSurface 0x{render_surface_id:08X}")
                     })?;
                 Ok(ContentAsset::RenderSurface(Box::new(
-                    RenderSurface::unpack(&mut Cursor::new(resource.bytes)).with_context(
+                    resource.decode(|bytes| Ok(RenderSurface::unpack(&mut Cursor::new(bytes))?)).with_context(
                         || format!("Could not parse RenderSurface 0x{render_surface_id:08X}"),
                     )?,
                 )))
@@ -560,6 +560,22 @@ impl LandblockFoundationCache {
 type SharedAssetFuture =
     Shared<BoxFuture<'static, std::result::Result<ContentAsset, Arc<anyhow::Error>>>>;
 
+/// Retains typed causes when a coalesced load distributes an error to several waiters.
+#[derive(Debug)]
+struct SharedAssetError(Arc<anyhow::Error>);
+
+impl std::fmt::Display for SharedAssetError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.0)
+    }
+}
+
+impl std::error::Error for SharedAssetError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.0.as_ref().as_ref())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ContentAssetRuntime {
     service: Arc<ContentAssetService>,
@@ -606,7 +622,7 @@ impl ContentAssetRuntime {
         in_flight.remove(&request);
         drop(in_flight);
 
-        result.map_err(|error| anyhow!("{error:#}"))
+        result.map_err(|error| SharedAssetError(error).into())
     }
 
     pub fn load_blocking(&self, request: ContentAssetRequest) -> Result<ContentAsset> {
@@ -654,6 +670,73 @@ mod tests {
     use holtburger_dat::file_type::region::{GameTime, LandDefs, RegionDesc};
     use holtburger_dat::{DatError, EOR_CELL_NAMESPACE, FileMetadata, ResourceSource};
     use std::collections::HashMap;
+
+    #[tokio::test]
+    async fn coalesced_decode_failures_retain_resource_identity_for_each_waiter() {
+        let file_id = 0x0100_0001;
+        let source = Arc::new(InMemoryResourceSource::default().with_file(
+            EOR_PORTAL_NAMESPACE,
+            file_id,
+            vec![0xff],
+        ));
+        let repository = ContentRepository::from_mounts(vec![source.clone()]);
+        let runtime = ContentAssetRuntime::new(ContentAssetService::new(
+            Arc::new(repository),
+            Arc::new(ContentDecodeCache::new()),
+        ));
+        let request = ContentAssetRequest::GfxObj(file_id);
+        let (first, second) = tokio::join!(runtime.load(request.clone()), runtime.load(request));
+        for result in [first, second] {
+            let error = result.unwrap_err();
+            let resource = error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<holtburger_content::ContentResourceError>())
+                .unwrap();
+            assert_eq!(
+                (&*resource.namespace, resource.file_id),
+                (EOR_PORTAL_NAMESPACE, file_id)
+            );
+        }
+        assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, file_id), 1);
+    }
+
+    #[tokio::test]
+    async fn missing_resource_identity_survives_the_async_loader() {
+        let file_id = 0x0100_0001;
+        let repository = ContentRepository::from_mounts(Vec::new());
+        let runtime = ContentAssetRuntime::new(ContentAssetService::new(
+            Arc::new(repository),
+            Arc::new(ContentDecodeCache::new()),
+        ));
+        let error = runtime
+            .load(ContentAssetRequest::GfxObj(file_id))
+            .await
+            .unwrap_err();
+        let resource = error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<holtburger_content::ContentResourceError>())
+            .unwrap();
+        assert_eq!(resource.file_id, file_id);
+    }
+
+    #[tokio::test]
+    async fn worker_admission_failure_is_not_a_resource_failure() {
+        let runtime = ContentAssetRuntime::new(ContentAssetService::new(
+            Arc::new(ContentRepository::from_mounts(Vec::new())),
+            Arc::new(ContentDecodeCache::new()),
+        ));
+        runtime.worker_slots.close();
+        let error = runtime
+            .load(ContentAssetRequest::GfxObj(0x0100_0001))
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .chain()
+                .all(|cause| !cause.is::<holtburger_content::ContentResourceError>())
+        );
+        assert!(error.to_string().contains("semaphore closed"));
+    }
 
     #[derive(Debug, Default)]
     struct InMemoryResourceSource {

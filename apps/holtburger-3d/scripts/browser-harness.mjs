@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { extractContentArguments } from "./entry-paths.mjs";
 import { probeSalvage } from "./client-salvage-probe.mjs";
 import { probeClientPresentation } from "./client-presentation-probe.mjs";
 import { probeClientMouseMovement } from "./client-mouse-movement-probe.mjs";
@@ -23,7 +24,6 @@ import { probeActionBars } from "./client-action-bar-probe.mjs";
 import { probeItemUse } from "./client-item-use-probe.mjs";
 import { probeClientBook } from "./client-book-probe.mjs";
 import { probeLoadouts } from "./client-loadout-probe.mjs";
-import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { decode } from "@msgpack/msgpack";
 import { tmpdir } from "node:os";
@@ -66,14 +66,17 @@ const workspaceDats = resolve(
 	"dats",
 );
 const childEnvironment = { ...process.env };
-if (
-	childEnvironment.HOLTBURGER_DATS === undefined &&
-	existsSync(workspaceDats)
-) {
-	childEnvironment.HOLTBURGER_DATS = workspaceDats;
-}
+delete childEnvironment.HOLTBURGER_DATS;
+const content = extractContentArguments(
+	process.argv.slice(2),
+	process.env.INIT_CWD ?? process.cwd(),
+);
+if (content.noContentSearch || content.clearContent)
+	throw new Error(
+		"--no-content-search and --clear-content apply only to desktop launches",
+	);
+const options = parseArgs(content.args);
 
-const options = parseArgs(process.argv.slice(2));
 const children = [];
 const tempDirectories = [];
 
@@ -4500,6 +4503,9 @@ async function startContentHost() {
 		"--",
 		"--port",
 		"0",
+		...(content.contentPath === null
+			? ["--discovery-root", workspaceDats]
+			: ["--content", content.contentPath]),
 	]);
 	return waitForReadyLine(child, (line) => {
 		const message = parseJsonLine(line);

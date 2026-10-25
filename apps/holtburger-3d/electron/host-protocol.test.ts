@@ -6,10 +6,137 @@ import {
 	PROTOCOL_VERSION,
 	SidecarFrameDecoder,
 	SidecarHostClient,
+	ContentStartupError,
 	encodeSidecarFrame,
 	wireCommand,
 	type SidecarProcessLike,
 } from "./host-protocol.js";
+
+describe("content startup protocol", () => {
+	it("preserves a structured startup refusal when the host exits", async () => {
+		const process = new FakeProcess();
+		const client = new SidecarHostClient(process, "client");
+		const connected = client.connect();
+		process.stdout.push(
+			encodeSidecarFrame({
+				kind: "startup_failed",
+				protocol_version: PROTOCOL_VERSION,
+				failure: {
+					kind: "selection",
+					reason: "absent",
+					message: "No archives at selected location",
+				},
+			}),
+		);
+		process.exit(1, null);
+		await expect(connected).rejects.toBeInstanceOf(ContentStartupError);
+		await expect(connected).rejects.toMatchObject({
+			failure: { kind: "selection" },
+		});
+	});
+
+	it("drains a startup diagnostic after exit before classifying process completion", async () => {
+		const process = new FakeProcess();
+		const client = new SidecarHostClient(process);
+		const connected = client.connect();
+		process.signalExit(1, null);
+		process.stdout.push(
+			encodeSidecarFrame({
+				kind: "startup_failed",
+				protocol_version: PROTOCOL_VERSION,
+				failure: {
+					kind: "selection",
+					reason: "invalid",
+					message: "Unreadable archive",
+				},
+			}),
+		);
+		process.close(1, null);
+		await expect(connected).rejects.toBeInstanceOf(ContentStartupError);
+	});
+
+	it("waits for process completion after receiving a shutdown acknowledgement", async () => {
+		const process = new FakeProcess();
+		const client = await connect(process);
+		let finished = false;
+		const stopping = client.shutdown().then(() => {
+			finished = true;
+		});
+		process.stdout.push(encodeSidecarFrame({ kind: "shutdown_ack", id: 1 }));
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(finished).toBe(false);
+		process.close(0, null);
+		await stopping;
+		expect(process.killCount).toBe(0);
+	});
+
+	it("cancels before handshake without sending application protocol traffic", async () => {
+		const process = new FakeProcess();
+		const client = new SidecarHostClient(process);
+		const failed = expect(client.connect()).rejects.toMatchObject({
+			code: "host_exit",
+		});
+		await client.shutdown();
+		await failed;
+		expect(process.stdin.writes).toEqual([]);
+		expect(process.killCount).toBe(1);
+	});
+
+	it("reports a same-chunk runtime failure before connect continuation runs", async () => {
+		const process = new FakeProcess();
+		const client = new SidecarHostClient(process, "client");
+		const failures = vi.fn();
+		client.listenContentFailures(failures);
+		const connected = client.connect();
+		const handshake = encodeSidecarFrame({
+			kind: "handshake",
+			protocol_version: PROTOCOL_VERSION,
+			host_name: "test",
+			host_version: "test",
+			host_mode: "client",
+			content_location: "/selected",
+		});
+		const failure = {
+			kind: "resource" as const,
+			namespace: "eor/portal",
+			file_id: 0x01000001,
+			source: "/selected",
+			message: "Required model is missing",
+		};
+		const notification = encodeSidecarFrame({
+			kind: "content_failed",
+			failure,
+		});
+		const combined = new Uint8Array(handshake.length + notification.length);
+		combined.set(handshake);
+		combined.set(notification, handshake.length);
+		process.stdout.push(combined);
+		expect(failures).toHaveBeenCalledExactlyOnceWith(failure);
+		await connected;
+		expect(client.contentLocation).toBe("/selected");
+		const late = vi.fn();
+		client.listenContentFailures(late);
+		expect(late).toHaveBeenCalledExactlyOnceWith(failure);
+	});
+
+	it("rejects an incompatible startup-failure version as a protocol error", async () => {
+		const process = new FakeProcess();
+		const client = new SidecarHostClient(process);
+		const connected = client.connect();
+		process.stdout.push(
+			encodeSidecarFrame({
+				kind: "startup_failed",
+				protocol_version: PROTOCOL_VERSION + 1,
+				failure: { kind: "selection", reason: "absent", message: "missing" },
+			}),
+		);
+		await expect(connected).rejects.toMatchObject({
+			code: "invalid_startup_failure",
+		});
+		expect(process.killCount).toBe(1);
+	});
+});
 
 class FakeStream {
 	readonly writes: Uint8Array[] = [];
@@ -49,22 +176,28 @@ class FakeProcess implements SidecarProcessLike {
 	readonly stdout = new FakeStream();
 	#exitListeners: Array<(code: number | null, signal: string | null) => void> =
 		[];
+	#closeListeners: Array<(code: number | null, signal: string | null) => void> =
+		[];
 	#errorListeners: Array<(error: Error) => void> = [];
 	killCount = 0;
 
 	on(
-		event: "exit",
+		event: "exit" | "close",
 		listener: (code: number | null, signal: string | null) => void,
 	): this;
 	on(event: "error", listener: (error: Error) => void): this;
 	on(
-		event: "exit" | "error",
+		event: "exit" | "close" | "error",
 		listener:
 			| ((code: number | null, signal: string | null) => void)
 			| ((error: Error) => void),
 	): this {
 		if (event === "exit") {
 			this.#exitListeners.push(
+				listener as (code: number | null, signal: string | null) => void,
+			);
+		} else if (event === "close") {
+			this.#closeListeners.push(
 				listener as (code: number | null, signal: string | null) => void,
 			);
 		} else {
@@ -75,16 +208,26 @@ class FakeProcess implements SidecarProcessLike {
 
 	kill(): boolean {
 		this.killCount += 1;
-		for (const listener of this.#exitListeners) listener(0, null);
+		this.exit(0, null);
 		return true;
 	}
 
 	failSpawn(error: Error): void {
 		for (const listener of this.#errorListeners) listener(error);
+		this.close(null, null);
 	}
 
 	exit(code: number | null, signal: string | null): void {
+		this.signalExit(code, signal);
+		this.close(code, signal);
+	}
+
+	signalExit(code: number | null, signal: string | null): void {
 		for (const listener of this.#exitListeners) listener(code, signal);
+	}
+
+	close(code: number | null, signal: string | null): void {
+		for (const listener of this.#closeListeners) listener(code, signal);
 	}
 }
 
@@ -102,6 +245,7 @@ async function connect(
 			host_name: "holtburger-3d-host",
 			host_version: "test",
 			host_mode: hostMode,
+			content_location: "/content",
 		}),
 	);
 	await connected;
@@ -129,6 +273,7 @@ describe("SidecarFrameDecoder", () => {
 			host_name: "holtburger-3d-host",
 			host_version: "test",
 			host_mode: "explorer",
+			content_location: "/content",
 		});
 		const second = encodeSidecarFrame({ kind: "shutdown_ack", id: 4 });
 		const merged = new Uint8Array(first.length + second.length);
@@ -297,6 +442,7 @@ describe("SidecarHostClient", () => {
 		const shutdownFrame = decodeWritten(process.stdin);
 		expect(shutdownFrame.length).toBeGreaterThan(0);
 		process.stdout.push(encodeSidecarFrame({ kind: "shutdown_ack", id: 3 }));
+		process.exit(0, null);
 		await shutdown;
 	});
 
@@ -356,6 +502,7 @@ describe("SidecarHostClient", () => {
 				host_name: "holtburger-3d-host",
 				host_version: "test",
 				host_mode: "client",
+				content_location: "/content",
 			}),
 		);
 		await expect(connected).rejects.toMatchObject({

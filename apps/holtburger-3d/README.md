@@ -584,11 +584,72 @@ The sidecar has one explicit composition root and mode-owned capabilities. Share
 inventories and dispatches only the selected authority. Event publication uses separate client and
 Explorer sink traits; the stdio writer is the only adapter that implements both.
 
-The launcher and host recognize these environment variables:
+### Client assets and startup
 
-- `HOLTBURGER_DATS` selects an explicit content installation. Development otherwise uses the
-  repository `dats` directory when present, followed by the normal content-repository discovery
-  rules.
+Both desktop modes accept `--content <path>` (or `--content=<path>`) to select an exact archive or
+asset directory for that launch:
+
+```bash
+npm run dev:explorer -- --content "/path/to/Asherons Call"
+npm run dev:client -- --account example --content "/path/to/Asherons Call"
+```
+
+Directories prefer HBA archives. If no HBA exists, the host opens retail DATs and identifies their
+roles from their headers. The standard base portal/highres pair is supported: highres resources
+take precedence by membership, with base portal supplying other portal resources. Cell and
+language archives retain their own namespaces. Duplicate archives of the same retail role are an
+error. Invalid HBA content is reported rather than silently repaired with DAT resources.
+
+Two independent desktop flags control asset setup:
+
+- `--no-content-search` disables default automatic discovery for this launch, including retries.
+  A saved location and explicit `--content` remain usable; choosing a folder is still available.
+- `--clear-content` clears the saved location and its attention marker before startup, then follows
+  normal selection policy. Default discovery can find and save another location.
+- Use both to open Provide assets directly:
+  `npm run dev:explorer -- --no-content-search --clear-content`.
+
+Client accepts the same flags alongside its usual launch arguments. With `--clear-content` and
+`--content` together, the requested clear is persisted, then the explicit selection stays temporary.
+These flags do not delete archives or clear other settings. The disabled-search policy is not saved.
+Standalone browser/live diagnostics do not own desktop preferences and reject these desktop flags.
+
+Without an override, startup tries the last successful location, then `dats` beside the packaged
+executable (the repository `dats` directory in development), then the platform Holtburger data
+directory. Absent candidates are skipped. An existing installation that cannot initialize is
+reported. Paths supplied through npm are resolved from the invocation directory; packaged default
+discovery does not depend on process working directory.
+
+The app shows the existing pregame loading page before constructing Client or Explorer. Its bundled
+portal animation and theme need no game assets. The startup shell feeds native asset-initialization
+status into that page; missing, failed, or flagged content opens a dedicated asset setup component
+inside the same pregame shell. Its form layout and styles are independent of the loading component. Choose a folder or retry the previous location. After content admission, Client uses
+the same loading component for connection and scene progress. Native asset recovery and the Client
+session lifecycle keep separate ownership. Loading pages keep the asset location in the pregame footer when known;
+`/assets` (also `@assets`) prints the active launch location to the in-game chat console.
+`/help assets` describes the command. The active location includes temporary CLI selections,
+independently of the saved preference. The native folder browser is the only OS-styled part
+of this flow. The asset form requests all end-of-retail DAT files or a full-profile HBA, uses
+consistent left alignment, and shows failure causes inline. It remains visible while the folder
+browser is open, with duplicate actions disabled; loading begins only after a folder is selected.
+Canceling the browser leaves setup open; Quit
+works before a game host or renderer exists.
+
+The canonical successful location is saved in `content-selection.json` under Electron's user-data
+profile, shared by both modes and separate from character/server settings. Development uses a
+separate profile. A required resource read/decode failure marks that saved installation as needing
+attention, causing the next launch to open setup with the prior diagnostic. Optional content
+failures do not mark the installation. `--content` and any replacement chosen during an override
+launch are temporary and never rewrite the saved preference. `--ignore-config` does not bypass
+asset recovery.
+
+Startup checks are shallow, so an installation can fail when a necessary resource is first used.
+Such failures remain visible; restart to choose another installation. Content is not replaced
+inside a running game. A failed preference write offers Retry saving and does not pretend that
+the selection or recovery marker reached disk.
+
+The launcher and host recognize these other environment variables:
+
 - `HOLTBURGER_VITE_PORT` pins the renderer server port when a shell-level override is preferable to
   the `--vite-port` argument. Omit it to use a random free port.
 - `HOLTBURGER_ELECTRON_OZONE_PLATFORM` accepts `auto`, `wayland`, or `x11` for Linux display-backend
@@ -599,11 +660,18 @@ The launcher and host recognize these environment variables:
   diagnostics. Packaged applications always use their bundled host. Normal development should let
   the launcher select the freshly built binary.
 
-Electron owns one product window and one host process. Normal application exit requests orderly
-host shutdown, then force-terminates a host that does not acknowledge within the bounded grace
-period. Host startup, protocol, or crash failures are reported as fatal application errors. Renderer
-reload is unsupported because it would retain host-owned sessions while replacing their renderer
-owner; restart the whole application after renderer or WebGL context failure.
+Electron owns one product window and at most one content-host attempt. Recoverable content setup
+reaps a failed attempt before starting another. Normal application exit requests orderly host
+shutdown and waits for process completion; acknowledgement alone is not completion. Executable,
+protocol, and unexpected host failures remain application errors. Renderer reload is unsupported
+because it would retain host-owned sessions while replacing their renderer owner; restart the
+whole application after renderer or WebGL context failure.
+
+`npm run probe:content` verifies native startup/recovery in an isolated temporary profile without
+screenshots. The synthetic archive intentionally lacks necessary scene/bootstrap assets: the
+probe verifies their failure marker, next-launch setup, override isolation, and bounded shutdown in
+both modes. Client retirement preserves the failed-construction outcome as a nonzero exit; a
+setup-only close must exit successfully.
 
 ## Verification and diagnostics
 

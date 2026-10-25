@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { access, mkdtemp, rm } from "node:fs/promises";
+import { access, copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -44,12 +44,17 @@ async function withTimeout(promise, timeoutMs, message) {
 }
 
 await access(hostPath, constants.X_OK);
-const emptyContentDirectory = await mkdtemp(
+const contentDirectory = await mkdtemp(
 	join(tmpdir(), "holtburger-3d-sidecar-smoke-"),
 );
-async function smokeMode(mode) {
-	const child = spawn(hostPath, [`--mode=${mode}`], {
-		env: { ...process.env, HOLTBURGER_DATS: emptyContentDirectory },
+async function smokeMode(mode, family) {
+	const contentPath = join(contentDirectory, `smoke.${family}`);
+	await copyFile(
+		join(appRoot, `scripts/fixtures/minimal-content.${family}.fixture`),
+		contentPath,
+	);
+	const child = spawn(hostPath, [`--mode=${mode}`, "--content", contentPath], {
+		env: { ...process.env },
 		stdio: "pipe",
 		windowsHide: true,
 	});
@@ -64,7 +69,7 @@ async function smokeMode(mode) {
 		await client.connect();
 		if (mode === "client") {
 			// Client startup needs a real DAT bootstrap and server; this smoke intentionally
-			// injects an empty repository, so verify mode admission without opening a socket.
+			// uses a synthetic palette archive, so verify mode admission without opening a socket.
 			await expectModeRejection(client, "explorer_catalog_capability");
 		} else {
 			await expectModeRejection(client, "start_client", {
@@ -96,7 +101,7 @@ async function smokeMode(mode) {
 				`host exited uncleanly (code=${result.code ?? "none"}, signal=${result.signal ?? "none"})`,
 			);
 		}
-		return { mode, status, shutdown: "clean" };
+		return { mode, family, status, shutdown: "clean" };
 	} catch (error) {
 		const diagnostic = stderr.trim();
 		throw new Error(
@@ -127,7 +132,8 @@ async function expectModeRejection(client, command, args) {
 try {
 	const results = [];
 	for (const mode of ["explorer", "client"])
-		results.push(await smokeMode(mode));
+		for (const family of ["hba", "dat"])
+			results.push(await smokeMode(mode, family));
 	console.log(
 		JSON.stringify({
 			binary: basename(hostPath),
@@ -137,5 +143,5 @@ try {
 		}),
 	);
 } finally {
-	await rm(emptyContentDirectory, { force: true, recursive: true });
+	await rm(contentDirectory, { force: true, recursive: true });
 }

@@ -495,6 +495,16 @@ export async function probeClientPresentation(
 			`${api}.read().portalReveals === 1 && ${visible} && document.querySelector('.client-world') !== null`,
 		);
 		const gameplay = await read(`${api}.read()`);
+		await read(`(() => {
+			const editor = document.querySelector('[aria-label="Chat message"]');
+			editor.value = '/assets';
+			editor.dispatchEvent(new Event('input', { bubbles: true }));
+			editor.closest('form').requestSubmit();
+		})()`);
+		// This injected browser host has no filesystem provenance; report that honestly.
+		await wait(
+			"document.querySelector('[aria-label=\"Chat messages\"]').textContent.includes('Asset location is unavailable.')",
+		);
 		for (const type of ["keyDown", "keyUp"])
 			await client.send("Input.dispatchKeyEvent", {
 				type,
@@ -757,6 +767,7 @@ export async function probeClientPresentation(
 			selection,
 			creator,
 			gameplay,
+			assetCommand: "local chat output",
 			returned,
 			rosterKeyboardNavigation: true,
 			systemMenuEscape: true,

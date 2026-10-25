@@ -20,16 +20,6 @@ pub enum HostRuntime {
 }
 
 impl HostRuntime {
-    /// Discovers shared content and constructs only the requested mode root.
-    pub fn discover(
-        mode: HostMode,
-        client_event_sink: Arc<dyn ClientEventSink>,
-        explorer_event_sink: Arc<dyn ExplorerEventSink>,
-    ) -> Result<Self> {
-        let content = SharedHostContent::discover()?;
-        Self::from_content(mode, content, client_event_sink, explorer_event_sink)
-    }
-
     /// Builds one mode root from injected content for tests and diagnostics.
     pub fn from_content(
         mode: HostMode,

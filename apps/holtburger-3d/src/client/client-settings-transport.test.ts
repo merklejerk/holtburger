@@ -12,10 +12,15 @@ function installBridge(overrides: Record<string, unknown> = {}): void {
 				sections: {},
 				hudPlacements: {},
 				unavailable: [],
+				repaired: [],
 			}),
 			saveUserPatch: async () => undefined,
 			resetUser: async () => [],
-			loadCharacter: async () => ({ sections: {}, unavailable: [] }),
+			loadCharacter: async () => ({
+				sections: {},
+				unavailable: [],
+				repaired: [],
+			}),
 			saveCharacterPatch: async () => undefined,
 			...overrides,
 		},
@@ -36,6 +41,7 @@ describe("Electron client settings transport", () => {
 				sections: { graphics: user.graphics },
 				hudPlacements: { book: user.hudLayout.book },
 				unavailable: ["user.input uses unsupported version 2"],
+				repaired: [],
 			}),
 			loadCharacter: async () => ({
 				sections: {
@@ -43,13 +49,15 @@ describe("Electron client settings transport", () => {
 					lastKnownName: "Mira",
 				},
 				unavailable: [],
+				repaired: [],
 			}),
 		});
 		const transport = createElectronClientSettingsTransport();
-		expect(await transport.loadUser()).toEqual({
+		expect(await transport.loadUser(user)).toEqual({
 			sections: { graphics: user.graphics },
 			hudPlacements: { book: user.hudLayout.book },
 			unavailable: ["user.input uses unsupported version 2"],
+			repaired: [],
 		});
 		expect(await transport.loadCharacter(7)).toEqual({
 			sections: {
@@ -57,6 +65,7 @@ describe("Electron client settings transport", () => {
 				lastKnownName: "Mira",
 			},
 			unavailable: [],
+			repaired: [],
 		});
 	});
 
@@ -92,12 +101,15 @@ describe("Electron client settings transport", () => {
 	it("rejects malformed preload responses", async () => {
 		installBridge({ loadUser: async () => ({ sections: { graphics: {} } }) });
 		await expect(
-			createElectronClientSettingsTransport().loadUser(),
+			createElectronClientSettingsTransport().loadUser(
+				createDefaultClientUserSettings({ width: 1440, height: 900 }, 8),
+			),
 		).rejects.toThrow("Malformed user settings response");
 		installBridge({
 			loadCharacter: async () => ({
 				sections: { lastKnownName: 42 },
 				unavailable: [],
+				repaired: [],
 			}),
 		});
 		await expect(

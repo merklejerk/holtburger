@@ -33,6 +33,7 @@ it("composes new HUD defaults with older saved placements at the real entry poin
 		sections: {},
 		hudPlacements: { inventory },
 		unavailable: [],
+		repaired: [],
 	});
 	// Load the entry for its mounting side effect; Svelte-check owns its component export types.
 	const entryModule = "./main";

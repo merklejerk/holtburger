@@ -382,10 +382,15 @@
 						sections: {},
 						hudPlacements: {},
 						unavailable: [],
+						repaired: [],
 					}),
 					saveUserPatch: async () => {},
 					resetUser: async () => [],
-					loadCharacter: async () => ({ sections: {}, unavailable: [] }),
+					loadCharacter: async () => ({
+						sections: {},
+						unavailable: [],
+						repaired: [],
+					}),
 					saveCharacterPatch: async () => {},
 				},
 				visualCacheTransport: {

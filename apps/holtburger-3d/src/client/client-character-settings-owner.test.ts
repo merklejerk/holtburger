@@ -51,13 +51,16 @@ describe("ClientCharacterSettingsOwner", () => {
 				lastKnownName: "A",
 			},
 			unavailable: [],
+			repaired: [],
 		});
 		await Promise.resolve();
 		expect(fixture.owner.state()).toMatchObject({
 			kind: "loading",
 			characterGuid: 2,
 		});
-		fixture.loads.get(2)!.resolve({ sections: {}, unavailable: [] });
+		fixture.loads
+			.get(2)!
+			.resolve({ sections: {}, unavailable: [], repaired: [] });
 		await vi.waitFor(() =>
 			expect(fixture.owner.state()).toMatchObject({
 				kind: "ready",
@@ -71,6 +74,7 @@ describe("ClientCharacterSettingsOwner", () => {
 		const loadCharacter = vi.fn(async () => ({
 			sections: {},
 			unavailable: [],
+			repaired: [],
 		}));
 		const saveCharacterPatch = vi.fn(() => saving.promise);
 		const owner = new ClientCharacterSettingsOwner({
@@ -100,7 +104,9 @@ describe("ClientCharacterSettingsOwner", () => {
 		fixture.owner.acceptGuid(7);
 		fixture.owner.acceptName(7, "Mira");
 		await vi.waitFor(() => expect(fixture.loads.size).toBe(1));
-		fixture.loads.get(7)!.resolve({ sections: {}, unavailable: [] });
+		fixture.loads
+			.get(7)!
+			.resolve({ sections: {}, unavailable: [], repaired: [] });
 		await vi.waitFor(() =>
 			expect(fixture.owner.state()).toMatchObject({
 				kind: "ready",
@@ -114,7 +120,9 @@ describe("ClientCharacterSettingsOwner", () => {
 		const fixture = ownerFixture();
 		fixture.owner.acceptGuid(1);
 		await vi.waitFor(() => expect(fixture.loads.has(1)).toBe(true));
-		fixture.loads.get(1)!.resolve({ sections: {}, unavailable: [] });
+		fixture.loads
+			.get(1)!
+			.resolve({ sections: {}, unavailable: [], repaired: [] });
 		await vi.waitFor(() => expect(fixture.owner.state().kind).toBe("ready"));
 		fixture.owner.change(
 			"combatControls",
@@ -133,7 +141,7 @@ describe("ClientCharacterSettingsOwner", () => {
 			transport: {
 				loadCharacter: async (guid) => {
 					loads.push(guid);
-					return { sections: {}, unavailable: [] };
+					return { sections: {}, unavailable: [], repaired: [] };
 				},
 				saveCharacterPatch: async (guid) => {
 					saves.push(guid);

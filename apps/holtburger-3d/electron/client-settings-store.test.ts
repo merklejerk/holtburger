@@ -30,6 +30,12 @@ const initialWindow = {
 	maximized: false,
 } as const;
 
+const defaultUser = createDefaultClientUserSettings(
+	initialWindow.normalBounds,
+	8,
+);
+const defaultCharacter = createDefaultClientCharacterSettings();
+
 async function temporarySettingsPath(): Promise<string> {
 	return join(
 		await mkdtemp(join(tmpdir(), "holtburger-settings-")),
@@ -60,7 +66,7 @@ describe("ClientSettingsStore", () => {
 			);
 			const store = new ClientSettingsStore(path, initialWindow);
 			await store.load();
-			expect(store.readUser("persisted")).toMatchObject({
+			expect(await store.loadUser(defaultUser, "persisted")).toMatchObject({
 				sections: {
 					graphics: { ...savedGraphics, alwaysShowEntityNameplates },
 				},
@@ -70,9 +76,9 @@ describe("ClientSettingsStore", () => {
 			await store.saveUserPatch({ sections: { graphics } });
 			const reloaded = new ClientSettingsStore(path, initialWindow);
 			await reloaded.load();
-			expect(reloaded.readUser("persisted").sections.graphics).toEqual(
-				graphics,
-			);
+			expect(
+				(await reloaded.loadUser(defaultUser, "persisted")).sections.graphics,
+			).toEqual(graphics);
 		} finally {
 			await rm(dirname(path), { recursive: true, force: true });
 		}
@@ -97,7 +103,9 @@ describe("ClientSettingsStore", () => {
 			);
 			const store = new ClientSettingsStore(path, initialWindow);
 			await store.load();
-			expect(store.readUser("persisted").sections.ui).toEqual({
+			expect(
+				(await store.loadUser(defaultUser, "persisted")).sections.ui,
+			).toEqual({
 				fonts,
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.initial,
@@ -118,14 +126,18 @@ describe("ClientSettingsStore", () => {
 			});
 			const reloaded = new ClientSettingsStore(path, initialWindow);
 			await reloaded.load();
-			expect(reloaded.readUser("persisted").sections.ui).toEqual(ui);
+			expect(
+				(await reloaded.loadUser(defaultUser, "persisted")).sections.ui,
+			).toEqual(ui);
 			expect((await readCollection(path)).user.future).toEqual(future);
 			expect(() =>
 				reloaded.saveUserPatch({
 					sections: { ui: { ...ui, textScale: CLIENT_TEXT_SCALE.maximum + 1 } },
 				}),
 			).toThrow();
-			expect(reloaded.readUser("persisted").sections.ui).toEqual(ui);
+			expect(
+				(await reloaded.loadUser(defaultUser, "persisted")).sections.ui,
+			).toEqual(ui);
 		} finally {
 			await rm(dirname(path), { recursive: true, force: true });
 		}
@@ -135,7 +147,9 @@ describe("ClientSettingsStore", () => {
 		try {
 			const store = new ClientSettingsStore(path, initialWindow);
 			await store.load();
-			expect(store.readUser("persisted").sections.recentEmotes).toBeUndefined();
+			expect(
+				(await store.loadUser(defaultUser, "persisted")).sections.recentEmotes,
+			).toBeUndefined();
 			const recentEmotes = ["wave", "bowdeepstate"];
 			await store.saveUserPatch({ sections: { recentEmotes } });
 			await store.saveCharacterPatch("first:9000/0x50000001", {
@@ -146,10 +160,13 @@ describe("ClientSettingsStore", () => {
 			});
 			const reloaded = new ClientSettingsStore(path, initialWindow);
 			await reloaded.load();
-			expect(reloaded.readUser("persisted").sections.recentEmotes).toEqual(
-				recentEmotes,
-			);
-			expect(reloaded.readUser("persisted").unavailable).toEqual([]);
+			expect(
+				(await reloaded.loadUser(defaultUser, "persisted")).sections
+					.recentEmotes,
+			).toEqual(recentEmotes);
+			expect(
+				(await reloaded.loadUser(defaultUser, "persisted")).unavailable,
+			).toEqual([]);
 			const saved = await readCollection(path);
 			expect(saved.user.recentEmotes).toEqual({
 				version: 1,
@@ -177,16 +194,19 @@ describe("ClientSettingsStore", () => {
 			const store = new ClientSettingsStore(path, initialWindow);
 			await store.load();
 			expect(
-				store.readCharacter(first, "persisted").sections.entityAlerts,
+				(await store.loadCharacter(first, defaultCharacter, "persisted"))
+					.sections.entityAlerts,
 			).toBeUndefined();
 			await store.saveCharacterPatch(first, { entityAlerts: rules });
 			const reloaded = new ClientSettingsStore(path, initialWindow);
 			await reloaded.load();
 			expect(
-				reloaded.readCharacter(first, "persisted").sections.entityAlerts,
+				(await reloaded.loadCharacter(first, defaultCharacter, "persisted"))
+					.sections.entityAlerts,
 			).toEqual(rules);
 			expect(
-				reloaded.readCharacter(second, "persisted").sections.entityAlerts,
+				(await reloaded.loadCharacter(second, defaultCharacter, "persisted"))
+					.sections.entityAlerts,
 			).toBeUndefined();
 			const saved = await readCollection(path);
 			const malformed = {
@@ -211,13 +231,20 @@ describe("ClientSettingsStore", () => {
 			);
 			const invalid = new ClientSettingsStore(path, initialWindow);
 			await invalid.load();
-			const read = invalid.readCharacter(first, "persisted");
-			expect(read.unavailable).toHaveLength(1);
-			expect(read.sections.entityAlerts).toBeUndefined();
+			const read = await invalid.loadCharacter(
+				first,
+				defaultCharacter,
+				"persisted",
+			);
+			expect(read.unavailable).toEqual([]);
+			expect(read.repaired).toEqual([
+				"character.entityAlerts: reset invalid value",
+			]);
+			expect(read.sections.entityAlerts).toEqual(defaultCharacter.entityAlerts);
 			await invalid.saveCharacterPatch(first, { lastKnownName: "Wayfarer" });
 			expect(
 				(await readCollection(path)).characters[first].entityAlerts,
-			).toEqual(malformed);
+			).toEqual({ version: 1, value: defaultCharacter.entityAlerts });
 		} finally {
 			await rm(dirname(path), { recursive: true, force: true });
 		}
@@ -248,7 +275,7 @@ describe("ClientSettingsStore", () => {
 			);
 			const store = new ClientSettingsStore(path, initialWindow);
 			await store.load();
-			const loaded = store.readUser("persisted");
+			const loaded = await store.loadUser(defaultUser, "persisted");
 			expect(loaded.unavailable).toEqual([]);
 			expect(loaded.sections.input?.client).toEqual({
 				...input.client,
@@ -266,11 +293,13 @@ describe("ClientSettingsStore", () => {
 			const reloaded = new ClientSettingsStore(path, initialWindow);
 			await reloaded.load();
 			expect(
-				reloaded.readUser("persisted").sections.input?.client.toggleChatHistory,
+				(await reloaded.loadUser(defaultUser, "persisted")).sections.input
+					?.client.toggleChatHistory,
 			).toEqual([]);
-			expect(reloaded.readUser("persisted").sections.chatFilters).toEqual([
-				"combat",
-			]);
+			expect(
+				(await reloaded.loadUser(defaultUser, "persisted")).sections
+					.chatFilters,
+			).toEqual(["combat"]);
 		} finally {
 			await rm(dirname(path), { recursive: true, force: true });
 		}
@@ -305,10 +334,12 @@ describe("ClientSettingsStore", () => {
 			const reloaded = new ClientSettingsStore(path, initialWindow);
 			await reloaded.load();
 			expect(
-				reloaded.readCharacter(first, "persisted").sections.actionBars,
+				(await reloaded.loadCharacter(first, defaultCharacter, "persisted"))
+					.sections.actionBars,
 			).toEqual(firstBars);
 			expect(
-				reloaded.readCharacter(second, "persisted").sections.actionBars,
+				(await reloaded.loadCharacter(second, defaultCharacter, "persisted"))
+					.sections.actionBars,
 			).toEqual(secondBars);
 			await reloaded.saveCharacterPatch(first, {
 				actionBars: bindActionCell(firstBars, address, null),
@@ -316,10 +347,12 @@ describe("ClientSettingsStore", () => {
 			const removed = new ClientSettingsStore(path, initialWindow);
 			await removed.load();
 			expect(
-				removed.readCharacter(first, "persisted").sections.actionBars,
+				(await removed.loadCharacter(first, defaultCharacter, "persisted"))
+					.sections.actionBars,
 			).toEqual(defaults.actionBars);
 			expect(
-				removed.readCharacter(second, "persisted").sections.actionBars,
+				(await removed.loadCharacter(second, defaultCharacter, "persisted"))
+					.sections.actionBars,
 			).toEqual(secondBars);
 		} finally {
 			await rm(dirname(path), { recursive: true, force: true });
@@ -341,7 +374,9 @@ describe("ClientSettingsStore", () => {
 		await store.saveUserPatch({ sections: { ui } });
 		const loaded = new ClientSettingsStore(path, initialWindow);
 		await loaded.load();
-		expect(loaded.readUser("persisted").sections.ui).toEqual(ui);
+		expect(
+			(await loaded.loadUser(defaultUser, "persisted")).sections.ui,
+		).toEqual(ui);
 	});
 
 	it("adds environment sections to an older profile without losing fonts or graphics", async () => {
@@ -356,7 +391,8 @@ describe("ClientSettingsStore", () => {
 			sections: { ui: defaults.ui, graphics: defaults.graphics },
 		});
 		expect(
-			store.readUser("persisted").sections.environmentOverrides,
+			(await store.loadUser(defaultUser, "persisted")).sections
+				.environmentOverrides,
 		).toBeUndefined();
 		const preset = clientWeatherPresets(clientEnvironmentFixture())[0];
 		if (preset === undefined) throw new Error("Fixture preset missing.");
@@ -369,7 +405,9 @@ describe("ClientSettingsStore", () => {
 		});
 		const loaded = new ClientSettingsStore(path, initialWindow);
 		await loaded.load();
-		expect(loaded.readUser("persisted").sections).toMatchObject({
+		expect(
+			(await loaded.loadUser(defaultUser, "persisted")).sections,
+		).toMatchObject({
 			ui: defaults.ui,
 			graphics: defaults.graphics,
 			clockFormat: "12-hour",
@@ -378,15 +416,18 @@ describe("ClientSettingsStore", () => {
 		await loaded.saveUserPatch({
 			sections: { environmentOverrides: CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT },
 		});
-		expect(loaded.readUser("persisted").sections.environmentOverrides).toEqual(
-			CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
-		);
+		expect(
+			(await loaded.loadUser(defaultUser, "persisted")).sections
+				.environmentOverrides,
+		).toEqual(CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT);
 	});
 	it("round-trips the audio mix and resets it to declared defaults", async () => {
 		const path = await temporarySettingsPath();
 		const store = new ClientSettingsStore(path, initialWindow);
 		await store.load();
-		expect(store.readUser("persisted").sections.audio).toBeUndefined();
+		expect(
+			(await store.loadUser(defaultUser, "persisted")).sections.audio,
+		).toBeUndefined();
 		const audio = {
 			...CLIENT_AUDIO_DEFAULTS,
 			masterVolume: 0.35,
@@ -397,13 +438,15 @@ describe("ClientSettingsStore", () => {
 		await store.saveUserPatch({ sections: { audio } });
 		const loaded = new ClientSettingsStore(path, initialWindow);
 		await loaded.load();
-		expect(loaded.readUser("persisted").sections.audio).toEqual(audio);
+		expect(
+			(await loaded.loadUser(defaultUser, "persisted")).sections.audio,
+		).toEqual(audio);
 		await loaded.saveUserPatch({ sections: { audio: CLIENT_AUDIO_DEFAULTS } });
 		const reset = new ClientSettingsStore(path, initialWindow);
 		await reset.load();
-		expect(reset.readUser("persisted").sections.audio).toEqual(
-			CLIENT_AUDIO_DEFAULTS,
-		);
+		expect(
+			(await reset.loadUser(defaultUser, "persisted")).sections.audio,
+		).toEqual(CLIENT_AUDIO_DEFAULTS);
 	});
 	it("loads and saves user, HUD, window, and character sections independently", async () => {
 		const path = await temporarySettingsPath();
@@ -426,17 +469,21 @@ describe("ClientSettingsStore", () => {
 
 		const loaded = new ClientSettingsStore(path, initialWindow);
 		await loaded.load();
-		expect(loaded.readUser("persisted")).toMatchObject({
+		expect(await loaded.loadUser(defaultUser, "persisted")).toMatchObject({
 			sections: { graphics: user.graphics },
 			hudPlacements: { book: user.hudLayout.book, world: user.hudLayout.world },
 			unavailable: [],
 		});
-		expect(loaded.readUser("fresh")).toMatchObject({
+		expect(await loaded.loadUser(defaultUser, "fresh")).toMatchObject({
 			sections: {},
 			hudPlacements: {},
 		});
 		expect(
-			loaded.readCharacter("example:9000/0x50000001", "persisted"),
+			await loaded.loadCharacter(
+				"example:9000/0x50000001",
+				defaultCharacter,
+				"persisted",
+			),
 		).toMatchObject({
 			sections: { actionBars: character.actionBars, lastKnownName: "Mira" },
 			unavailable: [],
@@ -475,9 +522,9 @@ describe("ClientSettingsStore", () => {
 		);
 		const store = new ClientSettingsStore(path, initialWindow);
 		await store.load();
-		expect(store.readUser("persisted").unavailable).toContain(
-			"user.input uses unsupported version 2",
-		);
+		expect(
+			(await store.loadUser(defaultUser, "persisted")).unavailable,
+		).toContain("user.input uses unsupported version 2");
 		await store.saveUserPatch({
 			sections: { graphics: user.graphics },
 			hudPlacements: { book: user.hudLayout.book, world: user.hudLayout.world },
@@ -527,9 +574,10 @@ describe("ClientSettingsStore", () => {
 		);
 		const store = new ClientSettingsStore(path, initialWindow);
 		await store.load();
-		expect(store.readUser("persisted").hudPlacements.characterSheet).toEqual(
-			savedPanel,
-		);
+		expect(
+			(await store.loadUser(defaultUser, "persisted")).hudPlacements
+				.characterSheet,
+		).toEqual(savedPanel);
 		const before = await readCollection(path);
 		const resizedPanel = { ...savedPanel, preferredHeight: 640 };
 		await store.saveUserPatch({
@@ -566,9 +614,12 @@ describe("ClientSettingsStore", () => {
 		await store.load();
 		const unavailable =
 			"hudPlacements.characterSheet uses unsupported version 2";
-		expect(store.readUser("persisted").unavailable).toEqual([unavailable]);
 		expect(
-			store.readUser("persisted").hudPlacements.characterSheet,
+			(await store.loadUser(defaultUser, "persisted")).unavailable,
+		).toEqual([unavailable]);
+		expect(
+			(await store.loadUser(defaultUser, "persisted")).hudPlacements
+				.characterSheet,
 		).toBeUndefined();
 		await expect(
 			store.saveUserPatch({

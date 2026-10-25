@@ -150,7 +150,8 @@ export class ClientCharacterSettingsOwner {
 			return;
 		}
 		if (!this.#isCurrentLoad(characterGuid, generation)) return;
-		if (loaded.unavailable.length > 0) this.#unavailable(loaded.unavailable);
+		const notices = [...loaded.repaired, ...loaded.unavailable];
+		if (notices.length > 0) this.#unavailable(notices);
 		const defaults = createDefaultClientCharacterSettings();
 		const { lastKnownName, ...savedSettings } = loaded.sections;
 		this.#set({

@@ -298,9 +298,16 @@ function installSettingsIpcBridge(
 	const readMode: ClientSettingsReadMode = ignorePersistedConfig
 		? "fresh"
 		: "persisted";
-	ipcMain.handle("settings:load-user", (event) => {
+	ipcMain.handle("settings:load-user", async (event, defaults: unknown) => {
 		requireApplicationFrame(event, window);
-		return store.readUser(readMode);
+		try {
+			return await store.loadUser(defaults, readMode);
+		} catch (error) {
+			// User settings load before the renderer mounts, so no toast can report
+			// a failed backup or repair write. Use the existing startup error surface.
+			reportFatalError("Holtburger client settings could not be loaded", error);
+			throw error;
+		}
 	});
 	ipcMain.handle("settings:save-user-patch", async (event, patch: unknown) => {
 		requireApplicationFrame(event, window);
@@ -310,13 +317,17 @@ function installSettingsIpcBridge(
 		requireApplicationFrame(event, window);
 		return store.resetUser(settings);
 	});
-	ipcMain.handle("settings:load-character", (event, guid: unknown) => {
-		requireApplicationFrame(event, window);
-		return store.readCharacter(
-			clientCharacterProfileKey(startup, requireCharacterGuid(guid)),
-			readMode,
-		);
-	});
+	ipcMain.handle(
+		"settings:load-character",
+		(event, guid: unknown, defaults: unknown) => {
+			requireApplicationFrame(event, window);
+			return store.loadCharacter(
+				clientCharacterProfileKey(startup, requireCharacterGuid(guid)),
+				defaults,
+				readMode,
+			);
+		},
+	);
 	ipcMain.handle(
 		"settings:save-character-patch",
 		async (event, request: unknown) => {
@@ -539,7 +550,9 @@ app.whenReady().then(async () => {
 			},
 		);
 		try {
-			await settingsStore.load();
+			const repaired = await settingsStore.load();
+			if (repaired.length > 0)
+				console.warn(`Client window settings repaired: ${repaired.join("; ")}`);
 		} catch (error) {
 			reportFatalError("Holtburger client settings are invalid", error);
 			return;

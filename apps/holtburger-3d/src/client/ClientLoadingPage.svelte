@@ -107,7 +107,11 @@
 	});
 </script>
 
-<ClientPregameScreen branding={returning ? "corner" : "hero"} backdrop={false}>
+<ClientPregameScreen
+	branding={returning ? "corner" : "hero"}
+	showPortalLogo={returning || page.kind !== "pending"}
+	backdrop={false}
+>
 	{#snippet footer()}
 		{#if page.kind !== "ended"}
 			<button

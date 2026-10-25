@@ -1816,7 +1816,7 @@
 		.client-ui-lock {
 			position: fixed;
 			top: 8px;
-			right: 8px;
+			right: 44px;
 			z-index: 500;
 			width: 28px;
 			height: 28px;

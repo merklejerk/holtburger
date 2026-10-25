@@ -459,6 +459,7 @@ try {
 			spawnedSelection: result.spawnedSelection,
 			objectPreview: result.objectPreview,
 			possessionScenario: result.possessionScenario,
+			motionPlaybackSamples: result.motionPlaybackSamples,
 			followFlight: result.followFlight,
 			relocationSequence: result.relocationSequence,
 			relocationState: result.relocationState,
@@ -691,7 +692,7 @@ function parseArgs(args) {
 		objectPreviewProbe: false,
 		objectPreviewBenchmarkPairs: 0,
 		spawnWcid: null,
-		deathMotionFixture: null,
+		motionPlaybackFixture: null,
 		entityShowcaseCount: 0,
 		entityPairWcid: null,
 		entityPairTargetWcid: null,
@@ -1025,8 +1026,8 @@ function parseArgs(args) {
 			case "--spawn-wcid":
 				parsed.spawnWcid = requireValue(args, ++index, arg);
 				break;
-			case "--death-motion-fixture":
-				parsed.deathMotionFixture = requireValue(args, ++index, arg);
+			case "--motion-playback-fixture":
+				parsed.motionPlaybackFixture = requireValue(args, ++index, arg);
 				break;
 			case "--spawned-selection-probe":
 				parsed.spawnedSelectionProbe = true;
@@ -1810,13 +1811,13 @@ function parseArgs(args) {
 		throw new Error("--spawn-simulated requires --spawn-wcid.");
 	}
 	if (
-		parsed.deathMotionFixture !== null &&
-		(Number(parsed.spawnWcid) !== 192 ||
+		parsed.motionPlaybackFixture !== null &&
+		(parsed.spawnWcid === null ||
 			parsed.entityShowcaseCount !== 0 ||
 			parsed.screenshotPath === null)
 	) {
 		throw new Error(
-			"--death-motion-fixture requires --spawn-wcid 192, --screenshot, and no entity showcase.",
+			"--motion-playback-fixture requires --spawn-wcid, --screenshot, and no entity showcase.",
 		);
 	}
 	if (parsed.possessionScenario && parsed.spawnWcid === null) {
@@ -1970,8 +1971,8 @@ Options:
                          Harness-only A/B: realize a spawned wearer without its attached children.
   --spawn-wcid <id>     Spawn one decimal or 0x WCID through the real catalog host, capture it,
                          then exact-despawn it and assert shared-runtime resource cleanup.
-  --death-motion-fixture <path>
-                        Replay death_motion_fixture MessagePack on --spawn-wcid 192; requires
+  --motion-playback-fixture <path>
+                        Replay production-world MessagePack motion levels on --spawn-wcid; requires
                         --screenshot and writes one adjacent screenshot per lifecycle sample.
   --spawned-selection-probe
                         Select every entity produced by --spawn-wcid through the production runtime.
@@ -2473,6 +2474,7 @@ function briefHarnessReport(result) {
 		spawnedSelection: result.spawnedSelection,
 		objectPreview: result.objectPreview,
 		possessionScenario: summarizePossessionScenario(result.possessionScenario),
+		motionPlaybackSamples: result.motionPlaybackSamples,
 		entityPair: result.entityPair,
 		entityPopulation: result.entityPopulation,
 		envCellLayers: summarizeEnvCellLayers(staticObjects?.envCellLayers ?? []),
@@ -5672,6 +5674,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		let spawnedEntityState = null;
 		let completedEntityState = null;
 		let possessionScenario = null;
+		const motionPlaybackSamples = [];
 		let spawnedSelection = null;
 		let objectPreview = null;
 		if (options.spawnWcid !== null && options.entityShowcaseCount === 0) {
@@ -5688,14 +5691,14 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 				[],
 			);
-			if (options.deathMotionFixture !== null) {
+			if (options.motionPlaybackFixture !== null) {
 				if (options.screenshotPath === null)
-					throw new Error("--death-motion-fixture requires --screenshot.");
-				const samples = decode(await readFile(options.deathMotionFixture));
+					throw new Error("--motion-playback-fixture requires --screenshot.");
+				const samples = decode(await readFile(options.motionPlaybackFixture));
 				for (const sample of samples) {
 					const firstFrame = await evaluate(
 						client,
-						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.applyDeathMotionSample",
+						"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.applyMotionPlaybackSample",
 						[sample],
 					);
 					await writeFile(
@@ -5703,6 +5706,12 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 						Buffer.from(firstFrame, "base64"),
 					);
 					await delay(sample.wait_ms);
+					motionPlaybackSamples.push({
+						label: sample.label,
+						guid: sample.guid,
+						fresh: sample.fresh,
+						captured: firstFrame.length > 0,
+					});
 					const capture = await client.send("Page.captureScreenshot", {
 						format: "png",
 					});
@@ -5713,7 +5722,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				}
 				await evaluate(
 					client,
-					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.applyDeathMotionSample",
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.applyMotionPlaybackSample",
 					[null],
 				);
 			}
@@ -6708,6 +6717,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			portalExecution,
 			portalTransitionLifecycle,
 			possessionScenario,
+			motionPlaybackSamples,
 			followFlight,
 			relocationSequence,
 			relocationState,

@@ -29,6 +29,8 @@ impl RequiredSelfMovementKinematics {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelfMovementKinematics {
+    /// Native body-table identity. Individual absent locomotion rows may use the designated
+    /// player baseline; physical selection reports active compatibility rates per channel.
     pub source: PlayerMotionTableSource,
     pub motion_table_id: u32,
     pub stance: u32,
@@ -89,8 +91,8 @@ pub struct SelfMovementCapabilities {
 /// Authoritative player movement and full-charge jump facts resolved from one world state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelfJumpCapabilities {
-    /// Motion-table speeds, stance, and current Run-rate scalar.
-    pub movement: SelfMovementCapabilities,
+    /// Current gameplay Run-rate scalar; launch speeds are retail interpreter constants.
+    pub run_rate_scalar: f32,
     /// Retail full-charge height after Jump skill, burden, exhaustion, and minimum-height rules.
     pub full_extent_jump_height: f32,
     /// Current burden ratio used by the charge-start eligibility check.
@@ -184,8 +186,8 @@ pub enum SelfMovementCapabilitiesError {
 /// Missing authoritative player facts required to resolve a jump without gameplay defaults.
 #[derive(Debug, Error)]
 pub enum SelfJumpCapabilitiesError {
-    #[error(transparent)]
-    Movement(#[from] SelfMovementCapabilitiesError),
+    #[error("player run-rate scalar is unavailable")]
+    RunRateUnavailable,
     #[error("current Jump skill is unavailable")]
     JumpSkillUnavailable,
     #[error("current burden is unavailable")]
@@ -244,7 +246,12 @@ impl WorldState {
     pub fn resolve_self_jump_capabilities(
         &self,
     ) -> Result<SelfJumpCapabilities, SelfJumpCapabilitiesError> {
-        let movement = self.resolve_self_movement_capabilities()?;
+        let run_rate_scalar = self
+            .self_movement_capabilities_override
+            .as_ref()
+            .map(|capabilities| capabilities.run_rate_scalar)
+            .or_else(|| self.player_run_rate())
+            .ok_or(SelfJumpCapabilitiesError::RunRateUnavailable)?;
         let jump_skill =
             self.get_player_skill_current(SkillType::Jump)
                 .ok_or(SelfJumpCapabilitiesError::JumpSkillUnavailable)? as f32;
@@ -265,7 +272,7 @@ impl WorldState {
         let full_extent_jump_height = retail_full_extent_jump_height(burden, effective_jump_skill);
 
         Ok(SelfJumpCapabilities {
-            movement,
+            run_rate_scalar,
             full_extent_jump_height,
             burden,
         })
@@ -334,18 +341,18 @@ fn optional_turn_right_omega(resolution: &PlayerMotionTableResolution) -> Option
 fn resolved_turn_omegas(
     resolution: &PlayerMotionTableResolution,
 ) -> Result<(Vector3, Vector3), SelfMovementKinematicsError> {
-    match (
-        optional_turn_left_omega(resolution),
-        optional_turn_right_omega(resolution),
-    ) {
-        (Some(left), Some(right)) => Ok((left, right)),
-        (Some(left), None) => Ok((left, left * -1.0)),
-        (None, Some(right)) => Ok((right * -1.0, right)),
-        (None, None) => Err(missing_required_kinematics_error(
-            resolution,
-            RequiredSelfMovementKinematics::TurnOmega,
-        )),
+    // Local controls canonicalize both directions as signed TurnRight. Controller summaries
+    // must use that same native/baseline row even if content also authors a different TurnLeft.
+    if let Some(right) = optional_turn_right_omega(resolution) {
+        return Ok((right * -1.0, right));
     }
+    if let Some(left) = optional_turn_left_omega(resolution) {
+        return Ok((left, left * -1.0));
+    }
+    Err(missing_required_kinematics_error(
+        resolution,
+        RequiredSelfMovementKinematics::TurnOmega,
+    ))
 }
 
 fn missing_required_kinematics_error(
@@ -363,25 +370,12 @@ fn missing_required_kinematics_error(
 #[cfg(test)]
 mod jump_tests {
     use super::*;
+    use crate::state::motion_resolution::test_support::{FixtureCycle, explicit_motion_catalog};
+    use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut};
+    use holtburger_dat::file_type::MotionTable;
+
     use crate::stats::{Attribute, AttributeType, Skill, TrainingLevel, Vital};
     use holtburger_common::{Guid, Quaternion};
-
-    fn movement_capabilities() -> SelfMovementCapabilities {
-        SelfMovementCapabilities {
-            kinematics: SelfMovementKinematics {
-                source: PlayerMotionTableSource::DirectProperty {
-                    motion_table_id: 0x0900_0020,
-                },
-                motion_table_id: 0x0900_0020,
-                stance: 0x8000_003d,
-                base_walk_forward_velocity: Vector3::new(1.0, 0.0, 0.0),
-                base_run_forward_velocity: Vector3::new(2.0, 0.0, 0.0),
-                base_turn_left_omega: Vector3::new(0.0, 0.0, -1.0),
-                base_turn_right_omega: Vector3::new(0.0, 0.0, 1.0),
-            },
-            run_rate_scalar: 1.0,
-        }
-    }
 
     fn jump_world(stamina: u32) -> WorldState {
         let mut world = WorldState::synthetic();
@@ -394,7 +388,6 @@ mod jump_tests {
                 rotation: Quaternion::identity(),
             },
         );
-        world.set_self_movement_capabilities_override(movement_capabilities());
         world.player.attributes.insert(
             AttributeType::StrengthAttr,
             Attribute {
@@ -408,22 +401,24 @@ mod jump_tests {
                 breakdown: Default::default(),
             },
         );
-        world.player.skills.insert(
-            SkillType::Jump,
-            Skill {
-                skill_type: SkillType::Jump,
-                ranks: 0,
-                init: 400,
-                spent_xp: 0,
-                next_rank_xp: None,
-                base: 400,
-                current: 400,
-                training: TrainingLevel::Trained,
-                trained_cost: 0,
-                specialized_cost: 0,
-                breakdown: Default::default(),
-            },
-        );
+        for (skill_type, value) in [(SkillType::Run, 0), (SkillType::Jump, 400)] {
+            world.player.skills.insert(
+                skill_type,
+                Skill {
+                    skill_type,
+                    ranks: 0,
+                    init: value,
+                    spent_xp: 0,
+                    next_rank_xp: None,
+                    base: value,
+                    current: value,
+                    training: TrainingLevel::Trained,
+                    trained_cost: 0,
+                    specialized_cost: 0,
+                    breakdown: Default::default(),
+                },
+            );
+        }
         world.player.vitals.insert(
             VitalType::Stamina,
             Vital {
@@ -466,6 +461,33 @@ mod jump_tests {
             retail_full_extent_jump_height(0.0, 0.0)
         );
         assert!(rested.full_extent_jump_height > exhausted.full_extent_jump_height);
+    }
+
+    #[test]
+    fn jump_capabilities_do_not_depend_on_body_motion_rows() {
+        let mut world = jump_world(100);
+        let expected = world.resolve_self_jump_capabilities().unwrap();
+        const TABLE: u32 = 0x0900_0020;
+        world
+            .player_entity_mut()
+            .unwrap()
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(TABLE));
+        for velocity in [
+            None,
+            Some(Vector3::new(1.0, 0.0, 0.0)),
+            Some(Vector3::new(9.0, 0.0, 0.0)),
+        ] {
+            world.set_motion_sequences(explicit_motion_catalog(
+                TABLE,
+                0x8000_003D,
+                velocity.map(|velocity| {
+                    FixtureCycle::moving(MotionTable::RUN_FORWARD_COMMAND, velocity)
+                }),
+                [],
+            ));
+            assert_eq!(world.resolve_self_jump_capabilities().unwrap(), expected);
+        }
     }
 
     #[test]

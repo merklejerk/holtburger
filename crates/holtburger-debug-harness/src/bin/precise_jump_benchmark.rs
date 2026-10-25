@@ -17,10 +17,7 @@ use holtburger_core::{
     PreciseJumpTarget, PreciseJumpWorldDisplacement, predict_selected_precise_jump,
     resolve_selected_precise_jump, retail_player_grounded_profile,
 };
-use holtburger_protocol::messages::movement::MotionStance;
-use holtburger_world::state::{
-    PlayerMotionTableSource, SelfJumpCapabilities, SelfMovementCapabilities, SelfMovementKinematics,
-};
+use holtburger_world::state::SelfJumpCapabilities;
 use holtburger_world::{
     CollisionScene, ContactState, DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
     DynamicPhysicalBodyDefinition, EdgeProtection, EntityCollisionParticipation,
@@ -439,20 +436,7 @@ fn add_population(
 
 fn representative_capabilities() -> SelfJumpCapabilities {
     SelfJumpCapabilities {
-        movement: SelfMovementCapabilities {
-            kinematics: SelfMovementKinematics {
-                source: PlayerMotionTableSource::DirectProperty {
-                    motion_table_id: 0x0900_0020,
-                },
-                motion_table_id: 0x0900_0020,
-                stance: MotionStance::NonCombat as u32,
-                base_walk_forward_velocity: Vector3::new(3.12, 0.0, 0.0),
-                base_run_forward_velocity: Vector3::new(4.0, 0.0, 0.0),
-                base_turn_left_omega: Vector3::new(0.0, 0.0, -1.0),
-                base_turn_right_omega: Vector3::new(0.0, 0.0, 1.0),
-            },
-            run_rate_scalar: 1.0,
-        },
+        run_rate_scalar: 1.0,
         full_extent_jump_height: 4.2125,
         burden: 0.0,
     }

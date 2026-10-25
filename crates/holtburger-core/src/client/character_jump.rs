@@ -14,8 +14,8 @@ const RETAIL_MINIMUM_JUMP_HEIGHT: f32 = 0.35;
 const RETAIL_DOUBLE_GRAVITY: f32 = 19.6;
 
 /// Selects the retail charge duration from an already resolved motion style.
-pub const fn retail_jump_charge_profile(motion_style: MotionStance) -> JumpChargeProfile {
-    if matches!(motion_style, MotionStance::DualWieldCombat) {
+pub const fn retail_jump_charge_profile(motion_style: u32) -> JumpChargeProfile {
+    if motion_style == MotionStance::DualWieldCombat as u32 {
         JumpChargeProfile::RETAIL_DUAL_WIELD
     } else {
         JumpChargeProfile::RETAIL_STANDARD
@@ -168,8 +168,7 @@ fn require_supported(readiness: CharacterJumpReadiness) -> Result<(), CharacterJ
 mod tests {
     use super::*;
     use crate::client::character_kinematics::{
-        CharacterKinematicsError, CharacterMovementKinematics,
-        jump_kinematics_from_movement_capabilities,
+        CharacterKinematicsError, CharacterMovementKinematics, retail_jump_kinematics,
     };
     use crate::client::character_motion::{
         CharacterMotionController, CharacterMotionEvent, CharacterMotionEventResult,
@@ -179,9 +178,6 @@ mod tests {
         oracle_planar_launch, oracle_vertical_launch,
     };
     use crate::client::movement_types::CharacterDrive;
-    use holtburger_world::{
-        PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics,
-    };
 
     fn kinematics() -> CharacterJumpKinematics {
         let movement = CharacterMovementKinematics::new(3.12, 4.0, 1.0).unwrap();
@@ -227,33 +223,18 @@ mod tests {
     }
 
     #[test]
-    fn numeric_player_adapter_reuses_existing_motion_capabilities_and_style_charge() {
-        let movement = SelfMovementCapabilities {
-            kinematics: SelfMovementKinematics {
-                source: PlayerMotionTableSource::DirectProperty {
-                    motion_table_id: 0x0900_0020,
-                },
-                motion_table_id: 0x0900_0020,
-                stance: MotionStance::DualWieldCombat as u32,
-                base_walk_forward_velocity: Vector3::new(3.12, 0.0, 0.0),
-                base_run_forward_velocity: Vector3::new(4.0, 0.0, 0.0),
-                base_turn_left_omega: Vector3::new(0.0, 0.0, -1.0),
-                base_turn_right_omega: Vector3::new(0.0, 0.0, 1.0),
-            },
-            run_rate_scalar: 1.5,
-        };
-
-        let kinematics = jump_kinematics_from_movement_capabilities(&movement, 4.2125).unwrap();
+    fn retail_launch_kinematics_and_style_charge_do_not_require_animation_data() {
+        let kinematics = retail_jump_kinematics(1.5, 4.2125).unwrap();
         assert_eq!(kinematics.movement().base_walk_forward_speed(), 3.12);
         assert_eq!(kinematics.movement().base_run_forward_speed(), 4.0);
         assert_eq!(kinematics.movement().run_rate_scalar(), 1.5);
         assert_eq!(kinematics.full_extent_jump_height(), 4.2125);
         assert_eq!(
-            retail_jump_charge_profile(MotionStance::DualWieldCombat),
+            retail_jump_charge_profile(MotionStance::DualWieldCombat as u32),
             JumpChargeProfile::RETAIL_DUAL_WIELD
         );
         assert_eq!(
-            retail_jump_charge_profile(MotionStance::NonCombat),
+            retail_jump_charge_profile(MotionStance::NonCombat as u32),
             JumpChargeProfile::RETAIL_STANDARD
         );
     }

@@ -913,8 +913,6 @@ mod tests {
         let camera = preview.aim.camera;
         world.seed_local_player_entity(camera.player_guid, "Player", preview.body.pose);
         world.player.instance_sequence = preview.context.instance_sequence;
-        world
-            .set_self_movement_capabilities_override(preview.context.capabilities.movement.clone());
         world.player.attributes.insert(
             AttributeType::StrengthAttr,
             Attribute {
@@ -928,22 +926,24 @@ mod tests {
                 breakdown: Default::default(),
             },
         );
-        world.player.skills.insert(
-            SkillType::Jump,
-            Skill {
-                skill_type: SkillType::Jump,
-                ranks: 0,
-                init: 300,
-                spent_xp: 0,
-                next_rank_xp: None,
-                base: 300,
-                current: 300,
-                training: TrainingLevel::Trained,
-                trained_cost: 0,
-                specialized_cost: 0,
-                breakdown: Default::default(),
-            },
-        );
+        for (skill_type, value) in [(SkillType::Run, 0), (SkillType::Jump, 300)] {
+            world.player.skills.insert(
+                skill_type,
+                Skill {
+                    skill_type,
+                    ranks: 0,
+                    init: value,
+                    spent_xp: 0,
+                    next_rank_xp: None,
+                    base: value,
+                    current: value,
+                    training: TrainingLevel::Trained,
+                    trained_cost: 0,
+                    specialized_cost: 0,
+                    breakdown: Default::default(),
+                },
+            );
+        }
         world.player.vitals.insert(
             VitalType::Stamina,
             Vital {

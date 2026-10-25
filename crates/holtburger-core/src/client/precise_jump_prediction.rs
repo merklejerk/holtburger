@@ -561,11 +561,7 @@ pub(in crate::client) mod tests {
         PlacedCollider, StaticColliderPlacement, TerrainCellDiagonals, TerrainCollisionSurface,
     };
     use holtburger_dat::physics::{BspLeaf, BspNode};
-    use holtburger_protocol::messages::movement::MotionStance;
-    use holtburger_world::state::{
-        PlayerMotionTableSource, SelfJumpCapabilities, SelfMovementCapabilities,
-        SelfMovementKinematics,
-    };
+    use holtburger_world::state::SelfJumpCapabilities;
     use holtburger_world::{
         DynamicBodyCollisionDefinition, DynamicPhysicalBodyConfiguration,
         DynamicPhysicalBodyDefinition, EdgeProtection, EntityCollisionParticipation,
@@ -910,20 +906,7 @@ pub(in crate::client) mod tests {
 
     fn capabilities() -> SelfJumpCapabilities {
         SelfJumpCapabilities {
-            movement: SelfMovementCapabilities {
-                kinematics: SelfMovementKinematics {
-                    source: PlayerMotionTableSource::DirectProperty {
-                        motion_table_id: 0x0900_0020,
-                    },
-                    motion_table_id: 0x0900_0020,
-                    stance: MotionStance::NonCombat as u32,
-                    base_walk_forward_velocity: Vector3::new(3.12, 0.0, 0.0),
-                    base_run_forward_velocity: Vector3::new(4.0, 0.0, 0.0),
-                    base_turn_left_omega: Vector3::new(0.0, 0.0, -1.0),
-                    base_turn_right_omega: Vector3::new(0.0, 0.0, 1.0),
-                },
-                run_rate_scalar: 1.0,
-            },
+            run_rate_scalar: 1.0,
             full_extent_jump_height: 4.2125,
             burden: 0.0,
         }

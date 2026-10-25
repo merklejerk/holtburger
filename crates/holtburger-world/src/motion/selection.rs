@@ -11,6 +11,7 @@
 use holtburger_common::Vector3;
 use holtburger_content::{MotionSequence, MotionSequenceTable};
 
+use super::rates::MotionRow;
 use super::sequence::{MotionSequenceRuntime, SequenceNode, SubstateSelection};
 use super::state::{MotionCommand, MotionState};
 
@@ -32,6 +33,30 @@ pub enum MotionSelectionOutcome {
     /// This is not an error. An entity performing a command its table has no entry for simply has
     /// no authored motion, and the caller falls through to whatever other authority it has.
     Unmodelled,
+}
+
+/// Native admission and chosen row for local physical rate resolution. A prohibited route
+/// must never be treated as missing content by the compatibility fallback.
+#[derive(Clone, Copy)]
+pub(super) enum NativeSelection<'a> {
+    /// Accepted native row; consumed directly by mean-rate resolution.
+    Selected(MotionRow<'a>),
+    /// Reissuing an established default while a modifier owns the substate is a no-op.
+    AlreadyActive,
+    /// No authored route for the requested command.
+    Missing,
+    /// Content exists, but the current state prevents selection.
+    Prohibited,
+}
+
+impl NativeSelection<'_> {
+    pub(super) fn outcome(self) -> MotionSelectionOutcome {
+        match self {
+            Self::Selected(_) => MotionSelectionOutcome::Selected,
+            Self::AlreadyActive => MotionSelectionOutcome::AlreadyActive,
+            Self::Missing | Self::Prohibited => MotionSelectionOutcome::Unmodelled,
+        }
+    }
 }
 
 /// Result of installing one transient action into the ordinary sequence runtime.
@@ -88,6 +113,17 @@ pub fn select_motion(
     command: MotionCommand,
     speed_mod: f32,
 ) -> MotionSelectionOutcome {
+    select_native(table, state, sequence, command, speed_mod).outcome()
+}
+
+/// Selects once and exposes the native admission decision to the physical owner.
+pub(super) fn select_native<'a>(
+    table: &'a MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    command: MotionCommand,
+    speed_mod: f32,
+) -> NativeSelection<'a> {
     select(table, state, sequence, command, speed_mod, false)
 }
 
@@ -244,67 +280,64 @@ pub fn stop_completely(
     }
 }
 
-fn select(
-    table: &MotionSequenceTable,
+fn select<'a>(
+    table: &'a MotionSequenceTable,
     state: &mut MotionState,
     sequence: &mut MotionSequenceRuntime,
     command: MotionCommand,
     speed_mod: f32,
     stop_modifiers: bool,
-) -> MotionSelectionOutcome {
+) -> NativeSelection<'a> {
     if state.style.raw() == 0 || state.substate.raw() == 0 {
-        return MotionSelectionOutcome::Unmodelled;
+        return NativeSelection::Prohibited;
     }
     let style_default = table.style_default(state.style.raw());
-
-    // Re-issuing the style's default substate while a modifier is driving the body is a no-op:
-    // the default is what the body falls back to, and it is already the thing being modified.
     if Some(command.raw()) == style_default && !stop_modifiers && state.substate.is_modifier() {
-        return MotionSelectionOutcome::AlreadyActive;
+        return NativeSelection::AlreadyActive;
     }
-
-    if command.is_style()
-        && let outcome = select_style(table, state, sequence, command, speed_mod, style_default)
-        && outcome.is_modelled()
+    if command.is_style() {
+        return select_style(table, state, sequence, command, speed_mod, style_default);
+    }
+    let substate = if command.is_substate() {
+        select_substate(table, state, sequence, command, speed_mod)
+    } else {
+        NativeSelection::Missing
+    };
+    if substate.outcome().is_modelled() || !command.is_modifier() {
+        return substate;
+    }
+    let modifier = select_modifier(table, state, sequence, command, speed_mod);
+    // A dual-class command cannot turn a refused native cycle into permission to borrow.
+    if matches!(substate, NativeSelection::Prohibited)
+        && matches!(modifier, NativeSelection::Missing)
     {
-        return outcome;
+        substate
+    } else {
+        modifier
     }
-
-    if command.is_substate()
-        && let outcome = select_substate(table, state, sequence, command, speed_mod)
-        && outcome.is_modelled()
-    {
-        return outcome;
-    }
-
-    if command.is_modifier() {
-        return select_modifier(table, state, sequence, command, speed_mod);
-    }
-
-    MotionSelectionOutcome::Unmodelled
 }
 
 /// Changing stance: play out of the current substate, through the style transition, and into the
 /// new style's default substate.
-fn select_style(
-    table: &MotionSequenceTable,
+fn select_style<'a>(
+    table: &'a MotionSequenceTable,
     state: &mut MotionState,
     sequence: &mut MotionSequenceRuntime,
     command: MotionCommand,
     speed_mod: f32,
     source_style_default: Option<u32>,
-) -> MotionSelectionOutcome {
+) -> NativeSelection<'a> {
     if state.style == command {
-        return MotionSelectionOutcome::AlreadyActive;
+        return NativeSelection::AlreadyActive;
     }
     let Some(source_style_default) = source_style_default.filter(|default| *default != 0) else {
-        return MotionSelectionOutcome::Unmodelled;
+        return NativeSelection::Missing;
     };
     let Some(destination_style_default) = table
         .style_default(command.raw())
         .filter(|default| *default != 0)
     else {
-        return MotionSelectionOutcome::Unmodelled;
+        return NativeSelection::Missing;
     };
 
     // Leaving whatever substate is running for the style's default one.
@@ -322,7 +355,7 @@ fn select_style(
         .flatten();
 
     let Some(cycle) = table.cycle(command.raw(), destination_style_default) else {
-        return MotionSelectionOutcome::Unmodelled;
+        return NativeSelection::Missing;
     };
     if cycle.clears_modifiers {
         state.clear_modifiers();
@@ -375,25 +408,25 @@ fn select_style(
     state.substate_mod = speed_mod;
     re_modify(table, state, sequence);
 
-    MotionSelectionOutcome::Selected
+    NativeSelection::Selected(MotionRow::Cycle(cycle))
 }
 
 /// Changing what the body is doing within its stance: walking, running, turning, standing.
-fn select_substate(
-    table: &MotionSequenceTable,
+fn select_substate<'a>(
+    table: &'a MotionSequenceTable,
     state: &mut MotionState,
     sequence: &mut MotionSequenceRuntime,
     command: MotionCommand,
     speed_mod: f32,
-) -> MotionSelectionOutcome {
+) -> NativeSelection<'a> {
     let Some(cycle) = table
         .cycle(state.style.raw(), command.raw())
         .or_else(|| table.cycle(table.default_style, command.raw()))
     else {
-        return MotionSelectionOutcome::Unmodelled;
+        return NativeSelection::Missing;
     };
     if !is_allowed(table, state, command, cycle) {
-        return MotionSelectionOutcome::Unmodelled;
+        return NativeSelection::Prohibited;
     }
 
     // Same motion at a new speed in the same direction: rescale the running clips instead of
@@ -406,7 +439,7 @@ fn select_substate(
         subtract_motion(sequence, cycle, state.substate_mod);
         combine_motion(sequence, cycle, speed_mod);
         state.substate_mod = speed_mod;
-        return MotionSelectionOutcome::Selected;
+        return NativeSelection::Selected(MotionRow::Cycle(cycle));
     }
 
     if cycle.clears_modifiers {
@@ -486,36 +519,36 @@ fn select_substate(
     state.substate = command;
     re_modify(table, state, sequence);
 
-    MotionSelectionOutcome::Selected
+    NativeSelection::Selected(MotionRow::Cycle(cycle))
 }
 
 /// Layering an additive motion on top of whatever the body is already doing.
-pub(super) fn select_modifier(
-    table: &MotionSequenceTable,
+pub(super) fn select_modifier<'a>(
+    table: &'a MotionSequenceTable,
     state: &mut MotionState,
     sequence: &mut MotionSequenceRuntime,
     command: MotionCommand,
     speed_mod: f32,
-) -> MotionSelectionOutcome {
+) -> NativeSelection<'a> {
     // A substate that clears modifiers cannot accept one.
     let Some(cycle) = table.cycle(state.style.raw(), state.substate.raw()) else {
-        return MotionSelectionOutcome::Unmodelled;
+        return NativeSelection::Prohibited;
     };
     if cycle.clears_modifiers {
-        return MotionSelectionOutcome::Unmodelled;
+        return NativeSelection::Prohibited;
     }
     let Some(modifier) = lookup_modifier(table, state, command) else {
-        return MotionSelectionOutcome::Unmodelled;
+        return NativeSelection::Missing;
     };
 
     if !state.add_modifier(command, speed_mod) {
         stop_motion(table, state, sequence, command);
         if !state.add_modifier(command, speed_mod) {
-            return MotionSelectionOutcome::Unmodelled;
+            return NativeSelection::Prohibited;
         }
     }
     combine_motion(sequence, modifier, speed_mod);
-    MotionSelectionOutcome::Selected
+    NativeSelection::Selected(MotionRow::Modifier(modifier))
 }
 
 /// Modifiers are looked up under the current style first and then unstyled, so a table can define

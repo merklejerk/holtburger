@@ -16,6 +16,7 @@ mod tests;
 mod actuation;
 mod directed;
 mod observed;
+mod rates;
 mod registry;
 mod selection;
 mod sequence;
@@ -29,6 +30,9 @@ use std::sync::Arc;
 /// The projection resolves references once, so a runtime clip can never hold an animation the
 /// archive does not contain.
 pub type MotionAnimationRef = Arc<MotionAnimation>;
+
+pub use rates::PLAYER_LOCOMOTION_BASELINE_TABLE;
+pub(crate) use rates::{MotionRow, baseline_row, locomotion_row};
 
 pub use actuation::{authored_grounded_actuation, grounded_character_actuation};
 pub use directed::{
@@ -44,7 +48,8 @@ pub use observed::{
 pub use registry::{
     AuthoredCollisionPose, BodyMotionRuntime, MAX_AUTHORED_ACTIONS, MotionActionEnqueueOutcome,
     MotionPlayback, MotionPlaybackLayer, MotionPresentation, MotionRuntimeRegistry,
-    OrdinaryMotionActivity, PlayingMotionClip, RemoteMotionSample, SettledMotionPose,
+    OrdinaryMotionActivity, PlayingMotionClip, RETAIL_RUN_FORWARD_BASE_SPEED_MPS,
+    RemoteMotionSample, SettledMotionPose,
 };
 pub(crate) use registry::{MotionCommandAdmissionOutcome, RemoteFramePolicy, RemoteMotionInput};
 pub use selection::{

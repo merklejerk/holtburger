@@ -7,7 +7,7 @@ use std::time::Duration;
 use thiserror::Error;
 
 use super::character_jump::{character_jump_vertical_velocity, local_planar_vector};
-use super::character_kinematics::jump_kinematics_from_movement_capabilities;
+use super::character_kinematics::retail_jump_kinematics;
 use super::character_motion::JumpExtent;
 
 /// Finite world-axis displacement between launch and desired landing body-reference positions.
@@ -108,8 +108,8 @@ pub fn resolve_selected_precise_jump(
     if !gravity.is_finite() || gravity <= 0.0 {
         return Err(PreciseJumpCandidateRejection::InvalidCapabilities);
     }
-    let kinematics = jump_kinematics_from_movement_capabilities(
-        &capabilities.movement,
+    let kinematics = retail_jump_kinematics(
+        capabilities.run_rate_scalar,
         capabilities.full_extent_jump_height,
     )
     .map_err(|_| PreciseJumpCandidateRejection::InvalidCapabilities)?;
@@ -187,10 +187,6 @@ pub enum PreciseJumpCandidateRejection {
 #[cfg(test)]
 mod tests {
     use holtburger_common::Sphere;
-    use holtburger_protocol::messages::movement::MotionStance;
-    use holtburger_world::state::{
-        PlayerMotionTableSource, SelfMovementCapabilities, SelfMovementKinematics,
-    };
     use holtburger_world::{
         EdgeProtection, GroundedConfig, PhysicalSphereSet, RETAIL_AIRBORNE_STEP_DOWN_HEIGHT,
         RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
@@ -204,20 +200,7 @@ mod tests {
         burden: f32,
     ) -> SelfJumpCapabilities {
         SelfJumpCapabilities {
-            movement: SelfMovementCapabilities {
-                kinematics: SelfMovementKinematics {
-                    source: PlayerMotionTableSource::DirectProperty {
-                        motion_table_id: 0x0900_0020,
-                    },
-                    motion_table_id: 0x0900_0020,
-                    stance: MotionStance::NonCombat as u32,
-                    base_walk_forward_velocity: Vector3::new(3.12, 0.0, 0.0),
-                    base_run_forward_velocity: Vector3::new(4.0, 0.0, 0.0),
-                    base_turn_left_omega: Vector3::new(0.0, 0.0, -1.0),
-                    base_turn_right_omega: Vector3::new(0.0, 0.0, 1.0),
-                },
-                run_rate_scalar: run_rate,
-            },
+            run_rate_scalar: run_rate,
             full_extent_jump_height,
             burden,
         }

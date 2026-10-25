@@ -48,7 +48,9 @@
 		"dev:explorer:release": "npm run build:electron:main && node scripts/electron-dev-entry.mjs explorer --release",
 		"dev:client:release": "npm run build:electron:main && node scripts/electron-dev-entry.mjs client --release",
 		"generate:world-map-settlements": "node --experimental-strip-types scripts/generate-world-map-settlements.ts",
-		"generate:housing-payment-icons": "node --experimental-strip-types scripts/generate-housing-payment-icons.ts"
+		"generate:housing-payment-icons": "node --experimental-strip-types scripts/generate-housing-payment-icons.ts",
+		"generate:branding": "node scripts/generate-branding.mjs",
+		"check:branding": "node scripts/generate-branding.mjs --check"
 	},
 	"devDependencies": {
 		"@electron-forge/cli": "^7.11.2",
@@ -56,6 +58,7 @@
 		"@electron/asar": "^4.3.0",
 		"@eslint/js": "^10.0.1",
 		"@poppanator/sveltekit-svg": "^7.0.1",
+		"@resvg/resvg-js": "2.6.2",
 		"@sveltejs/vite-plugin-svelte": "^7.0.0",
 		"@tsconfig/svelte": "^5.0.8",
 		"@types/node": "^24.12.2",
@@ -64,6 +67,8 @@
 		"eslint": "^10.2.1",
 		"globals": "^17.5.0",
 		"knip": "^6.13.1",
+		"png2icons": "2.0.1",
+		"postcss": "8.5.31",
 		"prettier": "3.9.6",
 		"prettier-plugin-svelte": "^3.5.2",
 		"svelte": "^5.55.4",

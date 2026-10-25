@@ -68,6 +68,8 @@ jobs:
           cp target/release/tui$EXT staging/holtburger-cli$EXT
           cp target/release/dat2hba$EXT staging/dat2hba$EXT
           cp target/release/dat-tool$EXT staging/dat-tool$EXT || true
+          mkdir -p staging/branding
+          cp assets/branding/portal-static.svg assets/branding/icon.png staging/branding/
           cp dats/assets.hba staging/dats/assets.hba
           cp scripts/*.js scripts/*.data.json scripts/*.data.bin staging/scripts/
           ARCHIVE_NAME="holtburger-nightly-${{ matrix.target }}"
@@ -160,8 +162,10 @@ jobs:
           tag_name: nightly
           files: artifacts/*
           prerelease: true
-          name: "Nightly Build (Live on the edge 🍔)"
+          name: "Holtburger Nightly"
           body: |
+            <img src="https://raw.githubusercontent.com/${{ github.repository }}/nightly/assets/branding/portal-static.svg" width="96" height="96" alt="Holtburger portal logo" />
+
             This is an automated nightly build of the Holtburger TUI client.
             
             **Warning:** These builds are highly experimental!

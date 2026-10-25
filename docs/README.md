@@ -1,3 +1,5 @@
+<img src="../assets/branding/portal-static.svg" width="80" height="80" alt="Holtburger portal logo" />
+
 # Asheron's Call Network Protocol Specification
 
 This document provides a breakdown of the network protocol used by Asheron's Call, as derived from the ACE emulator.

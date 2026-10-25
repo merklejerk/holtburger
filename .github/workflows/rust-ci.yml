@@ -10,6 +10,23 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  branding:
+    name: Branding exports
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/holtburger-3d/package-lock.json
+      - name: Install branding tools
+        working-directory: apps/holtburger-3d
+        run: npm ci --ignore-scripts
+      - name: Check generated branding assets
+        working-directory: apps/holtburger-3d
+        run: npm run check:branding
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest

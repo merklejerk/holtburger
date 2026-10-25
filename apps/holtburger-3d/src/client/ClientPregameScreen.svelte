@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
-	import PortalLogo from "../assets/icons/pregame-loading-portal.svg?component";
+	import PortalLogo from "../../../../assets/branding/portal.svg?component";
 	import { APP_BUILD_LABEL } from "../app/app-build";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import "./client-pregame.css";

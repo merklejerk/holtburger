@@ -70,6 +70,10 @@ if (!app.isPackaged) {
 }
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
+// Forge copies the native-window image outside ASAR; development reads the same export.
+const applicationIconPath = app.isPackaged
+	? join(process.resourcesPath, "icon.png")
+	: resolve(app.getAppPath(), "../../assets/branding/icon.png");
 let contentStartup: ContentStartup<SidecarHostClient> | undefined;
 let quitting = false;
 /** Client window close joins renderer preparation before native store/process shutdown. */
@@ -423,6 +427,7 @@ function createWindow(
 	const developmentOrigin = electronDevOrigin(entry.mode);
 	const window = new BrowserWindow({
 		title: entry.title,
+		icon: applicationIconPath,
 		width: INITIAL_WINDOW_CONTENT_SIZE.width,
 		height: INITIAL_WINDOW_CONTENT_SIZE.height,
 		useContentSize: true,
@@ -586,6 +591,7 @@ async function loadEntry(
 }
 
 app.whenReady().then(async () => {
+	app.dock?.setIcon(applicationIconPath);
 	let entry: ReturnType<typeof entryArguments>;
 	try {
 		entry = entryArguments();

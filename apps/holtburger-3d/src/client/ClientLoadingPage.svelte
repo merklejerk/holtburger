@@ -4,7 +4,7 @@
 	import type { ClientToast } from "./client-toast-center";
 	import { CLIENT_LOADING_TUNING } from "./client-tuning";
 	import ClientPregameScreen from "./ClientPregameScreen.svelte";
-	import LoadingPortal from "../assets/icons/pregame-loading-portal.svg?component";
+	import LoadingPortal from "../../../../assets/branding/portal.svg?component";
 	import DisconnectIcon from "../assets/icons/pregame-disconnect.svg?component";
 	import WarningIcon from "../assets/icons/pregame-warning.svg?component";
 

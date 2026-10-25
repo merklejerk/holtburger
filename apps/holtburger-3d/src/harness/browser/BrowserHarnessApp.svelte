@@ -410,7 +410,7 @@
 
 	interface BrowserHarnessApi {
 		/** Replay world-produced motion and lifecycle identity on a catalog-backed camera anchor. */
-		readonly applyDeathMotionSample: (
+		readonly applyMotionPlaybackSample: (
 			sample: {
 				readonly guid: number;
 				readonly motion: DynamicEntityMotion;
@@ -4573,16 +4573,16 @@
 					};
 				}
 				hostGlobal.__HOLTBURGER_3D_BROWSER_HARNESS__ = {
-					applyDeathMotionSample: async (sample) => {
+					applyMotionPlaybackSample: async (sample) => {
 						const captureCanvas = canvasElement;
 						if (!captureCanvas)
-							throw new Error("Death motion probe requires a canvas.");
+							throw new Error("Motion playback probe requires a canvas.");
 						if (!runtime)
-							throw new Error("Death motion probe requires a runtime.");
+							throw new Error("Motion playback probe requires a runtime.");
 						const anchor = spawnedEntities[0];
 						if (!anchor || spawnedEntities.length !== 1)
 							throw new Error(
-								"Death motion probe requires one catalog-backed anchor.",
+								"Motion playback probe requires one catalog-backed anchor.",
 							);
 						if (sample === null) {
 							await runtime.replaceDynamicEntitySnapshot(spawnedEntities);

@@ -4,7 +4,6 @@ use holtburger_common::properties::{
     PropertyInt, PropertyInt64, PropertyString, PropertyUpdate, WorldObjectExt as _,
 };
 use holtburger_protocol::errors::WeenieError;
-use holtburger_protocol::messages::movement::MotionStance;
 use holtburger_session::Session;
 use holtburger_world::player::PlayerCharacterOptions;
 use holtburger_world::{SpatialBodyId, WorldEvent, WorldState};
@@ -488,8 +487,8 @@ impl ClientRuntime {
     }
 
     fn character_motion_capabilities(&self) -> Option<ClientCharacterMotionCapabilities> {
-        let capabilities = self.world.resolve_self_jump_capabilities().ok()?;
-        let stance = MotionStance::from_repr(capabilities.movement.stance())?;
+        self.world.resolve_self_jump_capabilities().ok()?;
+        let stance = self.world.resolve_player_motion_style().ok()?;
         Some(ClientCharacterMotionCapabilities {
             full_charge_duration: character_jump::retail_jump_charge_profile(stance)
                 .full_charge_duration(),
@@ -1445,6 +1444,7 @@ mod tests {
     use holtburger_world::entity::{
         Entity, EntityMotionSnapshot, EntityNetworkMotion, OrderedMotionScalar,
     };
+    use holtburger_world::motion::PLAYER_LOCOMOTION_BASELINE_TABLE;
     use holtburger_world::state::motion_resolution::test_support::FIXTURE_STAND_COMMAND;
     use holtburger_world::stats::{
         Attribute, AttributeType, Skill, SkillType, TrainingLevel, Vital, VitalType,
@@ -1499,6 +1499,13 @@ mod tests {
     /// and authored links make clip identity independently observable. Production still selects
     /// content IDs from the actor's table; none of these fixture IDs cross the test boundary.
     fn jump_presentation_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {
+        jump_presentation_motion_catalog_with_falling(motion_table_id, true)
+    }
+
+    fn jump_presentation_motion_catalog_with_falling(
+        motion_table_id: u32,
+        include_falling: bool,
+    ) -> MotionSequenceCatalog {
         let style = MotionStance::NonCombat as u32;
         let cycle = |animation_id: u32, velocity: Option<Vector3>, omega: Option<Vector3>| {
             let mut flags = MotionDataFlags::empty();
@@ -1609,7 +1616,7 @@ mod tests {
                 landing_targets,
             ),
         ]);
-        let table = MotionTable {
+        let mut table = MotionTable {
             id: motion_table_id,
             default_style: style,
             style_defaults: HashMap::from([(style, FIXTURE_STAND_COMMAND)]),
@@ -1617,6 +1624,12 @@ mod tests {
             modifiers: HashMap::new(),
             links,
         };
+        if !include_falling {
+            table.cycles.remove(&MotionTable::cycle_key(
+                style,
+                holtburger_world::motion::MotionCommand::FALLING.raw(),
+            ));
+        }
         let animation = |id| Animation {
             id,
             flags: AnimationFlags::empty(),
@@ -1646,6 +1659,13 @@ mod tests {
 
     /// Authored action and locomotion fixture with measurable root tracks at clip boundaries.
     fn local_authored_motion_catalog(motion_table_id: u32) -> MotionSequenceCatalog {
+        local_authored_motion_catalog_with_idle_body(motion_table_id, None)
+    }
+
+    fn local_authored_motion_catalog_with_idle_body(
+        motion_table_id: u32,
+        idle_body_table: Option<u32>,
+    ) -> MotionSequenceCatalog {
         let style = MotionStance::NonCombat as u32;
         let clip = |animation_id| MotionData {
             bitfield: 0,
@@ -1713,8 +1733,18 @@ mod tests {
                 ),
             ]),
         };
+        let mut tables = Vec::new();
+        if let Some(id) = idle_body_table {
+            let mut native = table.clone();
+            native.id = id;
+            native
+                .cycles
+                .retain(|key, _| *key == MotionTable::cycle_key(style, FIXTURE_STAND_COMMAND));
+            tables.push(native);
+        }
+        tables.push(table);
         MotionSequenceCatalog::assemble(
-            [table],
+            tables,
             [
                 animation(JUMP_FIXTURE_STAND_ANIMATION, Vector3::zero()),
                 animation(JUMP_FIXTURE_RUN_ANIMATION, Vector3::new(0.0, 0.1, 0.0)),
@@ -2666,6 +2696,271 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn physical_fallback_movement_stops_and_rebinds_without_leaking_pose_or_authority() {
+        const IDLE_BODY_TABLE: u32 = 0x0900_0020;
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(48.0, 48.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        client
+            .world
+            .seed_local_player_entity(guid, "Creature", pose);
+        client
+            .world
+            .set_motion_sequences(local_authored_motion_catalog_with_idle_body(
+                PLAYER_LOCOMOTION_BASELINE_TABLE,
+                Some(IDLE_BODY_TABLE),
+            ));
+        client
+            .world
+            .player_entity_mut()
+            .unwrap()
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(IDLE_BODY_TABLE));
+        seed_test_self_movement_capabilities(&mut client);
+        seed_test_jump_authority(&mut client);
+        let body_id = holtburger_world::SpatialBodyId::LocalPlayer(guid);
+        client
+            .world
+            .scene
+            .set_dynamic_physical_body(
+                body_id,
+                Some(stable_dynamic_body_definition()),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let interest =
+            SimulationSceneInterest::prefetch_neighborhood(pose, CLIENT_COLLISION_OWNER_RADIUS)
+                .unwrap();
+        let collision = collision_snapshot(
+            interest.clone(),
+            flat_collision_scene_for_interest(&interest),
+        );
+        let dt = Duration::from_millis(PHYSICS_TICK_MS);
+        let ticks = Duration::from_secs(1).as_nanos().div_ceil(dt.as_nanos());
+        let mut now = Instant::now();
+        for _ in 0..ticks {
+            simulation::tick(
+                now,
+                dt,
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            now += dt;
+        }
+        assert_eq!(
+            client.world.scene.body(body_id).unwrap().contact,
+            holtburger_world::ContactState::Grounded
+        );
+        let start = client.world.scene.body(body_id).unwrap().pose;
+        let walking = movement_types::CharacterDrive::builder()
+            .walk()
+            .forward()
+            .build();
+        for drive in [walking, movement_types::CharacterDrive::default()] {
+            client
+                .movement
+                .enqueue_drive_intent(movement_types::PlayerDriveIntent::ManualHeld(drive), now);
+            client
+                .movement
+                .tick(now, &mut client.world, &mut client.session)
+                .await
+                .unwrap();
+            let phase_start = client.world.scene.body(body_id).unwrap().pose;
+            for _ in 0..ticks {
+                simulation::tick(
+                    now,
+                    dt,
+                    &mut client.world,
+                    &mut client.movement,
+                    Some(&collision),
+                )
+                .unwrap();
+                now += dt;
+                let playback = client.world.motion_runtimes.motion_playback(guid).unwrap();
+                for layer in [playback.ordinary, playback.locomotion]
+                    .into_iter()
+                    .flatten()
+                {
+                    assert_ne!(
+                        layer.clip.animation_id(),
+                        JUMP_FIXTURE_RUN_ANIMATION,
+                        "baseline clip must not become the creature pose"
+                    );
+                }
+            }
+            let end = client.world.scene.body(body_id).unwrap().pose;
+            if drive.is_stationary() {
+                assert!((end.coords - phase_start.coords).length() < 0.00001);
+            } else {
+                assert!(end.coords.y > start.coords.y);
+            }
+            assert_eq!(
+                client.world.player_entity().unwrap().mtable_id(),
+                Some(Guid(IDLE_BODY_TABLE))
+            );
+        }
+        // A real body-table change can now legitimately publish the baseline table's native clip.
+        client
+            .world
+            .player_entity_mut()
+            .unwrap()
+            .properties
+            .set_did_prop(
+                PropertyDataId::MotionTable,
+                Guid(PLAYER_LOCOMOTION_BASELINE_TABLE),
+            );
+        client
+            .movement
+            .enqueue_drive_intent(movement_types::PlayerDriveIntent::ManualHeld(walking), now);
+        client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        simulation::tick(
+            now,
+            dt,
+            &mut client.world,
+            &mut client.movement,
+            Some(&collision),
+        )
+        .unwrap();
+        let runtime = client.world.motion_runtimes.get(guid).unwrap();
+        assert_eq!(runtime.motion_table_id(), PLAYER_LOCOMOTION_BASELINE_TABLE);
+        assert_eq!(
+            runtime
+                .motion_playback()
+                .unwrap()
+                .locomotion
+                .unwrap()
+                .clip
+                .animation_id(),
+            JUMP_FIXTURE_RUN_ANIMATION
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_falling_animation_preserves_physical_jump_and_landing() {
+        const TABLE: u32 = 0x0900_0020;
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let guid = Guid(0x0102_0304);
+        let pose = WorldPosition {
+            landblock_id: Guid(0x1000_0001),
+            coords: Vector3::new(48.0, 48.0, 0.0),
+            rotation: Quaternion::identity(),
+        };
+        client
+            .world
+            .seed_local_player_entity(guid, "Creature", pose);
+        client
+            .world
+            .set_motion_sequences(jump_presentation_motion_catalog_with_falling(TABLE, false));
+        client
+            .world
+            .player_entity_mut()
+            .unwrap()
+            .properties
+            .set_did_prop(PropertyDataId::MotionTable, Guid(TABLE));
+        seed_test_self_movement_capabilities(&mut client);
+        seed_test_jump_authority(&mut client);
+        let body_id = holtburger_world::SpatialBodyId::LocalPlayer(guid);
+        client
+            .world
+            .scene
+            .set_dynamic_physical_body(
+                body_id,
+                Some(stable_dynamic_body_definition()),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        let interest =
+            SimulationSceneInterest::prefetch_neighborhood(pose, CLIENT_COLLISION_OWNER_RADIUS)
+                .unwrap();
+        let collision = collision_snapshot(
+            interest.clone(),
+            flat_collision_scene_for_interest(&interest),
+        );
+        let dt = Duration::from_millis(PHYSICS_TICK_MS);
+        let mut now = Instant::now();
+        for _ in 0..Duration::from_secs(1).as_nanos().div_ceil(dt.as_nanos()) {
+            simulation::tick(
+                now,
+                dt,
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            now += dt;
+        }
+        assert_eq!(
+            client.world.scene.body(body_id).unwrap().contact,
+            holtburger_world::ContactState::Grounded
+        );
+        let start_height = client.world.scene.body(body_id).unwrap().pose.coords.z;
+        let drive = movement_types::CharacterDrive::default();
+        client
+            .movement
+            .enqueue_drive_intent(movement_types::PlayerDriveIntent::ManualHeld(drive), now);
+        for (sequence, event) in [
+            (1, CharacterMotionEvent::BeginJump { drive }),
+            (
+                2,
+                CharacterMotionEvent::ReleaseJump {
+                    drive,
+                    extent: JumpExtent::MAXIMUM,
+                },
+            ),
+        ] {
+            client
+                .movement
+                .enqueue_character_motion_event(SequencedCharacterMotionEvent {
+                    sequence: CharacterMotionSequence(sequence),
+                    event,
+                });
+        }
+        client
+            .movement
+            .tick(now, &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        let mut commits = 0;
+        let mut airborne = false;
+        let mut landed = false;
+        let mut peak = start_height;
+        for _ in 0..Duration::from_secs(5).as_nanos().div_ceil(dt.as_nanos()) {
+            let tick = simulation::tick(
+                now,
+                dt,
+                &mut client.world,
+                &mut client.movement,
+                Some(&collision),
+            )
+            .unwrap();
+            commits += usize::from(tick.committed_jump.is_some());
+            let body = client.world.scene.body(body_id).unwrap();
+            peak = peak.max(body.pose.coords.z);
+            airborne |= body.contact == holtburger_world::ContactState::Airborne;
+            if airborne && body.contact == holtburger_world::ContactState::Grounded {
+                landed = true;
+                break;
+            }
+            now += dt;
+        }
+        assert_eq!(commits, 1);
+        assert!(airborne && landed);
+        assert!(peak > start_height + holtburger_world::RETAIL_AIRBORNE_STEP_DOWN_HEIGHT);
     }
 
     #[tokio::test]

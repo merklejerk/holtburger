@@ -110,7 +110,7 @@ async fn probe(
             _ => return None,
         };
         match lifecycle {
-            ClientLifecycleState::CharacterSelection { characters } => Some(
+            ClientLifecycleState::CharacterSelection { characters, .. } => Some(
                 characters
                     .iter()
                     .any(|entry| entry.guid == character && entry.delete_time == 0),

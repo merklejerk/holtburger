@@ -24,7 +24,7 @@ pub use client::character_jump::{
 };
 pub use client::character_kinematics::{
     CharacterJumpKinematics, CharacterKinematicsError, CharacterMovementKinematics,
-    jump_kinematics_from_movement_capabilities,
+    retail_jump_kinematics,
 };
 pub use client::character_motion::{
     CharacterMotionController, CharacterMotionEvent, CharacterMotionEventResult,

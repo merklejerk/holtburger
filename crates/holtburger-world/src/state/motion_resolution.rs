@@ -14,7 +14,7 @@ use crate::state::WorldState;
 use crate::{LocalIntegrationDemand, PhysicalBodyReconfiguration, WorldEvent};
 use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::{Guid, RigidTransform, Vector3};
-use holtburger_content::{MotionHookEffect, MotionSequence, MotionSequenceTable};
+use holtburger_content::{MotionHookEffect, MotionSequenceTable};
 use holtburger_dat::file_type::MotionTable;
 use holtburger_protocol::messages::movement::InterpretedMotionCommand;
 use std::time::Duration;
@@ -144,15 +144,6 @@ pub enum AuthoredMotionDriveError {
     MotionTableSourceUnavailable { guid: u32 },
     #[error("body 0x{guid:08X} resolved missing motion table 0x{motion_table_id:08X}")]
     MotionTableUnavailable { guid: u32, motion_table_id: u32 },
-    #[error(
-        "body 0x{guid:08X} motion table 0x{motion_table_id:08X} does not model command 0x{command:08X} in style 0x{style:08X}"
-    )]
-    RequiredCycleUnavailable {
-        guid: u32,
-        motion_table_id: u32,
-        style: u32,
-        command: u32,
-    },
 }
 
 /// Complete authored-motion result for one body advanced by the world clock.
@@ -193,6 +184,22 @@ pub enum LocalAuthoredMotionCommandError {
 pub(crate) const STICKY_TARGET_CLEARANCE_M: f32 = 0.3;
 
 impl WorldState {
+    /// Effective local motion style, without requiring any particular movement rows.
+    pub fn resolve_player_motion_style(&self) -> Result<u32, PlayerMotionTableLookupError> {
+        if let Some(style) = self.reported_player_motion_style() {
+            return Ok(style);
+        }
+        Ok(self.player_motion_table()?.1.default_style)
+    }
+
+    fn reported_player_motion_style(&self) -> Option<u32> {
+        self.player_entity()
+            .and_then(|entity| entity.network_motion.snapshot())
+            .and_then(|snapshot| snapshot.current_style)
+            .or(self.player.last_server_motion_style)
+            .map(|style| style as u32)
+    }
+
     /// Acknowledges a controller-declined local object turn without installing its playback.
     /// The controller owns the reason for declining; normal self authority rejects stale packets.
     pub fn acknowledge_local_object_turn(
@@ -418,6 +425,25 @@ impl WorldState {
     pub fn resolve_player_motion_table_profile(
         &self,
     ) -> Result<PlayerMotionTableResolution, PlayerMotionTableLookupError> {
+        let (source, table) = self.player_motion_table()?;
+        let stance = self
+            .reported_player_motion_style()
+            .unwrap_or(table.default_style);
+        Ok(PlayerMotionTableResolution {
+            source,
+            movement_profile: MotionTableMovementProfile::reduce(
+                table,
+                self.motion_sequences
+                    .table(crate::motion::PLAYER_LOCOMOTION_BASELINE_TABLE),
+                stance,
+            ),
+        })
+    }
+
+    /// Resolve native table identity without evaluating any animation rates.
+    fn player_motion_table(
+        &self,
+    ) -> Result<(PlayerMotionTableSource, &MotionSequenceTable), PlayerMotionTableLookupError> {
         let player_guid = self.player_guid_u32()?;
         let player = self
             .entities
@@ -448,8 +474,10 @@ impl WorldState {
 
         let motion_table_id = motion_table_id_for_source(source);
 
-        self.motion_table_profile_from_source(source, None)
-            .ok_or(PlayerMotionTableLookupError::MotionTableAbsentFromContract { motion_table_id })
+        let table = self.motion_sequences.table(motion_table_id).ok_or(
+            PlayerMotionTableLookupError::MotionTableAbsentFromContract { motion_table_id },
+        )?;
+        Ok((source, table))
     }
 
     /// Drives one named body's ordinary authored playback and returns its complete tick.
@@ -502,9 +530,22 @@ impl WorldState {
                 motion_table_id,
             },
         )?;
+        let baseline = (guid == self.player.guid)
+            .then(|| {
+                self.motion_sequences
+                    .table(crate::motion::PLAYER_LOCOMOTION_BASELINE_TABLE)
+            })
+            .flatten();
         Ok(self
             .motion_runtimes
-            .drive_manual(table, guid, order, presentation, dt.as_secs_f32())
+            .drive_manual_with_fallback(
+                table,
+                baseline,
+                guid,
+                order,
+                presentation,
+                dt.as_secs_f32(),
+            )
             .clone())
     }
 
@@ -701,40 +742,6 @@ impl WorldState {
     /// Whether the local adapter must advance this body's ordinary playback for an action.
     pub fn has_authored_motion_actions(&self, guid: Guid) -> bool {
         self.motion_runtimes.has_actions(guid)
-    }
-
-    /// Requires one style/command cycle before a playable-character adapter selects it.
-    ///
-    /// Generic remote content may legitimately leave a command unmodelled and retain its existing
-    /// presentation. A playable player table is a stronger contract: silently remaining in idle
-    /// would hide a broken required-content dependency.
-    pub fn require_authored_motion_cycle_for_body(
-        &self,
-        guid: Guid,
-        style: MotionCommand,
-        command: MotionCommand,
-    ) -> Result<(), AuthoredMotionDriveError> {
-        let source = self.motion_table_source_for_guid(guid).ok_or(
-            AuthoredMotionDriveError::MotionTableSourceUnavailable {
-                guid: u32::from(guid),
-            },
-        )?;
-        let motion_table_id = motion_table_id_for_source(source);
-        let table = self.motion_sequences.table(motion_table_id).ok_or(
-            AuthoredMotionDriveError::MotionTableUnavailable {
-                guid: u32::from(guid),
-                motion_table_id,
-            },
-        )?;
-        if table.cycle(style.raw(), command.raw()).is_none() {
-            return Err(AuthoredMotionDriveError::RequiredCycleUnavailable {
-                guid: u32::from(guid),
-                motion_table_id,
-                style: style.raw(),
-                command: command.raw(),
-            });
-        }
-        Ok(())
     }
 
     pub fn resolve_body_projection_input(&self, body_id: SpatialBodyId) -> Option<SolveBodyInput> {
@@ -1136,21 +1143,6 @@ impl WorldState {
             motion_table_id,
         })
     }
-
-    fn motion_table_profile_from_source(
-        &self,
-        source: PlayerMotionTableSource,
-        stance_override: Option<u32>,
-    ) -> Option<PlayerMotionTableResolution> {
-        let motion_table_id = motion_table_id_for_source(source);
-        let table = self.motion_sequences.table(motion_table_id)?;
-        let stance = stance_override.unwrap_or(table.default_style);
-
-        Some(PlayerMotionTableResolution {
-            source,
-            movement_profile: MotionTableMovementProfile::reduce(table, motion_table_id, stance),
-        })
-    }
 }
 
 /// Velocity-grade summary of the four movement commands for one table and stance.
@@ -1169,15 +1161,23 @@ pub struct MotionTableMovementProfile {
 }
 
 impl MotionTableMovementProfile {
-    fn reduce(table: &MotionSequenceTable, motion_table_id: u32, stance: u32) -> Self {
+    fn reduce(
+        table: &MotionSequenceTable,
+        baseline: Option<&MotionSequenceTable>,
+        stance: u32,
+    ) -> Self {
         let reduce = |command: u32| {
-            table
-                .cycle(stance, command)
-                .map(|sequence| MotionCommandKinematics::reduce(sequence, command))
+            crate::motion::locomotion_row(table, stance, MotionCommand(command))
+                .or_else(|| {
+                    baseline.and_then(|table| {
+                        crate::motion::baseline_row(table, MotionCommand(command))
+                    })
+                })
+                .map(|row| MotionCommandKinematics::reduce(row, command))
         };
 
         Self {
-            motion_table_id,
+            motion_table_id: table.id,
             stance,
             walk_forward: reduce(MotionTable::WALK_FORWARD_COMMAND),
             run_forward: reduce(MotionTable::RUN_FORWARD_COMMAND),
@@ -1195,17 +1195,23 @@ pub struct MotionCommandKinematics {
 }
 
 impl MotionCommandKinematics {
-    fn reduce(sequence: &MotionSequence, command: u32) -> Self {
-        let velocity = sequence.velocity.or_else(|| {
-            derives_forward_velocity(command)
-                .then(|| reduced_forward_speed(sequence).map(|speed| Vector3::new(speed, 0.0, 0.0)))
-                .flatten()
-        });
-
-        Self {
-            velocity,
-            omega: sequence.omega,
-        }
+    fn reduce(row: crate::motion::MotionRow<'_>, command: u32) -> Self {
+        let sequence = row.sequence();
+        let rates = row.rates();
+        let velocity = if sequence.velocity.is_some() {
+            Some(rates.velocity)
+        } else if derives_forward_velocity(command)
+            && matches!(row, crate::motion::MotionRow::Cycle(_))
+            && !sequence.clips.is_empty()
+        {
+            // Controllers consume a nominal forward scalar; physical rates retain the full vector.
+            Some(Vector3::new(rates.velocity.length(), 0.0, 0.0))
+        } else {
+            None
+        };
+        let omega =
+            (sequence.omega.is_some() || rates.omega.length_squared() > 0.0).then_some(rates.omega);
+        Self { velocity, omega }
     }
 }
 
@@ -1216,28 +1222,6 @@ impl MotionCommandKinematics {
 /// a translation at all, and inferring a forward vector for it would invent motion.
 fn derives_forward_velocity(command: u32) -> bool {
     command == MotionTable::WALK_FORWARD_COMMAND || command == MotionTable::RUN_FORWARD_COMMAND
-}
-
-/// Mean forward speed a grounded cycle implies, composed from its authored root motion.
-///
-/// Composes each clip's traversal window in order into one rigid transform, then divides the
-/// distance travelled by the frames traversed and scales by the rate they are traversed at. Rate
-/// sign selects traversal direction rather than changing the speed, so its magnitude is used.
-fn reduced_forward_speed(sequence: &MotionSequence) -> Option<f32> {
-    let framerate = sequence.clips.first()?.framerate.abs();
-    let mut composed = RigidTransform::identity();
-    let mut frames = 0u32;
-    for clip in &sequence.clips {
-        composed = composed.combine(
-            &clip
-                .animation
-                .root
-                .composed_over(clip.low_frame, clip.high_frame),
-        );
-        frames += clip.frame_span();
-    }
-
-    (frames > 0).then(|| composed.translation.length() / frames as f32 * framerate)
 }
 
 fn motion_table_id_for_source(source: PlayerMotionTableSource) -> u32 {

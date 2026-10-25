@@ -211,6 +211,7 @@ async fn probe(
     let characters = wait(events, duration, "character roster", |event| match event {
         ClientViewEvent::LifecycleChanged(ClientLifecycleState::CharacterSelection {
             characters,
+            ..
         }) => Some(characters),
         _ => None,
     })

@@ -441,7 +441,7 @@ fn manual_playback_selects_ready_falling_and_grounded_from_shared_support_state(
 }
 
 #[test]
-fn playable_jump_presentation_fails_loudly_when_required_cycle_is_missing() {
+fn manual_jump_retains_native_playback_when_falling_is_absent() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_3309);
     let pose = WorldPosition {
@@ -484,21 +484,36 @@ fn playable_jump_presentation_fails_loudly_when_required_cycle_is_missing() {
         },
         CharacterMotionReadiness::Ready,
     );
+    for contact in [
+        ContactState::Grounded,
+        ContactState::Airborne,
+        ContactState::Sliding,
+    ] {
+        assert!(
+            world
+                .scene
+                .apply_runtime_body_contact(SpatialBodyId::LocalPlayer(guid), contact,)
+        );
+        let tick = movement
+            .advance_local_authored_motion(&mut world, Duration::from_millis(30))
+            .expect("absent support animation must not terminate manual playback")
+            .unwrap();
+        assert_eq!(tick.offset.translation, Vector3::zero());
+        assert!(tick.hooks.is_empty());
+        assert_eq!(
+            world.motion_runtimes.state(guid).unwrap().substate,
+            MotionCommand::READY
+        );
+    }
+    movement.character_motion.clear();
     assert!(
         world
             .scene
-            .apply_runtime_body_contact(SpatialBodyId::LocalPlayer(guid), ContactState::Airborne,)
+            .apply_runtime_body_contact(SpatialBodyId::LocalPlayer(guid), ContactState::Grounded,)
     );
-
-    let error = movement
-        .advance_local_authored_motion(&mut world, Duration::from_millis(30))
-        .expect_err("a playable player table missing Falling must fail loudly");
-    assert!(
-        error
-            .to_string()
-            .contains("manual local jump presentation unavailable")
-    );
-    assert!(world.motion_runtimes.get(guid).is_none());
+    movement
+        .advance_local_authored_motion(&mut world, Duration::ZERO)
+        .expect("landing reconciliation must remain nonfatal");
 }
 
 #[test]

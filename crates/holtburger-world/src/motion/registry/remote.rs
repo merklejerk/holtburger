@@ -170,7 +170,7 @@ impl MotionRuntimeRegistry {
                 action.command.movement_override_gesture() == Some(MotionGesture::Windup)
             });
         let order = runtime.remote_order(table, guid, input, incoming_windups);
-        let previous_unmodelled = runtime.unmodelled;
+        let previous_resolution = runtime.ordinary_resolution;
         runtime.accept_order(table, order);
         for action in actions {
             if runtime.enqueue_action(action) == super::MotionActionEnqueueOutcome::Overflow {
@@ -184,7 +184,12 @@ impl MotionRuntimeRegistry {
         // The local controller decides whether this is a gesture or an actual source takeover;
         // retaining manual playback here preserves its cursor across windup/release packets.
         runtime.advance_authored(table, order, 0.0);
-        runtime.report_selection(table, guid, previous_unmodelled);
+        runtime.report_selection(
+            table,
+            guid,
+            previous_resolution,
+            runtime.ordinary_resolution,
+        );
         // Retail move_to_interpreted_state applies motion before re-establishing packet sticky.
         runtime
             .sticky

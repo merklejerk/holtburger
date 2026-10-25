@@ -49,6 +49,8 @@ pub struct GameEventMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameEvent {
+    /// Optional server salvage feedback, independent of inventory updates.
+    SalvageOperationsResult(Box<SalvageOperationsResultData>),
     /// Contract registry wire operation.
     SendClientContractTrackerTable(Box<ContractTrackerTable>),
     /// Contract registry wire operation.
@@ -167,6 +169,9 @@ impl ProtocolUnpack for GameEventMessage {
                 GameEventOpcode::PingResponse => {
                     GameEvent::PingResponse(Box::new(PingResponseEventData::unpack(data, offset)?))
                 }
+                GameEventOpcode::SalvageOperationsResult => GameEvent::SalvageOperationsResult(
+                    Box::new(SalvageOperationsResultData::unpack(data, offset)?),
+                ),
                 GameEventOpcode::ViewContents => {
                     GameEvent::ViewContents(Box::new(ViewContentsEventData::unpack(data, offset)?))
                 }
@@ -458,6 +463,10 @@ impl ProtocolPack for GameEventMessage {
             GameEvent::PingResponse(data) => {
                 buf.write_u32::<LittleEndian>(GameEventOpcode::PingResponse as u32)
                     .unwrap();
+                data.pack(buf);
+            }
+            GameEvent::SalvageOperationsResult(data) => {
+                (GameEventOpcode::SalvageOperationsResult as u32).pack(buf);
                 data.pack(buf);
             }
             GameEvent::ViewContents(data) => {

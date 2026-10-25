@@ -57,6 +57,7 @@
 		| "statusTray"
 		| "minimap"
 		| "inventory"
+		| "salvage"
 		| "worldContainer"
 		| "vendor"
 		| "houseCrystal"
@@ -434,6 +435,8 @@
 						canInteract: true,
 						interactionLabel: "Interact",
 					})}
+					readCanSalvage={() => false}
+					onSalvage={() => {}}
 					readCanSplit={() => false}
 					readCanInvite={() => false}
 					readCanAddFriend={() => false}

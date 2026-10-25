@@ -21,6 +21,8 @@ pub enum ItemUseCapability {
     Unsupported,
     /// Use the source without a second object.
     Direct,
+    /// Authored Ust interaction; each frontend opens its own salvage workflow.
+    SalvageTool,
     /// A separate compatible target is required.
     Targeted,
 }
@@ -120,6 +122,9 @@ pub fn consumable_facts(entity: &Entity) -> Option<ConsumableFacts> {
 pub fn item_use_capability(entity: &Entity) -> ItemUseCapability {
     if entity.get_string_prop(PropertyString::Name).is_none() || entity.item_type().is_none() {
         return ItemUseCapability::Unavailable;
+    }
+    if crate::crafting::salvage::is_salvage_tool(entity) {
+        return ItemUseCapability::SalvageTool;
     }
     let usable = entity.usable_flags();
     if !usable.allows_direct_use() {

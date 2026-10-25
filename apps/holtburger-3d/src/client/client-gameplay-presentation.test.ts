@@ -185,6 +185,7 @@ describe("ClientGameplayPresentation", () => {
 			await presentation.start();
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [entityFacts(corpseGuid, { corpse: "opened" })],
 				removed: [],
@@ -205,6 +206,7 @@ describe("ClientGameplayPresentation", () => {
 			});
 			transport.emit("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [entityFacts(corpseGuid, { corpse: "unopened" })],
 				removed: [],

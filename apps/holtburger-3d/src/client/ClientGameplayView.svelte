@@ -16,6 +16,8 @@
 	import type { ClientHousingManagementState } from "./client-housing-management-state";
 	import type { HousingSnapshot } from "./client-housing-contract";
 	import type { ClientConnectionObservation } from "./client-lifecycle-session";
+	import ClientSalvageWindow from "./ClientSalvageWindow.svelte";
+	import type { ClientSalvageState } from "./client-salvage-state";
 	import ClientTradeWindow from "./ClientTradeWindow.svelte";
 	import type { ClientTradeState } from "./client-trade-state";
 	import type { ClientHouseCrystalState } from "./client-house-crystal-state";
@@ -298,6 +300,8 @@
 		readonly vendor: ClientVendorState | null;
 		/** Session-local crystal interaction; effective-home knowledge is separate. */
 		readonly houseCrystal: ClientHouseCrystalState | null;
+		/** Character-owned salvage draft and local confirmation policy. */
+		readonly salvage: ClientSalvageState | null;
 		/** Session-owned P2P gestures and confirmed offer presentation. */
 		readonly trade: ClientTradeState | null;
 		/** Presentation owner for confirmed external storage, independent of system-panel selection. */
@@ -466,6 +470,7 @@
 		worldContainer,
 		vendor,
 		houseCrystal,
+		salvage,
 		trade,
 		itemInteractions,
 		onSelectContentsItem,
@@ -664,6 +669,10 @@
 	};
 	let nearbyOpen = $state(false);
 	let activePanel = $state<ClientSystemPanel | null>(null);
+	/** Salvage entry opens inventory through the same single-open-panel owner as the dock. */
+	export function showInventory(): void {
+		activePanel = "inventory";
+	}
 	/** Dock and keyboard share the single-open-panel policy. */
 	function toggleSystemPanel(panel: ClientSystemPanel): void {
 		activePanel = activePanel === panel ? null : panel;
@@ -1084,6 +1093,7 @@
 					{worldContainer}
 					{vendor}
 					{houseCrystal}
+					{salvage}
 					{trade}
 					onDragOwner={(owner) => (itemDrag = owner)}
 					{onPickInventoryTarget}
@@ -1310,6 +1320,12 @@
 						if (target !== null && readCanSetCorpsePermission())
 							onCorpsePermission(target.name, granted);
 					}}
+					readCanSalvage={() =>
+						selectedEntityGuid !== null &&
+						salvage?.canQueue(selectedEntityGuid) === true}
+					onSalvage={() => {
+						if (selectedEntityGuid !== null) salvage?.add(selectedEntityGuid);
+					}}
 					readCanSplit={canSplitSelectedEntity}
 					readCanAddFriend={() => friendTarget() !== null}
 					readCanIgnoreAccount={() => ignoreTarget() !== null}
@@ -1398,6 +1414,21 @@
 					{viewport}
 					onPlacementChange={(placement) =>
 						changeHudPlacement("worldContainer", placement)}
+				/>
+			{/key}
+		{/if}
+		{#if salvage !== null && inventory !== null}
+			{#key salvage}
+				<ClientSalvageWindow
+					model={salvage}
+					{inventory}
+					placement={hudLayout.salvage}
+					{viewport}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("salvage", placement)}
+					selectedGuid={selectedEntityGuid}
+					onSelectItem={onSelectEntity}
+					{onExamineItem}
 				/>
 			{/key}
 		{/if}

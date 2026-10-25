@@ -531,6 +531,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn salvage_during_equipment_change_gets_its_correlated_rejection() {
+        use super::super::{
+            salvage::{SalvageSubmitOutcome, SalvageSubmitRequest},
+            types::{ClientCommand, ClientViewEvent},
+        };
+        use holtburger_common::properties::{MaterialType, WorldObjectPropertyAccessorsMut};
+        use holtburger_world::{
+            crafting::salvage::{SalvageEvaluation, UST_WCID, find_salvage_tool},
+            entity::Entity,
+        };
+        let mut client = super::super::builder::build_test_client(ClientState::InWorld);
+        client.world = outfit(4, 1);
+        let item = client.world.entities.get_mut(INCOMING).unwrap();
+        item.set_int_prop(PropertyInt::MaterialType, MaterialType::Steel as i32);
+        item.set_int_prop(PropertyInt::ItemWorkmanship, 7);
+        item.set_int_prop(PropertyInt::NumItemsInMaterial, 1);
+        let mut ust = Entity::new(Guid(900), "Ust".into(), Default::default());
+        ust.wcid = Some(UST_WCID);
+        client.world.add_entity(ust);
+        confirm_unequip(&mut client.world, Guid(900), 3);
+        let tool = find_salvage_tool(&client.world, None).unwrap();
+        let SalvageEvaluation::Ready { review, .. } =
+            client.world.evaluate_salvage(tool, &[INCOMING])
+        else {
+            panic!("expected ready source");
+        };
+        client.equipment_operation = Some(operation(&client.world, Instant::now()));
+        let mut replies = client.client_view_event_tx.subscribe();
+        client
+            .handle_command(ClientCommand::SubmitSalvage(SalvageSubmitRequest {
+                sequence: 1,
+                review,
+            }))
+            .await
+            .unwrap();
+        let ClientViewEvent::SalvageSubmitted(result) = replies.try_recv().unwrap() else {
+            panic!("expected correlated salvage result");
+        };
+        assert!(
+            matches!(result.outcome, SalvageSubmitOutcome::Rejected { reason } if reason == "An inventory change is still pending.")
+        );
+        assert_eq!(client.session.game_action_sequence, 0);
+    }
+
+    #[tokio::test]
     async fn another_equipment_request_cannot_replace_the_pending_owner() {
         let mut client = super::super::builder::build_test_client(ClientState::InWorld);
         client.world = outfit(2, 1);

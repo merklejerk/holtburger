@@ -78,6 +78,13 @@ async function fixture() {
 		dynamic: { hostTime: { seconds: 10 }, entities: [] },
 		entities: {
 			projectileSupply: { kind: "not-applicable" },
+			salvage: {
+				skills: {
+					salvagingSkill: 0,
+					tinkeringSkill: 0,
+					augmentationBonusSalvage: 0,
+				},
+			},
 			worldContainer: { kind: "closed" },
 			entities: [
 				entityFacts(1),
@@ -161,6 +168,7 @@ describe("ClientSelectedEntityTracking", () => {
 			] as const) {
 				f.emit("client-entity-facts-changed", {
 					projectileSupply: null,
+					salvage: null,
 					worldContainer: null,
 					upserts: [
 						{
@@ -191,6 +199,7 @@ describe("ClientSelectedEntityTracking", () => {
 		for (const useCapability of ["unsupported", "unavailable"] as const) {
 			f.emit("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [
 					{ ...item, description: { ...item.description, useCapability } },
@@ -214,6 +223,7 @@ describe("ClientSelectedEntityTracking", () => {
 		for (const canPickUp of [true, false]) {
 			f.emit("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [
 					{
@@ -331,6 +341,7 @@ describe("ClientSelectedEntityTracking", () => {
 		});
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: [creature],
 			removed: [],
@@ -341,6 +352,7 @@ describe("ClientSelectedEntityTracking", () => {
 		f.emit("client-entity-health-updated", { guid: 11, healthFraction: 0.5 });
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: [
 				{
@@ -383,6 +395,7 @@ describe("ClientSelectedEntityTracking", () => {
 		});
 		f.emit("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: [entityFacts(11)],
 			removed: [],

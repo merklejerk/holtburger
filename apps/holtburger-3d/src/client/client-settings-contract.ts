@@ -77,6 +77,7 @@ const clientHudLayoutSchema = z
 		characterSheet: hudPlacementSchema,
 		inventory: hudPlacementSchema,
 		worldContainer: hudPlacementSchema,
+		salvage: hudPlacementSchema,
 		vendor: hudPlacementSchema,
 		houseCrystal: hudPlacementSchema,
 		trade: hudPlacementSchema,

@@ -188,6 +188,81 @@ impl ProtocolPack for CloseGroundContainerEventData {
     }
 }
 
+/// One server-reported material yield; it is not an inventory-object declaration.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SalvageResultRow {
+    /// Material identifier retained losslessly, including unknown extensions.
+    pub material: u32,
+    /// Average workmanship reported by the server.
+    pub workmanship: f64,
+    /// Total units obtained for this material/skill group.
+    pub units: u32,
+}
+
+/// Optional salvage feedback, grouped by skill and without a client request identity.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SalvageOperationsResultData {
+    /// Skill used for these yield rows.
+    pub skill: u32,
+    /// Unsuitable source GUIDs; ACE currently sends an empty list, retail supports entries.
+    pub rejected: Vec<Guid>,
+    /// Yield rows, independent of the actual inventory bag boundaries.
+    pub results: Vec<SalvageResultRow>,
+    /// Augmentation return bonus as a percentage.
+    pub augmentation_bonus: u32,
+}
+
+impl ProtocolUnpack for SalvageOperationsResultData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let skill = u32::unpack(data, offset)?;
+        let rejected_count = u32::unpack(data, offset)? as usize;
+        // Bound allocations by actual packet contents, before allocating attacker-provided counts.
+        data.get(*offset..offset.checked_add(rejected_count.checked_mul(4)?)?)?;
+        let rejected = (0..rejected_count)
+            .map(|_| Guid::unpack(data, offset))
+            .collect::<Option<Vec<_>>>()?;
+        let result_count = u32::unpack(data, offset)? as usize;
+        data.get(
+            *offset
+                ..offset
+                    .checked_add(result_count.checked_mul(16)?)?
+                    .checked_add(4)?,
+        )?;
+        let mut results = Vec::with_capacity(result_count);
+        for _ in 0..result_count {
+            results.push(SalvageResultRow {
+                material: u32::unpack(data, offset)?,
+                workmanship: f64::unpack(data, offset)?,
+                units: u32::unpack(data, offset)?,
+            });
+        }
+        let augmentation_bonus = u32::unpack(data, offset)?;
+        Some(Self {
+            skill,
+            rejected,
+            results,
+            augmentation_bonus,
+        })
+    }
+}
+
+impl ProtocolPack for SalvageOperationsResultData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.skill.pack(buf);
+        (self.rejected.len() as u32).pack(buf);
+        for guid in &self.rejected {
+            guid.pack(buf);
+        }
+        (self.results.len() as u32).pack(buf);
+        for row in &self.results {
+            row.material.pack(buf);
+            row.workmanship.pack(buf);
+            row.units.pack(buf);
+        }
+        self.augmentation_bonus.pack(buf);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -330,5 +405,57 @@ mod tests {
             })),
         }));
         assert_pack_unpack_parity(&hex::decode(hex_str).unwrap(), &expected);
+    }
+}
+
+#[cfg(test)]
+mod salvage_tests {
+    use super::*;
+    use holtburger_common::{properties::MaterialType, stats::SkillType};
+
+    #[test]
+    fn result_preserves_skill_rejections_fractional_workmanship_and_bonus() {
+        let result = SalvageOperationsResultData {
+            skill: SkillType::Salvaging as u32,
+            rejected: vec![Guid(0x80000001)],
+            results: vec![SalvageResultRow {
+                material: MaterialType::Steel as u32,
+                workmanship: 7.25,
+                units: 42,
+            }],
+            augmentation_bonus: 25,
+        };
+        let mut bytes = Vec::new();
+        result.pack(&mut bytes);
+        // Independent ACE field ordering, including its IEEE754 double at row offset +4.
+        let expected: Vec<_> = [
+            (SkillType::Salvaging as u32).to_le_bytes().as_slice(),
+            1u32.to_le_bytes().as_slice(),
+            Guid(0x80000001).0.to_le_bytes().as_slice(),
+            1u32.to_le_bytes().as_slice(),
+            (MaterialType::Steel as u32).to_le_bytes().as_slice(),
+            7.25f64.to_le_bytes().as_slice(),
+            42u32.to_le_bytes().as_slice(),
+            25u32.to_le_bytes().as_slice(),
+        ]
+        .concat();
+        assert_eq!(bytes, expected);
+        let mut offset = 0;
+        assert_eq!(
+            SalvageOperationsResultData::unpack(&bytes, &mut offset),
+            Some(result)
+        );
+        assert_eq!(offset, bytes.len());
+        for prefix in 0..bytes.len() {
+            assert!(SalvageOperationsResultData::unpack(&bytes[..prefix], &mut 0).is_none());
+        }
+    }
+
+    #[test]
+    fn impossible_list_lengths_are_rejected_before_allocation() {
+        let mut bytes = Vec::new();
+        0u32.pack(&mut bytes);
+        u32::MAX.pack(&mut bytes);
+        assert!(SalvageOperationsResultData::unpack(&bytes, &mut 0).is_none());
     }
 }

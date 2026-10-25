@@ -1,3 +1,4 @@
+import { ClientAppraisalRequests } from "./client-appraisal-requests";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
 import type { ClientEntityRead } from "./client-entity-mirror";
@@ -47,6 +48,10 @@ const itemInspectionFixture = itemFixture.outcome.inspection;
 
 class FakeInspectionSession {
 	readonly requests: number[] = [];
+	readonly appraisals = new ClientAppraisalRequests((guid) => {
+		this.requests.push(guid);
+		return this.#nextRequest;
+	});
 	readonly entities: { readonly read: () => ClientEntityRead };
 	readonly #listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
 	#nextRequest: Promise<void> = Promise.resolve();
@@ -83,16 +88,12 @@ class FakeInspectionSession {
 		return () => this.#listeners.delete(listener);
 	}
 
-	examineEntity(guid: number): Promise<void> {
-		this.requests.push(guid);
-		return this.#nextRequest;
-	}
-
 	failNext(error: Error): void {
 		this.#nextRequest = Promise.reject(error);
 	}
 
 	emit(event: ClientLifecycleSessionEvent): void {
+		this.appraisals.receive(event);
 		for (const listener of this.#listeners) listener(event);
 	}
 }
@@ -173,6 +174,13 @@ describe("ClientObjectInspection", () => {
 			kind: "current",
 			level: {
 				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
 				worldContainer: { kind: "closed" },
 				revision: 1,
 				entities: new Map([
@@ -223,8 +231,20 @@ describe("ClientObjectInspection", () => {
 			},
 		});
 		const unchanged = owner.read();
-		session.emit({ type: "object-preview-result", result: previewFixture });
+		// An unsolicited preview (including failure) cannot replace the visible capture.
+		session.emit({
+			type: "object-preview-result",
+			result: { ...previewFixture, outcome: { kind: "unavailable" } },
+		});
 		expect(owner.read()).toBe(unchanged);
+		await owner.examine(creatureFixture.guid);
+		session.emit({ type: "object-inspection-result", result: creatureFixture });
+		session.emit({ type: "object-preview-result", result: previewFixture });
+		expect(owner.read()).toMatchObject({
+			preview: { kind: "ready", revision: 1 },
+		});
+		await owner.examine(creatureFixture.guid);
+		session.emit({ type: "object-inspection-result", result: creatureFixture });
 		session.emit({
 			type: "object-preview-result",
 			result: {
@@ -319,6 +339,66 @@ describe("ClientObjectInspection", () => {
 		await owner.examine(5);
 		expect(owner.read()).toEqual({ kind: "idle" });
 		expect(failures).toEqual(["transport unavailable"]);
+	});
+
+	it("does not apply background appraisals or failures to a ready inspector", async () => {
+		const session = new FakeInspectionSession();
+		const failure = vi.fn();
+		const owner = new ClientObjectInspection(session, failure);
+		await owner.examine(itemFixture.guid);
+		session.emit({ type: "object-inspection-result", result: itemFixture });
+		const visible = owner.read();
+		const background = vi.fn();
+		await session.appraisals.request(itemFixture.guid, background).sent;
+		session.emit({
+			type: "object-inspection-result",
+			result: { guid: itemFixture.guid, outcome: { kind: "rejected" } },
+		});
+		expect(background).toHaveBeenCalledOnce();
+		expect(owner.read()).toBe(visible);
+		expect(failure).not.toHaveBeenCalled();
+		await session.appraisals.request(itemFixture.guid, background).sent;
+		session.emit({
+			type: "object-inspection-result",
+			result: {
+				...itemFixture,
+				outcome: {
+					kind: "ready",
+					inspection: { ...itemInspectionFixture, name: "Background data" },
+				},
+			},
+		});
+		expect(owner.read()).toBe(visible);
+		const other = vi.fn();
+		await session.appraisals.request(99, other).sent;
+		session.emit({
+			type: "object-inspection-result",
+			result: { guid: 99, outcome: { kind: "missing" } },
+		});
+		expect(other).toHaveBeenCalledOnce();
+		expect(owner.read()).toBe(visible);
+		expect(failure).not.toHaveBeenCalled();
+	});
+
+	it("closing and reopening cancels only the window subscription to a shared request", async () => {
+		const session = new FakeInspectionSession();
+		const owner = new ClientObjectInspection(session, vi.fn());
+		const background = vi.fn();
+		await session.appraisals.request(itemFixture.guid, background).sent;
+		await owner.examine(itemFixture.guid);
+		owner.close();
+		await owner.examine(itemFixture.guid);
+		const changed = vi.fn();
+		owner.subscribe(changed);
+		session.emit({ type: "object-inspection-result", result: itemFixture });
+		expect(session.requests).toEqual([itemFixture.guid]);
+		expect(background).toHaveBeenCalledWith(itemFixture);
+		expect(changed).toHaveBeenCalledOnce();
+		expect(owner.read().kind).toBe("ready");
+		owner.close();
+		await session.appraisals.request(itemFixture.guid, background).sent;
+		session.emit({ type: "object-inspection-result", result: itemFixture });
+		expect(owner.read().kind).toBe("idle");
 	});
 
 	it("invalidates on resync, leaving the world, and teardown", async () => {

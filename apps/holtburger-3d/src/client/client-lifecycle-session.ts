@@ -1,3 +1,14 @@
+import { ClientAppraisalRequests } from "./client-appraisal-requests";
+import {
+	salvagePreviewRequestSchema,
+	salvagePreviewResultSchema,
+	salvageSubmitRequestSchema,
+	salvageSubmitResultSchema,
+	type SalvagePreviewRequest,
+	type SalvagePreviewResult,
+	type SalvageSubmitRequest,
+	type SalvageSubmitResult,
+} from "./client-salvage-contract";
 import {
 	playerVisualCaptureSchema,
 	type PlayerVisualCapture,
@@ -290,6 +301,8 @@ type ClientCommandName = Extract<
 	| "evaluate_client_progression"
 	| "submit_client_progression"
 	| "set_client_character_title"
+	| "preview_client_salvage"
+	| "submit_client_salvage"
 	| "submit_client_item_use"
 	| "respond_to_client_confirmation"
 	| "start_client_camera"
@@ -327,6 +340,8 @@ type ClientEventName = Extract<
 	| "client-item-use-target-result"
 	| "client-spell-inspection-context"
 	| "client-spell-inspection-result"
+	| "client-salvage-preview"
+	| "client-salvage-result"
 	| "client-item-use-result"
 	| "client-state-resyncing"
 	| "client-entity-facts-changed"
@@ -433,6 +448,8 @@ export interface ClientLifecycleSessionState {
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	| { readonly type: "salvage-preview"; readonly result: SalvagePreviewResult }
+	| { readonly type: "salvage-result"; readonly result: SalvageSubmitResult }
 	| { readonly type: "death-locations"; readonly result: DeathLocationResult }
 	| {
 			readonly type: "contract-membership-change";
@@ -607,6 +624,8 @@ export class ClientLifecycleSession {
 	#equipmentNames = new Map<number, string>();
 	/** Imperative progression owner retained across character-panel mounts. */
 	readonly characterSheet: ClientCharacterSheetState;
+	/** Shared appraisal work routes results to requesting consumers without opening UI. */
+	readonly appraisals: ClientAppraisalRequests;
 	/** Dedicated Friends owner; the session only routes transport and lifecycle. */
 	readonly friends: ClientFriendsState;
 	/** Character-owned journal read model and local controls. */
@@ -645,6 +664,12 @@ export class ClientLifecycleSession {
 		mirror = new DynamicEntityMirror(),
 	) {
 		this.#transport = transport;
+		this.appraisals = new ClientAppraisalRequests(async (guid) => {
+			await transport.invoke(
+				"examine_client_entity",
+				objectInspectionTargetSchema.parse({ guid }),
+			);
+		});
 		this.#partyUpdates = new ClientPartyUpdates(
 			async (enabled) => {
 				await transport.invoke("set_client_party_updates", { enabled });
@@ -973,14 +998,6 @@ export class ClientLifecycleSession {
 		});
 	}
 
-	/** Request authoritative facts for one captured entity identity. */
-	async examineEntity(guid: number): Promise<void> {
-		await this.#transport.invoke(
-			"examine_client_entity",
-			objectInspectionTargetSchema.parse({ guid }),
-		);
-	}
-
 	/** Request text for one listed page of the active character's book. */
 	async readBookPage(request: ClientBookPageRequest): Promise<void> {
 		await this.#transport.invoke(
@@ -993,6 +1010,19 @@ export class ClientLifecycleSession {
 	async queryItemUseTarget(query: ClientItemUseTargetQuery): Promise<void> {
 		await this.#transport.invoke("query_client_item_use_target", {
 			query: itemUseTargetQuerySchema.parse(query),
+		});
+	}
+
+	/** Request read-only tool discovery and evaluation of the proposed salvage batch. */
+	async previewSalvage(request: SalvagePreviewRequest): Promise<void> {
+		await this.#transport.invoke("preview_client_salvage", {
+			request: salvagePreviewRequestSchema.parse(request),
+		});
+	}
+	/** Dispatch only if the world-produced review still matches current source facts. */
+	async submitSalvage(request: SalvageSubmitRequest): Promise<void> {
+		await this.#transport.invoke("submit_client_salvage", {
+			request: salvageSubmitRequestSchema.parse(request),
 		});
 	}
 
@@ -1561,6 +1591,22 @@ export class ClientLifecycleSession {
 						});
 					},
 				),
+				await this.#transport.listen("client-salvage-preview", (payload) => {
+					this.#emit({
+						type: "salvage-preview",
+						result: salvagePreviewResultSchema.parse(payload),
+					});
+				}),
+			);
+			unlisteners.push(
+				await this.#transport.listen("client-salvage-result", (payload) => {
+					this.#emit({
+						type: "salvage-result",
+						result: salvageSubmitResultSchema.parse(payload),
+					});
+				}),
+			);
+			unlisteners.push(
 				await this.#transport.listen("client-item-use-result", (payload) => {
 					this.#emit({
 						type: "item-use-result",
@@ -2055,6 +2101,7 @@ export class ClientLifecycleSession {
 	}
 
 	#emit(event: ClientLifecycleSessionEvent): void {
+		this.appraisals.receive(event);
 		if (event.type === "resyncing") {
 			this.#partyUpdates.setActive(false, true);
 			this.friends.setContext(this.#state.playerGuid, false);

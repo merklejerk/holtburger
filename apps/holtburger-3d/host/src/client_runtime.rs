@@ -357,6 +357,14 @@ pub enum ClientHostCommand {
     QueryClientItemUseTarget {
         query: holtburger_core::client::item_use::ItemUseTargetQuery,
     },
+    /// Read-only salvage tool discovery and ordered batch evaluation.
+    PreviewClientSalvage {
+        request: holtburger_core::client::salvage::SalvagePreviewRequest,
+    },
+    /// Revalidate reviewed sources before dispatching one salvage action.
+    SubmitClientSalvage {
+        request: holtburger_core::client::salvage::SalvageSubmitRequest,
+    },
     /// Execute only while the supplied semantic use consequence still matches.
     SubmitClientItemUse {
         request: holtburger_core::client::item_use::ItemUseRequest,
@@ -570,6 +578,8 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "submit_client_inventory",
     "equip_client_item",
     "apply_client_equipment_set",
+    "preview_client_salvage",
+    "submit_client_salvage",
     "submit_client_item_use",
     "query_client_item_use_target",
     "query_client_spell_inspection",
@@ -1088,6 +1098,16 @@ pub async fn dispatch_client(
             .map_err(application_error),
         QueryClientItemUseTarget { query } => runtime
             .send_command(ClientCommand::QueryItemUseTarget(query))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        PreviewClientSalvage { request } => runtime
+            .send_command(ClientCommand::PreviewSalvage(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SubmitClientSalvage { request } => runtime
+            .send_command(ClientCommand::SubmitSalvage(request))
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

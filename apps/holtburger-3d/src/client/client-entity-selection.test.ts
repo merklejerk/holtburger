@@ -759,6 +759,13 @@ class FakeLifecycle implements ClientEntitySelectionLifecyclePort {
 			this.entities.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
+					salvage: {
+						skills: {
+							salvagingSkill: 0,
+							tinkeringSkill: 0,
+							augmentationBonusSalvage: 0,
+						},
+					},
 					worldContainer: { kind: "closed" },
 					entities: [1, 4, 7, 8, 9, 12, 77].map((guid) => entityFacts(guid)),
 				},
@@ -769,6 +776,7 @@ class FakeLifecycle implements ClientEntitySelectionLifecyclePort {
 	update(upserts: ClientEntityFacts[], removed: number[]): void {
 		const prepared = this.entities.prepareDelta({
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts,
 			removed,

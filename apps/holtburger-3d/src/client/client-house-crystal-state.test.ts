@@ -81,6 +81,13 @@ function fixture(distance: number | null = 0) {
 			entities.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
+					salvage: {
+						skills: {
+							salvagingSkill: 0,
+							tinkeringSkill: 0,
+							augmentationBonusSalvage: 0,
+						},
+					},
 					worldContainer: { kind: "closed" },
 					entities: [
 						entityFacts(1),
@@ -247,6 +254,13 @@ describe("crystal draft ownership", () => {
 			f.entities.prepareSnapshot(
 				{
 					projectileSupply: { kind: "not-applicable" },
+					salvage: {
+						skills: {
+							salvagingSkill: 0,
+							tinkeringSkill: 0,
+							augmentationBonusSalvage: 0,
+						},
+					},
 					worldContainer: { kind: "closed" },
 					entities: [
 						entityFacts(1),

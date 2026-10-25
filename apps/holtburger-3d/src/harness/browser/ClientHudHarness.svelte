@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { createSalvageFixture } from "./client-salvage-fixture";
+	import { ClientSalvageState } from "../../client/client-salvage-state";
 	import "../../client/client-canvas.css";
 	import { createClientMouseMovementFixture } from "./client-mouse-movement-fixture";
 	import { soulEmoteFixture } from "../../client/client-soul-emotes.test-support";
@@ -282,6 +284,7 @@
 		const previous = userSettings.input;
 		emitInteractionEvent("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: [91, 95].map((guid) =>
 				entityFacts(guid, {
@@ -376,6 +379,7 @@
 			savedCaster = source;
 			emitInteractionEvent("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [
 					{
@@ -416,6 +420,7 @@
 			itemInteractions.cancel();
 			emitInteractionEvent("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [savedCaster],
 				removed: [],
@@ -518,6 +523,13 @@
 		supply: async (supply: ProjectileSupply) => {
 			emitInteractionEvent("client-entity-facts-changed", {
 				projectileSupply: supply,
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
 				worldContainer: null,
 				upserts: [],
 				removed: [],
@@ -852,6 +864,7 @@
 		});
 		emitInteractionEvent("client-entity-facts-changed", {
 			projectileSupply: null,
+			salvage: null,
 			worldContainer: null,
 			upserts: saved.map((item, index) => ({
 				...item,
@@ -914,6 +927,7 @@
 					throw new Error("Expected bound supply");
 				emitInteractionEvent("client-entity-facts-changed", {
 					projectileSupply: null,
+					salvage: null,
 					worldContainer: null,
 					upserts: [
 						{
@@ -942,6 +956,7 @@
 			removeSupply: () =>
 				emitInteractionEvent("client-entity-facts-changed", {
 					projectileSupply: null,
+					salvage: null,
 					worldContainer: null,
 					upserts: [],
 					removed: [995],
@@ -956,6 +971,7 @@
 					throw new Error("Expected food fixture");
 				emitInteractionEvent("client-entity-facts-changed", {
 					projectileSupply: null,
+					salvage: null,
 					worldContainer: null,
 					upserts: [
 						{
@@ -976,6 +992,7 @@
 					throw new Error("Expected tool fixture");
 				emitInteractionEvent("client-entity-facts-changed", {
 					projectileSupply: null,
+					salvage: null,
 					worldContainer: null,
 					upserts: [
 						{
@@ -1015,6 +1032,7 @@
 				releaseKeys();
 				emitInteractionEvent("client-entity-facts-changed", {
 					projectileSupply: null,
+					salvage: null,
 					worldContainer: null,
 					upserts: saved,
 					removed: [995],
@@ -1138,6 +1156,8 @@
 		/** Verify live inventory, shared placement, geometry, selection, and recovery. */
 		readonly probeInventory: typeof probeInventory;
 		/** Synthetic replies through the real vendor session and HUD. */
+		/** Salvage authority replies exercise the production window and session. */
+		readonly salvageProbe: ReturnType<typeof createSalvageFixture>;
 		readonly vendorProbe: ReturnType<typeof createVendorFixture>;
 		/** Synthetic profiles and payment quotes through production session decoding. */
 		readonly housingProbe: ReturnType<typeof createHousingFixture>;
@@ -1330,6 +1350,7 @@
 	}
 	let spells = $state<ClientSpellServices | null>(null);
 	let enchantments = $state.raw<ClientTimedEnchantments | null>(null);
+	let salvage = $state<ClientSalvageState | null>(null);
 	let inventory = $state<ClientInventoryState | null>(null);
 	let vendor = $state<ClientVendorState | null>(null);
 	let houseCrystal = $state<ClientHouseCrystalState | null>(null);
@@ -1397,6 +1418,13 @@
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },
 			entities: {
 				projectileSupply: { kind: "not-applicable" },
+				salvage: {
+					skills: {
+						salvagingSkill: 0,
+						tinkeringSkill: 0,
+						augmentationBonusSalvage: 0,
+					},
+				},
 				worldContainer: { kind: "closed" },
 				entities: [playerGuid, 7, 8].map((guid) => ({
 					guid,
@@ -1429,6 +1457,10 @@
 					canReceiveGive: false,
 					canTrade: false,
 					canOfferTrade: false,
+					salvage: {
+						kind: "ineligible",
+						reason: "Fixture item cannot be salvaged.",
+					},
 					targeting: "non-creature",
 					corpse: null,
 					scenePlacement: "available",
@@ -1591,6 +1623,11 @@
 		},
 	});
 	const itemInteractions = new ClientItemInteractions({
+		beginSalvage: (tool) => {
+			if (salvage === null)
+				throw new Error("Salvage fixture owner is not mounted.");
+			salvage.openTool(tool);
+		},
 		beginTrade: (partner) => trade?.open(partner),
 		reportNotice: (message) => {
 			toast = { id: 1, message, tone: "status" };
@@ -1626,6 +1663,7 @@
 			}
 			emitInteractionEvent("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				removed: [],
 				upserts: aetheriaDropRecords.map((record) => {
@@ -1650,6 +1688,7 @@
 		restore: () => {
 			emitInteractionEvent("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				removed: [],
 				upserts: aetheriaDropRecords,
@@ -1671,6 +1710,7 @@
 				throw new Error("Give fixture recipient missing");
 			emitInteractionEvent("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [
 					{
@@ -1679,6 +1719,10 @@
 						canReceiveGive: true,
 						canTrade: false,
 						canOfferTrade: false,
+						salvage: {
+							kind: "ineligible",
+							reason: "Fixture item cannot be salvaged.",
+						},
 						ownedByPlayer: false,
 						location: { kind: "none" },
 						scenePlacement: "available",
@@ -1715,6 +1759,7 @@
 				throw new Error("Source removal requires an existing source");
 			emitInteractionEvent("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [],
 				removed: [guid],
@@ -1724,6 +1769,7 @@
 		restoreSource: (source: ClientEntityFacts) =>
 			emitInteractionEvent("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [source],
 				removed: [],
@@ -1740,6 +1786,7 @@
 		end: () => {
 			emitInteractionEvent("client-entity-facts-changed", {
 				projectileSupply: null,
+				salvage: null,
 				worldContainer: null,
 				upserts: [],
 				removed: [7],
@@ -1830,6 +1877,10 @@
 		};
 	}
 	interface ObjectInspectionProbe {
+		crosstalk(): Promise<{
+			readonly backgroundIsolation: true;
+			readonly sharedCancellation: true;
+		}>;
 		readonly binding: (typeof INPUT_DEFAULTS.client.examine)[number];
 		begin(): void;
 		end(): void;
@@ -2205,6 +2256,58 @@
 		void objectInspectionOwner.examine(guid);
 	}
 	const objectInspectionProbe: ObjectInspectionProbe = {
+		async crosstalk() {
+			objectInspectionOwner.close();
+			await objectInspectionOwner.examine(7);
+			emitInteractionEvent(
+				"client-object-inspection-result",
+				inspectionResult("item", 7),
+			);
+			const visible = objectInspectionOwner.read();
+			const previousFailure = inspectionFailure;
+			for (const [kind, guid] of [
+				["rejected", 7],
+				["item", 7],
+				["missing", 8],
+			] as const) {
+				let delivered = false;
+				await interactionLifecycle.appraisals.request(guid, () => {
+					delivered = true;
+				}).sent;
+				emitInteractionEvent(
+					"client-object-inspection-result",
+					inspectionResult(kind, guid),
+				);
+				if (
+					!delivered ||
+					objectInspectionOwner.read() !== visible ||
+					inspectionFailure !== previousFailure
+				)
+					throw new Error(
+						"Background appraisal changed the inspector presentation.",
+					);
+			}
+			let delivered = false;
+			const shared = interactionLifecycle.appraisals.request(7, () => {
+				delivered = true;
+			});
+			await shared.sent;
+			const beforeJoin = interactionCommands.length;
+			await objectInspectionOwner.examine(7);
+			if (interactionCommands.length !== beforeJoin)
+				throw new Error("Inspector duplicated shared appraisal work.");
+			objectInspectionOwner.close();
+			emitInteractionEvent(
+				"client-object-inspection-result",
+				inspectionResult("item", 7),
+			);
+			await tick();
+			if (!delivered || objectInspectionOwner.read().kind !== "idle")
+				throw new Error(
+					"Closing the inspector cancelled background work or reopened the window.",
+				);
+			return { backgroundIsolation: true, sharedCancellation: true };
+		},
 		binding: INPUT_DEFAULTS.client.examine[0],
 		begin: () => {
 			releaseInspectionKeys?.();
@@ -4445,7 +4548,17 @@
 			(message) => inventoryToasts.publish({ message, tone: "warning" }),
 		);
 		housingManagement = housingManagementOwner;
+		const salvageOwner = new ClientSalvageState(
+			interactionLifecycle,
+			(message) => inventoryToasts.publish({ message, tone: "status" }),
+			() => {
+				itemInteractions.cancelTargeting();
+				gameplayView?.showInventory();
+			},
+		);
+		salvage = salvageOwner;
 		const sessionDialogs = new ClientDialogs(interactionLifecycle);
+		const unbindSalvage = sessionDialogs.bindLocal(salvageOwner);
 		dialogOwner = sessionDialogs;
 		const unbindItemDialogs = sessionDialogs.bindLocal(itemInteractions);
 		const unbindHousingDialogs = sessionDialogs.bindLocal(
@@ -4927,6 +5040,16 @@
 				select: (guid) => selection.select(guid),
 				commands: interactionCommands,
 			}),
+			salvageProbe: createSalvageFixture({
+				ready: () => interactionLifecycle.entities.read().kind === "current",
+				emit: emitInteractionEvent,
+				baseline: emitInteractionBaseline,
+				commands: interactionCommands,
+				showInventory: () => gameplayView?.showInventory(),
+				select: (guid) => selection.select(guid),
+				activateBound: (guid) =>
+					itemInteractions.activate(guid, "direct", false),
+			}),
 			vendorProbe: createVendorFixture({
 				emit: emitInteractionEvent,
 				baseline: emitInteractionBaseline,
@@ -5173,6 +5296,9 @@
 			trade = null;
 			vendorOwner.destroy();
 			unbindHousingDialogs();
+			unbindSalvage();
+			salvageOwner.destroy();
+			salvage = null;
 			unbindItemDialogs();
 			unbindContractDialogs();
 			unsubscribeDialogs();
@@ -5437,6 +5563,7 @@
 				{inventory}
 				{worldContainer}
 				{vendor}
+				{salvage}
 				{trade}
 				onSelectContentsItem={(guid, mode) =>
 					selection.selectContentsItem(guid, mode)}

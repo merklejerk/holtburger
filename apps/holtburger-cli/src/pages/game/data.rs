@@ -33,6 +33,20 @@ pub struct TimedResolvedEnchantments {
     pub received_at: Instant,
 }
 
+impl TimedResolvedEnchantments {
+    /// Age the shared group snapshot for inventory and inspection without starting local timers.
+    pub fn remaining_cooldown(
+        &self,
+        definition: &holtburger_world::item_cooldowns::ItemCooldownDefinition,
+    ) -> Option<f64> {
+        holtburger_world::item_cooldowns::remaining_seconds(
+            definition,
+            &self.resolved.cooldowns,
+            self.received_at.elapsed().as_secs_f64(),
+        )
+    }
+}
+
 /// TUI projection of core-owned quotes and row-local pending submissions.
 #[derive(Debug, Clone, Default)]
 pub struct TuiProgressionState {

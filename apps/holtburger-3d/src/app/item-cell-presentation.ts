@@ -4,6 +4,8 @@ import { itemStructureDisplay, type ItemStructure } from "./item-structure";
 
 /** Item facts needed by both inventory and bound-action cells. */
 export interface ItemCellFacts {
+	/** Remaining time sampled at the tooltip cadence so native hover text stays readable. */
+	readonly cooldownSeconds?: number;
 	/** Base accessible name, including any caller-owned slot context. */
 	readonly label: string;
 	/** Stack quantity; null when absent or unknown. */
@@ -64,5 +66,7 @@ export function itemCellPresentation(
 		}
 	}
 	if (facts.equipped) label += " (Equipped)";
+	if (facts.cooldownSeconds !== undefined && facts.cooldownSeconds > 0)
+		label += ` (Ready in ${facts.cooldownSeconds}s; shared cooldown)`;
 	return { label, count, meter, equipped: facts.equipped };
 }

@@ -1100,6 +1100,65 @@ mod tests {
     }
 
     #[test]
+    fn cooldown_definitions_publish_before_appraisal_and_follow_property_updates() {
+        use holtburger_common::properties::{ItemType, PropertyFloat, PropertyInt};
+        use holtburger_protocol::messages::{
+            PublicUpdatePropertyFloatData, PublicUpdatePropertyIntData,
+        };
+        use holtburger_world::{
+            entity_facts::EntityDescription, item_cooldowns::ItemCooldownDefinition,
+        };
+
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        let mut description = ObjectDescriptionData::with_guid(ITEM);
+        description.public_weenie_desc.name = Some("Essence".into());
+        description.public_weenie_desc.item_type = ItemType::FOOD.bits();
+        description.public_weenie_desc.container_id = Some(PLAYER);
+        description.public_weenie_desc.cooldown = Some(213);
+        for (message, group_id, duration_seconds) in [
+            (GameMessage::ObjectCreate(Box::new(description)), 213, None),
+            (
+                GameMessage::PublicUpdatePropertyFloat(Box::new(PublicUpdatePropertyFloatData {
+                    sequence: 1,
+                    guid: ITEM,
+                    property: PropertyFloat::CooldownDuration as u32,
+                    value: 45.0,
+                })),
+                213,
+                Some(45.0),
+            ),
+            (
+                GameMessage::PublicUpdatePropertyInt(Box::new(PublicUpdatePropertyIntData {
+                    sequence: 1,
+                    guid: ITEM,
+                    property: PropertyInt::SharedCooldown as u32,
+                    value: 1000,
+                })),
+                1000,
+                Some(45.0),
+            ),
+        ] {
+            for event in world.handle_message(&message) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            let EntityDescription::Known { cooldown, .. } = mirror[&ITEM].description else {
+                panic!("known item cooldown");
+            };
+            assert_eq!(
+                cooldown,
+                Some(ItemCooldownDefinition {
+                    group_id: Some(group_id),
+                    duration_seconds
+                })
+            );
+        }
+    }
+
+    #[test]
     fn structure_updates_preserve_independent_properties_in_snapshots() {
         use holtburger_common::properties::{ItemType, PropertyInt};
         use holtburger_protocol::messages::PublicUpdatePropertyIntData;

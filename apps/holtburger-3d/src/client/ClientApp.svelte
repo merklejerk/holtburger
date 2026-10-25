@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { provideItemCooldowns } from "../app/item-cooldowns.svelte";
 	import "./client-canvas.css";
 	import { persistPlayerVisualCapture } from "./client-visual-capture";
 	import type { ClientVisualCacheTransport } from "./client-visual-cache-transport";
@@ -330,6 +331,17 @@
 	}
 	let spells = $state<ClientSpellServices | null>(null);
 	let enchantments = $state.raw<ClientTimedEnchantments | null>(null);
+	const itemCooldowns = provideItemCooldowns();
+	$effect(() => {
+		itemCooldowns.replace(
+			enchantments === null
+				? null
+				: {
+						cooldowns: enchantments.resolved.cooldowns,
+						receivedAtMs: enchantments.receivedAtMs,
+					},
+		);
+	});
 	/** Event-driven stance consumed by combat controls and spell shortcuts. */
 	let combatMode = $state<ClientCombatMode>("unknown");
 	let combatStatus = $state<ClientCombatStatus>({

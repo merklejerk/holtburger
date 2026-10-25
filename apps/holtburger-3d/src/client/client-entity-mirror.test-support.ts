@@ -51,6 +51,7 @@ export function entityFacts(
 			consumable: null,
 			useCapability: "direct" as const,
 			stackCount: null,
+			cooldown: null,
 			structure: { current: null, max: null },
 			icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 		},

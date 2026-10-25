@@ -147,7 +147,17 @@ pub fn build_context_panel_content(data: &GameData, view: &ViewState) -> Vec<Lin
             match &result.outcome {
                 ObjectInspectionOutcome::Ready { inspection } => {
                     let spell_catalog = data.spell_catalog();
-                    assess::get_assess_info(inspection, spell_catalog.as_deref())
+                    let cooldown_seconds = match &inspection.details {
+                        holtburger_world::inspection::ObjectInspectionDetails::Item(item) => {
+                            item.cooldown.and_then(|definition| {
+                                data.resolved_enchantments
+                                    .as_ref()?
+                                    .remaining_cooldown(&definition)
+                            })
+                        }
+                        holtburger_world::inspection::ObjectInspectionDetails::Creature(_) => None,
+                    };
+                    assess::get_assess_info(inspection, spell_catalog.as_deref(), cooldown_seconds)
                 }
                 ObjectInspectionOutcome::Rejected => {
                     vec![Line::from("You could not appraise this object.")]

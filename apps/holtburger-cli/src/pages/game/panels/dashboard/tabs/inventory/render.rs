@@ -141,6 +141,13 @@ fn get_list_items(
             is_salvaging,
             active_subject_guid == Some(e.guid),
             container_count,
+            holtburger_world::item_cooldowns::ItemCooldownDefinition::from_properties(*e).and_then(
+                |definition| {
+                    data.resolved_enchantments
+                        .as_ref()?
+                        .remaining_cooldown(&definition)
+                },
+            ),
         ));
     }
 
@@ -157,6 +164,7 @@ fn render_inventory_item(
     is_salvaging: bool,
     is_active_subject: bool,
     container_count: Option<u32>,
+    cooldown_seconds: Option<f64>,
 ) -> ListItem<'static> {
     let class = classify_entity(e);
     let color = get_entity_color(class);
@@ -206,5 +214,40 @@ fn render_inventory_item(
         indent, type_marker, display_name_with_status
     );
 
-    ListItem::new(Line::styled(text, text_style)).style(item_style)
+    let mut spans = vec![Span::styled(text, text_style)];
+    if let Some(seconds) = cooldown_seconds {
+        spans.push(Span::styled(
+            format!(" [CD {:.0}s]", seconds.ceil()),
+            Style::default().fg(theme::SUMMARY_FG),
+        ));
+    }
+    ListItem::new(Line::from(spans)).style(item_style)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{buffer::Buffer, widgets::Widget};
+
+    #[test]
+    fn active_cooldown_is_visible_beside_equipment_status() {
+        let entity = Entity::new(Guid(1), "Essence".into(), Default::default());
+        let row = render_inventory_item(
+            &entity,
+            0,
+            false,
+            true,
+            false,
+            false,
+            false,
+            None,
+            Some(22.2),
+        );
+        let area = Rect::new(0, 0, 80, 1);
+        let mut buffer = Buffer::empty(area);
+        List::new(vec![row]).render(area, &mut buffer);
+        let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(text.contains("Essence (EQUIPPED)"));
+        assert!(text.contains("[CD 23s]"));
+    }
 }

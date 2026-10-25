@@ -351,6 +351,12 @@ try {
 		report = { suite: "client-spells", ...result.clientSpells, browserErrors };
 	} else if (options.clientNearby) {
 		report = { suite: "client-nearby", ...result.clientNearby, browserErrors };
+	} else if (options.itemCooldowns) {
+		report = {
+			suite: "item-cooldowns",
+			...result.itemCooldowns,
+			browserErrors,
+		};
 	} else if (options.clientHud) {
 		const evidence = {
 			clientHud: result.clientHud,
@@ -625,6 +631,7 @@ function parseArgs(args) {
 		clientWaypoint: false,
 		clientHousing: false,
 		clientHud: false,
+		itemCooldowns: false,
 		clientNearby: false,
 		clientSpells: false,
 		clientInventory: false,
@@ -764,6 +771,10 @@ function parseArgs(args) {
 	for (let index = 0; index < args.length; index += 1) {
 		const arg = args[index];
 		switch (arg) {
+			case "--item-cooldowns":
+				parsed.clientHud = true;
+				parsed.itemCooldowns = true;
+				break;
 			case "--client-party-screenshots":
 				parsed.clientHud = true;
 				parsed.clientPartyScreenshotDirectory = resolve(
@@ -2148,6 +2159,7 @@ Options:
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --client-inventory    Verify inventory gestures, item use, give confirmations, and suppression.
+  --item-cooldowns      Verify shared countdowns, themed CSS fills, expiry, and untouched icon artwork.
   --client-loadouts     Exercise loadout capture, exclusions, shortcut placement, and warning feedback.
   --relocate-sequence <hex,hex,...>
                          Re-issue scene interest at each landblock in turn, so sustained streaming
@@ -4601,7 +4613,7 @@ async function runClientHudHarness({ viteUrl }) {
 		join(tmpdir(), "holtburger-3d-client-hud-harness-"),
 	);
 	tempDirectories.push(userDataDirectory);
-	const pageUrl = `${viteUrl}/harness/browser/?client-hud=1`;
+	const pageUrl = `${viteUrl}/harness/browser/?${options.itemCooldowns ? "item-cooldowns" : "client-hud"}=1`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -4638,6 +4650,27 @@ async function runClientHudHarness({ viteUrl }) {
 			});
 		});
 		await client.send("Runtime.enable");
+		if (options.itemCooldowns) {
+			const started = Date.now();
+			while (
+				!(await evaluateExpression(
+					client,
+					"Boolean(window.__HOLTBURGER_ITEM_COOLDOWNS__)",
+				))
+			) {
+				if (Date.now() - started > 30_000)
+					throw new Error("Timed out loading item cooldown harness");
+				await delay(100);
+			}
+			return {
+				itemCooldowns: await evaluateExpression(
+					client,
+					"window.__HOLTBURGER_ITEM_COOLDOWNS__()",
+				),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
 		await waitForClientHudHarnessApi(client);
 		if (options.clientMouseMovement)
 			return {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { useItemCooldown } from "../app/item-cooldowns.svelte";
 	import ClientWaypointText from "./ClientWaypointText.svelte";
 	import { formatQuantity } from "../app/quantity-format";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
@@ -43,6 +44,7 @@
 	const { inspection, nameColor, item, spells, icons, onSetWaypoint }: Props =
 		$props();
 	const statuses = $derived(formatItemStatuses(item.status));
+	const cooldownStatus = useItemCooldown(() => item.cooldown, "inspection");
 	const imbues = $derived(formatInspectionImbuedEffects(item.imbuedEffects));
 	const collapsedDescription = $derived(
 		inspection.description === null
@@ -265,6 +267,22 @@
 			{#if onUseIndexes.length > 0}
 				{@render spellList(onUseIndexes)}
 			{/if}
+		</section>
+	{/if}
+
+	{#if item.cooldown?.durationSeconds != null || cooldownStatus.seconds > 0}
+		<section data-inspection-cooldown>
+			<h3 class="ui-section-heading">Cooldown</h3>
+			<dl class="inspection-facts">
+				{#if item.cooldown?.durationSeconds != null}<div>
+						<dt>Cooldown when used</dt>
+						<dd>{formatDuration(item.cooldown.durationSeconds)} (shared)</dd>
+					</div>{/if}
+				{#if cooldownStatus.seconds > 0}<div>
+						<dt>Cooldown remaining</dt>
+						<dd>{formatDuration(cooldownStatus.seconds)}</dd>
+					</div>{/if}
+			</dl>
 		</section>
 	{/if}
 

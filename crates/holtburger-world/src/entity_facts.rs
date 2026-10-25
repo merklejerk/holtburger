@@ -87,6 +87,8 @@ pub enum EntityDescription {
         stack_count: Option<u32>,
         /// Lossless structure properties for item indicators and selected-entity labels.
         structure: EntityStructure,
+        /// Shared reuse group and configured duration, consumed by item cooldown UI.
+        cooldown: Option<crate::item_cooldowns::ItemCooldownDefinition>,
         /// Consumed by inventory and other UI item-image presentation.
         icon: EntityIconAppearance,
         /// Public item classification consumed by frontend inventory type sorting.
@@ -383,6 +385,9 @@ impl WorldState {
                         current: entity.structure(),
                         max: entity.max_structure(),
                     },
+                    cooldown: crate::item_cooldowns::ItemCooldownDefinition::from_properties(
+                        entity,
+                    ),
                     icon: EntityIconAppearance::from_properties(entity),
                     map_category: semantic_dynamic_entity_map_blip_category(
                         entity.flags,
@@ -1012,6 +1017,7 @@ mod tests {
             hydrated.description,
             EntityDescription::Known {
                 name: "Sword".into(),
+                cooldown: None,
                 stack_count: None,
                 structure: EntityStructure {
                     current: None,
@@ -1066,6 +1072,7 @@ mod tests {
             facts.description,
             EntityDescription::Known {
                 name: "Creature".into(),
+                cooldown: None,
                 stack_count: None,
                 structure: EntityStructure {
                     current: None,

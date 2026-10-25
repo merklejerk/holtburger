@@ -48,6 +48,9 @@
 		{#each items as item (item.guid)}
 			<ItemGridCell
 				itemGuid={item.guid}
+				cooldown={item.description.kind === "known"
+					? item.description.cooldown
+					: null}
 				display={iconFor(item.guid)}
 				equipped={item.location.kind === "equipped"}
 				capacity={capacities.get(item.guid)}

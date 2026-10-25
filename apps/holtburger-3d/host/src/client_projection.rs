@@ -2661,6 +2661,11 @@ mod tests {
         item.flags = ObjectDescriptionFlag::FOOD;
         item.set_int_prop(PropertyInt::BoosterEnum, 4);
         item.set_int_prop(PropertyInt::BoostValue, 50);
+        item.set_int_prop(PropertyInt::SharedCooldown, 213);
+        item.set_float_prop(
+            holtburger_common::properties::PropertyFloat::CooldownDuration,
+            45.0,
+        );
         item.set_did_prop(
             holtburger_common::properties::PropertyDataId::Spell,
             Guid(42),

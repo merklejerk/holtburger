@@ -302,6 +302,7 @@
 							display={item?.display}
 							count={item?.stackCount ?? null}
 							structure={item?.structure ?? null}
+							cooldown={item?.cooldown ?? null}
 							capacity={item?.capacity ?? null}
 							available={content?.kind === "loadout" ||
 								(content !== null &&

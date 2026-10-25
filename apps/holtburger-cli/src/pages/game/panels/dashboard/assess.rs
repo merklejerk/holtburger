@@ -56,6 +56,7 @@ fn push_section(lines: &mut Vec<Line<'static>>, title: &str) {
 pub fn get_assess_info(
     inspection: &ObjectInspection,
     spell_lookup: Option<&SpellCatalog>,
+    cooldown_seconds: Option<f64>,
 ) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
         Span::styled("─── ", Style::default().fg(Color::Yellow)),
@@ -77,6 +78,25 @@ pub fn get_assess_info(
 
     match &inspection.details {
         ObjectInspectionDetails::Item(item) => {
+            if let Some(duration) = item
+                .cooldown
+                .and_then(|definition| definition.duration_seconds)
+            {
+                push_labeled(
+                    &mut lines,
+                    "Cooldown when used (shared)",
+                    format!("{duration}s"),
+                    Color::White,
+                );
+            }
+            if let Some(seconds) = cooldown_seconds {
+                push_labeled(
+                    &mut lines,
+                    "Cooldown remaining",
+                    format!("{:.0}s", seconds.ceil()),
+                    Color::White,
+                );
+            }
             if let Some(level) = inspection.level {
                 push_labeled(&mut lines, "Level", level, Color::White);
             }
@@ -711,6 +731,27 @@ mod tests {
     }
 
     #[test]
+    fn item_inspection_combines_configured_and_live_shared_cooldown() {
+        let mut entity = Entity::new(Guid(1), "Essence".into(), WorldPosition::default());
+        entity.set_int_prop(PropertyInt::SharedCooldown, 213);
+        entity.set_float_prop(
+            holtburger_common::properties::PropertyFloat::CooldownDuration,
+            45.0,
+        );
+        let lines = get_assess_info(&inspect_entity(&entity), None, Some(22.2));
+        let text = lines
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(text.contains("Cooldown when used (shared): 45s"));
+        assert!(text.contains("Cooldown remaining: 23s"));
+    }
+
+    #[test]
     fn assess_output_explains_consumable_use_effects_and_spells_once() {
         use holtburger_common::properties::PropertyDataId;
         use holtburger_dat::file_type::spell_table::SpellBase;
@@ -738,7 +779,7 @@ mod tests {
             (i32::MIN, "Depletes 2147483648 Stamina."),
         ] {
             entity.set_int_prop(PropertyInt::BoostValue, amount);
-            let text = get_assess_info(&inspect_entity(&entity), Some(&catalog))
+            let text = get_assess_info(&inspect_entity(&entity), Some(&catalog), None)
                 .iter()
                 .map(Line::to_string)
                 .collect::<Vec<_>>()
@@ -748,7 +789,7 @@ mod tests {
             assert!(text.contains("Restores your vitality."));
             assert_eq!(text.matches("Test Restoration").count(), 1);
         }
-        let text = get_assess_info(&inspect_entity(&entity), None)
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
             .iter()
             .map(Line::to_string)
             .collect::<Vec<_>>()
@@ -764,7 +805,7 @@ mod tests {
         entity.set_int_prop(PropertyInt::BoostValue, 50);
         for (multiplier, percent) in [(1.3, "130%"), (1.1, "110%")] {
             entity.set_float_prop(PropertyFloat::HealkitMod, multiplier);
-            let text = get_assess_info(&inspect_entity(&entity), None)
+            let text = get_assess_info(&inspect_entity(&entity), None, None)
                 .iter()
                 .map(Line::to_string)
                 .collect::<Vec<_>>()
@@ -786,7 +827,7 @@ mod tests {
         entity.set_int_prop(PropertyInt::ItemMaxLevel, 3);
         entity.set_int64_prop(PropertyInt64::ItemBaseXp, 100);
         entity.set_int64_prop(PropertyInt64::ItemTotalXp, 350);
-        let text = get_assess_info(&inspect_entity(&entity), None)
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
             .iter()
             .map(Line::to_string)
             .collect::<Vec<_>>()
@@ -794,7 +835,7 @@ mod tests {
         assert!(text.contains("Item Level:  2 / 3"));
         assert!(text.contains("Item XP:  350 / 700"));
         entity.set_int64_prop(PropertyInt64::ItemTotalXp, 700);
-        let text = get_assess_info(&inspect_entity(&entity), None)
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
             .iter()
             .map(Line::to_string)
             .collect::<Vec<_>>()
@@ -814,7 +855,7 @@ mod tests {
         entity.set_bool_prop(PropertyBool::Locked, false);
         let inspection = inspect_entity(&entity);
 
-        let text = get_assess_info(&inspection, None)
+        let text = get_assess_info(&inspection, None, None)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
@@ -853,7 +894,7 @@ mod tests {
         });
         let inspection = inspect_entity(&entity);
 
-        let text = get_assess_info(&inspection, None)
+        let text = get_assess_info(&inspection, None, None)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
@@ -913,7 +954,7 @@ mod tests {
             }),
         });
 
-        let text = get_assess_info(&inspect_entity(&entity), None)
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()
@@ -949,7 +990,7 @@ mod tests {
         });
         let inspection = inspect_entity(&entity);
 
-        let text = get_assess_info(&inspection, None)
+        let text = get_assess_info(&inspection, None, None)
             .into_iter()
             .map(|line| line.to_string())
             .collect::<Vec<_>>()

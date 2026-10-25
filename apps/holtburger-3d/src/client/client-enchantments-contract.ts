@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { groupCooldownSchema } from "./client-item-cooldowns-contract";
 
 const u16 = z.number().int().nonnegative().max(0xffff);
 const u32 = z.number().int().nonnegative().max(0xffff_ffff);
@@ -23,7 +24,7 @@ const enchantmentInstanceSchema = z
 		key: enchantmentKeySchema,
 		spellCategory: u16,
 		powerLevel: u32,
-		kind: z.enum(["beneficial", "harmful", "vitae", "cooldown"]),
+		kind: z.enum(["beneficial", "harmful", "vitae"]),
 		remainingSeconds: z.number().finite().nonnegative().nullable(),
 		statModType: u32,
 		statModKey: u32,
@@ -48,6 +49,7 @@ export const resolvedEnchantmentsSchema = z
 	.object({
 		instances: z.array(enchantmentInstanceSchema),
 		groups: z.array(enchantmentGroupSchema),
+		cooldowns: z.array(groupCooldownSchema),
 	})
 	.strict();
 

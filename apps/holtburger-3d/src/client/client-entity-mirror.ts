@@ -1,3 +1,4 @@
+import { itemCooldownDefinitionSchema } from "./client-item-cooldowns-contract";
 import {
 	salvageCandidateSchema,
 	salvageContextSchema,
@@ -112,6 +113,8 @@ const clientEntityFactsSchema = z
 					name: z.string(),
 					/** Quantity only when world facts establish a stackable entity. */
 					stackCount: guid.nullable(),
+					/** Item reuse membership, independent of the player's current group timer. */
+					cooldown: itemCooldownDefinitionSchema.nullable(),
 					/** Structure properties retain independent absence from server updates. */
 					structure: z
 						.object({ current: guid.nullable(), max: guid.nullable() })

@@ -288,6 +288,10 @@
 							facts?.ownedByPlayer === true &&
 							facts.location.kind === "equipped";
 						next.set(content.item, {
+							cooldown:
+								facts?.description.kind === "known"
+									? facts.description.cooldown
+									: null,
 							label:
 								facts?.description.kind === "known"
 									? facts.description.name

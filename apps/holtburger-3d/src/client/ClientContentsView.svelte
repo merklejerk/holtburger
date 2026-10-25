@@ -80,6 +80,9 @@
 			{#each packs as item, index (index)}
 				<ItemGridCell
 					itemGuid={item?.guid ?? null}
+					cooldown={item?.description.kind === "known"
+						? item.description.cooldown
+						: null}
 					display={item === null ? undefined : iconFor(item.guid)}
 					equipped={item?.location.kind === "equipped"}
 					capacity={item === null ? null : capacities.get(item.guid)}

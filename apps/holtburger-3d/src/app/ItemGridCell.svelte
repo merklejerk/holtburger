@@ -1,4 +1,8 @@
 <script lang="ts">
+	import {
+		useItemCooldown,
+		type ItemCooldownDefinition,
+	} from "./item-cooldowns.svelte";
 	import type { ItemCapacity } from "./item-capacity";
 	import ItemCellVisual from "./ItemCellVisual.svelte";
 	import { itemCellPresentation } from "./item-cell-presentation";
@@ -23,6 +27,8 @@
 		readonly structure?: ItemStructure | null;
 		/** Known ordinary-slot occupancy; container capacity takes precedence over structure. */
 		readonly capacity?: ItemCapacity | null;
+		/** World-authored group membership; absent cells never subscribe to countdowns. */
+		readonly cooldown?: ItemCooldownDefinition | null;
 		/** Selection and admission are controlled by the consuming UI. */
 		readonly selected: boolean;
 		/** Contextual dimming supplied by the consumer, independent of selection. */
@@ -68,7 +74,12 @@
 		quantityActionHint,
 		structure = null,
 		capacity = null,
+		cooldown = null,
 	}: Props = $props();
+	const cooldownStatus = useItemCooldown(
+		() => (itemGuid === null ? null : cooldown),
+		"tooltip",
+	);
 	const empty = $derived(itemGuid === null && templateWcid === null);
 	const placeholderReady = $derived(
 		placeholderDisplay?.kind === "ready" ||
@@ -77,6 +88,7 @@
 	const presentation = $derived(
 		itemCellPresentation({
 			label,
+			cooldownSeconds: cooldownStatus.seconds,
 			count: itemGuid === null ? null : (count ?? null),
 			quantityActionHint,
 			structure: itemGuid === null ? null : structure,
@@ -107,6 +119,7 @@
 			display={empty ? placeholderDisplay : display}
 			name={label}
 			{presentation}
+			cooldownAnimation={cooldownStatus.animation}
 			{showEquipped}
 			tooltipLabel={presentation.label}
 		/>

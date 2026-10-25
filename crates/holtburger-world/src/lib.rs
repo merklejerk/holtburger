@@ -30,6 +30,7 @@ pub mod hydration;
 mod identify;
 pub mod inspection;
 pub mod interaction;
+pub mod item_cooldowns;
 pub mod item_progression;
 pub mod item_use;
 pub mod magic;

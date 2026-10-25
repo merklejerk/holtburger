@@ -1,4 +1,8 @@
 <script lang="ts">
+	import {
+		useItemCooldown,
+		type ItemCooldownDefinition,
+	} from "../app/item-cooldowns.svelte";
 	import ClientLoadoutVisual from "./ClientLoadoutVisual.svelte";
 	import { loadoutTooltip } from "./client-loadout";
 	import ActionAlternateIcon from "../assets/icons/action-alternate.svg?component";
@@ -35,6 +39,8 @@
 		structure: ItemStructure | null;
 		/** Known occupancy for a bound container. */
 		capacity: ItemCapacity | null;
+		/** Bound item's authored reuse group; cooldown never changes binding identity. */
+		cooldown: ItemCooldownDefinition | null;
 		/** Availability is presentation; activation still revalidates. */
 		available: boolean;
 		/** Confirmed equipment state controls the overlay and accessible status. */
@@ -59,6 +65,7 @@
 		count,
 		structure,
 		capacity,
+		cooldown,
 		available,
 		equipped,
 		selected,
@@ -66,6 +73,7 @@
 		onactivate,
 	}: Props = $props();
 	const anchorName = $derived(`--action-cell-${bar}-${digit}`);
+	const cooldownStatus = useItemCooldown(() => cooldown, "tooltip");
 	function showAlternateMarker(element: HTMLElement): void {
 		// The top layer escapes the bar's scroll clipping; removing the marker closes its popover.
 		element.showPopover();
@@ -73,6 +81,7 @@
 	const presentation = $derived(
 		itemCellPresentation({
 			label,
+			cooldownSeconds: cooldownStatus.seconds,
 			count: content === null ? null : count,
 			structure: content === null ? null : structure,
 			capacity: content === null ? null : capacity,
@@ -111,6 +120,7 @@
 		<ClientLoadoutVisual icon={content.icon} />
 	{:else if content !== null}
 		<ItemCellVisual
+			cooldownAnimation={cooldownStatus.animation}
 			{display}
 			name={label}
 			{presentation}

@@ -1,3 +1,4 @@
+import { itemCooldownDefinitionSchema } from "./client-item-cooldowns-contract";
 import { z } from "zod";
 import { clientIconAppearanceSchema } from "./client-entity-mirror";
 
@@ -269,6 +270,8 @@ const itemInspectionSchema = z
 		status: itemStatusSchema,
 		stack: countSchema.nullable(),
 		uses: countSchema.nullable(),
+		/** Static reuse definition; live countdown comes from the player registry. */
+		cooldown: itemCooldownDefinitionSchema.nullable(),
 		armor: enchantedValueSchema(i32).nullable(),
 		weapon: z
 			.object({

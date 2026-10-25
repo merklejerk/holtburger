@@ -378,7 +378,7 @@ npm run harness:browser -- --client-hud --brief --screenshot /tmp/css-client.png
 ```
 
 For native Explorer checks, launch
-`HOLTBURGER_ELECTRON_REMOTE_DEBUGGING_PORT=0 npm run dev:explorer`, then run
+`npm run dev:explorer -- --debug-port=0`, then run
 `npm run probe:explorer:theme -- <printed CDP port> /tmp/css-explorer`.
 Append `modal` to measure the texture dialog. This uses local content and changes
 diagnostic controls; it restores the default theme when finished.

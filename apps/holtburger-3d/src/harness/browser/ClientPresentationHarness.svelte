@@ -10,6 +10,9 @@
 	import { soulEmoteFixture } from "../../client/client-soul-emotes.test-support";
 	import {
 		initialCreationDraft,
+		initialCreationAppearance,
+		creationGender,
+		creationHeritage,
 		creationAppearanceRequest,
 	} from "../../client/client-character-creation";
 	import {
@@ -178,7 +181,16 @@
 		const content = pregameContentTransport(url);
 		const start = async () => {
 			const catalog = await loadCharacterCreationCatalog(content);
-			const draft = initialCreationDraft(catalog, 1, 1, "Fixture", () => 0.5);
+			const draft = initialCreationDraft(
+				catalog,
+				1,
+				1,
+				"Fixture",
+				initialCreationAppearance(
+					creationGender(creationHeritage(catalog, 1), 1),
+					() => 0.5,
+				),
+			);
 			const visual = await resolveCharacterCreationAppearance(
 				content,
 				creationAppearanceRequest(draft, false),

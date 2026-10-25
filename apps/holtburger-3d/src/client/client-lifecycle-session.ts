@@ -1,3 +1,4 @@
+import { characterManagementPending } from "./client-character-selection";
 import {
 	abortError,
 	isAbortError,
@@ -271,6 +272,8 @@ type ClientCommandName = Extract<
 	| "submit_client_housing_management"
 	| "select_client_character"
 	| "create_client_character"
+	| "delete_client_character"
+	| "restore_client_character"
 	| "replace_client_drive"
 	| "queue_client_character_motion_event"
 	| "submit_client_friends"
@@ -856,17 +859,46 @@ export class ClientLifecycleSession {
 		if (lifecycle?.kind !== "character-selection")
 			throw new Error("Character creation requires character selection.");
 		const management = this.#state.characterManagement;
-		if (
-			["creating", "deleting", "restoring", "uncertain"].includes(
-				management.kind,
-			)
-		)
+		if (characterManagementPending(management))
 			throw new Error("A character-management operation is still pending.");
 		if (lifecycle.characters.length >= lifecycle.maxSlots)
 			throw new Error("The server's character slots are full.");
 		await this.#transport.invoke("create_client_character", {
 			draft: characterCreationDraftSchema.parse(draft),
 		});
+	}
+
+	/** Resolve the current roster slot from identity immediately before deletion. */
+	async deleteCharacter(guid: number): Promise<void> {
+		const character = this.#editableCharacter(guid);
+		if (character.deleteTime !== 0)
+			throw new Error("Character is already pending deletion.");
+		await this.#transport.invoke("delete_client_character", {
+			slot: character.slot,
+		});
+	}
+
+	/** Server authority decides whether the recovery window is still open. */
+	async restoreCharacter(guid: number): Promise<void> {
+		const character = this.#editableCharacter(guid);
+		if (character.deleteTime === 0)
+			throw new Error("Character is not pending deletion.");
+		await this.#transport.invoke("restore_client_character", { guid });
+	}
+
+	/** Reject stale dialog targets and operations outside character selection. */
+	#editableCharacter(guid: number) {
+		const lifecycle = this.#state.lifecycle;
+		if (lifecycle?.kind !== "character-selection")
+			throw new Error("Character management requires character selection.");
+		if (characterManagementPending(this.#state.characterManagement))
+			throw new Error("A character-management operation is still pending.");
+		const character = lifecycle.characters.find(
+			(character) => character.guid === guid,
+		);
+		if (character === undefined)
+			throw new Error("Character is no longer in the server roster.");
+		return character;
 	}
 
 	/** Read the latest lifecycle facts without exposing the host transport or protocol types. */

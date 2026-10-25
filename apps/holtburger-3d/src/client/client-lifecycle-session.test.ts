@@ -1645,6 +1645,46 @@ describe("ClientLifecycleSession", () => {
 		expect(lifecycles).toEqual([currentPortal]);
 	});
 
+	it("resolves deletion identity to the current roster slot and restores by GUID", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		transport.emit("client-lifecycle-changed", {
+			kind: "character-selection",
+			maxSlots: 10,
+			characters: [
+				{ guid: 7, name: "Mira", slot: 3, deleteTime: 0 },
+				{ guid: 8, name: "Nox", slot: 5, deleteTime: 100 },
+			],
+		});
+		await session.deleteCharacter(7);
+		await session.restoreCharacter(8);
+		expect(transport.invocations.slice(-2)).toEqual([
+			{ command: "delete_client_character", args: { slot: 3 } },
+			{ command: "restore_client_character", args: { guid: 8 } },
+		]);
+		await expect(session.deleteCharacter(8)).rejects.toThrow(
+			"already pending deletion",
+		);
+		await expect(session.restoreCharacter(7)).rejects.toThrow(
+			"not pending deletion",
+		);
+		await expect(session.deleteCharacter(99)).rejects.toThrow(
+			"no longer in the server roster",
+		);
+		transport.emit("client-character-management-changed", { kind: "deleting" });
+		await expect(session.deleteCharacter(7)).rejects.toThrow("still pending");
+		transport.emit("client-character-management-changed", {
+			kind: "uncertain",
+			message: "Awaiting roster",
+		});
+		await expect(session.restoreCharacter(8)).rejects.toThrow("still pending");
+		transport.emit("client-lifecycle-changed", { kind: "logging-out" });
+		await expect(session.deleteCharacter(7)).rejects.toThrow(
+			"requires character selection",
+		);
+	});
+
 	it("projects strict lifecycle, time, correction, and terminal updates", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);

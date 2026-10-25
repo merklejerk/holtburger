@@ -21,6 +21,17 @@
 		/* Backdrop shading and control decoration are independent of world scenery. */
 		--pregame-backdrop-color: rgb(0 0 0 / 90%);
 		--pregame-editor-backdrop-color: rgb(0 0 0 / 92%);
+		/* Independent name-field contrast, derived from the pregame palette. */
+		--pregame-name-background-color: color-mix(
+			in srgb,
+			var(--ui-color-well) 75%,
+			transparent
+		);
+		--pregame-name-input-background: color-mix(
+			in srgb,
+			var(--ui-color-well) 55%,
+			transparent
+		);
 		--pregame-button-background: rgb(8 10 9 / 65%);
 		--pregame-button-hover-background: color-mix(
 			in srgb,
@@ -164,6 +175,75 @@
 		font-size: calc(clamp(28px, 2.8vw, 42px) * var(--ui-text-scale));
 		font-weight: 400;
 	}
+	.client-pregame-screen .creation-name {
+		--ui-hud-background-color: var(--pregame-name-background-color);
+		--ui-input-background: var(--pregame-name-input-background);
+		--ui-input-border-color: var(--ui-color-accent);
+	}
+	.client-pregame-screen .creation-name-error-icon {
+		color: var(--ui-color-danger);
+	}
+
+	.client-pregame-screen .creation-name-label {
+		color: var(--ui-color-highlight);
+		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+		font-weight: 600;
+		letter-spacing: 0.06em;
+	}
+	.client-pregame-screen .creation-name input {
+		border-width: 2px;
+		font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
+	}
+
+	.client-pregame-screen .creation-summary dt {
+		color: var(--ui-color-muted);
+	}
+	.client-pregame-screen .creation-summary dd {
+		font-variant-numeric: tabular-nums;
+	}
+	.client-pregame-screen .creation-review-name dd {
+		color: var(--ui-color-highlight);
+		font-family: var(--ui-font-heading);
+		font-size: calc(1.25rem * var(--ui-text-scale));
+	}
+	.client-pregame-screen .creation-credit-balances dd {
+		color: var(--ui-color-highlight);
+		font-size: calc(1.25rem * var(--ui-text-scale));
+		font-weight: 600;
+	}
+	.client-pregame-screen .creation-review-attributes > div,
+	.client-pregame-screen .creation-skills li {
+		border-bottom: 1px solid
+			color-mix(in srgb, var(--ui-color-border) 30%, transparent);
+	}
+
+	.client-pregame-screen .creation-build-heading {
+		font-size: calc(var(--ui-font-size-heading-2) * var(--ui-text-scale));
+		color: var(--ui-color-highlight);
+	}
+	.client-pregame-screen .creation-skill-group-heading {
+		margin: 0 0 6px;
+		font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
+		font-weight: 600;
+		color: var(--ui-color-muted);
+	}
+	/* Exhaustion only blocks increases; keep sliders interactive for refunds. */
+	.client-pregame-screen .creation-attribute-range.exhausted {
+		accent-color: var(--ui-color-muted);
+	}
+
+	.client-pregame-screen .creation-skill-row {
+		border-bottom: 1px solid
+			color-mix(in srgb, var(--ui-color-border) 30%, transparent);
+	}
+	.client-pregame-screen .creation-skill-description {
+		color: var(--ui-color-muted);
+	}
+	.client-pregame-screen .creation-skill-row summary:focus-visible {
+		outline: 2px solid var(--ui-color-focus);
+		outline-offset: -2px;
+	}
+
 	.client-pregame-screen .creation-rotate {
 		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 	}
@@ -193,10 +273,6 @@
 	.client-pregame-screen .creation-fields > legend {
 		font-family: var(--ui-font-heading);
 		color: var(--ui-color-highlight);
-	}
-	.client-pregame-screen .creation-section {
-		font-size: calc(18px * var(--ui-text-scale));
-		border-top: 1px solid var(--ui-color-border);
 	}
 	.client-pregame-screen .creation-actions {
 		border-top: 1px solid var(--ui-color-border);

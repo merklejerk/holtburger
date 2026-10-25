@@ -232,6 +232,30 @@ pub(crate) struct ParsedMaterialDependency {
 }
 
 impl ContentRepository {
+    /// Read a decoded palette through repository availability policy and verify its resource identity.
+    pub fn read_palette(&self, palette_id: u32) -> Result<Palette> {
+        let resource = read_available_resource(self, EOR_PORTAL_NAMESPACE, palette_id)?;
+        let palette = Palette::unpack(&mut Cursor::new(resource.bytes))
+            .with_context(|| format!("failed to parse Palette 0x{palette_id:08X}"))?;
+        anyhow::ensure!(
+            palette.id == palette_id,
+            "Palette identity differs from 0x{palette_id:08X}"
+        );
+        Ok(palette)
+    }
+
+    /// Read authored shade ordering without exposing archive decoding to frontend adapters.
+    pub fn read_palette_set(&self, palette_set_id: u32) -> Result<PaletteSet> {
+        let resource = read_available_resource(self, EOR_PORTAL_NAMESPACE, palette_set_id)?;
+        let set = PaletteSet::unpack(&mut Cursor::new(resource.bytes))
+            .with_context(|| format!("failed to parse PaletteSet 0x{palette_set_id:08X}"))?;
+        anyhow::ensure!(
+            set.id == palette_set_id,
+            "PaletteSet identity differs from 0x{palette_set_id:08X}"
+        );
+        Ok(set)
+    }
+
     pub fn build_clothing_obj_desc(
         &self,
         clothing_table_id: u32,
@@ -657,7 +681,7 @@ pub(crate) fn parse_material_dependency(
             let palette = if *orig_palette_id == 0 {
                 None
             } else {
-                Some(read_palette(content, *orig_palette_id)?)
+                Some(content.read_palette(*orig_palette_id)?)
             };
             (Some(surface_texture), palette)
         }
@@ -708,7 +732,7 @@ fn read_render_surface_dependency(
     let render_surface = RenderSurface::unpack(&mut Cursor::new(resource.bytes))
         .with_context(|| format!("failed to parse RenderSurface 0x{render_surface_id:08X}"))?;
     let default_palette = match render_surface.default_palette_id {
-        Some(palette_id) => Some(read_palette(content, palette_id)?),
+        Some(palette_id) => Some(content.read_palette(palette_id)?),
         None => None,
     };
 
@@ -716,12 +740,6 @@ fn read_render_surface_dependency(
         render_surface,
         default_palette,
     })
-}
-
-fn read_palette(content: &ContentRepository, palette_id: u32) -> Result<Palette> {
-    let resource = read_available_resource(content, EOR_PORTAL_NAMESPACE, palette_id)?;
-    Palette::unpack(&mut Cursor::new(resource.bytes))
-        .with_context(|| format!("failed to parse Palette 0x{palette_id:08X}"))
 }
 
 fn read_available_resource(
@@ -855,11 +873,11 @@ fn resolve_palette_composite(
         return Ok(None);
     }
 
-    let base = read_palette(content, base_palette_id)?;
+    let base = content.read_palette(base_palette_id)?;
     let replacements = obj_desc
         .sub_palettes
         .iter()
-        .map(|sub_palette| read_palette(content, sub_palette.sub_id))
+        .map(|sub_palette| content.read_palette(sub_palette.sub_id))
         .collect::<Result<Vec<_>>>()?;
     let ranges = obj_desc
         .sub_palettes
@@ -1201,6 +1219,68 @@ mod palette_composite_tests {
         assert_ne!(
             identity(0x0400_0AAA, vec![first]),
             identity(0x0400_0AAA, vec![first, second])
+        );
+    }
+}
+
+#[cfg(test)]
+mod palette_read_tests {
+    use super::*;
+    use crate::test_support::CountingSource;
+    use std::{collections::HashMap, sync::Arc};
+
+    fn repository(requested_id: u32, record_id: u32, entries: &[u32]) -> ContentRepository {
+        // Palette and PaletteSet both encode an identity, count, and packed u32 entries.
+        let bytes = [record_id, entries.len() as u32]
+            .into_iter()
+            .chain(entries.iter().copied())
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        ContentRepository::from_mounts(vec![Arc::new(CountingSource::new(HashMap::from([(
+            (EOR_PORTAL_NAMESPACE.to_string(), requested_id),
+            bytes,
+        )])))])
+    }
+
+    #[test]
+    fn palette_queries_preserve_authored_colors_and_shade_order() {
+        let palette_id = 0x0400_0001;
+        let colors = [0xff11_2233, 0xff44_5566];
+        assert_eq!(
+            repository(palette_id, palette_id, &colors)
+                .read_palette(palette_id)
+                .unwrap()
+                .colors_argb,
+            colors
+        );
+        let set_id = 0x0f00_0001;
+        let shades = [palette_id + 1, palette_id];
+        assert_eq!(
+            repository(set_id, set_id, &shades)
+                .read_palette_set(set_id)
+                .unwrap()
+                .palette_ids,
+            shades
+        );
+    }
+
+    #[test]
+    fn palette_queries_reject_a_record_under_the_wrong_resource_identity() {
+        let palette_id = 0x0400_0001;
+        assert!(
+            repository(palette_id, palette_id + 1, &[0xff11_2233])
+                .read_palette(palette_id)
+                .unwrap_err()
+                .to_string()
+                .contains("Palette identity differs")
+        );
+        let set_id = 0x0f00_0001;
+        assert!(
+            repository(set_id, set_id + 1, &[palette_id])
+                .read_palette_set(set_id)
+                .unwrap_err()
+                .to_string()
+                .contains("PaletteSet identity differs")
         );
     }
 }

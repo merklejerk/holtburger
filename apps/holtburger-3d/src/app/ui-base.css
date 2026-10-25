@@ -196,6 +196,10 @@
 		--ui-overlay-padding: 12px;
 		--ui-overlay-gap: 8px;
 		--ui-overlay-icon-size: 16px;
+		/* Square menu grids use larger artwork than text-menu rows. Palette triggers share it. */
+		--ui-menu-grid-icon-size: 24px;
+		--ui-menu-grid-cell-size: 3rem;
+		--ui-menu-grid-padding: 4px;
 		--ui-overlay-backdrop-opacity: 0.55;
 		/* Shared panel content inset and stacked editor-label spacing. */
 		--ui-body-padding: 8px;
@@ -1377,5 +1381,72 @@
 		.ui-hud-attention {
 			animation: none;
 		}
+	}
+}
+
+/* Triangle progression controls shared by the character sheet and character creation. */
+@layer components {
+	.ui-stat-action {
+		position: relative;
+		flex-shrink: 0;
+		min-width: calc(1.6rem * var(--ui-icon-scale));
+		min-height: max(calc(1.35rem * var(--ui-icon-scale)), 1.5em);
+		padding: calc(0.15rem * var(--ui-icon-scale))
+			calc(0.2rem * var(--ui-icon-scale)) 0;
+		border: 0;
+		background: transparent;
+		color: inherit;
+		font: inherit;
+		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+		white-space: nowrap;
+		cursor: pointer;
+	}
+	.ui-stat-action-shape {
+		position: absolute;
+		top: 0;
+		left: 50%;
+		width: 100%;
+		height: 100%;
+		transform: translateX(-50%);
+		color: var(--ui-panel-border-color, var(--ui-color-border));
+		fill: none;
+	}
+	.ui-stat-action.active:not(:disabled) .ui-stat-action-shape {
+		color: var(--ui-character-upgrade-color, var(--ui-color-success));
+	}
+	.ui-stat-action:hover:not(:disabled) .ui-stat-action-shape {
+		fill: color-mix(in srgb, currentColor 65%, transparent);
+	}
+	.ui-stat-action:focus-visible {
+		outline: 2px solid var(--ui-color-focus);
+		outline-offset: 1px;
+	}
+	.ui-stat-action-label {
+		position: relative;
+		isolation: isolate;
+		font-weight: 600;
+	}
+	/* Feather a dark backing beneath the number without blurring the text or arrow. */
+	.ui-stat-action-label::before {
+		content: "";
+		position: absolute;
+		inset: -6px -8px;
+		z-index: -1;
+		background: radial-gradient(
+			ellipse,
+			color-mix(in srgb, var(--ui-color-shadow) 85%, transparent) 0%,
+			color-mix(in srgb, var(--ui-color-shadow) 60%, transparent) 30%,
+			color-mix(in srgb, var(--ui-color-shadow) 20%, transparent) 55%,
+			transparent 75%
+		);
+		filter: blur(2px);
+		pointer-events: none;
+	}
+	.ui-stat-action:disabled {
+		cursor: not-allowed;
+		opacity: 0.75;
+	}
+	.ui-stat-action[data-direction="down"] .ui-stat-action-shape {
+		transform: translateX(-50%) rotate(180deg);
 	}
 }

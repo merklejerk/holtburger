@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UpgradeTriangle from "../assets/icons/character-upgrade-triangle.svg?component";
 	import AppearanceIcon from "../assets/icons/pregame-appearance.svg?component";
 	import BuildIcon from "../assets/icons/pregame-skills-stats.svg?component";
 	import ReviewIcon from "../assets/icons/pregame-review.svg?component";
@@ -7,29 +8,31 @@
 	import HairIcon from "../assets/icons/pregame-hair.svg?component";
 	import NoseIcon from "../assets/icons/pregame-nose.svg?component";
 	import MouthIcon from "../assets/icons/pregame-mouth.svg?component";
-	import ShadeIcon from "../assets/icons/pregame-shade.svg?component";
 	import FaceIcon from "../assets/icons/pregame-face.svg?component";
 	import EyeIcon from "../assets/icons/hud-eye.svg?component";
 	import ClothesIcon from "../assets/icons/equipment-chest.svg?component";
+	import WarningIcon from "../assets/icons/pregame-warning.svg?component";
 	import RandomizeIcon from "../assets/icons/hud-reset.svg?component";
 	import BackIcon from "../assets/icons/hud-back.svg?component";
 	import RotateIcon from "../assets/icons/layout-rotate.svg?component";
 	import { onMount } from "svelte";
+	import UiPaletteDropdown from "../app/UiPaletteDropdown.svelte";
 	import UiTabs from "../app/UiTabs.svelte";
 	import UiTabPanel from "../app/UiTabPanel.svelte";
+	import { characterManagementPending } from "./client-character-selection";
+	import { creationNameSchema } from "./client-character-creation-name";
 	import ClientPregameScreen from "./ClientPregameScreen.svelte";
 	import ClientModelPreview from "./ClientModelPreview.svelte";
 	import type { ClientObjectPreviewService } from "./client-object-preview-service";
 	import type { CharacterManagementState } from "./client-host-contract";
 	import {
 		characterCreationDraftSchema,
+		CREATION_ATTRIBUTES,
 		type CharacterCreationCatalog,
 		type CharacterCreationDraft,
 	} from "./client-character-creation-contract";
 	import {
 		CharacterCreationPreviewResolver,
-		characterManagementPending,
-		creationBuildBalance,
 		creationAppearanceRequest,
 		NO_CREATION_HEADGEAR,
 		creationFaceFraming,
@@ -37,11 +40,21 @@
 		creationHeritage,
 		creationPreviewSource,
 		initialCreationDraft,
+		initialCreationAppearance,
 		randomizeCreationClothing,
+		randomizeCreationAppearance,
+		creationShadeIndex,
 		type CharacterCreationServices,
 		type CreationAppearance,
 		type CreationPreviewResolution,
 	} from "./client-character-creation";
+
+	import {
+		creationBuildControls,
+		applyCreationAttribute,
+		applyCreationSkill,
+		creationSkillFormulaText,
+	} from "./client-character-creation-build";
 
 	interface Props {
 		readonly services: CharacterCreationServices;
@@ -56,8 +69,12 @@
 		readonly draft: CharacterCreationDraft;
 	};
 	let editor = $state.raw<Editor | null>(null);
+	// Retain edited visuals by race/body for this creator session; consumers read only on selection.
+	const bodyAppearances = new Map<string, CreationAppearance>();
 	let loadError = $state<string | null>(null);
 	let commandError = $state<string | null>(null);
+	// Inline name feedback starts after the first edit, rather than flagging the initial blank draft.
+	let nameEdited = $state(false);
 	let submission = $state.raw<{
 		readonly before: CharacterManagementState;
 	} | null>(null);
@@ -67,8 +84,14 @@
 	});
 	let resolver: CharacterCreationPreviewResolver | null = null;
 	let face = $state(false);
-	let page = $state<"appearance" | "skills-stats" | "review">("appearance");
+	let page = $state<"race" | "appearance" | "skills-stats" | "review">("race");
 	const tabs = [
+		{
+			value: "race",
+			label: "Race",
+			id: "creation-race-tab",
+			panelId: "creation-race",
+		},
 		{
 			value: "appearance",
 			label: "Appearance",
@@ -89,6 +112,7 @@
 		},
 	] as const;
 	const stepIcons = {
+		race: HeritageIcon,
 		appearance: AppearanceIcon,
 		"skills-stats": BuildIcon,
 		review: ReviewIcon,
@@ -101,30 +125,11 @@
 			label: "Hair / body style",
 			icon: HairIcon,
 		},
-		{
-			field: "hairColor",
-			count: "hairColors",
-			label: "Hair color",
-			icon: HairIcon,
-		},
 		{ field: "eyes", count: "eyes", label: "Eyes", icon: EyeIcon },
-		{
-			field: "eyeColor",
-			count: "eyeColors",
-			label: "Eye color",
-			icon: EyeIcon,
-		},
 		{ field: "nose", count: "noses", label: "Nose", icon: NoseIcon },
 		{ field: "mouth", count: "mouths", label: "Mouth", icon: MouthIcon },
 	] as const;
-	const attributes = [
-		"Strength",
-		"Endurance",
-		"Coordination",
-		"Quickness",
-		"Focus",
-		"Self",
-	] as const;
+	const attributes = CREATION_ATTRIBUTES;
 	const advancements = [
 		{ value: 1, label: "Untrained" },
 		{ value: 2, label: "Trained" },
@@ -140,24 +145,31 @@
 			? null
 			: creationGender(heritage, editor.draft.gender),
 	);
-	const balance = $derived(
+	const buildControls = $derived(
 		editor === null || heritage === null
 			? null
-			: creationBuildBalance(heritage, editor.draft),
+			: creationBuildControls(editor.catalog, heritage, editor.draft),
 	);
-	const invalidAttributes = $derived.by(() => {
-		const current = editor;
-		return (
-			current !== null &&
-			current.draft.attributes.some(
-				(value) =>
-					!Number.isInteger(value) ||
-					value < current.catalog.minimumAttribute ||
-					value > current.catalog.maximumAttribute,
-			)
-		);
-	});
+	const balance = $derived(
+		buildControls === null ? null : buildControls.balance,
+	);
 
+	const nameValidation = $derived(
+		editor === null ? null : creationNameSchema.safeParse(editor.draft.name),
+	);
+	const nameError = $derived(
+		nameEdited && nameValidation !== null && !nameValidation.success
+			? nameValidation.error.issues[0].message
+			: null,
+	);
+
+	const canSubmit = $derived(
+		editor !== null &&
+			balance !== null &&
+			balance.attributes === 0 &&
+			balance.skills >= 0 &&
+			nameValidation?.success === true,
+	);
 	const busy = $derived(
 		submission !== null || characterManagementPending(management),
 	);
@@ -223,18 +235,54 @@
 		updateDraft(draft);
 		requestPreview(draft);
 	}
-	function changeBody(heritageId: number, genderId: number): void {
+	function randomizeAppearance(): void {
 		const current = readEditor();
-		const draft = initialCreationDraft(
-			current.catalog,
-			heritageId,
-			genderId,
-			current.draft.name,
-			Math.random,
+		const body = creationGender(
+			creationHeritage(current.catalog, current.draft.heritage),
+			current.draft.gender,
 		);
+		const draft = {
+			...current.draft,
+			appearance: randomizeCreationAppearance(
+				current.draft.appearance,
+				body,
+				Math.random,
+			),
+		};
 		updateDraft(draft);
 		requestPreview(draft);
 	}
+
+	function changeBody(heritageId: number, genderId: number): void {
+		const current = readEditor();
+		bodyAppearances.set(
+			`${current.draft.heritage}:${current.draft.gender}`,
+			current.draft.appearance,
+		);
+		const key = `${heritageId}:${genderId}`;
+		let appearance = bodyAppearances.get(key);
+		if (appearance === undefined) {
+			const body = creationGender(
+				creationHeritage(current.catalog, heritageId),
+				genderId,
+			);
+			appearance = initialCreationAppearance(body, Math.random);
+			bodyAppearances.set(key, appearance);
+		}
+		const draft =
+			heritageId === current.draft.heritage
+				? { ...current.draft, gender: genderId, appearance }
+				: initialCreationDraft(
+						current.catalog,
+						heritageId,
+						genderId,
+						current.draft.name,
+						appearance,
+					);
+		updateDraft(draft);
+		requestPreview(draft);
+	}
+
 	function changeHeritage(id: number): void {
 		const chosen = creationHeritage(readEditor().catalog, id);
 		const body = chosen.genders[0];
@@ -243,22 +291,25 @@
 		changeBody(id, body.id);
 	}
 	function changeAttribute(index: number, value: number): void {
-		const draft = readEditor().draft;
-		const attributes: CharacterCreationDraft["attributes"] = [
-			...draft.attributes,
-		];
-		attributes[index] = value;
-		updateDraft({ ...draft, attributes });
+		const controls = buildControls;
+		if (controls === null) throw new Error("Creation controls are not loaded.");
+		const control = controls.attributes[index];
+		if (control === undefined)
+			throw new Error(`Unknown creation attribute ${index}.`);
+		updateDraft(applyCreationAttribute(readEditor().draft, control, value));
 	}
-	function changeSkill(id: number, value: number): void {
-		const draft = readEditor().draft;
-		const skills = [...draft.skills];
-		skills[id] = value;
-		updateDraft({ ...draft, skills });
+	function changeSkill(id: number, direction: "upgrade" | "downgrade"): void {
+		const controls = buildControls;
+		if (controls === null) throw new Error("Creation controls are not loaded.");
+		const row = controls.skills.find((entry) => entry.skill.id === id);
+		if (row === undefined) throw new Error(`Unknown creation skill ${id}.`);
+		updateDraft(applyCreationSkill(readEditor().draft, id, row[direction]));
 	}
+
 	async function submit(event: SubmitEvent): Promise<void> {
 		event.preventDefault();
-		if (busy) return;
+		nameEdited = true;
+		if (busy || page !== "review" || !canSubmit) return;
 		commandError = null;
 		submission = { before: management };
 		try {
@@ -301,7 +352,7 @@
 					heritage.id,
 					gender.id,
 					"",
-					Math.random,
+					initialCreationAppearance(gender, Math.random),
 				);
 				editor = { catalog, draft };
 				requestPreview(draft);
@@ -349,6 +400,44 @@
 			</UiTabs>
 		</aside>
 		<div class="creation-preview">
+			<label class="creation-name ui-hud-group"
+				><span id="creation-name-label" class="creation-name-label"
+					>Character name</span
+				><span class="creation-name-editor"
+					><input
+						class="ui-input"
+						type="text"
+						placeholder="Enter a name"
+						title={nameError === null ? undefined : nameError}
+						aria-labelledby="creation-name-label"
+						aria-invalid={nameError !== null}
+						aria-describedby={nameError === null
+							? undefined
+							: "creation-name-error"}
+						required
+						form="creation-review-form"
+						disabled={busy || editor === null}
+						value={editor === null ? "" : editor.draft.name}
+						oninput={(event) => {
+							nameEdited = true;
+							updateDraft({
+								...readEditor().draft,
+								name: event.currentTarget.value,
+							});
+						}}
+					/>
+					{#if nameError !== null}
+						<span
+							class="creation-name-error-icon pregame-icon"
+							title={nameError}
+							aria-hidden="true"><WarningIcon /></span
+						>
+						<span id="creation-name-error" class="sr-only" role="alert"
+							>{nameError}</span
+						>
+					{/if}
+				</span>
+			</label>
 			<div class="creation-viewport">
 				<ClientModelPreview
 					{source}
@@ -400,21 +489,22 @@
 			<div class="creation-settings">
 				{#if loadError !== null}
 					<p class="ui-error" role="alert">{loadError}</p>
-				{:else if editor === null || heritage === null || gender === null || balance === null}
+				{:else if editor === null || heritage === null || gender === null || balance === null || buildControls === null}
 					<p role="status">Loading character choices…</p>
 				{:else}
+					{@const draft = editor.draft}
 					<UiTabPanel
-						id="creation-appearance"
-						labelledBy="creation-appearance-tab"
-						active={page === "appearance"}
+						id="creation-race"
+						labelledBy="creation-race-tab"
+						active={page === "race"}
 					>
 						<fieldset class="creation-fields" disabled={busy}>
-							<legend class="sr-only">Body and appearance</legend>
+							<legend class="sr-only">Race and starting town</legend>
 							<label
 								><span class="creation-label"
 									><span class="pregame-icon" aria-hidden="true"
 										><HeritageIcon /></span
-									>Heritage</span
+									>Race</span
 								><select
 									class="ui-input"
 									value={editor.draft.heritage}
@@ -425,6 +515,32 @@
 										>{/each}</select
 								></label
 							>
+							<label
+								>Starting town<select
+									class="ui-input"
+									value={editor.draft.startArea}
+									onchange={(event) =>
+										updateDraft({
+											...readEditor().draft,
+											startArea: Number(event.currentTarget.value),
+										})}
+									>{#each heritage.startAreaIds as id}{@const area =
+											editor.catalog.startAreas.find(
+												(entry) => entry.id === id,
+											)}{#if area !== undefined}<option value={id}
+												>{area.name}</option
+											>{/if}{/each}</select
+								></label
+							>
+						</fieldset>
+					</UiTabPanel>
+					<UiTabPanel
+						id="creation-appearance"
+						labelledBy="creation-appearance-tab"
+						active={page === "appearance"}
+					>
+						<fieldset class="creation-fields" disabled={busy}>
+							<legend class="sr-only">Body and appearance</legend>
 							<label
 								><span class="creation-label"
 									><span class="pregame-icon" aria-hidden="true"
@@ -443,10 +559,6 @@
 										>{/each}</select
 								></label
 							>
-							<h2 class="creation-section">
-								<span class="pregame-icon" aria-hidden="true"><FaceIcon /></span
-								>Features &amp; color
-							</h2>
 							{#each ordinalChoices as control}
 								{@const Icon = control.icon}
 								{#if gender[control.count] > 1}<label
@@ -454,56 +566,105 @@
 											><span class="pregame-icon" aria-hidden="true"
 												><Icon /></span
 											>{control.label}</span
-										><select
-											class="ui-input"
-											value={editor.draft.appearance[control.field]}
-											onchange={(event) =>
-												changeAppearance(
-													control.field,
-													Number(event.currentTarget.value),
-												)}
-											>{#each Array.from({ length: gender[control.count] }, (_, index) => index) as index}<option
-													value={index}>{index + 1}</option
-												>{/each}</select
-										></label
+										><span class="creation-variant">
+											<input
+												type="range"
+												min="0"
+												max={gender[control.count] - 1}
+												step="1"
+												value={editor.draft.appearance[control.field]}
+												aria-valuetext={`${editor.draft.appearance[control.field] + 1} of ${gender[control.count]}`}
+												oninput={(event) =>
+													changeAppearance(
+														control.field,
+														event.currentTarget.valueAsNumber,
+													)}
+											/>
+											<span class="ui-muted" aria-hidden="true"
+												>{editor.draft.appearance[control.field] + 1} / {gender[
+													control.count
+												]}</span
+											>
+										</span></label
 									>{/if}
 							{/each}
-							<label
-								><span class="creation-label"
-									><span class="pregame-icon" aria-hidden="true"
-										><ShadeIcon /></span
-									>Skin shade</span
-								><input
-									type="range"
-									min="0"
-									max="1"
-									step="0.01"
-									value={editor.draft.appearance.skinHue}
-									oninput={(event) =>
+							<div class="creation-field">
+								<span>Skin color</span><UiPaletteDropdown
+									label="Skin color"
+									colors={gender.skinColors}
+									value={creationShadeIndex(
+										editor.draft.appearance.skinHue,
+										gender.skinColors.length,
+									)}
+									visible={page === "appearance"}
+									disabled={busy}
+									onchange={(index) =>
 										changeAppearance(
 											"skinHue",
-											Number(event.currentTarget.value),
+											(index + 0.5) / gender.skinColors.length,
 										)}
-								/></label
-							>
-							{#if gender.hairColors > 0}<label
-									><span class="creation-label"
-										><span class="pregame-icon" aria-hidden="true"
-											><ShadeIcon /></span
-										>Hair shade</span
-									><input
-										type="range"
-										min="0"
-										max="1"
-										step="0.01"
-										value={editor.draft.appearance.hairHue}
-										oninput={(event) =>
+								/>
+							</div>
+							{#if gender.hairColors.length > 0}
+								{@const shades =
+									gender.hairColors[editor.draft.appearance.hairColor]}
+								<div class="creation-field">
+									<span>Hair color</span><UiPaletteDropdown
+										label="Hair color"
+										colors={gender.hairColors.map(
+											(colors) =>
+												colors[
+													creationShadeIndex(
+														draft.appearance.hairHue,
+														colors.length,
+													)
+												],
+										)}
+										value={editor.draft.appearance.hairColor}
+										visible={page === "appearance"}
+										disabled={busy}
+										onchange={(index) => changeAppearance("hairColor", index)}
+									/>
+								</div>
+								<div class="creation-field">
+									<span>Hair shade</span><UiPaletteDropdown
+										label="Hair shade"
+										colors={shades}
+										value={creationShadeIndex(
+											editor.draft.appearance.hairHue,
+											shades.length,
+										)}
+										visible={page === "appearance"}
+										disabled={busy}
+										onchange={(index) =>
 											changeAppearance(
 												"hairHue",
-												Number(event.currentTarget.value),
+												(index + 0.5) / shades.length,
 											)}
-									/></label
-								>{/if}
+									/>
+								</div>
+							{/if}
+							{#if gender.eyeColors.length > 0}
+								<div class="creation-field">
+									<span>Eye color</span><UiPaletteDropdown
+										label="Eye color"
+										colors={gender.eyeColors}
+										value={editor.draft.appearance.eyeColor}
+										visible={page === "appearance"}
+										disabled={busy}
+										onchange={(index) => changeAppearance("eyeColor", index)}
+									/>
+								</div>
+							{/if}
+							<button
+								class="pregame-action ui-button creation-randomize"
+								type="button"
+								onclick={randomizeAppearance}
+								><span class="pregame-icon" aria-hidden="true"
+									><RandomizeIcon /></span
+								>Randomize appearance</button
+							>
+
 							{#if heritage.usesStarterClothing}
 								<button
 									class="pregame-action ui-button creation-randomize"
@@ -525,45 +686,127 @@
 						active={page === "skills-stats"}
 					>
 						<fieldset class="creation-fields" disabled={busy}>
-							<legend>Attributes and skills</legend>
-							<p>Attribute points remaining: {balance.attributes}</p>
-							{#each attributes as label, index}<label
-									>{label}<input
-										class="ui-input"
-										type="number"
-										min={editor.catalog.minimumAttribute}
-										max={editor.catalog.maximumAttribute}
-										step="1"
-										value={editor.draft.attributes[index]}
-										oninput={(event) =>
-											changeAttribute(index, Number(event.currentTarget.value))}
-									/></label
-								>{/each}
-							<p>Skill credits remaining: {balance.skills}</p>
-							{#each heritage.skills as skill}
-								<label title={skill.description}
-									>{skill.name}<select
-										class="ui-input"
-										value={editor.draft.skills[skill.id]}
-										onchange={(event) =>
-											changeSkill(skill.id, Number(event.currentTarget.value))}
-										>{#each advancements as choice}<option
-												value={choice.value}
-												disabled={choice.value < skill.minimumAdvancement ||
-													(choice.value >= 2 && skill.trainedCost === null) ||
-													(choice.value === 3 &&
-														skill.specializationUpgradeCost === null)}
-												>{choice.label}{choice.value === 2
-													? ` (${skill.trainedCost ?? "unavailable"})`
-													: choice.value === 3 &&
-														  skill.trainedCost !== null &&
-														  skill.specializationUpgradeCost !== null
-														? ` (${skill.trainedCost + skill.specializationUpgradeCost})`
-														: ""}</option
-											>{/each}</select
-									></label
+							<legend class="sr-only">Attributes and skills</legend>
+							<section aria-labelledby="creation-attributes-heading">
+								<h3
+									id="creation-attributes-heading"
+									class="ui-section-heading creation-build-heading"
 								>
-							{/each}
+									Attributes
+								</h3>
+								<div class="creation-fields">
+									{#each buildControls.attributes as control}
+										<label
+											><span>{control.label}</span><span
+												class="creation-variant"
+												><input
+													type="range"
+													class="creation-attribute-range"
+													class:exhausted={buildControls.balance.attributes ===
+														0}
+													title={buildControls.balance.attributes === 0
+														? "No attribute points remaining. Lower an attribute to reclaim points."
+														: undefined}
+													min={control.minimum}
+													max={control.maximum}
+													step="1"
+													value={control.value}
+													oninput={(event) =>
+														changeAttribute(
+															control.index,
+															event.currentTarget.valueAsNumber,
+														)}
+												/><span class="ui-mono" aria-hidden="true"
+													>{control.value}</span
+												></span
+											></label
+										>
+									{/each}
+								</div>
+							</section>
+							<section aria-labelledby="creation-skills-heading">
+								<h3
+									id="creation-skills-heading"
+									class="ui-section-heading creation-build-heading"
+								>
+									Skills
+								</h3>
+								<div class="creation-skill-groups">
+									{#each advancements.toReversed() as group}
+										{@const rows = buildControls.skills.filter(
+											(row) => row.training === group.value,
+										)}
+										<section
+											aria-labelledby={`creation-skill-group-${group.value}`}
+										>
+											<h4
+												id={`creation-skill-group-${group.value}`}
+												class="creation-skill-group-heading"
+											>
+												{group.label}
+											</h4>
+											{#if rows.length === 0}<p class="ui-muted">None</p>{/if}
+											{#each rows as row (row.skill.id)}
+												{@const formula = creationSkillFormulaText(
+													row.skill.formula,
+												)}
+												<div class="creation-skill-row">
+													<details>
+														<summary>{row.skill.name}</summary>
+														<div class="creation-skill-description">
+															{#if row.skill.description.length > 0}<p>
+																	{row.skill.description}
+																</p>{/if}
+															{#if formula !== null}<p class="ui-mono">
+																	Formula: {formula}
+																</p>{/if}
+														</div>
+													</details>
+													<div class="creation-skill-actions">
+														{#each ["downgrade", "upgrade"] as direction}
+															{@const action =
+																direction === "upgrade"
+																	? row.upgrade
+																	: row.downgrade}
+															{@const caption =
+																action.kind === "blocked"
+																	? action.reason
+																	: `${Math.abs(action.credits)} credits ${direction === "upgrade" ? "cost" : "refunded"}`}
+															<button
+																class="ui-stat-action"
+																class:active={action.kind === "available"}
+																type="button"
+																data-direction={direction === "upgrade"
+																	? "up"
+																	: "down"}
+																disabled={action.kind === "blocked"}
+																aria-label={`${row.skill.name}: ${action.label}. ${caption}`}
+																title={`${action.label}: ${caption}`}
+																onclick={() =>
+																	changeSkill(
+																		row.skill.id,
+																		direction === "upgrade"
+																			? "upgrade"
+																			: "downgrade",
+																	)}
+															>
+																<span
+																	class="ui-stat-action-shape"
+																	aria-hidden="true"><UpgradeTriangle /></span
+																><span class="ui-stat-action-label"
+																	>{action.credits === null
+																		? "—"
+																		: Math.abs(action.credits)}</span
+																>
+															</button>
+														{/each}
+													</div>
+												</div>
+											{/each}
+										</section>
+									{/each}
+								</div>
+							</section>
 						</fieldset>
 					</UiTabPanel>
 					<UiTabPanel
@@ -577,56 +820,99 @@
 							onsubmit={submit}
 						>
 							<fieldset class="creation-fields" disabled={busy}>
-								<legend>Review and create</legend>
-								<label
-									>Name<input
-										class="ui-input"
-										type="text"
-										required
-										value={editor.draft.name}
-										oninput={(event) =>
-											updateDraft({
-												...readEditor().draft,
-												name: event.currentTarget.value,
-											})}
-									/></label
-								>
-								<label
-									>Starting area<select
-										class="ui-input"
-										value={editor.draft.startArea}
-										onchange={(event) =>
-											updateDraft({
-												...readEditor().draft,
-												startArea: Number(event.currentTarget.value),
-											})}
-										>{#each heritage.startAreaIds as id}{@const area =
-												editor.catalog.startAreas.find(
-													(entry) => entry.id === id,
-												)}{#if area !== undefined}<option value={id}
-													>{area.name}</option
-												>{/if}{/each}</select
-									></label
-								>
-								<p>{heritage.name} · {gender.name}</p>
-								<p>
-									Attribute points remaining: {balance.attributes} · Skill credits
-									remaining:
-									{balance.skills}
-								</p>
-								{#if invalidAttributes}<p class="ui-error">
-										Each attribute must be an integer from {editor.catalog
-											.minimumAttribute} to {editor.catalog.maximumAttribute}.
-									</p>{/if}
-								<p class="ui-muted">
-									Creation returns to character selection. Enter the world when
-									you are ready.
-								</p>
+								<legend class="sr-only">Review and create</legend>
+								<dl class="creation-summary creation-review-identity ui-well">
+									<div class="creation-review-name">
+										<dt>Name</dt>
+										<dd>{draft.name.trim() || "Not entered"}</dd>
+									</div>
+									<div>
+										<dt>Race</dt>
+										<dd>{heritage.name}</dd>
+									</div>
+									<div>
+										<dt>Gender</dt>
+										<dd>{gender.name}</dd>
+									</div>
+									<div>
+										<dt>Starting town</dt>
+										<dd>
+											{editor.catalog.startAreas.find(
+												(area) => area.id === draft.startArea,
+											)?.name}
+										</dd>
+									</div>
+								</dl>
+								<dl class="creation-summary creation-credit-balances ui-well">
+									<div>
+										<dt>Attribute points remaining</dt>
+										<dd>{balance.attributes}</dd>
+									</div>
+									<div>
+										<dt>Skill credits remaining</dt>
+										<dd>{balance.skills}</dd>
+									</div>
+								</dl>
+								<section aria-labelledby="creation-review-attributes-heading">
+									<h3
+										id="creation-review-attributes-heading"
+										class="ui-section-heading"
+									>
+										Starting attributes
+									</h3>
+									<dl class="creation-summary creation-review-attributes">
+										{#each attributes as label, index}<div>
+												<dt>{label}</dt>
+												<dd>{draft.attributes[index]}</dd>
+											</div>{/each}
+									</dl>
+								</section>
+								<div class="creation-review-skills">
+									{#each advancements
+										.filter((entry) => entry.value >= 2)
+										.toReversed() as advancement}
+										{@const skills = heritage.skills
+											.filter(
+												(skill) => draft.skills[skill.id] === advancement.value,
+											)
+											.toSorted((a, b) => a.name.localeCompare(b.name))}
+										<section
+											aria-labelledby={`creation-review-skills-${advancement.value}`}
+										>
+											<h3
+												id={`creation-review-skills-${advancement.value}`}
+												class="ui-section-heading"
+											>
+												{advancement.label} skills
+											</h3>
+											{#if skills.length === 0}<p class="ui-muted">
+													None
+												</p>{:else}<ul class="creation-skills">
+													{#each skills as skill}<li>{skill.name}</li>{/each}
+												</ul>{/if}
+										</section>
+									{/each}
+								</div>
 							</fieldset>
 						</form>
 					</UiTabPanel>
 				{/if}
 				<div class="creation-feedback">
+					{#if page === "skills-stats" && balance !== null}
+						<dl
+							class="creation-summary creation-credit-balances creation-build-balances ui-well"
+							aria-label="Remaining creation points"
+						>
+							<div>
+								<dt>Attribute points remaining</dt>
+								<dd id="creation-attribute-credits">{balance.attributes}</dd>
+							</div>
+							<div>
+								<dt>Skill credits remaining</dt>
+								<dd id="creation-skill-credits">{balance.skills}</dd>
+							</div>
+						</dl>
+					{/if}
 					{#if commandError !== null}<p class="ui-error" role="alert">
 							{commandError}
 						</p>{/if}
@@ -642,7 +928,7 @@
 				</div>
 			</div>
 			<div class="creation-actions">
-				{#if page !== "appearance"}<button
+				{#if page !== "race"}<button
 						class="pregame-action pregame-quiet ui-button"
 						type="button"
 						disabled={busy}
@@ -655,13 +941,7 @@
 						class="pregame-primary pregame-action ui-button"
 						type="submit"
 						form="creation-review-form"
-						disabled={busy ||
-							editor === null ||
-							balance === null ||
-							balance.attributes !== 0 ||
-							balance.skills < 0 ||
-							invalidAttributes ||
-							editor.draft.name.trim().length === 0}
+						disabled={busy || !canSubmit}
 						>{busy ? "Creating…" : "Create character"}</button
 					>
 				{:else}
@@ -725,7 +1005,7 @@
 			grid-column: 2;
 			grid-row: 1 / 3;
 			display: grid;
-			grid-template-rows: minmax(0, 1fr) auto;
+			grid-template-rows: auto minmax(0, 1fr) auto;
 			min-width: 0;
 			gap: 12px;
 		}
@@ -772,7 +1052,7 @@
 		}
 		.creation-settings :global(.tab-panel) {
 			overflow-x: hidden;
-			padding-block: 16px;
+			padding: 16px;
 			scrollbar-gutter: stable;
 		}
 		.creation-fields {
@@ -786,7 +1066,8 @@
 		.creation-fields > legend {
 			padding-bottom: 16px;
 		}
-		.creation-fields label {
+		.creation-fields label,
+		.creation-field {
 			display: grid;
 			grid-template-columns: minmax(100px, 1fr) minmax(120px, 1fr);
 			align-items: center;
@@ -800,13 +1081,137 @@
 			align-items: center;
 			gap: 10px;
 		}
-		.creation-section {
-			display: flex;
-			align-items: center;
-			gap: 10px;
-			padding-top: 20px;
-			margin-top: 4px;
+		.creation-name {
+			position: relative;
+			z-index: 1;
+			width: min(100%, 14rem);
+			padding-block: 10px;
+			min-width: 0;
+			justify-self: center;
+			display: grid;
+			gap: 8px;
 		}
+		.creation-name-editor {
+			position: relative;
+			display: block;
+		}
+		.creation-name-error-icon {
+			position: absolute;
+			inset-inline-start: calc(100% + 8px);
+			top: 50%;
+			transform: translateY(-50%);
+		}
+
+		.creation-name input {
+			min-height: 40px;
+			padding: 6px 8px;
+			min-width: 0;
+		}
+		.creation-variant {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: center;
+			gap: 8px;
+		}
+		.creation-variant input {
+			width: 100%;
+			min-width: 0;
+			margin: 0;
+		}
+		.creation-variant > span {
+			min-width: 6ch;
+			text-align: right;
+			font-variant-numeric: tabular-nums;
+		}
+
+		.creation-feedback {
+			display: grid;
+		}
+		.creation-credit-balances.creation-build-balances {
+			margin: 12px 16px 0;
+		}
+
+		.creation-skill-groups {
+			display: grid;
+			gap: 20px;
+		}
+		.creation-skill-row {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			column-gap: 12px;
+		}
+		.creation-skill-row details {
+			min-width: 0;
+		}
+		.creation-skill-row summary {
+			min-height: 36px;
+			padding-block: 8px;
+			overflow-wrap: anywhere;
+			cursor: pointer;
+		}
+		.creation-skill-description {
+			display: grid;
+			gap: 8px;
+			padding: 0 0 12px 14px;
+		}
+		.creation-skill-description p {
+			white-space: pre-wrap;
+			overflow-wrap: anywhere;
+		}
+		.creation-skill-actions {
+			display: flex;
+			align-self: start;
+			gap: calc(8px * var(--ui-icon-scale));
+			margin-block: 4px;
+		}
+
+		.creation-summary {
+			display: grid;
+			gap: 6px 16px;
+			margin: 0;
+		}
+		.creation-summary > div {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: baseline;
+			gap: 8px;
+			min-width: 0;
+		}
+		.creation-summary dd {
+			margin: 0;
+			text-align: right;
+			overflow-wrap: anywhere;
+		}
+		.creation-review-identity.ui-well,
+		.creation-credit-balances.ui-well {
+			padding: 12px;
+		}
+		.creation-credit-balances,
+		.creation-review-attributes,
+		.creation-review-skills {
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 8px 20px;
+		}
+		.creation-credit-balances > div {
+			grid-template-columns: minmax(0, 1fr);
+			gap: 4px;
+		}
+		.creation-credit-balances dd {
+			text-align: left;
+		}
+		.creation-review-skills > section {
+			min-width: 0;
+		}
+		.creation-skills {
+			margin: 0;
+			padding: 0;
+			list-style: none;
+		}
+		.creation-skills li {
+			padding-block: 4px;
+		}
+
 		.creation-randomize {
 			width: 100%;
 		}

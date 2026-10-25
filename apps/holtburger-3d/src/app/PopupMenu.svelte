@@ -265,6 +265,7 @@
 <div
 	class="popup-menu ui-overlay-surface"
 	class:symbol-grid={layout === "grid"}
+	style:--popup-grid-columns={Math.max(1, Math.min(6, items.length))}
 	popover="manual"
 	role="menu"
 	tabindex="-1"
@@ -320,7 +321,7 @@
 				<span class="popup-menu-icon" aria-hidden="true"
 					>{@render icon(item)}</span
 				>
-				<span>{item.label}</span>
+				<span class:sr-only={layout === "grid"}>{item.label}</span>
 			{:else}{item.label}{/if}
 			{#if item.children}<span class="popup-menu-arrow" aria-hidden="true"
 					>›</span
@@ -393,16 +394,27 @@
 		}
 		.popup-menu.symbol-grid {
 			box-sizing: border-box;
-			width: min(calc(18rem * var(--ui-icon-scale)), 100vw);
+			width: min(
+				calc(
+					var(--popup-grid-columns) * var(--ui-menu-grid-cell-size) *
+						var(--ui-icon-scale)
+				),
+				100vw
+			);
 			min-width: 0;
-			max-height: min(calc(18rem * var(--ui-icon-scale)), 100vh);
+			max-height: min(
+				calc(6 * var(--ui-menu-grid-cell-size) * var(--ui-icon-scale)),
+				100vh
+			);
 			overflow-x: hidden;
 		}
 		.popup-menu.symbol-grid:popover-open {
 			display: grid;
-			grid-template-columns: repeat(6, minmax(0, 1fr));
+			grid-template-columns: repeat(var(--popup-grid-columns), minmax(0, 1fr));
 		}
 		.symbol-grid .popup-menu-item {
+			--ui-menu-item-padding: var(--ui-menu-grid-padding);
+			--ui-overlay-icon-size: var(--ui-menu-grid-icon-size);
 			justify-content: center;
 			min-width: 0;
 			font-size: calc(1.75rem * var(--ui-icon-scale));
@@ -410,6 +422,9 @@
 			aspect-ratio: 1;
 		}
 		.popup-menu-icon {
+			/* Center artwork independently of the menu row's text baseline. */
+			display: grid;
+			place-items: center;
 			width: calc(var(--ui-overlay-icon-size) * var(--ui-icon-scale));
 			height: calc(var(--ui-overlay-icon-size) * var(--ui-icon-scale));
 			flex: none;

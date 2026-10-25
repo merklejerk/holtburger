@@ -87,6 +87,7 @@ impl CharacterGenCatalog {
                         skill_type,
                         name: skill.name.clone(),
                         description: skill.description.clone(),
+                        formula: (skill.formula.x != 0).then(|| skill.formula.clone()),
                         available_at_creation: skill.chargen_use != 0
                             && skill_type.is_some_and(|skill| skill.is_eor()),
                         trained_cost: skill.trained_cost,
@@ -285,6 +286,8 @@ pub struct CharacterGenSkillDefinition {
     pub skill_type: Option<SkillType>,
     pub name: String,
     pub description: String,
+    /// Authored attribute formula, absent when X disables it (ACE AttributeFormula.cs:57).
+    pub formula: Option<holtburger_dat::file_type::skill_table::SkillFormula>,
     /// Resolved creation eligibility: the authored flag and ACE's active EOR skill set.
     /// Retired, unimplemented, and unknown definitions remain available for wire-slot lookup.
     pub available_at_creation: bool,
@@ -607,6 +610,50 @@ mod skill_availability_tests {
         assert_eq!(catalog.expected_skill_slots, unknown_id as usize + 1);
     }
 
+    #[test]
+    fn creation_catalog_preserves_enabled_skill_formulas_and_descriptions() {
+        let mut defined = skill(1);
+        defined.description = "A DAT skill description".into();
+        defined.formula.x = 1;
+        defined.formula.z = 3;
+        defined.formula.attr1 = AttributeType::StrengthAttr as u32;
+        defined.formula.attr2 = AttributeType::CoordinationAttr as u32;
+        let table = SkillTable {
+            skill_base_hash: HashMap::from([
+                (SkillType::MeleeDefense as u32, defined.clone()),
+                (SkillType::MissileDefense as u32, skill(1)),
+            ]),
+            ..SkillTable::default()
+        };
+        let char_gen = CharGen {
+            id: CharGen::FILE_ID,
+            starter_areas: Vec::new(),
+            heritage_groups: HashMap::new(),
+        };
+        let catalog =
+            CharacterGenCatalog::from_assets(&char_gen, &table, &BTreeMap::new()).unwrap();
+        let projected = catalog
+            .skill_definition(SkillType::MeleeDefense as u32)
+            .unwrap();
+        assert_eq!(projected.description, defined.description);
+        let formula = projected.formula.as_ref().unwrap();
+        assert_eq!(
+            (formula.attr1, formula.attr2, formula.z),
+            (
+                defined.formula.attr1,
+                defined.formula.attr2,
+                defined.formula.z
+            )
+        );
+        assert!(
+            catalog
+                .skill_definition(SkillType::MissileDefense as u32)
+                .unwrap()
+                .formula
+                .is_none()
+        );
+    }
+
     fn skill(chargen_use: u32) -> SkillBase {
         SkillBase {
             name: "Skill".into(),
@@ -650,6 +697,7 @@ mod skill_cost_tests {
                     skill_type: None,
                     name: "Skill".into(),
                     description: String::new(),
+                    formula: None,
                     available_at_creation: true,
                     trained_cost: 6,
                     specialization_total_cost: total,

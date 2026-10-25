@@ -5,7 +5,6 @@ import {
 	type CharacterCreationDraft,
 	type CharacterCreationPreview,
 } from "./client-character-creation-contract";
-import type { CharacterManagementState } from "./client-host-contract";
 import type { ObjectPreviewSource } from "../lib/game/runtime/object-preview-source";
 import type { ObjectPreviewFraming } from "../lib/game/preview/object-preview-viewport";
 import { OBJECT_PREVIEW_VERTICAL_FOV_DEGREES } from "../lib/game/renderer/object-preview-camera";
@@ -23,18 +22,6 @@ export interface CharacterCreationServices {
 		request: CharacterCreationAppearanceRequest,
 	): Promise<CharacterCreationPreview>;
 	submit(draft: CharacterCreationDraft): Promise<void>;
-}
-
-/** Shared frontend admission for creation, selection and entry controls. Core checks again. */
-export function characterManagementPending(
-	state: CharacterManagementState,
-): boolean {
-	return (
-		state.kind === "creating" ||
-		state.kind === "deleting" ||
-		state.kind === "restoring" ||
-		state.kind === "uncertain"
-	);
 }
 
 /** A garment's dependent fields travel together when its style changes. */
@@ -142,8 +129,8 @@ export function creationGender(
 	return gender;
 }
 
-/** Randomize starter clothing once per body selection; facial edits keep those choices stable. */
-function initialCreationAppearance(
+/** Seed a newly visited body with randomized features, shades, and a valid starter outfit. */
+export function initialCreationAppearance(
 	gender: CreationGender,
 	roll: () => number,
 ): CreationAppearance {
@@ -169,7 +156,11 @@ function initialCreationAppearance(
 		pantsHue: 0.5,
 		footwearHue: 0.5,
 	};
-	return randomizeCreationClothing(appearance, gender, roll);
+	return randomizeCreationAppearance(
+		randomizeCreationClothing(appearance, gender, roll),
+		gender,
+		roll,
+	);
 }
 
 /** Replace only clothing choices; retain the edited face and never mutate the current draft. */
@@ -206,16 +197,42 @@ export function randomizeCreationClothing(
 	return appearance;
 }
 
-/** Rebuild every dependent build choice on heritage/body selection, preserving only the typed name. */
+/** Randomize body features and shades while retaining the selected outfit. */
+export function randomizeCreationAppearance(
+	current: CreationAppearance,
+	gender: CreationGender,
+	roll: () => number,
+): CreationAppearance {
+	const ordinal = (count: number) =>
+		count === 0 ? 0 : Math.floor(roll() * count);
+	return {
+		...current,
+		hairStyle: ordinal(gender.hairStyles),
+		hairColor: ordinal(gender.hairColors.length),
+		eyes: ordinal(gender.eyes),
+		eyeColor: ordinal(gender.eyeColors.length),
+		nose: ordinal(gender.noses),
+		mouth: ordinal(gender.mouths),
+		skinHue: roll(),
+		hairHue: roll(),
+	};
+}
+
+/** Retail palette sets divide the inclusive hue interval into equal authored bins. */
+export function creationShadeIndex(hue: number, count: number): number {
+	return Math.floor((count - 0.000001) * hue);
+}
+
+/** Assemble race-specific build defaults around the caller-owned body appearance and name. */
 export function initialCreationDraft(
 	catalog: CharacterCreationCatalog,
 	heritageId: number,
 	genderId: number,
 	name: string,
-	roll: () => number,
+	appearance: CreationAppearance,
 ): CharacterCreationDraft {
 	const heritage = creationHeritage(catalog, heritageId);
-	const gender = creationGender(heritage, genderId);
+	creationGender(heritage, genderId);
 	const defaults = heritage.defaults;
 	const startArea = heritage.startAreaIds[0];
 	if (startArea === undefined)
@@ -229,7 +246,7 @@ export function initialCreationDraft(
 		startArea,
 		attributes: [...defaults.attributes],
 		skills: [...defaults.skills],
-		appearance: initialCreationAppearance(gender, roll),
+		appearance,
 	};
 }
 

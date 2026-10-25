@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { creationNameSchema } from "./client-character-creation-name";
 import type { HostTransport } from "../lib/host/host-transport";
 import { objectPreviewVisualSchema } from "./client-object-preview-contract";
 
@@ -43,7 +44,7 @@ export const characterCreationDraftSchema = z
 		/** Strength, endurance, coordination, quickness, focus, self. */
 		attributes,
 		skills,
-		name: z.string(),
+		name: creationNameSchema,
 		startArea: word,
 	})
 	.strict();
@@ -58,12 +59,15 @@ const garment = z
 		paletteTemplateIds: z.array(word).min(1),
 	})
 	.strict();
+/** Host-resolved CSS swatches from the substituted DAT palette intervals. */
+const swatch = z.string().regex(/^#[0-9a-f]{6}$/);
 const gender = namedChoice
 	.extend({
 		hairStyles: index,
-		hairColors: index,
+		hairColors: z.array(z.array(swatch).min(1)),
+		skinColors: z.array(swatch).min(1),
 		eyes: index,
-		eyeColors: index,
+		eyeColors: z.array(swatch),
 		noses: index,
 		mouths: index,
 		headgear: z.array(garment),
@@ -78,9 +82,26 @@ const creationDefaults = z
 		skills,
 	})
 	.strict();
+/** Creation attribute order matches the protocol tuple, independent of DAT attribute IDs. */
+export const CREATION_ATTRIBUTES = [
+	"Strength",
+	"Endurance",
+	"Coordination",
+	"Quickness",
+	"Focus",
+	"Self",
+] as const;
+const skillFormula = z
+	.object({
+		first: z.enum(CREATION_ATTRIBUTES),
+		second: z.enum(CREATION_ATTRIBUTES).nullable(),
+		divisor: word.min(1),
+	})
+	.strict();
 const skill = namedChoice
 	.extend({
 		description: z.string(),
+		formula: skillFormula.nullable(),
 		trainedCost: index.nullable(),
 		specializationUpgradeCost: index.nullable(),
 		minimumAdvancement: index.max(3),

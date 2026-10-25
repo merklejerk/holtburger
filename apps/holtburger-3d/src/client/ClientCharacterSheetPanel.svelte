@@ -418,6 +418,7 @@
 					disabled={button.disabled}
 					title={button.reason}
 					aria-label={`${statName} ${button.label}: ${button.reason}`}
+					class="ui-stat-action"
 					class:active={selected.key === button.key}
 					onpointerenter={() => (hoveredAction = button.key)}
 					onpointerleave={() => (hoveredAction = null)}
@@ -425,10 +426,10 @@
 					onblur={() => (focusedAction = null)}
 					onclick={button.purchase}
 				>
-					<span class="action-shape" aria-hidden="true"
+					<span class="ui-stat-action-shape" aria-hidden="true"
 						><UpgradeTriangle /></span
 					>
-					<span class="action-label">{button.label}</span>
+					<span class="ui-stat-action-label">{button.label}</span>
 				</button>
 			{/each}
 			<small class="action-cost">{selected.cost || "—"}</small>
@@ -1020,54 +1021,6 @@
 			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 			opacity: 0.7;
 		}
-		.actions button {
-			position: relative;
-			flex-shrink: 0;
-			min-width: 1.6rem;
-			min-height: max(1.35rem, 1.5em);
-			padding: 0.15rem 0.2rem 0;
-			border: 0;
-			background: transparent;
-			color: inherit;
-			font: inherit;
-			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
-			white-space: nowrap;
-			cursor: pointer;
-		}
-		.action-shape {
-			position: absolute;
-			top: 0;
-			left: 50%;
-			width: 1.6rem;
-			height: 100%;
-			transform: translateX(-50%);
-			color: var(--ui-panel-border-color, var(--ui-color-border));
-			fill: none;
-		}
-		.actions button.active:not(:disabled) .action-shape {
-			color: var(--ui-character-upgrade-color, var(--ui-color-success));
-		}
-		.actions button:hover:not(:disabled) .action-shape {
-			fill: color-mix(in srgb, currentColor 65%, transparent);
-		}
-		.actions button:focus-visible {
-			outline: 2px solid var(--ui-color-focus);
-			outline-offset: 1px;
-		}
-		.action-label {
-			position: relative;
-			isolation: isolate;
-			font-weight: 600;
-		}
-		/* Blur the black backing without blurring the label or clipping its overhang. */
-		.action-label::before {
-			content: "";
-			position: absolute;
-			inset: -1px -2px;
-			z-index: -1;
-			background: color-mix(in srgb, var(--ui-color-shadow) 40%, transparent);
-			filter: blur(2px);
-		}
 		.action-cost {
 			min-width: 0;
 			margin-left: auto;
@@ -1076,10 +1029,6 @@
 			line-height: 1.1;
 			opacity: 0.9;
 			overflow-wrap: anywhere;
-		}
-		.actions button:disabled {
-			cursor: not-allowed;
-			opacity: 0.75;
 		}
 		ul {
 			margin: 0.2rem 0 0.7rem;

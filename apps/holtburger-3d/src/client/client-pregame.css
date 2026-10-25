@@ -21,7 +21,8 @@
 	}
 }
 @layer overrides {
-	.client-pregame-screen .ui-button {
+	/* Text actions are larger; compact icon controls retain their shared geometry. */
+	.client-pregame-screen .ui-button:where(:not(.ui-icon-button)) {
 		min-height: 40px;
 		padding: 10px 20px;
 	}

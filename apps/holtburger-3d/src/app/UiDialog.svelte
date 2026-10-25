@@ -5,6 +5,8 @@
 	interface Props {
 		/** Visible accessible heading for this modal. */
 		readonly title: string;
+		/** Selector inside the dialog to focus on opening; otherwise focus the dialog itself. */
+		readonly initialFocus?: string;
 		/** Feature hook for focused diagnostics and body styling. */
 		readonly className: string;
 		/** Body and actions remain owned by the feature. */
@@ -18,6 +20,7 @@
 	}
 	const {
 		title,
+		initialFocus,
 		className,
 		children,
 		onCancel,
@@ -30,7 +33,7 @@
 </script>
 
 <dialog
-	use:keyboard.modal
+	use:keyboard.modal={initialFocus}
 	use:dismissDialogOnBackdrop={() => {
 		if (dismissOnBackdrop) onCancel();
 	}}

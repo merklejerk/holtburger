@@ -254,6 +254,21 @@ describe("game keyboard routing", () => {
 		expect(game.keyup).not.toHaveBeenCalled();
 	});
 
+	it("rejects a missing dialog focus target before opening or acquiring modality", () => {
+		const { keyboard, viewport, game } = fixture();
+		const dialog = {
+			querySelector: vi.fn(() => null),
+			showModal: vi.fn(),
+		} as unknown as HTMLDialogElement;
+		expect(() => keyboard.modal(dialog, "input")).toThrow(
+			"Dialog initial focus target is missing",
+		);
+		expect(dialog.showModal).not.toHaveBeenCalled();
+		expect(viewport.allowed).toBe(true);
+		keyboard.keydown(keyEvent("KeyW"));
+		expect(game.keydown).toHaveBeenCalledOnce();
+	});
+
 	it("retains the cancellation boundary without a game controller", () => {
 		const viewport = new ViewportInputGate();
 		const keyboard = new KeyboardInputPolicy(viewport);

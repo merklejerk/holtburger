@@ -320,5 +320,20 @@ pub(super) fn open_selection(
         repository.mounted_sources.push(archive.revision);
         repository.resource_index.extend(archive.entries);
     }
+    for entry in &repository.resource_index {
+        if entry.namespace == holtburger_dat::EOR_CELL_NAMESPACE
+            && (0x0100..0xfffe).contains(&(entry.file_id & 0xffff))
+        {
+            repository
+                .env_cells_by_landblock
+                .entry(crate::normalize_landblock_id(entry.file_id))
+                .or_default()
+                .push(entry.file_id);
+        }
+    }
+    for cells in repository.env_cells_by_landblock.values_mut() {
+        cells.sort_unstable();
+        cells.dedup();
+    }
     Ok(repository)
 }

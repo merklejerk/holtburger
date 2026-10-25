@@ -2,6 +2,7 @@ use anyhow::{Context, Result, ensure};
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_dat::landblock::{CellLandblock, Frame, LandblockInfo};
 use holtburger_dat::{EOR_CELL_NAMESPACE, ResourceKey};
+use std::collections::BTreeSet;
 
 use crate::{ActiveRegionData, ContentDecodeCache, ContentRepository, TerrainCellDiagonals};
 
@@ -110,7 +111,7 @@ pub struct LandblockBuildingPortal {
 /// Shallow reference to one EnvCell owned by the landblock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LandblockEnvCellRef {
-    /// Stable ordinal in the contiguous LandblockInfo EnvCell range.
+    /// Stable selector offset from 0x0100, including cells beyond LandblockInfo's range.
     pub source_index: u32,
     /// Full EnvCell DID.
     pub env_cell_id: u32,
@@ -193,6 +194,7 @@ impl LandblockAssetAssembler {
             landblock_id,
             terrain,
             info.as_deref(),
+            content.archived_env_cells(landblock_id),
         )))
     }
 }
@@ -328,6 +330,7 @@ fn assemble_from_records(
     landblock_id: u32,
     terrain: LandblockTerrain,
     info: Option<&LandblockInfo>,
+    archived_env_cells: &[u32],
 ) -> LandblockAsset {
     let explicit_objects = info
         .into_iter()
@@ -369,18 +372,26 @@ fn assemble_from_records(
                 .collect(),
         })
         .collect();
-    let env_cell_refs = (0..info.map_or(0, |info| info.num_cells))
-        .map(|source_index| LandblockEnvCellRef {
-            source_index,
-            env_cell_id: (landblock_id & 0xffff_0000) | (0x0100 + source_index),
-        })
-        .collect();
+    // Retail fetches the destination by ID before prefetching the metadata range
+    // (acclient.c:334831-334855, 333897-333987). Our whole-owner product includes
+    // archived cells beyond that range, while retaining missing declared cells as errors.
+    let env_cell_ids = (0..info.map_or(0, |info| info.num_cells))
+        .map(|index| (landblock_id & 0xffff_0000) | (0x0100 + index))
+        .chain(archived_env_cells.iter().copied())
+        .collect::<BTreeSet<_>>();
     let scene_class = classify_landblock_scene(
         landblock_id,
         &terrain.height_indices,
-        info.map_or(0, |info| info.num_cells),
+        env_cell_ids.len() as u32,
         buildings.len(),
     );
+    let env_cell_refs = env_cell_ids
+        .into_iter()
+        .map(|env_cell_id| LandblockEnvCellRef {
+            source_index: (env_cell_id & 0xffff) - 0x0100,
+            env_cell_id,
+        })
+        .collect();
     let mut restrictions = info
         .and_then(|info| info.restriction_tables.as_ref())
         .into_iter()
@@ -449,10 +460,12 @@ fn placement_from_frame(frame: &Frame) -> LandblockPlacement {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     use holtburger_common::math::{Quaternion, Vector3};
     use holtburger_dat::file_type::region::{GameTime, LandDefs, RegionDesc};
     use holtburger_dat::landblock::{BuildInfo, PortalInternal, RestrictionTable, Stab};
+    use holtburger_dat::{DatFileType, HbaWriter};
 
     use super::*;
 
@@ -497,7 +510,7 @@ mod tests {
 
         let terrain =
             assemble_terrain(&landblock, &region).expect("synthetic terrain should assemble");
-        let asset = assemble_from_records(landblock.id, terrain, Some(&info));
+        let asset = assemble_from_records(landblock.id, terrain, Some(&info), &[]);
 
         assert_eq!(asset.scene_class, LandblockSceneClass::OutdoorWithEnvCells);
         assert_eq!(asset.terrain.height_indices[1], 9);
@@ -549,6 +562,95 @@ mod tests {
     }
 
     #[test]
+    fn archive_discovery_includes_extra_cells_and_preserves_required_cell_failures() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("cells.hba");
+        let mut writer = HbaWriter::new();
+        for (owner, has_objects) in [(0x0007_ffff_u32, 1_u32), (0x0008_ffff, 0)] {
+            let mut bytes = owner.to_le_bytes().to_vec();
+            bytes.extend(has_objects.to_le_bytes());
+            // Flat terrain: 81 u16 samples, 81 height bytes, then alignment.
+            bytes.resize(
+                (bytes.len() + LANDBLOCK_GRID_SIZE.pow(2) * 3).next_multiple_of(4),
+                0,
+            );
+            writer
+                .add(
+                    EOR_CELL_NAMESPACE,
+                    owner,
+                    DatFileType::Landblock as u32,
+                    bytes,
+                )
+                .unwrap();
+            writer
+                .add(
+                    EOR_CELL_NAMESPACE,
+                    (owner & 0xffff_0000) | 0x0219,
+                    DatFileType::IndoorCell as u32,
+                    vec![0],
+                )
+                .unwrap();
+        }
+        // Two declared cells, no objects, buildings, or restriction table.
+        let info = [0x0007_fffe_u32, 2, 0, 0]
+            .into_iter()
+            .flat_map(u32::to_le_bytes)
+            .collect();
+        writer
+            .add(
+                EOR_CELL_NAMESPACE,
+                0x0007_fffe,
+                DatFileType::LandblockInfo as u32,
+                info,
+            )
+            .unwrap();
+        writer.write(&path).unwrap();
+        let content = ContentRepository::from_hba_path(path).unwrap();
+        let cache = ContentDecodeCache::new();
+        let region = ActiveRegionData::new(Arc::new(synthetic_region([0.0; 256])));
+        let asset = LandblockAssetAssembler
+            .assemble(&content, &cache, &region, 0x0007_ffff)
+            .unwrap()
+            .unwrap();
+        assert_eq!(asset.scene_class, LandblockSceneClass::DungeonOnly);
+        assert_eq!(
+            asset.env_cell_refs,
+            vec![
+                LandblockEnvCellRef {
+                    source_index: 0,
+                    env_cell_id: 0x0007_0100
+                },
+                LandblockEnvCellRef {
+                    source_index: 1,
+                    env_cell_id: 0x0007_0101
+                },
+                LandblockEnvCellRef {
+                    source_index: 0x119,
+                    env_cell_id: 0x0007_0219
+                },
+            ]
+        );
+        // A declared cell missing from the archive must still fail interior assembly.
+        let error = crate::LandblockInteriorSystemAssembler
+            .assemble(&content, &cache, &asset)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("Could not load required EnvCell 0x00070100"));
+        // Cells discovered without metadata still participate in scene classification.
+        let discovered = LandblockAssetAssembler
+            .assemble(&content, &cache, &region, 0x0008_ffff)
+            .unwrap()
+            .unwrap();
+        assert_eq!(discovered.scene_class, LandblockSceneClass::DungeonOnly);
+        assert_eq!(
+            discovered.env_cell_refs,
+            vec![LandblockEnvCellRef {
+                source_index: 0x119,
+                env_cell_id: 0x0008_0219
+            }]
+        );
+    }
+
+    #[test]
     fn scene_class_matches_ace_predicate_env_cell_availability_and_northwest_exception() {
         let flat_heights = vec![0; LANDBLOCK_GRID_SIZE * LANDBLOCK_GRID_SIZE];
 
@@ -591,8 +693,6 @@ mod tests {
 
     #[test]
     fn terrain_query_includes_dungeon_roots_without_loading_scene_records() {
-        use holtburger_dat::{DatFileType, HbaWriter};
-        use std::sync::Arc;
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("terrain.hba");
         let mut writer = HbaWriter::new();

@@ -5,7 +5,7 @@ use holtburger_dat::{
     EOR_PORTAL_NAMESPACE, LayeredResourceResolver, ResourceKey, ResourceSource, StaticResourceKey,
     file_type::{Animation, ChatPoseTable, DatFileType, MotionTable, SetupModel},
 };
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -80,6 +80,8 @@ pub struct ContentRepository {
     mounts: Vec<Arc<dyn ResourceSource>>,
     mounted_sources: Vec<MountedContentSource>,
     resource_index: Vec<RepositoryResourceIndexEntry>,
+    /// Sorted, unique archived EnvCell IDs grouped by normalized landblock owner.
+    env_cells_by_landblock: HashMap<u32, Vec<u32>>,
     source_description: Option<String>,
 }
 
@@ -178,13 +180,15 @@ impl ContentRepository {
     /// Mounts already-constructed sources without a resource index.
     ///
     /// `ResourceSource` cannot enumerate its contents, so index-driven readers — the material
-    /// capability report and the motion contract — see nothing from a repository built this way.
+    /// capability report, additional EnvCell discovery, and the motion contract — see nothing
+    /// from a repository built this way.
     /// Use `from_hba_dir` or `from_hba_path` when a caller needs those.
     pub fn from_mounts(mounts: Vec<Arc<dyn ResourceSource>>) -> Self {
         Self {
             mounts,
             mounted_sources: Vec::new(),
             resource_index: Vec::new(),
+            env_cells_by_landblock: HashMap::new(),
             source_description: None,
         }
     }
@@ -253,6 +257,13 @@ impl ContentRepository {
     /// applies the repository's layered resolution policy.
     pub fn resource_index(&self) -> &[RepositoryResourceIndexEntry] {
         &self.resource_index
+    }
+
+    /// Archived indoor cells for this owner, independent of LandblockInfo's prefetch count.
+    pub(crate) fn archived_env_cells(&self, landblock_id: u32) -> &[u32] {
+        self.env_cells_by_landblock
+            .get(&crate::normalize_landblock_id(landblock_id))
+            .map_or(&[], Vec::as_slice)
     }
 
     pub fn resource_metadata(&self, key: ResourceKey<'_>) -> Option<holtburger_dat::FileMetadata> {

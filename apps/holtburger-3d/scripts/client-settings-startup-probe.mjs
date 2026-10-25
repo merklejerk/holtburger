@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,7 +29,14 @@ await writeFile(
 	JSON.stringify({
 		formatVersion: 1,
 		user: {
-			ui: { version: 1, value: savedUi },
+			ui: {
+				version: 1,
+				value: {
+					...savedUi,
+					fonts: { ...savedUi.fonts, heading: "retired-font" },
+					retiredTheme: true,
+				},
+			},
 			hudPlacements: {
 				book: unknownBook,
 				characterSheet: { version: 1, value: savedCharacterSheet },
@@ -103,7 +110,17 @@ try {
 		`async () => {
 			const bridge = window.holtburgerSettings;
 			if (!bridge) throw new Error("Settings preload bridge is missing");
-			const before = await bridge.loadUser();
+			const { createDefaultClientUserSettings } =
+				await import("/src/client/client-settings-defaults.ts");
+			const defaults = createDefaultClientUserSettings(
+				{ width: window.innerWidth, height: window.innerHeight }, 0
+			);
+			const before = await bridge.loadUser(defaults);
+			if (before.repaired.length !== 0)
+				throw new Error("Startup repair was repeated on the second load");
+			if (before.sections.ui.fonts.heading !== defaults.ui.fonts.heading ||
+				before.sections.ui.fonts.body !== "mono")
+				throw new Error("Startup repair did not preserve valid sibling preferences");
 			const expectedUi = ${JSON.stringify(savedUi)};
 			if (before.sections.ui?.textScale !== expectedUi.textScale)
 				throw new Error("Saved text scale did not cross the preload bridge");
@@ -120,11 +137,6 @@ try {
 				throw new Error("Client startup did not apply the restored text scale");
 			if (!before.unavailable.some((reason) => reason.includes("hudPlacements.book")))
 				throw new Error("Future book section was not reported");
-			const { createDefaultClientUserSettings } =
-				await import("/src/client/client-settings-defaults.ts");
-			const defaults = createDefaultClientUserSettings(
-				{ width: window.innerWidth, height: window.innerHeight }, 0
-			);
 			const expectedPanel = ${JSON.stringify(savedCharacterSheet)};
 			if (JSON.stringify(before.hudPlacements.characterSheet) !== JSON.stringify(expectedPanel))
 				throw new Error("Character panel placement did not cross the preload bridge");
@@ -136,6 +148,15 @@ try {
 		}`,
 	);
 	const collection = JSON.parse(await readFile(settingsPath, "utf8"));
+	if ("retiredTheme" in collection.user.ui.value)
+		throw new Error("Startup repair left a retired setting on disk");
+	const backups = (await readdir(directory)).filter((name) =>
+		name.includes(".backup-"),
+	);
+	if (backups.length !== 1)
+		throw new Error(
+			"Startup repair did not retain exactly one original backup",
+		);
 	if (
 		JSON.stringify(collection.user.hudPlacements.book) !==
 		JSON.stringify(unknownBook)

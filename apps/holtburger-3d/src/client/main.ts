@@ -8,19 +8,22 @@ import { createDefaultClientUserSettings } from "./client-settings-defaults";
 import { createElectronClientSettingsTransport } from "./client-settings-transport";
 
 const settingsTransport = createElectronClientSettingsTransport();
-const loadedUserSettings = await settingsTransport.loadUser();
 const defaults = createDefaultClientUserSettings(
 	{ width: window.innerWidth, height: window.innerHeight },
 	createClientShortcuts(clientDebugEnabled(window.location.search)).length,
 );
+const loadedUserSettings = await settingsTransport.loadUser(defaults);
 const initialUserSettings = {
 	...defaults,
 	...loadedUserSettings.sections,
 	hudLayout: { ...defaults.hudLayout, ...loadedUserSettings.hudPlacements },
 };
 let initialSettingsIssue: string | null =
-	loadedUserSettings.unavailable.length > 0
-		? loadedUserSettings.unavailable.join("; ")
+	loadedUserSettings.unavailable.length > 0 ||
+	loadedUserSettings.repaired.length > 0
+		? [...loadedUserSettings.repaired, ...loadedUserSettings.unavailable].join(
+				"; ",
+			)
 		: null;
 if (
 	Object.keys(loadedUserSettings.sections).length === 0 &&

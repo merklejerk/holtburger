@@ -1,8 +1,13 @@
-import { readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { copyFile, readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import { replaceLocalFile } from "./replace-local-file.js";
+import { repairSettingsEntry } from "./client-settings-repair.js";
 import type { ZodType } from "zod";
 import {
 	clientUserSettingsSchema,
+	clientCharacterSettingsSchema,
 	clientWindowSettingsSchema,
 	type ClientWindowSettings,
 } from "../src/client/client-settings-contract.js";
@@ -57,8 +62,94 @@ export class ClientSettingsStore {
 	}
 
 	/** Load once before consumers can observe settings. */
-	async load(): Promise<void> {
-		this.#document = await this.#readDocument();
+	async load(): Promise<readonly string[]> {
+		return this.#queueWrite<readonly string[]>((document) => {
+			const repaired = repairSettingsEntry(
+				document.user.window,
+				clientWindowSettingsSchema,
+				this.#initialWindow,
+				"window",
+			);
+			return {
+				document:
+					repaired.entry === undefined
+						? document
+						: {
+								...document,
+								user: { ...document.user, window: repaired.entry },
+							},
+				result: repaired.notices,
+				backup: true,
+			};
+		});
+	}
+
+	/** Frontend supplies viewport-aware defaults; the filesystem owner repairs before publishing. */
+	async loadUser(defaults: unknown, mode: ClientSettingsReadMode) {
+		const { hudLayout, ...sections } = clientUserSettingsSchema.parse(defaults);
+		if (mode === "fresh") return { ...this.#readUser(mode), repaired: [] };
+		const repaired = await this.#queueWrite<readonly string[]>((document) => {
+			const user = repairEntries(
+				document.user,
+				clientUserSectionSchemas,
+				sections,
+				"user",
+			);
+			const hud = clientHudPlacementEntries(document);
+			const notices = [...user.notices];
+			if (hud.kind === "unavailable") {
+				user.entries.hudPlacements = {};
+				notices.push("hudPlacements: reset invalid map");
+			} else if (hud.kind === "loaded") {
+				const placements = repairEntries(
+					hud.value,
+					clientHudPlacementSchemas,
+					hudLayout,
+					"hudPlacements",
+				);
+				user.entries.hudPlacements = placements.entries;
+				notices.push(...placements.notices);
+			}
+			return {
+				document: { ...document, user: user.entries },
+				result: notices,
+				backup: true,
+			};
+		});
+		return { ...this.#readUser(mode), repaired };
+	}
+
+	/** Repair only the requested profile, preserving other characters and unknown sections. */
+	async loadCharacter(
+		profileKey: string,
+		defaults: unknown,
+		mode: ClientSettingsReadMode,
+	) {
+		const values = {
+			...clientCharacterSettingsSchema.parse(defaults),
+			lastKnownName: null,
+		};
+		if (mode === "fresh")
+			return { ...this.#readCharacter(profileKey, mode), repaired: [] };
+		const repaired = await this.#queueWrite<readonly string[]>((document) => {
+			const profile = document.characters[profileKey];
+			if (profile === undefined) return { document, result: [] };
+			const result = repairEntries(
+				profile,
+				clientCharacterSectionSchemas,
+				values,
+				"character",
+			);
+			return {
+				document: {
+					...document,
+					characters: { ...document.characters, [profileKey]: result.entries },
+				},
+				result: result.notices,
+				backup: true,
+			};
+		});
+		return { ...this.#readCharacter(profileKey, mode), repaired };
 	}
 
 	readWindow(): {
@@ -78,7 +169,7 @@ export class ClientSettingsStore {
 				};
 	}
 
-	readUser(mode: ClientSettingsReadMode): LoadedClientUserSettings {
+	#readUser(mode: ClientSettingsReadMode): LoadedClientUserSettings {
 		const sections: Record<string, unknown> = {};
 		const hudPlacements: Record<string, unknown> = {};
 		const unavailable: string[] = [];
@@ -117,7 +208,7 @@ export class ClientSettingsStore {
 		};
 	}
 
-	readCharacter(
+	#readCharacter(
 		profileKey: string,
 		mode: ClientSettingsReadMode,
 	): LoadedClientCharacterSettings {
@@ -256,16 +347,28 @@ export class ClientSettingsStore {
 			| {
 					readonly document: ClientSettingsCollection;
 					readonly result: Result;
+					/** Keep the exact source before a normalization changes persisted choices. */
+					readonly backup?: boolean;
 			  },
 	): Promise<Result> {
 		const write = this.#writeTail.then(async () => {
 			const current = await this.#readDocument();
 			const changed = change(current);
 			const document = "document" in changed ? changed.document : changed;
-			await replaceLocalFile(
-				this.#path,
-				`${JSON.stringify(document, null, 2)}\n`,
-			);
+			// Object key order is presentation, not a preference change. All mutations
+			// share this decision so no-op loads and saves cannot create backups or writes.
+			if (!isDeepStrictEqual(document, current)) {
+				if ("document" in changed && changed.backup)
+					await copyFile(
+						this.#path,
+						`${this.#path}.backup-${randomUUID()}`,
+						constants.COPYFILE_EXCL,
+					);
+				await replaceLocalFile(
+					this.#path,
+					`${JSON.stringify(document, null, 2)}\n`,
+				);
+			}
 			this.#document = document;
 			return ("document" in changed ? changed.result : undefined) as Result;
 		});
@@ -309,6 +412,28 @@ export class ClientSettingsStore {
 		}
 		return parsed.data;
 	}
+}
+
+/** Unknown sibling sections are opaque; only schema-owned entries can be normalized. */
+function repairEntries(
+	raw: Readonly<Record<string, unknown>>,
+	schemas: Readonly<Record<string, ZodType>>,
+	defaults: Readonly<Record<string, unknown>>,
+	label: string,
+): { entries: Record<string, unknown>; notices: string[] } {
+	const entries = { ...raw };
+	const notices: string[] = [];
+	for (const [key, schema] of Object.entries(schemas)) {
+		const repaired = repairSettingsEntry(
+			raw[key],
+			schema,
+			defaults[key],
+			`${label}.${key}`,
+		);
+		if (raw[key] !== undefined) entries[key] = repaired.entry;
+		notices.push(...repaired.notices);
+	}
+	return { entries, notices };
 }
 
 function validatedUserEntries(

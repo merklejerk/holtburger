@@ -119,8 +119,8 @@ if (process.argv.includes("--holtburger-mode=client")) {
 		},
 	});
 	contextBridge.exposeInMainWorld("holtburgerSettings", {
-		loadUser(): Promise<unknown> {
-			return ipcRenderer.invoke("settings:load-user");
+		loadUser(defaults: unknown): Promise<unknown> {
+			return ipcRenderer.invoke("settings:load-user", defaults);
 		},
 		saveUserPatch(patch: unknown): Promise<void> {
 			return ipcRenderer.invoke("settings:save-user-patch", patch);
@@ -128,8 +128,12 @@ if (process.argv.includes("--holtburger-mode=client")) {
 		resetUser(settings: unknown): Promise<unknown> {
 			return ipcRenderer.invoke("settings:reset-user", settings);
 		},
-		loadCharacter(characterGuid: number): Promise<unknown> {
-			return ipcRenderer.invoke("settings:load-character", characterGuid);
+		loadCharacter(characterGuid: number, defaults: unknown): Promise<unknown> {
+			return ipcRenderer.invoke(
+				"settings:load-character",
+				characterGuid,
+				defaults,
+			);
 		},
 		saveCharacterPatch(characterGuid: number, patch: unknown): Promise<void> {
 			return ipcRenderer.invoke("settings:save-character-patch", {

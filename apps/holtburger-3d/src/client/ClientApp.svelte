@@ -626,7 +626,7 @@
 			),
 		unavailable: (reasons) =>
 			toastCenter.publish({
-				message: `Character settings unavailable: ${reasons.join("; ")}`,
+				message: `Character settings: ${reasons.join("; ")}`,
 				tone: "warning",
 			}),
 		saveFailed: (error) =>

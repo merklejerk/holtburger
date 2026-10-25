@@ -3,13 +3,123 @@ import { describe, expect, it } from "vitest";
 import {
 	buildEntryPath,
 	collapseRendererArguments,
+	extractElectronLaunchArguments,
 	extractVitePortArguments,
 	partitionClientLaunchArguments,
 	stripClientLaunchArguments,
 } from "./entry-paths.mjs";
 import { parseVitePort, resolveVitePort } from "./dev-port.mjs";
+import { clientDebugEnabled } from "../src/client/client-debug";
 
 describe("development launcher arguments", () => {
+	it.each([[], ["--debug=false"]])(
+		"leaves DevTools closed without an opt-in: %j",
+		(...args) => {
+			expect(extractElectronLaunchArguments(args)).toEqual({
+				args,
+				electronSwitches: [],
+			});
+		},
+	);
+
+	it.each(["--debug", "--debug=true"])(
+		"opens the default DevTools port for %s and preserves renderer diagnostics",
+		(flag) => {
+			expect(extractElectronLaunchArguments([flag])).toEqual({
+				args: [flag],
+				electronSwitches: ["--remote-debugging-port=9222"],
+			});
+		},
+	);
+
+	it.each([
+		["--debug", "--debug-port", "9223"],
+		["--debug-port=9223", "--debug"],
+	])(
+		"overrides the debug port without leaking it into the renderer: %j",
+		(...args) => {
+			expect(extractElectronLaunchArguments(args)).toEqual({
+				args: ["--debug"],
+				electronSwitches: ["--remote-debugging-port=9223"],
+			});
+		},
+	);
+
+	it("allows an assigned DevTools port without renderer instrumentation", () => {
+		expect(
+			extractElectronLaunchArguments(["--debug=false", "--debug-port=0"]),
+		).toEqual({
+			args: ["--debug=false"],
+			electronSwitches: ["--remote-debugging-port=0"],
+		});
+	});
+
+	it.each([
+		["--debug=false", "--debug"],
+		["--debug", "--debug=false"],
+		["--query=debug=false", "--debug"],
+		["--query=debug=true"],
+	])("matches the renderer's effective diagnostics query: %j", (...args) => {
+		const launch = extractElectronLaunchArguments(args);
+		const search = buildEntryPath("", launch.args);
+		expect(launch.electronSwitches.length > 0).toBe(clientDebugEnabled(search));
+	});
+
+	it("partitions client arguments before interpreting renderer and shell flags", () => {
+		const partitioned = partitionClientLaunchArguments([
+			"--account",
+			"ash",
+			"--debug-port",
+			"0",
+			"--debug",
+		]);
+		const launch = extractElectronLaunchArguments(
+			partitioned.rendererArguments,
+		);
+		expect(partitioned.launchArguments).toEqual(["--account", "ash"]);
+		expect(collapseRendererArguments(launch.args)).toEqual([
+			"--query=debug=true",
+		]);
+		expect(launch.electronSwitches).toEqual(["--remote-debugging-port=0"]);
+	});
+
+	it.each(["", "-1", "1.5", "65536", "NaN", "01"])(
+		"rejects invalid debug port %j",
+		(value) => {
+			expect(() =>
+				extractElectronLaunchArguments([`--debug-port=${value}`]),
+			).toThrow("--debug-port must be an integer from 0 to 65535.");
+		},
+	);
+
+	it("rejects missing and duplicate debug port values", () => {
+		for (const args of [["--debug-port"], ["--debug-port", "--debug"]]) {
+			expect(() => extractElectronLaunchArguments(args)).toThrow(
+				"--debug-port requires a value.",
+			);
+		}
+		expect(() =>
+			extractElectronLaunchArguments(["--debug-port=0", "--debug-port=9223"]),
+		).toThrow("Debug port was specified more than once.");
+	});
+
+	it("combines debug and uncapped switches without consuming renderer flags", () => {
+		expect(
+			extractElectronLaunchArguments([
+				"--debug",
+				"--uncapped",
+				"--landblock=0x7fffff",
+			]),
+		).toEqual({
+			args: ["--debug", "--landblock=0x7fffff"],
+			electronSwitches: [
+				"--disable-frame-rate-limit",
+				"--disable-gpu-vsync",
+				"--remote-debugging-port=9222",
+			],
+		});
+	});
+
 	it("forwards world-map cache bypass to main without putting it in the renderer URL", () => {
 		expect(
 			partitionClientLaunchArguments(["--ignore-world-map-cache", "--debug"]),

@@ -74,6 +74,7 @@ const child = spawn(
 		"run",
 		mode === "streaming" ? "dev:client:release" : "dev:client",
 		"--",
+		"--debug-port=0",
 		"--vite-port",
 		"0",
 		"--account",
@@ -84,10 +85,7 @@ const child = spawn(
 	],
 	{
 		cwd: appRoot,
-		env: {
-			...process.env,
-			HOLTBURGER_ELECTRON_REMOTE_DEBUGGING_PORT: "0",
-		},
+		env: { ...process.env },
 		stdio: ["ignore", "pipe", "pipe"],
 	},
 );

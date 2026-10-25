@@ -8,7 +8,7 @@ export function buildEntryPath(
 	args: readonly string[],
 ): string;
 export function collapseRendererArguments(args: readonly string[]): string[];
-/** Shell-only arguments consumed before renderer query construction and Electron startup. */
+/** Consume shell flags and translate the effective debug query after client arguments are partitioned. */
 export function extractElectronLaunchArguments(args: readonly string[]): {
 	args: string[];
 	electronSwitches: string[];

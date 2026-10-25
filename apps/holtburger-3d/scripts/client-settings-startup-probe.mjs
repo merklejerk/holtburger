@@ -47,6 +47,7 @@ const child = spawn(
 		"run",
 		"dev:client",
 		"--",
+		"--debug-port=0",
 		"--vite-port",
 		"0",
 		"--settings-file",
@@ -58,10 +59,7 @@ const child = spawn(
 	],
 	{
 		cwd: directory,
-		env: {
-			...process.env,
-			HOLTBURGER_ELECTRON_REMOTE_DEBUGGING_PORT: "0",
-		},
+		env: { ...process.env },
 		stdio: ["ignore", "pipe", "pipe"],
 	},
 );

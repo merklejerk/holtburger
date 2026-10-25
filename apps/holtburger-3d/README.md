@@ -470,6 +470,15 @@ npm run dev:client:release -- --account YOUR_ACCOUNT --uncapped
 npm run dev:explorer:release -- --uncapped
 ```
 
+Pass `--debug` to enable renderer diagnostics and expose Chrome DevTools on port 9222.
+Use `--debug-port <port>` (or `--debug-port=<port>`) to override the port; `0` requests
+an assigned port. The port option also works on its own without enabling renderer diagnostics.
+
+```bash
+npm run dev:client -- --debug
+npm run dev:explorer -- --debug --debug-port 9223
+```
+
 Unfocused windows still use the app's 10 FPS background limit. Uncapping can increase CPU/GPU use.
 
 The app launchers choose a free loopback port at random by default. Pin one explicitly with

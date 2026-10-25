@@ -86,12 +86,40 @@ export function collapseRendererArguments(args) {
 	return queryPath.length === 0 ? [] : [`--query=${queryPath.slice(1)}`];
 }
 
-/** Consume shell-only flags before renderer query construction and Electron startup. */
+/** Default Chrome DevTools port when renderer diagnostics are enabled. */
+const DEFAULT_DEBUG_PORT = 9222;
+
+/** Consume shell flags and translate the effective debug query after client arguments are partitioned. */
 export function extractElectronLaunchArguments(args) {
 	const remainingArgs = [];
 	const switches = new Set();
-	for (const argument of args) {
+	let debugPort;
+	for (let index = 0; index < args.length; index += 1) {
+		const argument = args[index];
 		const parsed = parseLongArgument(argument);
+		if (parsed.name === "debug-port") {
+			if (debugPort !== undefined) {
+				throw new Error("Debug port was specified more than once.");
+			}
+			let value = parsed.value;
+			if (value === undefined) {
+				value = args[index + 1];
+				if (value === undefined || value.startsWith("--")) {
+					throw new Error("--debug-port requires a value.");
+				}
+				index += 1;
+			}
+			const port = Number(value);
+			if (
+				!/^(0|[1-9][0-9]*)$/.test(value) ||
+				!Number.isSafeInteger(port) ||
+				port > 65_535
+			) {
+				throw new Error("--debug-port must be an integer from 0 to 65535.");
+			}
+			debugPort = port;
+			continue;
+		}
 		if (parsed.name !== "uncapped") {
 			remainingArgs.push(argument);
 			continue;
@@ -101,6 +129,11 @@ export function extractElectronLaunchArguments(args) {
 		}
 		switches.add("--disable-frame-rate-limit");
 		switches.add("--disable-gpu-vsync");
+	}
+	// Use the same query assembly and first-value semantics as the renderer diagnostics flag.
+	const query = new URLSearchParams(buildEntryPath("", remainingArgs));
+	if (debugPort !== undefined || query.get("debug") === "true") {
+		switches.add(`--remote-debugging-port=${debugPort ?? DEFAULT_DEBUG_PORT}`);
 	}
 	return { args: remainingArgs, electronSwitches: [...switches] };
 }

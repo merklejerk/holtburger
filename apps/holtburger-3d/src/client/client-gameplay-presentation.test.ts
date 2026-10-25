@@ -307,7 +307,9 @@ describe("ClientGameplayPresentation", () => {
 		});
 		expect(runtime.portalTransitionRenderTimes).toEqual([1]);
 		expect(runtime.portalTransitionSounds).toEqual(["enter"]);
-		expect(presentation.frame(1_016).rendered).toBe(true);
+		await vi.waitFor(() =>
+			expect(presentation.frame(1_016).rendered).toBe(true),
+		);
 		expect(runtime.portalTransitionSounds).toEqual(["enter"]);
 		await presentation.destroy();
 	});
@@ -374,10 +376,12 @@ describe("ClientGameplayPresentation", () => {
 		expect(transport.acknowledgedWorldReveals).toEqual([]);
 
 		runtime.envCellScopeAvailable = true;
-		expect(presentation.frame(2_000).rendered).toBe(true);
-		expect(runtime.portalTransitions.at(-1)).toMatchObject({
-			kind: "tunnel-to-destination",
-			progress: 0,
+		await vi.waitFor(() => {
+			expect(presentation.frame(2_000).rendered).toBe(true);
+			expect(runtime.portalTransitions.at(-1)).toMatchObject({
+				kind: "tunnel-to-destination",
+				progress: 0,
+			});
 		});
 		expect(transport.acknowledgedWorldReveals).toEqual([]);
 
@@ -484,7 +488,9 @@ describe("ClientGameplayPresentation", () => {
 		expect(() => presentation.readLocationReport()).toThrow(
 			"Presented camera location is unavailable.",
 		);
-		expect(presentation.frame(1_016).rendered).toBe(true);
+		await vi.waitFor(() =>
+			expect(presentation.frame(1_016).rendered).toBe(true),
+		);
 		const player = currentState(playerGuid).dynamic.entities.find(
 			(entity) => entity.identity.guid === playerGuid,
 		);
@@ -541,7 +547,9 @@ describe("ClientGameplayPresentation", () => {
 		});
 
 		await presentation.start();
-		expect(presentation.frame(1_000).rendered).toBe(true);
+		await vi.waitFor(() =>
+			expect(presentation.frame(1_000).rendered).toBe(true),
+		);
 		const center = presentation.samplePreciseJumpRay(420, 290);
 		const right = presentation.samplePreciseJumpRay(740, 290);
 
@@ -596,7 +604,9 @@ describe("ClientGameplayPresentation", () => {
 			resources: fakeOwner(runtime, activeRegion()),
 		});
 		await presentation.start();
-		expect(presentation.frame(1_000).rendered).toBe(true);
+		await vi.waitFor(() =>
+			expect(presentation.frame(1_000).rendered).toBe(true),
+		);
 		await runtime.upsertDynamicEntity({
 			...view(7),
 			display: { level: 6, name: "Drudge" },
@@ -832,10 +842,12 @@ describe("ClientGameplayPresentation", () => {
 			expect(runtime.eligibilityReevaluationCount).toBeGreaterThan(0);
 		});
 		runtime.envCellScopeAvailable = true;
-		expect(presentation.frame(9_000).rendered).toBe(true);
-		expect(runtime.portalTransitions.at(-1)).toMatchObject({
-			kind: "tunnel-to-destination",
-			progress: 0,
+		await vi.waitFor(() => {
+			expect(presentation.frame(9_000).rendered).toBe(true);
+			expect(runtime.portalTransitions.at(-1)).toMatchObject({
+				kind: "tunnel-to-destination",
+				progress: 0,
+			});
 		});
 		expect(presentation.frame(10_000).rendered).toBe(true);
 		expect(runtime.portalTransitions.at(-1)?.kind).toBe(
@@ -907,10 +919,12 @@ describe("ClientGameplayPresentation", () => {
 		);
 		expect(runtime.upserted).toHaveLength(1);
 
-		expect(presentation.frame(2_000).rendered).toBe(true);
-		expect(runtime.portalTransitions.at(-1)).toMatchObject({
-			kind: "tunnel-to-destination",
-			progress: 0,
+		await vi.waitFor(() => {
+			expect(presentation.frame(2_000).rendered).toBe(true);
+			expect(runtime.portalTransitions.at(-1)).toMatchObject({
+				kind: "tunnel-to-destination",
+				progress: 0,
+			});
 		});
 		expect(runtime.portalTransitionSounds).toEqual(["enter", "exit"]);
 		expect(presentation.frame(2_500).rendered).toBe(true);
@@ -957,15 +971,17 @@ describe("ClientGameplayPresentation", () => {
 		await vi.waitFor(() =>
 			expect(presentation.frame(1_032).rendered).toBe(true),
 		);
-		expect(presentation.readDiagnostics().cameraStatus).toMatchObject({
-			kind: "active",
-			clearance: null,
-			renderedReach: 0,
-			placementOutcome: {
-				kind: "fallback",
-				reason: "free-sphere-query",
-			},
-		});
+		await vi.waitFor(() =>
+			expect(presentation.readDiagnostics().cameraStatus).toMatchObject({
+				kind: "active",
+				clearance: null,
+				renderedReach: 0,
+				placementOutcome: {
+					kind: "fallback",
+					reason: "free-sphere-query",
+				},
+			}),
+		);
 		expect(presentation.frame(4_100).rendered).toBe(true);
 		expect(presentation.frame(5_100).rendered).toBe(true);
 		expect(presentation.frame(6_100).rendered).toBe(true);
@@ -1096,7 +1112,11 @@ describe("ClientGameplayPresentation", () => {
 			runtime.snapshotReplacements[0]?.map((entity) => entity.identity.guid),
 		).toEqual([0x0101_0001]);
 
-		const firstFrame = presentation.frame(1_000);
+		const firstFrame = await vi.waitFor(() => {
+			const frame = presentation.frame(1_000);
+			expect(frame.rendered).toBe(true);
+			return frame;
+		});
 		expect(firstFrame.rendered).toBe(true);
 		await vi.waitFor(() => expect(runtime.sceneRequests).toHaveLength(1));
 		expect(runtime.sceneRequests[0]?.target.requested).toMatchObject({

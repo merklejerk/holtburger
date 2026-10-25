@@ -35,7 +35,7 @@
 		type ClientChatFilterTag,
 		type ClientChatLine,
 	} from "../../client/client-chat-policy";
-	import type { ClientLifecycleUiState } from "../../client/client-lifecycle-state";
+	import type { ClientAppPhase } from "../../client/client-app-lifecycle";
 
 	provideAppInputPolicy();
 	/** Showcase geometry follows the available stage, independently of client placement defaults. */
@@ -156,7 +156,7 @@
 	>({ kind: "idle" });
 	let revision = 0;
 	let characters = $state<
-		Extract<ClientLifecycleUiState, { kind: "character-selection" }>
+		Extract<ClientAppPhase, { kind: "character-selection" }>
 	>({
 		kind: "character-selection",
 		maxSlots: 11,

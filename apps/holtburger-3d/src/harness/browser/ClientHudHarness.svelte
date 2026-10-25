@@ -178,7 +178,7 @@
 	import opaqueUrl from "./themes/opaque.css?url&no-inline";
 	import type { FrameRates } from "../../app/frame-rate-sampler";
 	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
-	import type { ClientLifecycleUiState } from "../../client/client-lifecycle-state";
+	import type { ClientAppPhase } from "../../client/client-app-lifecycle";
 	import { ClientInventoryState } from "../../client/client-inventory-state";
 	import { browserUiIconRepository } from "../../app/ui-icon-repository";
 	import ClientGameplayView from "../../client/ClientGameplayView.svelte";
@@ -800,7 +800,7 @@
 	let unrestrictedUse = $state(false);
 	let entryPending = $state(false);
 	let characterState = $state<
-		Extract<ClientLifecycleUiState, { kind: "character-selection" }>
+		Extract<ClientAppPhase, { kind: "character-selection" }>
 	>({
 		kind: "character-selection",
 		maxSlots: 11,
@@ -5356,6 +5356,10 @@
 		></canvas>
 		{#if gameplayCanvas !== null && interactionRoot !== null}
 			<ClientGameplayView
+				canReturnToMenu={true}
+				canDisconnect={true}
+				onReturnToMainMenu={() => void interactionLifecycle.logout()}
+				onDisconnect={() => void interactionLifecycle.disconnect()}
 				bind:this={gameplayView}
 				{emotesEnabled}
 				nearby={nearbyOwner}

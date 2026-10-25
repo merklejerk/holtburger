@@ -559,6 +559,41 @@ describe("preview mount lifecycle through the client service", () => {
 		await expect(owner.destroy()).rejects.toThrow("teardown failed");
 	});
 
+	it("drains a pending replacement after the previous device retirement fails", async () => {
+		const first = device();
+		first.destroy.mockRejectedValue(new Error("retirement failed"));
+		build.mockResolvedValueOnce(first.renderer);
+		const resources = deferred<ObjectPreviewResources>();
+		let resolutions = 0;
+		const owner = service(() =>
+			++resolutions === 1 ? Promise.resolve(RESOURCES) : resources.promise,
+		);
+		const a = owner.open(REQUEST);
+		a.setViewport(VIEWPORT);
+		await flush();
+		frame(100);
+		await a.ready;
+		const b = owner.open(REQUEST);
+		const cancelled = b.ready.catch((error: unknown) => error);
+		await flush();
+		let settled = false;
+		const shutdown = owner.destroy();
+		void shutdown.then(
+			() => {
+				settled = true;
+			},
+			() => {
+				settled = true;
+			},
+		);
+		await flush();
+		expect(settled).toBe(false);
+		resources.resolve(RESOURCES);
+		await expect(shutdown).rejects.toThrow("teardown failed");
+		await expect(cancelled).resolves.toMatchObject({ name: "AbortError" });
+		expect(build).toHaveBeenCalledOnce();
+	});
+
 	it("shutdown drains pending resource resolution and closes admission", async () => {
 		const resources = deferred<ObjectPreviewResources>();
 		const owner = service(() => resources.promise);

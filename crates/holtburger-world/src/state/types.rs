@@ -451,6 +451,32 @@ impl WorldState {
         crate::magic::get_enchanted_resistance(base, &self.player.enchantments, key as u32)
     }
 
+    /// Retire all character-owned runtime data while preserving content and server time.
+    pub fn retire_character(&mut self) {
+        self.entities = EntityManager::new();
+        self.player = PlayerState {
+            enchantments: crate::enchantments::PlayerEnchantments::with_rules(
+                crate::enchantments::EnchantmentRules::from_catalog(&self.spell_catalog),
+            ),
+            ..PlayerState::new()
+        };
+        self.storage = Default::default();
+        self.motion_runtimes = MotionRuntimeRegistry::new();
+        self.scene = SpatialScene::new();
+        self.housing = Default::default();
+        self.vendor = None;
+        self.fellowship = None;
+        self.friends = None;
+        self.contracts = None;
+        self.squelch = None;
+        self.allegiance = None;
+        self.trade = None;
+        self.world_container = super::WorldContainerState::Closed;
+        self.attachments = Default::default();
+        self.entity_lifecycle = Default::default();
+        self.self_movement_capabilities_override = None;
+    }
+
     pub fn new(bootstrap: Arc<WorldBootstrap>) -> Self {
         Self {
             weenie_types: bootstrap.weenie_types.clone(),

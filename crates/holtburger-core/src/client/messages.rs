@@ -333,6 +333,20 @@ impl ClientRuntime {
             return Ok(Vec::new());
         }
         let message = message.unwrap();
+        // After F653 retires the character, only account/lifecycle replies may cross the
+        // gap before ACE sends the refreshed roster. Late world packets cannot restore it.
+        if self.state == ClientState::LoggingOut
+            && self.world.player.guid == Guid::NULL
+            && !matches!(
+                message,
+                GameMessage::CharacterList(_)
+                    | GameMessage::ServerName(_)
+                    | GameMessage::CharacterError(_)
+                    | GameMessage::AccountBoot(_)
+            )
+        {
+            return Ok(Vec::new());
+        }
 
         log::debug!("GameMessage: {:?}", message);
 
@@ -455,6 +469,17 @@ impl ClientRuntime {
             GameMessage::UpdatePosition(_) => Ok(()),
             GameMessage::UpdateMotion(_) => Ok(()),
             GameMessage::AutonomousPosition(_) => Ok(()),
+            GameMessage::CharacterLogOff => {
+                // Retail ExecuteLogOff (acclient.c:378669) retires the character, retaining login.
+                // ACE Session.SendFinalLogOffMessages follows this ACK with a fresh roster.
+                if matches!(
+                    self.state,
+                    ClientState::InWorld | ClientState::EnteringWorld | ClientState::LoggingOut
+                ) {
+                    self.retire_logged_out_character();
+                }
+                Ok(())
+            }
             GameMessage::CharacterList(data) => {
                 self.event_ordering = None;
                 self.clear_busy_operation();
@@ -985,11 +1010,19 @@ impl ClientRuntime {
                     ActionResultSource::Wire,
                     ActionResultReason::Character(error),
                 );
+                if error == CharacterError::Logoff
+                    && self.state == ClientState::LoggingOut
+                    && self.world.player.guid != Guid::NULL
+                {
+                    self.state = ClientState::InWorld;
+                    self.send_status_event();
+                }
                 // ACE terminates an already-logged-in account with CharacterError.Logon. Treat
                 // this authentication edge as a typed server disconnect instead of leaving the
                 // client waiting for the generic receive timeout.
                 if error == CharacterError::Logon && self.authenticating {
                     self.authenticating = false;
+                    self.exit_diagnostic = Some("The server rejected the login request.".into());
                     self.set_exit_cause(ClientExitCause::ServerDisconnect);
                     self.state = ClientState::Disconnected;
                     self.send_status_event();
@@ -998,6 +1031,7 @@ impl ClientRuntime {
             }
             GameMessage::AccountBoot(data) => {
                 let reason = self.character_selection.handle_boot_account(*data);
+                self.exit_diagnostic = Some(reason.clone());
                 self.set_exit_cause(ClientExitCause::ServerDisconnect);
                 self.state = ClientState::Disconnected;
                 self.send_status_event();

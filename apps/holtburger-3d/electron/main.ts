@@ -1,3 +1,7 @@
+import {
+	ClientWindowClose,
+	CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
+} from "./client-window-close.js";
 import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from "electron";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
@@ -60,6 +64,8 @@ if (!app.isPackaged) {
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 let hostClient: SidecarHostClient | undefined;
 let quitting = false;
+/** Client window close joins renderer preparation before native store/process shutdown. */
+let clientWindowClose: ClientWindowClose | undefined;
 let exitCode = 0;
 let fatalReported = false;
 let flushClientSettings: (() => Promise<void>) | undefined;
@@ -187,27 +193,6 @@ async function startHost(
 	connected = true;
 	for (const event of hostEventNamesForMode(mode)) {
 		await client.listen(event, (payload) => {
-			if (event === "client-exit-requested") {
-				const cause =
-					typeof payload === "object" &&
-					payload !== null &&
-					"cause" in payload &&
-					typeof payload.cause === "string"
-						? payload.cause
-						: undefined;
-				const diagnostic =
-					typeof payload === "object" &&
-					payload !== null &&
-					"diagnostic" in payload &&
-					typeof payload.diagnostic === "string"
-						? payload.diagnostic
-						: "client host requested application exit";
-				// Explicit disconnect and orderly app shutdown are terminal lifecycle states, not
-				// failures. Connection, startup, and runtime failures remain whole-app fatal.
-				if (cause !== "explicit-disconnect" && cause !== "host-shutdown") {
-					reportFatalError("Holtburger client stopped", new Error(diagnostic));
-				}
-			}
 			if (!window.isDestroyed())
 				window.webContents.send("host:event", { event, payload });
 		});
@@ -235,17 +220,23 @@ function installIpcBridge(
 	startup: ClientLaunchConfiguration | undefined,
 ): void {
 	let clientLaunch: Promise<void> | undefined;
-	const applicationContents = window.webContents;
-	ipcMain.handle("host:invoke", async (event, request: unknown) => {
-		if (
-			applicationContents.isDestroyed() ||
-			event.sender !== applicationContents ||
-			event.senderFrame !== applicationContents.mainFrame
-		) {
+	ipcMain.handle("client:start", async (event) => {
+		requireApplicationFrame(event, window);
+		if (quitting)
 			throw new Error(
-				"host requests are accepted only from the application frame",
+				"Client launch is unavailable while the application is closing.",
 			);
-		}
+		if (mode !== "client" || startup === undefined)
+			throw new Error("Client startup is unavailable in this application mode");
+		const client = await hostReady.promise;
+		if (quitting)
+			throw new Error("Client launch was cancelled by application close.");
+		// Memoize the sole launch attempt; credentials remain private to the Electron main process.
+		clientLaunch ??= client.startClient(startup);
+		await clientLaunch;
+	});
+	ipcMain.handle("host:invoke", async (event, request: unknown) => {
+		requireApplicationFrame(event, window);
 		if (
 			typeof request !== "object" ||
 			request === null ||
@@ -263,18 +254,6 @@ function installIpcBridge(
 		if (!isHostCommandArguments(args))
 			throw new Error("host command arguments must be an object");
 		const client = await hostReady.promise;
-		// The lifecycle owner installs all event listeners before its first snapshot request.
-		// Launch here so login popups cannot arrive while the renderer is still loading.
-		if (
-			request.command === "request_client_current_state" &&
-			startup !== undefined
-		) {
-			clientLaunch ??= client.startClient(startup).catch((error: unknown) => {
-				reportFatalError("Holtburger client failed to start", error);
-				throw error;
-			});
-			await clientLaunch;
-		}
 		return client.invoke(request.command, args);
 	});
 }
@@ -283,6 +262,11 @@ function requireApplicationFrame(
 	event: Electron.IpcMainInvokeEvent,
 	window: BrowserWindow,
 ): void {
+	if (
+		clientWindowClose !== undefined &&
+		!clientWindowClose.acceptsRendererRequests
+	)
+		throw new Error("Client renderer request admission is closed.");
 	const applicationContents = window.webContents;
 	if (
 		applicationContents.isDestroyed() ||
@@ -402,6 +386,9 @@ function createWindow(
 	window.once("ready-to-show", () => window.show());
 	window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 	window.webContents.on("render-process-gone", (_event, details) => {
+		clientWindowClose?.rendererUnavailable(
+			`Client renderer stopped: ${details.reason}.`,
+		);
 		if (quitting) return;
 		reportFatalError(
 			"Holtburger 3D renderer stopped",
@@ -596,6 +583,71 @@ app.whenReady().then(async () => {
 		);
 		flushClientSettings = installWindowSettings(window, settingsStore);
 	}
+
+	if (entry.mode === "client") {
+		const close = new ClientWindowClose({
+			deadlineMs: CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
+			prepareRenderer: () => {
+				if (
+					window.isDestroyed() ||
+					window.webContents.isDestroyed() ||
+					fatalReported
+				)
+					throw new Error(
+						"Client renderer is unavailable for close preparation.",
+					);
+				window.webContents.send("client:prepare-close");
+			},
+			shutdownNative: async () => {
+				const results = await Promise.allSettled([
+					hostClient?.shutdown() ?? Promise.resolve(),
+					flushClientSettings?.() ?? Promise.resolve(),
+					visualCache?.close() ?? Promise.resolve(),
+				]);
+				const failures = results.filter(
+					(result): result is PromiseRejectedResult =>
+						result.status === "rejected",
+				);
+				if (failures.length)
+					throw new AggregateError(
+						failures.map((result) => result.reason),
+						"Application shutdown failed",
+					);
+			},
+			reportFailure: (error) => {
+				exitCode = 1;
+				console.error("application shutdown failed", error);
+			},
+			exit: () => app.exit(exitCode),
+		});
+		clientWindowClose = close;
+		window.on("close", (event) => {
+			event.preventDefault();
+			quitting = true;
+			void close.request();
+		});
+		window.webContents.on(
+			"did-start-navigation",
+			(_event, _url, isInPlace, isMainFrame) => {
+				if (isMainFrame && !isInPlace && close.preparing)
+					close.rendererUnavailable(
+						"Client renderer navigated during close preparation.",
+					);
+			},
+		);
+		ipcMain.handle("client:request-close", (event) => {
+			if (!close.acceptsRendererRequests) return;
+			requireApplicationFrame(event, window);
+			quitting = true;
+			void close.request();
+		});
+		ipcMain.handle("client:prepared-close", (event, payload: unknown) => {
+			// A timed-out/finished close ignores late acknowledgements without reopening admission.
+			if (!close.preparing) return;
+			requireApplicationFrame(event, window);
+			close.acceptPreparation(payload);
+		});
+	}
 	installIpcBridge(window, entry.mode, entry.clientStartup);
 	try {
 		await startHost(window, entry.mode, entry.ignoreWorldMapCache);
@@ -612,6 +664,12 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", (event) => {
+	if (clientWindowClose !== undefined) {
+		event.preventDefault();
+		quitting = true;
+		void clientWindowClose.request();
+		return;
+	}
 	if (
 		quitting ||
 		(!hostClient &&

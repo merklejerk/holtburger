@@ -231,6 +231,7 @@ impl ClientRuntime {
 
                     if now.duration_since(self.session.last_recv_time) > super::connection::CONNECTION_TIMEOUT {
                         log::warn!("Connection timed out (no data for {}s)", super::connection::CONNECTION_TIMEOUT.as_secs());
+                        self.exit_diagnostic = Some(format!("Connection timed out: no server traffic for {} seconds.", super::connection::CONNECTION_TIMEOUT.as_secs()));
                         self.set_exit_cause(ClientExitCause::ServerDisconnect);
                         self.state = ClientState::Disconnected;
                         let _ = self.client_view_event_tx.send(ClientViewEvent::Disconnected);

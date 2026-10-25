@@ -216,6 +216,7 @@ export async function probeClientTheme(
 			}
 			reportConsoleError(...args);
 		};
+		window.holtburgerClient = { quit: async () => {}, onPrepareClose: () => () => {}, start: async () => { throw new Error("Theme harness: no live connection"); } };
 		window.holtburgerHost = {
 			listen: async () => 1,
 			unlisten: async () => {},

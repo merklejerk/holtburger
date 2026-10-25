@@ -31,7 +31,7 @@
 	} from "../../client/client-character-creation-contract";
 	import type { CharacterCreationServices } from "../../client/client-character-creation";
 	import type { CharacterManagementState } from "../../client/client-host-contract";
-	import type { ClientLifecycleUiState } from "../../client/client-lifecycle-state";
+	import type { ClientAppPhase } from "../../client/client-app-lifecycle";
 	import type {
 		ObjectPreviewResources,
 		ObjectPreviewHandle,
@@ -63,7 +63,7 @@
 	}: Props = $props();
 	let root: HTMLDivElement;
 	let selection = $state.raw<
-		Extract<ClientLifecycleUiState, { kind: "character-selection" }>
+		Extract<ClientAppPhase, { kind: "character-selection" }>
 	>({
 		kind: "character-selection",
 		maxSlots: 10,

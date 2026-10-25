@@ -61,6 +61,93 @@ class FakeTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientCameraSession", () => {
+	it("cancels registration before its command reply without an unhandled receipt rejection", async () => {
+		const transport = new FakeTransport();
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		let release: () => void = () => {
+			throw new Error("Gate not initialized.");
+		};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const original = transport.invoke.bind(transport);
+		const invoke = vi
+			.spyOn(transport, "invoke")
+			.mockImplementation(async (command, args) => {
+				if (command === "start_client_camera") await gate;
+				await original(command, args);
+			});
+		const camera = new ClientCameraSession(lifecycle);
+		const cancelled = expect(
+			camera.start(TARGET, DISTANCE, [0, 0, -1], PROJECTION),
+		).rejects.toMatchObject({ name: "AbortError" });
+		await vi.waitFor(() =>
+			expect(invoke).toHaveBeenCalledWith(
+				"start_client_camera",
+				expect.anything(),
+			),
+		);
+		await camera.stop();
+		await cancelled;
+		expect(camera.status()).toEqual({ kind: "stopped" });
+		release();
+		await vi.waitFor(() =>
+			expect(
+				transport.calls.some((call) => call.command === "stop_client_camera"),
+			).toBe(true),
+		);
+		expect(camera.status()).toEqual({ kind: "stopped" });
+		camera.destroy();
+		lifecycle.stop();
+	});
+	it("keeps replacement callbacks and receipt identity separate from a cancelled same-target start", async () => {
+		const transport = new FakeTransport();
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const original = transport.invoke.bind(transport);
+		vi.spyOn(transport, "invoke").mockImplementation(async (command, args) => {
+			if (command === "start_client_camera") {
+				transport.calls.push({ command, args });
+				return;
+			}
+			await original(command, args);
+		});
+		const camera = new ClientCameraSession(lifecycle);
+		const first = expect(
+			camera.start(TARGET, DISTANCE, [0, 0, -1], PROJECTION),
+		).rejects.toMatchObject({ name: "AbortError" });
+		await vi.waitFor(() =>
+			expect(
+				transport.calls.filter(
+					(call) => call.command === "start_client_camera",
+				),
+			).toHaveLength(1),
+		);
+		const next = camera.start(TARGET, DISTANCE, [0, 0, -1], PROJECTION);
+		await first;
+		transport.emit("client-camera-started", IDENTITY);
+		await vi.waitFor(() =>
+			expect(
+				transport.calls.filter(
+					(call) => call.command === "start_client_camera",
+				),
+			).toHaveLength(2),
+		);
+		transport.emit("client-camera-started", {
+			...IDENTITY,
+			cameraGeneration: IDENTITY.cameraGeneration + 1,
+		});
+		await next;
+		expect(camera.status()).toMatchObject({
+			kind: "awaiting-first-path",
+			identity: { cameraGeneration: IDENTITY.cameraGeneration + 1 },
+		});
+		await camera.stop();
+		camera.destroy();
+		lifecycle.stop();
+	});
+
 	it("keeps character and camera on one playback instant through bursty delivery", async () => {
 		const transport = new FakeTransport();
 		const lifecycle = new ClientLifecycleSession(transport);
@@ -292,6 +379,29 @@ describe("ClientCameraSession", () => {
 		);
 		expect(camera.acknowledgedProjection(101)?.revision).toBe(1);
 	});
+
+	it.each(["client-lifecycle-changed", "client-exit-requested"] as const)(
+		"retires the camera locally after terminal %s without sending a stop",
+		async (event) => {
+			const transport = new FakeTransport();
+			const lifecycle = new ClientLifecycleSession(transport);
+			await lifecycle.start();
+			const camera = new ClientCameraSession(lifecycle);
+			await camera.start(TARGET, DISTANCE, [0, 0, -1], PROJECTION);
+			transport.calls.length = 0;
+			transport.emit(
+				event,
+				event === "client-lifecycle-changed"
+					? { kind: "exiting", cause: "server-disconnect" }
+					: { cause: "server-disconnect", diagnostic: "Server maintenance" },
+			);
+			await camera.stop();
+			expect(camera.status()).toEqual({ kind: "stopped" });
+			expect(transport.calls).toEqual([]);
+			await camera.destroy();
+			lifecycle.stop();
+		},
+	);
 
 	it("drops stale generations and clears projection/path state on stop", async () => {
 		const transport = new FakeTransport();

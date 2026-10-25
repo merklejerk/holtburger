@@ -1,3 +1,9 @@
+import {
+	abortError,
+	isAbortError,
+	awaitWithAbort,
+} from "../lib/async-lifetime";
+import { ClientCameraRegistrations } from "./client-camera-registrations";
 import { ClientAppraisalRequests } from "./client-appraisal-requests";
 import {
 	salvagePreviewRequestSchema,
@@ -315,6 +321,7 @@ type ClientCommandName = Extract<
 	| "cancel_client_precise_jump"
 	| "acknowledge_client_world_reveal"
 	| "stop_client_camera"
+	| "logout_client"
 	| "disconnect_client"
 >;
 type ClientEventName = Extract<
@@ -600,6 +607,7 @@ export type ClientLifecycleSessionEvent =
 			readonly type: "camera-started";
 			readonly receipt: ClientCameraStartReceipt;
 	  }
+	| { readonly type: "camera-error"; readonly message: string }
 	| { readonly type: "camera"; readonly tick: ClientCameraTick }
 	| {
 			readonly type: "presentation-tick";
@@ -619,6 +627,14 @@ export type ClientLifecycleSessionEvent =
  * ignored by the injected mirror while a replacement snapshot is pending, so receiver loss cannot
  * leave a plausible but incomplete client scene.
  */
+/** Startup withdrawal and live authority observation have distinct retirement points. */
+interface SessionAttachment {
+	readonly events: AbortController;
+	readonly startup: AbortController;
+	readonly completion: Promise<void>;
+	readonly unlisteners: (() => void)[];
+}
+
 export class ClientLifecycleSession {
 	/** Latest submitted snapshot names outlive shortcut removal, without retaining past activations. */
 	#equipmentNames = new Map<number, string>();
@@ -636,11 +652,13 @@ export class ClientLifecycleSession {
 	readonly allegiance: ClientAllegianceState;
 	readonly mirror: DynamicEntityMirror;
 	readonly #transport: ClientLifecycleTransport;
+	/** Native camera registration and command admission belong to the session, not a driver. */
+	readonly #cameras: ClientCameraRegistrations;
 	readonly #listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
 	/** Shared semantic source for inventory, selection, and selected display. */
 	readonly entities = new ClientEntityMirror();
 	readonly #dynamicSession: DynamicEntitySession;
-	#unlisten: readonly (() => void)[] | null = null;
+	#attachment: SessionAttachment | null = null;
 	readonly #partyUpdates: ClientPartyUpdates;
 	/** Cold membership/HUD publication excludes roster and vital updates. */
 	#partyPresence = { inParty: false, hudPresent: false };
@@ -664,6 +682,19 @@ export class ClientLifecycleSession {
 		mirror = new DynamicEntityMirror(),
 	) {
 		this.#transport = transport;
+		this.#cameras = new ClientCameraRegistrations({
+			start: async (request) => {
+				await transport.invoke("start_client_camera", { request });
+			},
+			stop: async (request) => {
+				await transport.invoke("stop_client_camera", { request });
+			},
+			report: (error) =>
+				this.#emit({
+					type: "camera-error",
+					message: error instanceof Error ? error.message : String(error),
+				}),
+		});
 		this.appraisals = new ClientAppraisalRequests(async (guid) => {
 			await transport.invoke(
 				"examine_client_entity",
@@ -718,9 +749,14 @@ export class ClientLifecycleSession {
 		});
 	}
 
-	/** Install every authority listener, then request one atomic replacement snapshot. */
-	async start(): Promise<void> {
-		if (this.#unlisten !== null) return;
+	/** Install every listener before optional authority startup, then request an atomic snapshot.
+	 * Omit startup when attaching to an already-running authority (for example diagnostic harnesses).
+	 */
+	start(options?: {
+		readonly startAuthority: () => Promise<void>;
+	}): Promise<void> {
+		if (this.#attachment !== null) return this.#attachment.completion;
+		this.#cameras.open();
 		this.#serverClock = null;
 		this.#state = emptyState();
 		this.#resetCharacterLists();
@@ -729,31 +765,71 @@ export class ClientLifecycleSession {
 		this.#vendor = null;
 		this.#housing = emptyHousing();
 		this.#trade = { trade: null, pending_items: [] };
-		let siblingUnlisteners: readonly (() => void)[] = [];
+		const attachment: SessionAttachment = {
+			events: new AbortController(),
+			startup: new AbortController(),
+			unlisteners: [],
+			completion: Promise.resolve().then(() =>
+				this.#attach(attachment, options),
+			),
+		};
+		this.#attachment = attachment;
+		return attachment.completion;
+	}
+	async #attach(
+		attachment: SessionAttachment,
+		options: { readonly startAuthority: () => Promise<void> } | undefined,
+	): Promise<void> {
+		const signal = AbortSignal.any([
+			attachment.startup.signal,
+			attachment.events.signal,
+		]);
 		try {
+			signal.throwIfAborted();
 			await this.#dynamicSession.start({
+				signal,
 				beforeRequest: async () => {
-					siblingUnlisteners = await this.#listenToSiblingEvents();
-					this.#unlisten = siblingUnlisteners;
+					await this.#listenToSiblingEvents(
+						signal,
+						attachment.events.signal,
+						attachment.unlisteners,
+					);
+					signal.throwIfAborted();
+					if (options !== undefined)
+						await awaitWithAbort(options.startAuthority(), signal);
 				},
 			});
 		} catch (error) {
-			this.#serverClock = null;
-			for (const unlisten of siblingUnlisteners) unlisten();
-			this.#unlisten = null;
-			this.#dynamicSession.stop();
+			if (this.#attachment === attachment) this.#dynamicSession.stop();
+			// An issued native launch can still publish its terminal outcome while presentation retires.
+			if (!isAbortError(error) || attachment.events.signal.aborted) {
+				if (this.#attachment === attachment) this.#serverClock = null;
+				attachment.events.abort(abortError("Client attachment retired."));
+				for (const unlisten of attachment.unlisteners.splice(0)) unlisten();
+				if (this.#attachment === attachment) this.#attachment = null;
+			}
 			throw error;
 		}
+	}
+	/** Withdraw unissued startup stages without losing live authority observation needed for cleanup. */
+	cancelStartup(): void {
+		this.#attachment?.startup.abort(abortError("Client startup withdrawn."));
 	}
 
 	/** Stop all listeners and require replacement state if this owner starts again. */
 	stop(): void {
+		this.#cameras.close();
 		this.#equipmentNames = new Map();
 		this.#partyUpdates.stop();
 		this.#serverClock = null;
 		this.#resetCharacterLists();
-		for (const unlisten of this.#unlisten ?? []) unlisten();
-		this.#unlisten = null;
+		const attachment = this.#attachment;
+		this.#attachment = null;
+		if (attachment !== null) {
+			attachment.startup.abort(abortError("Client session retired."));
+			attachment.events.abort(abortError("Client session retired."));
+			for (const unlisten of attachment.unlisteners.splice(0)) unlisten();
+		}
 		this.#dynamicSession.stop();
 		this.entities.awaitSnapshot();
 		this.#entryRequestGuid = null;
@@ -846,6 +922,8 @@ export class ClientLifecycleSession {
 	/** Submit held drive or relative facing; core owns cadence, sequence numbers, and movement limits. */
 	async replaceDrive(request: ClientDriveRequest): Promise<void> {
 		const validated = decodeClientDriveRequest(request);
+		// Authority already retires held movement on these boundaries; late local release needs no IPC.
+		if (this.#state.lifecycle?.kind !== "in-world") return;
 		await this.#transport.invoke("replace_client_drive", {
 			request: validated,
 		});
@@ -856,6 +934,7 @@ export class ClientLifecycleSession {
 		request: ClientCharacterMotionEventRequest,
 	): Promise<void> {
 		const validated = decodeClientCharacterMotionEventRequest(request);
+		if (this.#state.lifecycle?.kind !== "in-world") return;
 		await this.#transport.invoke("queue_client_character_motion_event", {
 			request: validated,
 		});
@@ -1082,7 +1161,7 @@ export class ClientLifecycleSession {
 
 	/** Cast using complete caller-owned recipient intent; core resolves normal spell routes. */
 	async castSpell(spellId: number, aim: ClientSpellCastAim): Promise<void> {
-		if (this.#unlisten === null)
+		if (this.#attachment === null || this.#attachment.unlisteners.length === 0)
 			throw new Error("Spell session is unavailable.");
 		if (
 			this.#state.lifecycle?.kind !== "in-world" ||
@@ -1188,12 +1267,17 @@ export class ClientLifecycleSession {
 	}
 
 	/** Register a client camera generation; its authority receipt arrives on the sibling event. */
-	async startCamera(request: ClientCameraStartRequest): Promise<void> {
-		await this.#transport.invoke("start_client_camera", { request });
+	registerCamera(
+		request: ClientCameraStartRequest,
+		signal: AbortSignal,
+	): Promise<ClientCameraIdentity> {
+		return this.#cameras.register(request, signal);
 	}
 
 	async setCameraIntent(request: ClientCameraIntentRequest): Promise<void> {
-		await this.#transport.invoke("set_client_camera_intent", { request });
+		await this.#cameras.command(async () => {
+			await this.#transport.invoke("set_client_camera_intent", { request });
+		});
 	}
 
 	/** Requests a player-only override; the accepted setting arrives through the host event. */
@@ -1206,7 +1290,9 @@ export class ClientLifecycleSession {
 	async setCameraClearance(
 		request: ClientCameraClearanceRequest,
 	): Promise<void> {
-		await this.#transport.invoke("set_client_camera_clearance", { request });
+		await this.#cameras.command(async () => {
+			await this.#transport.invoke("set_client_camera_clearance", { request });
+		});
 	}
 
 	/** Replace the queued precise-jump aim sample for the active camera generation. */
@@ -1251,19 +1337,47 @@ export class ClientLifecycleSession {
 	}
 
 	async stopCamera(request: ClientCameraIdentity): Promise<void> {
-		await this.#transport.invoke("stop_client_camera", { request });
+		await this.#cameras.stop(request);
+	}
+
+	/** Gracefully leave the active character without ending the login session. */
+	async logout(): Promise<void> {
+		await this.#transport.invoke("logout_client");
+	}
+
+	/** Withdraw camera IPC before the Electron close owner takes over native shutdown. */
+	prepareAuthorityShutdown(): void {
+		this.#cameras.close();
 	}
 
 	/** Ask the authority to disconnect this one client attempt. */
 	async disconnect(): Promise<void> {
+		this.prepareAuthorityShutdown();
 		await this.#transport.invoke("disconnect_client");
 	}
 
-	async #listenToSiblingEvents(): Promise<(() => void)[]> {
-		const unlisteners: (() => void)[] = [];
+	async #listenToSiblingEvents(
+		installSignal: AbortSignal,
+		eventsSignal: AbortSignal,
+		unlisteners: (() => void)[],
+	): Promise<(() => void)[]> {
+		const listen = async (
+			event: ClientEventName,
+			handler: (payload: unknown) => void,
+		): Promise<() => void> => {
+			installSignal.throwIfAborted();
+			const unlisten = await this.#transport.listen(event, (payload) => {
+				if (!eventsSignal.aborted) handler(payload);
+			});
+			if (installSignal.aborted) {
+				unlisten();
+				throw installSignal.reason;
+			}
+			return unlisten;
+		};
 		try {
 			unlisteners.push(
-				await this.#transport.listen("client-book-opened", (payload) =>
+				await listen("client-book-opened", (payload) =>
 					this.#emit({
 						type: "book-opened",
 						receipt: clientBookOpenedSchema.parse(payload),
@@ -1271,7 +1385,7 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-book-updated", (payload) =>
+				await listen("client-book-updated", (payload) =>
 					this.#emit({
 						type: "book-updated",
 						book: clientBookSchema.parse(payload),
@@ -1279,37 +1393,31 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-object-inspection-result",
-					(payload) =>
-						this.#emit({
-							type: "object-inspection-result",
-							result: decodeObjectInspectionResult(payload),
-						}),
+				await listen("client-object-inspection-result", (payload) =>
+					this.#emit({
+						type: "object-inspection-result",
+						result: decodeObjectInspectionResult(payload),
+					}),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-object-preview-result",
-					(payload) =>
-						this.#emit({
-							type: "object-preview-result",
-							result: decodeObjectPreviewResult(payload),
-						}),
+				await listen("client-object-preview-result", (payload) =>
+					this.#emit({
+						type: "object-preview-result",
+						result: decodeObjectPreviewResult(payload),
+					}),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-entity-collision-disabled",
-					(payload) =>
-						this.#emit({
-							type: "entity-collision-disabled",
-							disabled: decodeClientEntityCollisionDisabled(payload),
-						}),
+				await listen("client-entity-collision-disabled", (payload) =>
+					this.#emit({
+						type: "entity-collision-disabled",
+						disabled: decodeClientEntityCollisionDisabled(payload),
+					}),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-state-resyncing", (payload) => {
+				await listen("client-state-resyncing", (payload) => {
 					if (payload !== null)
 						throw new Error("Invalid client resync notification.");
 					this.#state = {
@@ -1326,78 +1434,66 @@ export class ClientLifecycleSession {
 				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-entity-facts-changed",
-					(payload) => {
-						const prepared = this.entities.prepareDelta(
-							clientEntityDeltaSchema.parse(payload),
-						);
-						if (prepared === null) return;
-						this.entities.commit(prepared);
-						this.#emit({ type: "entities" });
-					},
-				),
+				await listen("client-entity-facts-changed", (payload) => {
+					const prepared = this.entities.prepareDelta(
+						clientEntityDeltaSchema.parse(payload),
+					);
+					if (prepared === null) return;
+					this.entities.commit(prepared);
+					this.#emit({ type: "entities" });
+				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-player-spells-updated",
-					(payload) => {
-						const spellIds = decodeClientSpells(payload);
-						this.#state = { ...this.#state, knownSpells: spellIds };
-						this.#emit({ type: "spells", spellIds });
-					},
-				),
+				await listen("client-player-spells-updated", (payload) => {
+					const spellIds = decodeClientSpells(payload);
+					this.#state = { ...this.#state, knownSpells: spellIds };
+					this.#emit({ type: "spells", spellIds });
+				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-player-enchantments-updated",
-					(payload) => {
-						const enchantments = {
-							resolved: decodeResolvedEnchantments(payload),
-							receivedAtMs: performance.now(),
-						};
-						this.#state = { ...this.#state, enchantments };
-						this.#emit({ type: "enchantments", enchantments });
-					},
-				),
+				await listen("client-player-enchantments-updated", (payload) => {
+					const enchantments = {
+						resolved: decodeResolvedEnchantments(payload),
+						receivedAtMs: performance.now(),
+					};
+					this.#state = { ...this.#state, enchantments };
+					this.#emit({ type: "enchantments", enchantments });
+				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-allegiance-updated", (payload) => {
+				await listen("client-allegiance-updated", (payload) => {
 					this.allegiance.update(
 						allegianceUpdatedSchema.parse(payload).allegiance,
 					);
 				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-squelch-updated", (payload) => {
+				await listen("client-squelch-updated", (payload) => {
 					this.squelch.update(squelchUpdatedSchema.parse(payload).squelch);
 				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-contracts-updated", (payload) => {
+				await listen("client-contracts-updated", (payload) => {
 					this.contracts.update(
 						contractsUpdatedSchema.parse(payload).contracts,
 					);
 				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-contract-membership-changed",
-					(payload) => {
-						this.#emit({
-							type: "contract-membership-change",
-							change: contractMembershipChangeSchema.parse(payload),
-						});
-					},
-				),
+				await listen("client-contract-membership-changed", (payload) => {
+					this.#emit({
+						type: "contract-membership-change",
+						change: contractMembershipChangeSchema.parse(payload),
+					});
+				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-friends-updated", (payload) => {
+				await listen("client-friends-updated", (payload) => {
 					this.friends.update(friendsUpdatedSchema.parse(payload).friends);
 				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-party-updated", (payload) => {
+				await listen("client-party-updated", (payload) => {
 					this.#party = z
 						.object({ party: partySnapshotSchema.nullable() })
 						.strict()
@@ -1406,157 +1502,125 @@ export class ClientLifecycleSession {
 				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-character-preferences-updated",
-					(payload) => {
-						const preferences = decodeClientCharacterPreferences(payload);
-						const options = preferences.appearance;
-						this.#partyPreferences = preferences.party;
-						this.friends.updatePreferences(preferences.friends);
-						this.allegiance.updatePreferences(preferences.allegiance);
-						this.#state = { ...this.#state, appearanceOptions: options };
-						this.#emit({ type: "appearance-options", options });
-					},
-				),
+				await listen("client-character-preferences-updated", (payload) => {
+					const preferences = decodeClientCharacterPreferences(payload);
+					const options = preferences.appearance;
+					this.#partyPreferences = preferences.party;
+					this.friends.updatePreferences(preferences.friends);
+					this.allegiance.updatePreferences(preferences.allegiance);
+					this.#state = { ...this.#state, appearanceOptions: options };
+					this.#emit({ type: "appearance-options", options });
+				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-combat-mode-updated",
-					(payload) => {
-						const { mode } = decodeClientCombatMode(payload);
-						this.#state = { ...this.#state, combatMode: mode };
-						this.#emit({ type: "combat-mode", mode });
-					},
-				),
+				await listen("client-combat-mode-updated", (payload) => {
+					const { mode } = decodeClientCombatMode(payload);
+					this.#state = { ...this.#state, combatMode: mode };
+					this.#emit({ type: "combat-mode", mode });
+				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-combat-status-updated",
-					(payload) => {
-						const status = decodeClientCombatStatus(payload);
-						this.#state = { ...this.#state, combat: status };
-						this.#emit({ type: "combat", status });
-					},
-				),
+				await listen("client-combat-status-updated", (payload) => {
+					const status = decodeClientCombatStatus(payload);
+					this.#state = { ...this.#state, combat: status };
+					this.#emit({ type: "combat", status });
+				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-connection-updated", (payload) => {
+				await listen("client-connection-updated", (payload) => {
 					this.#connection = {
 						sample: connectionSampleSchema.parse(payload),
 						receivedAtMs: performance.now(),
 					};
 				}),
-				await this.#transport.listen("client-current-state", (payload) =>
+				await listen("client-current-state", (payload) =>
 					this.#receiveCurrentState(payload),
 				),
-				await this.#transport.listen(
-					"client-recall-destinations-changed",
-					(payload) => {
-						this.#emit({
-							type: "recall-destinations",
-							destinations: recallDestinationsSchema.parse(payload),
-						});
-					},
-				),
-				await this.#transport.listen(
-					"client-map-teleport-capability-changed",
-					(payload) =>
-						this.#emit({
-							type: "map-teleport-capability",
-							allowed: mapTeleportCapabilitySchema.parse(payload),
-						}),
+				await listen("client-recall-destinations-changed", (payload) => {
+					this.#emit({
+						type: "recall-destinations",
+						destinations: recallDestinationsSchema.parse(payload),
+					});
+				}),
+				await listen("client-map-teleport-capability-changed", (payload) =>
+					this.#emit({
+						type: "map-teleport-capability",
+						allowed: mapTeleportCapabilitySchema.parse(payload),
+					}),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-character-sheet-updated",
-					(payload) => {
-						const sheet = characterSheetSchema.nullable().parse(payload);
-						// Character-entry status always republishes the complete sheet. Ignore
-						// delayed updates from a retired entry while no character is active.
-						if (
-							this.#state.lifecycle?.kind !== "in-world" ||
-							(sheet !== null && sheet.character !== this.#state.playerGuid)
-						)
-							return;
-						this.characterSheet.replace(sheet);
-					},
-				),
-				await this.#transport.listen(
-					"client-progression-evaluated",
-					(payload) => {
-						const result = progressionEvaluatedSchema.parse(payload);
-						this.characterSheet.acceptEvaluations(
-							result.requestId,
-							result.evaluations,
-						);
-					},
-				),
-				await this.#transport.listen("client-progression-feedback", (payload) =>
+				await listen("client-character-sheet-updated", (payload) => {
+					const sheet = characterSheetSchema.nullable().parse(payload);
+					// Character-entry status always republishes the complete sheet. Ignore
+					// delayed updates from a retired entry while no character is active.
+					if (
+						this.#state.lifecycle?.kind !== "in-world" ||
+						(sheet !== null && sheet.character !== this.#state.playerGuid)
+					)
+						return;
+					this.characterSheet.replace(sheet);
+				}),
+				await listen("client-progression-evaluated", (payload) => {
+					const result = progressionEvaluatedSchema.parse(payload);
+					this.characterSheet.acceptEvaluations(
+						result.requestId,
+						result.evaluations,
+					);
+				}),
+				await listen("client-progression-feedback", (payload) =>
 					this.characterSheet.acceptFeedback(
 						progressionFeedbackSchema.parse(payload),
 					),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-lifecycle-changed", (payload) =>
+				await listen("client-lifecycle-changed", (payload) =>
 					this.#receiveLifecycle(payload),
 				),
-				await this.#transport.listen(
-					"client-character-management-changed",
-					(payload) => {
-						const state = characterManagementSchema.parse(payload);
-						this.#state = { ...this.#state, characterManagement: state };
-						this.#emit({ type: "character-management", state });
-					},
-				),
+				await listen("client-character-management-changed", (payload) => {
+					const state = characterManagementSchema.parse(payload);
+					this.#state = { ...this.#state, characterManagement: state };
+					this.#emit({ type: "character-management", state });
+				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-player-visual-capture-changed",
-					(payload) => {
-						const capture = playerVisualCaptureSchema.nullable().parse(payload);
-						this.#state = { ...this.#state, playerVisualCapture: capture };
-						this.#emit({ type: "player-visual-capture", capture });
-					},
-				),
+				await listen("client-player-visual-capture-changed", (payload) => {
+					const capture = playerVisualCaptureSchema.nullable().parse(payload);
+					this.#state = { ...this.#state, playerVisualCapture: capture };
+					this.#emit({ type: "player-visual-capture", capture });
+				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
+				await listen(
 					"client-character-motion-capabilities-updated",
 					(payload) => this.#receiveCharacterMotionCapabilities(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-character-motion-feedback",
-					(payload) => this.#receiveCharacterMotionFeedback(payload),
+				await listen("client-character-motion-feedback", (payload) =>
+					this.#receiveCharacterMotionFeedback(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-server-controlled-motion",
-					(payload) => {
-						if (payload !== null)
-							throw new Error("Invalid server-controlled motion notification.");
-						this.#emit({ type: "server-controlled-motion" });
-					},
+				await listen("client-server-controlled-motion", (payload) => {
+					if (payload !== null)
+						throw new Error("Invalid server-controlled motion notification.");
+					this.#emit({ type: "server-controlled-motion" });
+				}),
+			);
+			unlisteners.push(
+				await listen("client-precise-jump-evaluation", (payload) =>
+					this.#receivePreciseJumpEvaluation(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-precise-jump-evaluation",
-					(payload) => this.#receivePreciseJumpEvaluation(payload),
+				await listen("client-precise-jump-transaction-feedback", (payload) =>
+					this.#receivePreciseJumpTransactionFeedback(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-precise-jump-transaction-feedback",
-					(payload) => this.#receivePreciseJumpTransactionFeedback(payload),
-				),
-			);
-			unlisteners.push(
-				await this.#transport.listen("client-death-locations", (payload) => {
+				await listen("client-death-locations", (payload) => {
 					this.#emit({
 						type: "death-locations",
 						result: deathLocationResultSchema.parse(payload),
@@ -1564,34 +1628,25 @@ export class ClientLifecycleSession {
 				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-item-use-target-result",
-					(payload) => {
-						this.#emit({
-							type: "item-use-target-result",
-							result: itemUseTargetResultSchema.parse(payload),
-						});
-					},
-				),
-				await this.#transport.listen(
-					"client-spell-inspection-context",
-					(payload) => {
-						this.#emit({
-							type: "spell-inspection-context",
-							context: spellInspectionContextSchema.parse(payload),
-						});
-					},
-				),
-				await this.#transport.listen(
-					"client-spell-inspection-result",
-					(payload) => {
-						this.#emit({
-							type: "spell-inspection-result",
-							result: spellInspectionResultSchema.parse(payload),
-						});
-					},
-				),
-				await this.#transport.listen("client-salvage-preview", (payload) => {
+				await listen("client-item-use-target-result", (payload) => {
+					this.#emit({
+						type: "item-use-target-result",
+						result: itemUseTargetResultSchema.parse(payload),
+					});
+				}),
+				await listen("client-spell-inspection-context", (payload) => {
+					this.#emit({
+						type: "spell-inspection-context",
+						context: spellInspectionContextSchema.parse(payload),
+					});
+				}),
+				await listen("client-spell-inspection-result", (payload) => {
+					this.#emit({
+						type: "spell-inspection-result",
+						result: spellInspectionResultSchema.parse(payload),
+					});
+				}),
+				await listen("client-salvage-preview", (payload) => {
 					this.#emit({
 						type: "salvage-preview",
 						result: salvagePreviewResultSchema.parse(payload),
@@ -1599,7 +1654,7 @@ export class ClientLifecycleSession {
 				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-salvage-result", (payload) => {
+				await listen("client-salvage-result", (payload) => {
 					this.#emit({
 						type: "salvage-result",
 						result: salvageSubmitResultSchema.parse(payload),
@@ -1607,69 +1662,60 @@ export class ClientLifecycleSession {
 				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-item-use-result", (payload) => {
+				await listen("client-item-use-result", (payload) => {
 					this.#emit({
 						type: "item-use-result",
 						result: itemUseResultSchema.parse(payload),
 					});
 				}),
-				await this.#transport.listen("client-trade-snapshot", (payload) => {
+				await listen("client-trade-snapshot", (payload) => {
 					this.#trade = tradeSnapshotSchema.parse(payload);
 					this.#emit({ type: "trade-snapshot", trade: this.#trade });
 				}),
-				await this.#transport.listen(
-					"client-housing-management-finished",
-					(payload) => {
-						this.#emit({
-							type: "housing-management-finished",
-							result: housingManagementResultSchema.parse(payload),
-						});
-					},
-				),
-				await this.#transport.listen("client-housing-updated", (payload) => {
+				await listen("client-housing-management-finished", (payload) => {
+					this.#emit({
+						type: "housing-management-finished",
+						result: housingManagementResultSchema.parse(payload),
+					});
+				}),
+				await listen("client-housing-updated", (payload) => {
 					this.#housing = housingSnapshotSchema.parse(payload);
 					this.#emit({ type: "housing-updated", housing: this.#housing });
 				}),
-				await this.#transport.listen(
-					"client-housing-payment-finished",
-					(payload) => {
-						this.#emit({
-							type: "housing-payment-finished",
-							result: housingPaymentResultSchema.parse(payload),
-						});
-					},
-				),
-				await this.#transport.listen(
-					"client-housing-crystal-received",
-					(payload) => {
-						const crystal = housingCrystalSchema.parse(payload);
-						this.#housing = { ...this.#housing, crystal };
-						this.#emit({ type: "housing-crystal-received", crystal });
-					},
-				),
-				await this.#transport.listen("client-vendor-snapshot", (payload) => {
+				await listen("client-housing-payment-finished", (payload) => {
+					this.#emit({
+						type: "housing-payment-finished",
+						result: housingPaymentResultSchema.parse(payload),
+					});
+				}),
+				await listen("client-housing-crystal-received", (payload) => {
+					const crystal = housingCrystalSchema.parse(payload);
+					this.#housing = { ...this.#housing, crystal };
+					this.#emit({ type: "housing-crystal-received", crystal });
+				}),
+				await listen("client-vendor-snapshot", (payload) => {
 					this.#vendor = vendorSnapshotSchema.parse(payload);
 					this.#emit({ type: "vendor-snapshot", vendor: this.#vendor });
 				}),
-				await this.#transport.listen("client-vendor-preview", (payload) => {
+				await listen("client-vendor-preview", (payload) => {
 					this.#emit({
 						type: "vendor-preview",
 						result: vendorPreviewSchema.parse(payload),
 					});
 				}),
-				await this.#transport.listen("client-vendor-result", (payload) => {
+				await listen("client-vendor-result", (payload) => {
 					this.#emit({
 						type: "vendor-result",
 						result: vendorResultSchema.parse(payload),
 					});
 				}),
-				await this.#transport.listen("client-vendor-phase", (payload) => {
+				await listen("client-vendor-phase", (payload) => {
 					this.#emit({
 						type: "vendor-phase",
 						phase: vendorPhaseSchema.parse(payload),
 					});
 				}),
-				await this.#transport.listen("client-inventory-preview", (payload) => {
+				await listen("client-inventory-preview", (payload) => {
 					this.#emit({
 						type: "inventory-preview",
 						result: inventoryPreviewResultSchema.parse(payload),
@@ -1677,77 +1723,66 @@ export class ClientLifecycleSession {
 				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-housing-payment-preview",
-					(payload) => {
-						this.#emit({
-							type: "housing-payment-preview",
-							result: housingPreviewResultSchema.parse(payload),
-						});
-					},
+				await listen("client-housing-payment-preview", (payload) => {
+					this.#emit({
+						type: "housing-payment-preview",
+						result: housingPreviewResultSchema.parse(payload),
+					});
+				}),
+			);
+			unlisteners.push(
+				await listen("client-entity-selection-query-result", (payload) =>
+					this.#receiveEntitySelectionQueryResult(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-entity-selection-query-result",
-					(payload) => this.#receiveEntitySelectionQueryResult(payload),
+				await listen("client-local-player-established", (payload) =>
+					this.#receiveLocalPlayerEstablished(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-local-player-established",
-					(payload) => this.#receiveLocalPlayerEstablished(payload),
-				),
-			);
-			unlisteners.push(
-				await this.#transport.listen("client-server-time-updated", (payload) =>
+				await listen("client-server-time-updated", (payload) =>
 					this.#receiveServerTime(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-world-name-updated", (payload) =>
+				await listen("client-world-name-updated", (payload) =>
 					this.#receiveWorldName(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-player-entered", (payload) =>
+				await listen("client-player-entered", (payload) =>
 					this.#receivePlayerEntered(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-player-vitals-updated",
-					(payload) => this.#receiveVitals(payload),
+				await listen("client-player-vitals-updated", (payload) =>
+					this.#receiveVitals(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-entity-health-updated",
-					(payload) =>
-						this.#emit({
-							type: "entity-health",
-							health: decodeClientEntityHealth(payload),
-						}),
+				await listen("client-entity-health-updated", (payload) =>
+					this.#emit({
+						type: "entity-health",
+						health: decodeClientEntityHealth(payload),
+					}),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-action-feedback", (payload) =>
+				await listen("client-action-feedback", (payload) =>
 					this.#receiveActionFeedback(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-confirmation-updated",
-					(payload) => {
-						const { confirmation } = decodeClientConfirmationUpdated(payload);
-						this.#state = { ...this.#state, activeConfirmation: confirmation };
-						this.#emit({ type: "confirmation", confirmation });
-					},
-				),
+				await listen("client-confirmation-updated", (payload) => {
+					const { confirmation } = decodeClientConfirmationUpdated(payload);
+					this.#state = { ...this.#state, activeConfirmation: confirmation };
+					this.#emit({ type: "confirmation", confirmation });
+				}),
 			);
 			for (const type of ["transient-string", "popup-string"] as const) {
 				unlisteners.push(
-					await this.#transport.listen(`client-${type}`, (payload) =>
+					await listen(`client-${type}`, (payload) =>
 						this.#emit({
 							type,
 							message: decodeClientServerText(payload).message,
@@ -1756,7 +1791,7 @@ export class ClientLifecycleSession {
 				);
 			}
 			unlisteners.push(
-				await this.#transport.listen("client-combat-outcome", (payload) => {
+				await listen("client-combat-outcome", (payload) => {
 					const outcome = decodeClientCombatOutcome(payload);
 					const receivedAtMs = performance.now();
 					if (
@@ -1773,12 +1808,12 @@ export class ClientLifecycleSession {
 				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-chat-message", (payload) =>
+				await listen("client-chat-message", (payload) =>
 					this.#receiveChat(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-dynamic-sound-cue", (payload) =>
+				await listen("client-dynamic-sound-cue", (payload) =>
 					this.#emit({
 						type: "dynamic-sound-cue",
 						cue: decodeClientDynamicSoundCue(payload),
@@ -1786,7 +1821,7 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-dynamic-script-cue", (payload) =>
+				await listen("client-dynamic-script-cue", (payload) =>
 					this.#emit({
 						type: "dynamic-script-cue",
 						cue: decodeClientDynamicScriptCue(payload),
@@ -1794,19 +1829,18 @@ export class ClientLifecycleSession {
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen(
-					"client-presentation-discontinuity",
-					(payload) => this.#receivePresentationDiscontinuity(payload),
+				await listen("client-presentation-discontinuity", (payload) =>
+					this.#receivePresentationDiscontinuity(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-camera-started", (payload) =>
+				await listen("client-camera-started", (payload) =>
 					this.#receiveCameraStarted(payload),
 				),
 			);
 
 			unlisteners.push(
-				await this.#transport.listen("client-presentation-tick", (payload) => {
+				await listen("client-presentation-tick", (payload) => {
 					const receivedAtMs = performance.now();
 					const tick = decodeClientPresentationTick(payload);
 					if (this.mirror.isAwaitingSnapshot()) return;
@@ -1819,18 +1853,18 @@ export class ClientLifecycleSession {
 				}),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-camera", (payload) =>
+				await listen("client-camera", (payload) =>
 					this.#receiveCamera(payload),
 				),
 			);
 			unlisteners.push(
-				await this.#transport.listen("client-exit-requested", (payload) =>
+				await listen("client-exit-requested", (payload) =>
 					this.#receiveExit(payload),
 				),
 			);
 			return unlisteners;
 		} catch (error) {
-			for (const unlisten of unlisteners) unlisten();
+			for (const unlisten of unlisteners.splice(0)) unlisten();
 			throw error;
 		}
 	}
@@ -2055,10 +2089,9 @@ export class ClientLifecycleSession {
 	}
 
 	#receiveCameraStarted(payload: unknown): void {
-		this.#emit({
-			type: "camera-started",
-			receipt: decodeClientCameraStartReceipt(payload),
-		});
+		const receipt = decodeClientCameraStartReceipt(payload);
+		this.#cameras.receive(receipt);
+		this.#emit({ type: "camera-started", receipt });
 	}
 
 	#receiveCamera(payload: unknown): void {
@@ -2067,6 +2100,7 @@ export class ClientLifecycleSession {
 
 	#receiveExit(payload: unknown): void {
 		const exit = decodeClientExitRequested(payload);
+		this.#cameras.close();
 		const lifecycle: ClientLifecycle = { kind: "exiting", cause: exit.cause };
 		this.#state = { ...this.#state, lifecycle, exit, activeConfirmation: null };
 		this.#emit({ type: "lifecycle", lifecycle });
@@ -2101,6 +2135,15 @@ export class ClientLifecycleSession {
 	}
 
 	#emit(event: ClientLifecycleSessionEvent): void {
+		const phase =
+			event.type === "lifecycle"
+				? event.lifecycle.kind
+				: event.type === "current-state"
+					? event.state.lifecycle.kind
+					: null;
+		if (phase === "exiting") this.#cameras.close();
+		else if (phase === "logging-out" || phase === "character-selection")
+			this.#cameras.reset();
 		this.appraisals.receive(event);
 		if (event.type === "resyncing") {
 			this.#partyUpdates.setActive(false, true);

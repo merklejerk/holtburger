@@ -563,6 +563,8 @@ pub enum ClientHostCommand {
     StopClientCamera {
         request: holtburger_core::ClientCameraIdentity,
     },
+    /// Graceful character logout, preserving the login session.
+    LogoutClient,
     DisconnectClient,
 }
 
@@ -630,6 +632,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "cancel_client_precise_jump",
     "acknowledge_client_world_reveal",
     "stop_client_camera",
+    "logout_client",
     "disconnect_client",
 ];
 
@@ -666,6 +669,8 @@ pub struct ClientHostRuntime {
     pub content: SharedHostContent,
     event_sink: Arc<dyn ClientEventSink>,
     state: tokio::sync::Mutex<ClientHostState>,
+    /// Retained cancellation permit also covers disconnect before socket construction finishes.
+    stop_startup: tokio::sync::Notify,
 }
 
 impl ClientHostRuntime {
@@ -674,6 +679,7 @@ impl ClientHostRuntime {
         Self {
             content,
             event_sink,
+            stop_startup: tokio::sync::Notify::new(),
             state: tokio::sync::Mutex::new(ClientHostState {
                 started: false,
                 accepting: true,
@@ -693,8 +699,10 @@ impl ClientHostRuntime {
             if state.started {
                 bail!("client startup has already been supplied");
             }
+            if !state.accepting {
+                bail!("client startup is unavailable after session retirement");
+            }
             state.started = true;
-            state.accepting = true;
             Arc::clone(&state.shutdown_requested)
         };
 
@@ -732,7 +740,17 @@ impl ClientHostRuntime {
         if let Some(distance) = startup.melee_max_chase_distance {
             builder = builder.combat_tuning(holtburger_core::ClientCombatTuning::new(distance)?);
         }
-        let mut client = match builder.connect().await {
+        let connection = tokio::select! {
+            result = builder.connect() => result,
+            () = self.stop_startup.notified() => {
+                self.event_sink.publish_client_event(client_exit_requested(
+                    holtburger_core::ClientExitCause::ExplicitDisconnect,
+                    "Disconnected during startup.",
+                ))?;
+                bail!("Client startup was cancelled.");
+            }
+        };
+        let mut client = match connection {
             Ok(client) => client,
             Err(error) => {
                 let _ = self.event_sink.publish_client_event(client_exit_requested(
@@ -749,24 +767,31 @@ impl ClientHostRuntime {
         let camera_input = client.camera_input_handle();
         let (command_tx, command_rx) = tokio::sync::mpsc::unbounded_channel();
         client.set_command_rx(command_rx);
-        let supervisor = run_client_task(
-            client,
-            events,
-            command_tx.clone(),
-            Arc::clone(&self.event_sink),
-            shutdown_requested,
-        );
-        let task = tokio::spawn(async move {
-            if let Err(error) = supervisor.await {
-                log::error!("client supervisor stopped: {error:#}");
-            }
-        });
-
         {
             let mut state = self.state.lock().await;
+            if !state.accepting {
+                self.event_sink.publish_client_event(client_exit_requested(
+                    holtburger_core::ClientExitCause::ExplicitDisconnect,
+                    "Disconnected during startup.",
+                ))?;
+                bail!("Client startup was cancelled.");
+            }
+            // Construct the authority future only after the last startup suspension point.
+            // Holding it across the lock wait embeds the full client loop in startup state.
+            let supervisor = run_client_task(
+                client,
+                events,
+                command_tx.clone(),
+                Arc::clone(&self.event_sink),
+                shutdown_requested,
+            );
+            state.task = Some(tokio::spawn(async move {
+                if let Err(error) = supervisor.await {
+                    log::error!("client supervisor stopped: {error:#}");
+                }
+            }));
             state.command_tx = Some(command_tx.clone());
             state.camera_input = Some(camera_input);
-            state.task = Some(task);
         }
 
         command_tx
@@ -904,7 +929,7 @@ impl ClientHostRuntime {
     }
 
     pub async fn disconnect(&self) -> Result<()> {
-        self.send_command(ClientCommand::Disconnect).await
+        self.retire(false).await
     }
 
     /// Enqueue one validated chat intent; this does not acknowledge server delivery.
@@ -912,30 +937,49 @@ impl ClientHostRuntime {
         self.send_command(request.into_command()?).await
     }
 
-    /// Stops command intake, asks core to disconnect, and bounds the owned task lifetime.
+    /// Application shutdown shares bounded authority retirement with explicit disconnect.
     pub async fn shutdown(&self) {
+        if let Err(error) = self.retire(true).await {
+            log::error!("client shutdown failed: {error:#}");
+        }
+    }
+
+    async fn retire(&self, host_shutdown: bool) -> Result<()> {
         let (sender, task) = {
             let mut state = self.state.lock().await;
             state.accepting = false;
             state
                 .shutdown_requested
-                .store(true, std::sync::atomic::Ordering::Release);
+                .store(host_shutdown, std::sync::atomic::Ordering::Release);
             state.camera_input = None;
             (state.command_tx.take(), state.task.take())
         };
+        self.stop_startup.notify_one();
         if let Some(sender) = sender {
+            // A closed channel already means the authority finished; still join its forwarder.
             let _ = sender.send(ClientCommand::Disconnect);
         }
         if let Some(mut task) = task {
             match tokio::time::timeout(std::time::Duration::from_secs(2), &mut task).await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => log::error!("client supervisor failed: {error}"),
+                Ok(result) => result?,
                 Err(_) => {
                     task.abort();
-                    let _ = task.await;
+                    match task.await {
+                        Err(error) if error.is_cancelled() => {}
+                        result => result?,
+                    }
+                    self.event_sink.publish_client_event(client_exit_requested(
+                        if host_shutdown {
+                            holtburger_core::ClientExitCause::HostShutdown
+                        } else {
+                            holtburger_core::ClientExitCause::ExplicitDisconnect
+                        },
+                        "Disconnected; local session stopped after the shutdown deadline.",
+                    ))?;
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -1333,6 +1377,11 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        LogoutClient => runtime
+            .send_command(ClientCommand::Logout)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         DisconnectClient => runtime
             .disconnect()
             .await
@@ -1344,6 +1393,46 @@ pub async fn dispatch_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No publication is valid when launch is rejected before construction.
+    struct UnexpectedEvents;
+
+    impl ClientEventSink for UnexpectedEvents {
+        fn publish_client_event(
+            &self,
+            _event: crate::client_projection::ClientHostEvent,
+        ) -> Result<()> {
+            panic!("retired startup published an event");
+        }
+    }
+
+    #[tokio::test]
+    async fn disconnect_before_startup_permanently_closes_launch_admission() {
+        let content = SharedHostContent::from_repository(Arc::new(
+            holtburger_content::ContentRepository::from_mounts(Vec::new()),
+        ))
+        .unwrap();
+        let runtime = ClientHostRuntime::from_content(content, Arc::new(UnexpectedEvents));
+        runtime.disconnect().await.unwrap();
+        let error = runtime
+            .start(ClientLaunchConfiguration {
+                host: "127.0.0.1".into(),
+                port: 0,
+                account: "retired-startup-test".into(),
+                password: String::new(),
+                melee_max_chase_distance: None,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "client startup is unavailable after session retirement"
+        );
+        let state = runtime.state.lock().await;
+        assert!(!state.accepting);
+        assert!(!state.started);
+        assert!(state.task.is_none());
+    }
 
     #[test]
     fn soul_emote_request_preserves_alias_for_core_resolution() {

@@ -1,3 +1,8 @@
+import {
+	abortError,
+	isAbortError,
+	awaitWithAbort,
+} from "../lib/async-lifetime";
 import type { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";
 import {
 	ClientPregameBackdrop,
@@ -31,9 +36,12 @@ type GameplayDriver = Pick<
 	"start" | "frame" | "destroy"
 >;
 
-type ActiveDriver =
+type ActiveDriver = (
 	| { readonly kind: "pregame"; readonly driver: ClientPregameBackdrop }
-	| { readonly kind: "gameplay"; readonly driver: GameplayDriver };
+	| { readonly kind: "gameplay"; readonly driver: GameplayDriver }
+) & {
+	/** Cancels the local startup wait before driver retirement joins it. */ readonly lifetime: AbortController;
+};
 
 /** Frame result is pulled imperatively; only changed status is published to cold UI. */
 export type ClientPresentationRootFrame =
@@ -76,6 +84,12 @@ export class ClientPresentationRoot<
 	#requested: ClientPresentationMode | null = null;
 	#revision = 0;
 	#transition: Promise<void> = Promise.resolve();
+	/** Mode selection may stop waiting for shared construction without aborting that construction. */
+	#modeWait = new AbortController();
+	/** Retained after active is cleared, including a failed retirement. */
+	#driverRetirement: Promise<void> = Promise.resolve();
+	/** Gameplay retirement never waits for unrelated pregame content work. */
+	#gameplayRetirement: Promise<void> = Promise.resolve();
 	#switching = false;
 	#closed = false;
 	#failure: { readonly message: string; readonly canRetry: boolean } | null =
@@ -116,6 +130,10 @@ export class ClientPresentationRoot<
 	}
 
 	#switch(mode: ClientPresentationMode): Promise<void> {
+		this.#modeWait.abort(abortError("Presentation mode superseded."));
+		this.#modeWait = new AbortController();
+		const modeSignal = this.#modeWait.signal;
+		this.#active?.lifetime.abort(abortError("Presentation driver superseded."));
 		const revision = ++this.#revision;
 		this.#switching = true;
 		this.#failure = null;
@@ -135,28 +153,38 @@ export class ClientPresentationRoot<
 				}
 				let owner: TOwner;
 				try {
-					owner = await this.#ownerCompletion;
+					owner = await awaitWithAbort(this.#ownerCompletion, modeSignal);
 				} catch (error) {
-					if (!this.#closed && revision === this.#revision)
+					if (
+						!this.#closed &&
+						revision === this.#revision &&
+						!isAbortError(error)
+					)
 						this.#report(error, false);
 					return;
 				}
 				if (this.#closed || revision !== this.#revision) return;
 				const active: ActiveDriver =
 					mode === "pregame"
-						? { kind: "pregame", driver: new ClientPregameBackdrop(owner) }
+						? {
+								kind: "pregame",
+								driver: new ClientPregameBackdrop(owner),
+								lifetime: new AbortController(),
+							}
 						: {
 								kind: "gameplay",
+								lifetime: new AbortController(),
 								driver: this.#dependencies.createGameplay(owner),
 							};
 				// Retain the driver while startup runs so shutdown/failure can still retire it.
 				this.#active = active;
-				await active.driver.start();
+				await awaitWithAbort(active.driver.start(), active.lifetime.signal);
 				if (this.#closed || revision !== this.#revision) return;
 				this.#switching = false;
 			})
 			.catch((error: unknown) => {
 				if (
+					!isAbortError(error) &&
 					!this.#closed &&
 					revision === this.#revision &&
 					this.#failure?.canRetry !== false
@@ -215,25 +243,40 @@ export class ClientPresentationRoot<
 		return message;
 	}
 
-	async #retireDriver(): Promise<void> {
+	/** Cancel and join actual gameplay borrowers, irrespective of requested mode or static loading. */
+	retireGameplay(): Promise<void> {
+		void this.setMode("idle");
+		if (this.#active?.kind === "gameplay") return this.#retireDriver();
+		return this.#gameplayRetirement;
+	}
+
+	#retireDriver(): Promise<void> {
 		const active = this.#active;
-		if (active === null) return;
+		if (active === null) return this.#driverRetirement;
 		this.#active = null;
-		try {
-			await active.driver.destroy();
-		} catch (error) {
-			// A failed withdrawal cannot safely admit a new driver to the same mutable runtime.
-			this.#report(error, false);
-			throw error;
-		} finally {
-			if (active.kind === "gameplay") this.#dependencies.onGameplayRetired();
-		}
+		active.lifetime.abort(abortError("Presentation driver retired."));
+		const retirement = (async () => {
+			try {
+				await active.driver.destroy();
+			} catch (error) {
+				this.#report(error, false);
+				throw error;
+			} finally {
+				if (active.kind === "gameplay") this.#dependencies.onGameplayRetired();
+			}
+		})();
+		this.#driverRetirement = retirement;
+		if (active.kind === "gameplay") this.#gameplayRetirement = retirement;
+		// Status consumers and explicit barrier consumers share the original failure, without an unobserved rejection.
+		void retirement.catch(() => undefined);
+		return retirement;
 	}
 
 	destroy(): Promise<void> {
 		if (this.#retirement !== null) return this.#retirement;
 		this.#closed = true;
 		this.#revision++;
+		this.#modeWait.abort(abortError("Presentation root retired."));
 		this.#abort.abort();
 		return (this.#retirement = this.#destroy());
 	}

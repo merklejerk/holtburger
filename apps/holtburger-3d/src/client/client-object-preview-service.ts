@@ -57,8 +57,18 @@ export class StandardClientObjectPreviewService implements ClientObjectPreviewSe
 	}
 
 	#appendRetirement(retirement: Promise<void>): void {
-		this.#retirement = Promise.all([this.#retirement, retirement]).then(
-			() => undefined,
+		this.#retirement = Promise.allSettled([this.#retirement, retirement]).then(
+			(results) => {
+				const failures = results.flatMap((result) =>
+					result.status === "rejected" ? [result.reason] : [],
+				);
+				if (failures.length === 1) throw failures[0];
+				if (failures.length > 0)
+					throw new AggregateError(
+						failures,
+						"Object preview retirement failed.",
+					);
+			},
 		);
 		// Preserve failure for activation/shutdown while observing it immediately.
 		void this.#retirement.catch((error: unknown) =>

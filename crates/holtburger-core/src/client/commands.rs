@@ -365,6 +365,7 @@ impl ClientRuntime {
             | ClientCommand::RequestCurrentApplicationState
             | ClientCommand::AcknowledgeClientWorldReveal { .. }
             | ClientCommand::QueryEntityDebugInfo(_)
+            | ClientCommand::Logout
             | ClientCommand::Disconnect
             | ClientCommand::Quit => self.handle_system_command(cmd).await,
         }
@@ -1154,6 +1155,7 @@ impl ClientRuntime {
                 }
                 Ok(())
             }
+            ClientCommand::Logout => self.logout().await,
             ClientCommand::Disconnect | ClientCommand::Quit => {
                 log::info!("Disconnecting...");
                 // First attempt a graceful logout from the world

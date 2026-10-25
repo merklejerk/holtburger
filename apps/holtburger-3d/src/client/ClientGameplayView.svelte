@@ -157,7 +157,17 @@
 		type ClientMouseMovementInput,
 	} from "./client-viewport-mouse-controller";
 
+	import ClientSystemMenu from "./ClientSystemMenu.svelte";
+
 	interface Props {
+		/** Authority-admitted application session actions, independent of panel selection. */
+		readonly canReturnToMenu: boolean;
+		/** Full disconnect has independent admission during world entry and portals. */
+		readonly canDisconnect: boolean;
+		/** Graceful character logout returns to the roster. */
+		readonly onReturnToMainMenu: () => void;
+		/** Full server-session retirement. */
+		readonly onDisconnect: () => void;
 		/** Set the current local destination without submitting chat. */
 		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		/** Session-lifetime party presentation owner. */
@@ -384,7 +394,17 @@
 		readonly interactionRoot: HTMLElement;
 	}
 
+	let systemMenu: ClientSystemMenu | undefined;
+	/** Fallback game Escape action after existing cancellation contexts. */
+	export function openSystemMenu(): void {
+		systemMenu?.show();
+	}
+
 	let {
+		canReturnToMenu,
+		canDisconnect,
+		onReturnToMainMenu,
+		onDisconnect,
 		onSetWaypoint,
 		hudLayout,
 		party,
@@ -1033,6 +1053,13 @@
 		<ClientTargetIndicator
 			readFrame={readTargetIndicatorFrame}
 			selectedGuid={selectedEntityGuid}
+		/>
+		<ClientSystemMenu
+			bind:this={systemMenu}
+			canReturn={canReturnToMenu}
+			{canDisconnect}
+			{onReturnToMainMenu}
+			{onDisconnect}
 		/>
 		<button
 			type="button"

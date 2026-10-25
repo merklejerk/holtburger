@@ -33,3 +33,6 @@ png = "0.18.1"
 tempfile.workspace = true
 rayon.workspace = true
 env_logger.workspace = true
+
+[dev-dependencies]
+holtburger-world = { workspace = true, features = ["test-support"] }

@@ -475,6 +475,8 @@ pub enum ClientState {
     CharacterSelection,
     EnteringWorld,
     InWorld,
+    /// Character logout is awaiting the server acknowledgement and refreshed roster.
+    LoggingOut,
     Disconnected,
 }
 
@@ -505,6 +507,8 @@ pub enum ClientLifecycleState {
         cause: ClientWorldActivationCause,
     },
     InWorld,
+    /// The login connection remains alive while the character leaves the world.
+    LoggingOut,
     Exiting {
         cause: ClientExitCause,
     },
@@ -530,7 +534,7 @@ pub struct ClientCharacterSummary {
     pub delete_time: u32,
 }
 
-/// Terminal cause retained for diagnostics and process-exit policy.
+/// Terminal cause retained for diagnostics and client lifecycle presentation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ClientExitCause {
     ExplicitDisconnect,
@@ -1409,6 +1413,8 @@ pub enum ClientCommand {
     AcknowledgeClientWorldReveal {
         world_generation: u64,
     },
+    /// Gracefully leave the character and retain the authenticated session.
+    Logout,
     Disconnect,
     SetFellowshipUpdatesSubscribed {
         enabled: bool,

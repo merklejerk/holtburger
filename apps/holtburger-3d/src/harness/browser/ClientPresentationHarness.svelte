@@ -2,6 +2,8 @@
 	import { onMount, type ComponentProps } from "svelte";
 	import { encode } from "@msgpack/msgpack";
 	import { z } from "zod";
+	import { GamePresentationRuntime } from "../../lib/game/runtime/game-presentation-runtime";
+	import type { ClientClosePreparation } from "../../client/client-close-contract";
 	import ClientApp from "../../client/ClientApp.svelte";
 	import { createClientShortcuts } from "../../client/ClientShortcutDock.svelte";
 	import { createDefaultClientUserSettings } from "../../client/client-settings-defaults";
@@ -66,6 +68,7 @@
 			throw new Error("Client presentation fixture requires contentHost");
 		let closed = false;
 		const previousBridge = window.holtburgerHost;
+		const previousStartup = window.holtburgerClient;
 		const nativeGetContext = HTMLCanvasElement.prototype.getContext;
 		const worlds = new Set<HTMLCanvasElement>();
 		let worldContextRequests = 0;
@@ -77,6 +80,18 @@
 		const connection = loadingGate(controlledLoading);
 		const scene = loadingGate(controlledLoading);
 		const retirement = loadingGate(false);
+		const captureStaging = loadingGate(false);
+		let prepareClose: (() => Promise<ClientClosePreparation>) | null = null;
+		let closeResult: ClientClosePreparation | null = null;
+		// Hold actual borrower withdrawal as well as camera IPC: logout can implicitly retire the native camera.
+		const replaceSnapshot =
+			GamePresentationRuntime.prototype.replaceDynamicEntitySnapshot;
+		GamePresentationRuntime.prototype.replaceDynamicEntitySnapshot =
+			async function (entities) {
+				const completion = replaceSnapshot.call(this, entities);
+				if (entities.length === 0) await retirement.wait();
+				return completion;
+			};
 		const expectedErrors: string[] = [];
 		const reportError = console.error;
 		console.error = (...args) => {
@@ -127,6 +142,8 @@
 					worldCanvases: number;
 					worldContextRequests: number;
 					portalReveals: number;
+					/** User logout requests received by the fixture authority. */
+					logoutRequests: number;
 					/** Actual GPU draws prove the scene progresses behind the opaque loading page. */
 					worldDraws: number;
 					/** Authority delivery and host barriers establish independent readiness ordering. */
@@ -136,13 +153,20 @@
 						connection: ReturnType<typeof connection.read>;
 						scene: ReturnType<typeof scene.read>;
 						retirement: ReturnType<typeof retirement.read>;
+						captures: ReturnType<typeof captureStaging.read>;
 					};
 					expectedErrors: readonly string[];
+					closeResult: ClientClosePreparation | null;
 				};
-				returnSelection(): void;
+				/** Terminal authority edge carrying the connection-loss diagnostic. */
+				failSession(): void;
 				releaseConnection(): void;
 				releaseScene(): void;
 				holdRetirement(): void;
+				holdCaptureStaging(): void;
+				releaseCaptureStaging(): void;
+				publishCapture(): void;
+				beginClose(): void;
 				releaseRetirement(): void;
 				failScene(): void;
 				failConnection(): void;
@@ -175,9 +199,10 @@
 				}),
 			};
 			const authority = pregameGameplayFixture(visual.body);
-			authority.selection(
-				new URLSearchParams(location.search).has("empty-roster"),
+			const emptyRoster = new URLSearchParams(location.search).has(
+				"empty-roster",
 			);
+			authority.selection(emptyRoster);
 			const tokens = new Map<number, () => void>();
 			let token = 0;
 			const iconCanvas = document.createElement("canvas");
@@ -192,14 +217,44 @@
 				atob(iconCanvas.toDataURL().split(",")[1]),
 				(value) => value.charCodeAt(0),
 			);
+			window.holtburgerClient = {
+				quit: async () => {
+					if (prepareClose === null)
+						throw new Error("Client close handler not registered.");
+					closeResult = await prepareClose();
+				},
+				onPrepareClose: (handler) => {
+					prepareClose = handler;
+					return () => {
+						if (prepareClose === handler) prepareClose = null;
+					};
+				},
+				start: async () => {
+					await connection.wait();
+					if (failConnection) {
+						failConnection = false;
+						throw new Error("Presentation fixture: connection failed");
+					}
+					// Authentication progress and the later roster are distinct authority stages.
+					authority.selection(emptyRoster);
+				},
+			};
+			let disconnected = false;
+			let disconnectRequests = 0;
 			window.holtburgerHost = {
 				invoke: async (command, args) => {
+					if (closeResult !== null)
+						throw new Error(`Host request after close preparation: ${command}`);
+					if (
+						disconnected &&
+						(command === "stop_client_camera" ||
+							command === "set_client_camera_intent" ||
+							command === "set_client_camera_clearance")
+					)
+						throw new Error(
+							"Presentation fixture: client host is shutting down",
+						);
 					if (command === "request_client_current_state") {
-						await connection.wait();
-						if (failConnection) {
-							failConnection = false;
-							throw new Error("Presentation fixture: connection failed");
-						}
 						const result = await authority.invoke(command, args);
 						rosterDelivered = true;
 						return result;
@@ -216,7 +271,9 @@
 					}
 					if (command === "stop_client_camera") await retirement.wait();
 					if (command === "disconnect_client") {
-						authority.exit();
+						disconnectRequests++;
+						disconnected = true;
+						authority.exit("explicit-disconnect", "Fixture disconnected");
 						return;
 					}
 					if (command === "host_status")
@@ -262,6 +319,8 @@
 					worldCanvases: worlds.size,
 					worldContextRequests,
 					portalReveals: authority.acknowledgements(),
+					logoutRequests: authority.logoutRequests(),
+					disconnectRequests,
 					worldDraws,
 					rosterDelivered,
 					sceneResponses,
@@ -269,13 +328,37 @@
 						connection: connection.read(),
 						scene: scene.read(),
 						retirement: retirement.read(),
+						captures: captureStaging.read(),
 					},
 					expectedErrors,
+					closeResult,
 				}),
-				returnSelection: () => authority.selection(),
+				failSession: () =>
+					authority.exit(
+						"server-disconnect",
+						"The server closed the connection for maintenance.",
+					),
 				releaseConnection: connection.release,
 				releaseScene: scene.release,
 				holdRetirement: retirement.hold,
+				holdCaptureStaging: captureStaging.hold,
+				releaseCaptureStaging: captureStaging.release,
+				publishCapture: () => {
+					const guid = authority.snapshot().localPlayerGuid;
+					if (guid === null)
+						throw new Error("Fixture capture requires a local player.");
+					authority.capture({ guid, source });
+				},
+				beginClose: () => {
+					if (prepareClose === null)
+						throw new Error("Client close handler not registered.");
+					void prepareClose().then(
+						(result) => {
+							closeResult = result;
+						},
+						(error) => console.error(error),
+					);
+				},
 				releaseRetirement: retirement.release,
 				failScene: () => {
 					failScene = true;
@@ -310,7 +393,9 @@
 						guid === 0x50000043
 							? { kind: "ready", capture: { guid, source } }
 							: { kind: "missing" },
-					stage: async () => {},
+					stage: async () => {
+						await captureStaging.wait();
+					},
 					listenFailures: () => () => {},
 				},
 			};
@@ -326,9 +411,13 @@
 			connection.release();
 			scene.release();
 			retirement.release();
+			captureStaging.release();
+			GamePresentationRuntime.prototype.replaceDynamicEntitySnapshot =
+				replaceSnapshot;
 			console.error = reportError;
 			HTMLCanvasElement.prototype.getContext = nativeGetContext;
 			window.holtburgerHost = previousBridge;
+			window.holtburgerClient = previousStartup;
 			delete bridge.__HOLTBURGER_CLIENT_PRESENTATION__;
 		};
 	});

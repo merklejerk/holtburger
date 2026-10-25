@@ -394,6 +394,7 @@ const lifecycleSchema = z.discriminatedUnion("kind", [
 		})
 		.strict(),
 	z.object({ kind: z.literal("in-world") }).strict(),
+	z.object({ kind: z.literal("logging-out") }).strict(),
 	z
 		.object({
 			kind: z.literal("exiting"),
@@ -1040,7 +1041,6 @@ const entitySelectionQueryResultSchema = z.union([
 ]);
 
 export type ClientLifecycle = z.infer<typeof lifecycleSchema>;
-export type ClientCharacter = z.infer<typeof characterSchema>;
 export type ClientCurrentState = Omit<
 	z.infer<typeof currentStateSchema>,
 	"dynamic"

@@ -430,3 +430,86 @@ pub async fn dispatch_shared_content(
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client_projection::{ClientExitCauseWire, ClientHostEvent, ClientLifecycleWire};
+    use crate::client_runtime::{ClientHostCommand, ClientHostRuntime};
+    use crate::host_event_sink::ClientEventSink;
+    use crate::host_mode::ClientLaunchConfiguration;
+    use crate::protocol::{HostCommand, dispatch};
+    use crate::runtime::HostRuntime;
+    use holtburger_core::client::connection::CONNECTION_TIMEOUT;
+    use tokio::sync::mpsc;
+
+    /// Retains authority events so startup and disconnect are checked through their real boundary.
+    struct EventSink(mpsc::UnboundedSender<ClientHostEvent>);
+
+    impl ClientEventSink for EventSink {
+        fn publish_client_event(&self, event: ClientHostEvent) -> Result<()> {
+            self.0.send(event).map_err(anyhow::Error::from)
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn client_startup_and_disconnect_fit_the_default_worker_stack() {
+        // Keep this asset-independent, but exercise the actual dispatch/start/supervisor futures.
+        let content = SharedHostContent::from_repository(Arc::new(ContentRepository::from_mounts(
+            Vec::new(),
+        )))
+        .unwrap();
+        *content.client_bootstrap.lock().unwrap() = Some(Arc::new(WorldBootstrap::synthetic()));
+        let endpoint = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let port = endpoint.local_addr().unwrap().port();
+        let (sender, mut events) = mpsc::unbounded_channel();
+        let runtime = HostRuntime::Client(ClientHostRuntime::from_content(
+            content,
+            Arc::new(EventSink(sender)),
+        ));
+
+        // Poll the request on a Tokio worker, like stdio dispatch, rather than the test's root.
+        tokio::time::timeout(
+            CONNECTION_TIMEOUT,
+            tokio::spawn(async move {
+                dispatch(
+                    &runtime,
+                    HostCommand::Client(ClientHostCommand::StartClient {
+                        startup: ClientLaunchConfiguration {
+                            host: "127.0.0.1".into(),
+                            port,
+                            account: "startup-stack-test".into(),
+                            password: String::new(),
+                            melee_max_chase_distance: None,
+                        },
+                    }),
+                )
+                .await
+                .unwrap();
+                while !matches!(
+                    events.recv().await.unwrap(),
+                    ClientHostEvent::LifecycleChanged(ClientLifecycleWire::Authenticating)
+                ) {}
+
+                dispatch(
+                    &runtime,
+                    HostCommand::Client(ClientHostCommand::DisconnectClient),
+                )
+                .await
+                .unwrap();
+                loop {
+                    if let ClientHostEvent::ExitRequested(exit) = events.recv().await.unwrap() {
+                        assert!(matches!(
+                            exit.cause,
+                            ClientExitCauseWire::ExplicitDisconnect
+                        ));
+                        break;
+                    }
+                }
+            }),
+        )
+        .await
+        .expect("client startup/disconnect did not complete")
+        .unwrap();
+    }
+}

@@ -52,6 +52,7 @@ pub mod inventory_plan;
 mod inventory_runtime;
 pub mod inventory_storage;
 pub mod item_use;
+mod lifecycle;
 mod map_teleport;
 mod messages;
 mod movement;
@@ -225,6 +226,8 @@ pub struct ClientRuntime {
     spell_inspection: spell_inspection::SpellInspectionState,
     /// Terminal cause selected by the authority before it publishes `Exiting`.
     exit_cause: Option<ClientExitCause>,
+    /// Authority-owned explanation retained after a normal runtime termination.
+    exit_diagnostic: Option<String>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
     /// Monotonic origin shared by focused dynamic-entity snapshots and deltas.
     dynamic_entity_time_origin: Instant,
@@ -364,6 +367,7 @@ impl ClientRuntime {
                 .unwrap_or(ClientLifecycleState::EnteringWorld {
                     character_guid: self.character_selection.character_id.unwrap_or(Guid::NULL),
                 }),
+            ClientState::LoggingOut => ClientLifecycleState::LoggingOut,
             ClientState::Disconnected => ClientLifecycleState::Exiting {
                 cause: self.exit_cause.unwrap_or(ClientExitCause::ServerDisconnect),
             },
@@ -526,13 +530,7 @@ impl ClientRuntime {
             };
             self.emit_character_management();
         }
-        self.reset_combat_engagement();
-        self.clear_busy_operation();
-        self.reset_housing();
-        self.stop_pack_exchange("World lifecycle changed; the last request may still complete");
-        self.stop_equipment_change("Client is exiting; the last request may still complete");
-        self.equipment_set = Default::default();
-        self.pending_combat_mode = None;
+        self.stop_character_actions();
         self.exit_cause = Some(cause);
     }
 

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { APP_BUILD_LABEL } from "../app/app-build";
 	import ClientPregameScreen from "./ClientPregameScreen.svelte";
 	import { onMount } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
@@ -14,7 +13,7 @@
 		type CharacterPreviewState,
 	} from "./client-character-preview";
 	import type { ClientVisualCacheTransport } from "./client-visual-cache-transport";
-	import type { ClientLifecycleUiState } from "./client-lifecycle-state";
+	import type { ClientAppPhase } from "./client-app-lifecycle";
 	import ClientCharacterCreator from "./ClientCharacterCreator.svelte";
 	import {
 		characterManagementPending,
@@ -25,7 +24,7 @@
 
 	/** The authority-owned character roster and current frontend selection. */
 	type CharacterSelectionState = Extract<
-		ClientLifecycleUiState,
+		ClientAppPhase,
 		{ readonly kind: "character-selection" }
 	>;
 
@@ -183,15 +182,11 @@
 			<button
 				type="button"
 				class="pregame-action pregame-quiet ui-button"
-				disabled={entryPending}
 				onclick={() => void onDisconnect()}
 			>
 				<span class="pregame-icon" aria-hidden="true"><DisconnectIcon /></span>
 				Disconnect
 			</button>
-			<span class="selection-build" aria-label="Build information"
-				>{APP_BUILD_LABEL}</span
-			>
 		{/snippet}
 		<div class="character-selection-content">
 			<form class="character-roster" use:focusCharacter onsubmit={handleSubmit}>
@@ -359,12 +354,6 @@
 		.client-actions {
 			display: grid;
 			gap: 12px;
-		}
-		.selection-build {
-			margin-left: auto;
-			margin-right: calc(12px - clamp(20px, 4vw, 64px));
-			text-align: right;
-			overflow-wrap: anywhere;
 		}
 		@media (max-width: 640px) {
 			.character-roster::before {

@@ -144,7 +144,7 @@ fn dat_and_hba_supply_equivalent_payloads_inventory_and_provenance() {
     let payload = vec![0x42; DIRECTORY_NODE_SIZE];
     for (dataset, namespace, id, expected_type) in [
         (1, EOR_PORTAL_NAMESPACE, 0x0100_0001, DatFileType::Model),
-        (2, EOR_CELL_NAMESPACE, 0x0100_0001, DatFileType::IndoorCell),
+        (2, EOR_CELL_NAMESPACE, 0x0007_0219, DatFileType::IndoorCell),
         (
             3,
             holtburger_dat::EOR_LANGUAGE_NAMESPACE,
@@ -172,6 +172,11 @@ fn dat_and_hba_supply_equivalent_payloads_inventory_and_provenance() {
                 (namespace, id, expected_type as u32)
             );
             assert!(!index[0].is_pruned);
+            if namespace == EOR_CELL_NAMESPACE && (0x0100..0xfffe).contains(&(id & 0xffff)) {
+                assert_eq!(repository.archived_env_cells(id), &[id]);
+            } else {
+                assert!(repository.archived_env_cells(id).is_empty());
+            }
             let revisions = repository.mounted_sources();
             assert_eq!(revisions.len(), 1);
             assert_eq!(revisions[0].path, fs::canonicalize(path).unwrap());
@@ -182,6 +187,42 @@ fn dat_and_hba_supply_equivalent_payloads_inventory_and_provenance() {
             );
         }
     }
+}
+
+#[test]
+fn archived_env_cells_are_unique_sorted_and_scoped_to_the_cell_namespace_and_owner() {
+    let root = tempdir().unwrap();
+    let ids = [
+        0x0007_0219,
+        0x0007_0100,
+        0x0008_0100,
+        0x0007_0001,
+        0x0007_fffe,
+        0x0007_ffff,
+    ];
+    let mut writer = HbaWriter::new();
+    for id in ids {
+        writer.add(EOR_CELL_NAMESPACE, id, 0, vec![0]).unwrap();
+    }
+    writer
+        .add(EOR_PORTAL_NAMESPACE, 0x0007_0300, 0, vec![0])
+        .unwrap();
+    writer.write(root.path().join("cells.hba")).unwrap();
+    // Duplicate mounted entries must not become duplicate interior cells.
+    write_hba(
+        &root.path().join("duplicate.hba"),
+        EOR_CELL_NAMESPACE,
+        ids[0],
+        &[0],
+        false,
+    );
+    let repository = ContentRepository::open_selected(root.path()).unwrap();
+    assert_eq!(
+        repository.archived_env_cells(0x0007_ffff),
+        &[0x0007_0100, 0x0007_0219]
+    );
+    assert_eq!(repository.archived_env_cells(0x0008_ffff), &[0x0008_0100]);
+    assert!(repository.archived_env_cells(0x0009_ffff).is_empty());
 }
 
 #[test]

@@ -1,0 +1,21 @@
+/* Common control layout for gameplay settings and the pregame drawer. */
+@layer components {
+	.settings-section {
+		display: grid;
+		gap: 12px;
+	}
+	.settings-section label:not(.ui-checkbox) {
+		display: grid;
+		gap: var(--ui-label-gap);
+	}
+	.settings-section input[type="range"],
+	.settings-section select {
+		width: 100%;
+	}
+	.settings-section input[type="range"] {
+		margin-inline: 0;
+	}
+	.settings-section p {
+		margin: 0;
+	}
+}

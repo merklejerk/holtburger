@@ -1,4 +1,7 @@
 <script lang="ts">
+	import type { Snippet } from "svelte";
+	import ClientPregameSettingsDrawer from "./ClientPregameSettingsDrawer.svelte";
+	import SettingsIcon from "../assets/icons/hud-settings.svg?component";
 	import UiDialog from "../app/UiDialog.svelte";
 	import DeleteIcon from "../assets/icons/character-delete.svg?component";
 	import RestoreIcon from "../assets/icons/character-restore.svg?component";
@@ -36,6 +39,8 @@
 
 	/** Selection remains separate from the explicit world-entry action. */
 	interface Props {
+		/** Live settings content; omitted by roster-only diagnostic surfaces. */
+		readonly settings?: Snippet;
 		/** Current roster and selection. */
 		readonly state: CharacterSelectionState;
 		/** Blocks selection and duplicate activation while entry is being requested. */
@@ -58,6 +63,7 @@
 
 	let {
 		state: selection,
+		settings,
 		entryPending,
 		management,
 		characterActions = null,
@@ -70,6 +76,7 @@
 	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	let creating = $state(false);
+	let settingsOpen = $state(false);
 	// Capture identity and displayed name so selection changes cannot retarget confirmation.
 	let deletion = $state<{
 		readonly guid: number;
@@ -246,6 +253,19 @@
 {:else}
 	<ClientPregameScreen branding="corner" showPortalLogo={true} backdrop={true}>
 		{#snippet footer()}
+			{#if settings !== undefined}
+				<button
+					type="button"
+					class="pregame-action pregame-quiet ui-button"
+					disabled={blocked}
+					aria-haspopup="dialog"
+					aria-expanded={settingsOpen}
+					onclick={() => (settingsOpen = true)}
+				>
+					<span class="pregame-icon" aria-hidden="true"><SettingsIcon /></span
+					>Settings
+				</button>
+			{/if}
 			<button
 				type="button"
 				class="pregame-action pregame-quiet ui-button"
@@ -255,6 +275,11 @@
 				Disconnect
 			</button>
 		{/snippet}
+		{#if settingsOpen && settings !== undefined}
+			<ClientPregameSettingsDrawer onClose={() => (settingsOpen = false)}>
+				{@render settings()}
+			</ClientPregameSettingsDrawer>
+		{/if}
 		<div class="character-selection-content">
 			<form class="character-roster" use:focusCharacter onsubmit={handleSubmit}>
 				<h1 id="character-roster-heading">Choose a character</h1>

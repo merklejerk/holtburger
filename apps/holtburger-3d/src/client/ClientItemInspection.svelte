@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { useItemCooldown } from "../app/item-cooldowns.svelte";
 	import ClientWaypointText from "./ClientWaypointText.svelte";
-	import { formatQuantity } from "../app/quantity-format";
+	import UiQuantity from "../app/UiQuantity.svelte";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import { formatDuration } from "../app/duration-format";
 	import type { SpellReference } from "../app/spell-references";
@@ -314,13 +314,13 @@
 				<div class="inspection-wide">
 					<dt>Item XP</dt>
 					<dd>
-						{formatQuantity(BigInt(progression.totalXp))} / {formatQuantity(
-							BigInt(
+						<UiQuantity value={BigInt(progression.totalXp)} /> / <UiQuantity
+							value={BigInt(
 								advancement.kind === "advancing"
 									? advancement.nextLevelXp
 									: advancement.maxLevelXp,
-							),
-						)}
+							)}
+						/>
 					</dd>
 				</div>
 			</dl>

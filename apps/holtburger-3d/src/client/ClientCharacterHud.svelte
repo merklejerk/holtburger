@@ -79,16 +79,22 @@
 		);
 		return () => window.clearInterval(timer);
 	});
-	const xpPercent = $derived(
-		level === null
-			? 0
-			: BigInt(level.xpForNextLevel) === 0n
-				? 100 // At the level cap there is no remaining level to fill.
-				: progressPercent(
-						BigInt(level.xpIntoLevel),
-						BigInt(level.xpForNextLevel),
-					),
-	);
+	/** Fill and exact hover/accessibility text share the level-cap decision. */
+	const xpProgress = $derived.by(() => {
+		if (level === null) return { percent: 0, description: undefined };
+		const maximum = BigInt(level.xpForNextLevel);
+		// At the level cap, zero means there is no next level to fill.
+		if (maximum === 0n)
+			return {
+				percent: 100,
+				description: `Maximum level · ${formatQuantity(BigInt(level.currentXp))} total XP`,
+			};
+		const current = BigInt(level.xpIntoLevel);
+		return {
+			percent: progressPercent(current, maximum),
+			description: `${formatQuantity(current)} / ${formatQuantity(maximum)} XP`,
+		};
+	});
 
 	function vital(kind: ClientVital["kind"]): ClientVital | undefined {
 		return vitals.find((candidate) => candidate.kind === kind);
@@ -118,8 +124,10 @@
 		<progress
 			class="xp-progress ui-progress"
 			aria-label="Level experience"
+			title={xpProgress.description}
+			aria-valuetext={xpProgress.description}
 			max="100"
-			value={xpPercent}
+			value={xpProgress.percent}
 		></progress>
 	</div>
 	<div

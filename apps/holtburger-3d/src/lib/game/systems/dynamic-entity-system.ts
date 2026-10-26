@@ -772,10 +772,14 @@ export class DynamicEntitySystem<
 		return this.#modelRoots.get(nodeId) ?? null;
 	}
 
-	/** Ordinary presentation visibility also gates particles, including the frame before selection updates. */
-	isVisible(nodeId: SceneNodeId): boolean {
+	/** NoDraw hides model parts, not their emitters (acclient.c:305467,318087-318164). */
+	canRenderParticles(nodeId: SceneNodeId): boolean {
 		const entity = this.#entities.get(nodeId);
-		return entity !== undefined && dynamicModelIsVisible(entity);
+		return (
+			entity !== undefined &&
+			entity.renderable.kind !== "preparing" &&
+			!entity.presentationState.hidden
+		);
 	}
 
 	/** Cold attachment lookup; ordinary mesh parts need no scene node or per-frame scene copy. */
@@ -1978,7 +1982,7 @@ export class DynamicEntitySystem<
 	}
 }
 
-/** Shared draw/particle admission reads the model's complete presentation state at its owning layer. */
+/** Mesh visibility is independent from the eligibility of the model's particle emitters. */
 function dynamicModelIsVisible(
 	entity: DynamicEntityRecord,
 ): entity is DynamicEntityRecord & {

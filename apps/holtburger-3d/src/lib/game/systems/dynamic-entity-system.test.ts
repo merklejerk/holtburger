@@ -68,13 +68,13 @@ describe("DynamicEntitySystem authored ownership", () => {
 			const part = system.requestPartNode(root, 0);
 			if (part === null) throw new Error("Fixture part was not prepared.");
 			expect(system.modelRootOf(part)).toBe(root);
-			expect(system.isVisible(root)).toBe(true);
+			expect(system.canRenderParticles(root)).toBe(true);
 			return part;
 		});
 		system.removeOwner("local");
 		for (const node of [...installation.nodeIds, ...parts]) {
 			expect(system.modelRootOf(node)).toBeNull();
-			expect(system.isVisible(node)).toBe(false);
+			expect(system.canRenderParticles(node)).toBe(false);
 		}
 		await system.destroy();
 	});
@@ -1756,6 +1756,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		});
 		expect(system.getVisiblePresentation(firstNodeId)).toBeNull();
 		expect(system.withSelectionGeometry(firstNodeId, () => true)).toBeNull();
+		expect(system.canRenderParticles(firstNodeId)).toBe(true);
 		system.updatePresentationState(firstNodeId, {
 			cloaked: false,
 			hidden: true,
@@ -1764,6 +1765,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			translucency: 0,
 		});
 		expect(system.getVisiblePresentation(firstNodeId)).toBeNull();
+		expect(system.canRenderParticles(firstNodeId)).toBe(false);
 
 		system.updatePresentationState(firstNodeId, {
 			cloaked: false,

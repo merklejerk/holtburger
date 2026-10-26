@@ -99,13 +99,15 @@ describe("local model presentation preparation", () => {
 				placement: item.source.placementFrame,
 				playback: item.playback,
 				noDraw: item.initialPresentationState.noDraw,
+				hidden: item.initialPresentationState.hidden,
 			})),
 		).toEqual([
 			{
 				scale: new Vec3(0.8, 0.8, 0.8),
 				placement: 0,
 				playback: { kind: "resolved", pose: source.body.pose },
-				noDraw: true,
+				noDraw: false,
+				hidden: true,
 			},
 			{
 				scale: new Vec3(0.5, 0.5, 0.5),
@@ -114,7 +116,8 @@ describe("local model presentation preparation", () => {
 					kind: "resolved",
 					pose: source.attachments[0]?.visual.pose,
 				},
-				noDraw: true,
+				noDraw: false,
+				hidden: true,
 			},
 		]);
 		const body: SceneNodeId = "scene-node:1";

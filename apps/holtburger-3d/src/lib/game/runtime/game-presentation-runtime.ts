@@ -1115,7 +1115,7 @@ export class GamePresentationRuntime {
 		const nodeId = sceneNodeIdOf(target.targetId);
 		const root = nodeId === null ? null : this.#dynamics.modelRootOf(nodeId);
 		return root !== null &&
-			this.#dynamics.isVisible(root) &&
+			this.#dynamics.canRenderParticles(root) &&
 			this.#selectedDynamicNodeIds.has(root)
 			? root
 			: null;
@@ -4602,7 +4602,8 @@ export class GamePresentationRuntime {
 					throw new Error("Installed local model has no presentation source.");
 				this.#dynamics.updatePresentationState(model.nodeId, {
 					...source.initialPresentationState,
-					noDraw: !visible,
+					// Local scene visibility suppresses the whole presentation, including emitters.
+					hidden: !visible,
 				});
 			}
 		};

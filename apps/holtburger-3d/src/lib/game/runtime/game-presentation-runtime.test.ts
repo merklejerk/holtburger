@@ -61,7 +61,8 @@ import { validateTerrainGenerationValues } from "../terrain/terrain-generation-v
 import { compileTerrainCompositionTable } from "../terrain/composition-table";
 import { CLIENT_COMBAT_EFFECTS_TUNING } from "../../../client/client-tuning";
 import type { CombatEffectInstance } from "../systems/combat-effects-system";
-import { SceneGraph } from "../scene";
+import { SceneGraph, type SceneNodeId } from "../scene";
+import { sceneNodeIdOf } from "../scene/utils";
 import { resolveTerrainMaterialTable } from "../terrain/terrain-materials";
 import { resolveTerrainTextureFacts } from "../terrain/types";
 import {
@@ -1600,6 +1601,111 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 				.outcomeCounts,
 		).toEqual({ "owned-by-world": 1 });
 		await runtime.destroy();
+	});
+
+	it("submits explosion particles while NoDraw hides their projectile mesh", async () => {
+		const tableId = "0x34000001" as DatAssetId;
+		const scriptId = "0x33000001" as DatAssetId;
+		const emitterId = "0x32000001" as DatAssetId;
+		const meshId = "0x01000001" as DatAssetId;
+		const explodeCue = 5;
+		let submittedCount = 0;
+		let selectedNodes: readonly SceneNodeId[] = [];
+		const renderer = testRenderer({
+			drawFrame: () => ({
+				...EMPTY_RENDERER_FRAME_FEEDBACK,
+				selectedDynamicNodeIds: selectedNodes,
+			}),
+			particles: {
+				install: async () => {},
+				submit: (ranges) => {
+					submittedCount = ranges.reduce((sum, range) => sum + range.count, 0);
+				},
+				clear() {},
+			},
+		});
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			renderer,
+			{
+				destroy() {},
+				loadPhysicsScript: async () => ({
+					id: scriptId,
+					lengthSeconds: 0,
+					records: [
+						{
+							kind: "create-particle",
+							emitterInfoId: emitterId,
+							emitterId: 1,
+							partIndex: 0,
+							offsetOrigin: acVector3([0, 0, 0]),
+							startTime: 0,
+							authoredOrder: 0,
+						},
+					],
+				}),
+			},
+			{
+				destroy() {},
+				loadPhysicsScriptTable: async () => ({
+					id: tableId,
+					cues: new Map([[explodeCue, [{ maximumIntensity: 1, scriptId }]]]),
+				}),
+			},
+			{
+				destroy() {},
+				loadParticleEmitter: async () => particleEmitterInfo(emitterId, meshId),
+			},
+			{
+				destroy() {},
+				loadParticleMeshes: async () => ({
+					presentations: new Map([
+						[
+							meshId,
+							{ orientation: "authored", presentation: spawnedVisual() },
+						],
+					]),
+					textureDependencies: [],
+				}),
+			},
+		);
+		onTestFinished(() => runtime.destroy());
+		const entity = withPhysicsEffectTable(
+			spawnedEntity(7, 3, { noDraw: true }),
+			tableId,
+		);
+		await runtime.upsertDynamicEntity(entity);
+		runtime.playDynamicEntityScriptCue({
+			guid: 7,
+			generation: 3,
+			cue: explodeCue,
+			intensity: 1,
+		});
+		await settleSoundCues();
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		runtime.render(0);
+		const observation = runtime
+			.getAuthoredDynamicRuntimeDiagnostics()
+			.worldOwnedBehavior.observations.find(
+				(entry) => entry.command === "create-particle",
+			);
+		if (observation === undefined)
+			throw new Error("Explosion did not create its emitter.");
+		const root = sceneNodeIdOf(observation.targetId);
+		if (root === null) throw new Error("Explosion has no scene owner.");
+		expect(
+			runtime.withSpawnedEntitySelectionGeometry(7, () => true),
+		).toBeNull();
+		expect(submittedCount).toBe(0);
+		selectedNodes = [root];
+		runtime.render(0.1);
+		runtime.render(0.2);
+		expect(submittedCount).toBeGreaterThan(0);
+		selectedNodes = [];
+		runtime.render(0.3);
+		runtime.render(0.4);
+		expect(submittedCount).toBe(0);
 	});
 
 	it("reconciles intrinsic Hidden and UnHide cues without replaying unchanged levels", async () => {

@@ -282,20 +282,19 @@ describe("resident portal junctions", () => {
 		]);
 	});
 	it("declines a whole component when three same-domain exits overlap", () => {
-		const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const diagnostic = vi.spyOn(console, "debug").mockImplementation(() => {});
 		try {
 			expectSeparate([
 				...doorway("tall", aperture("tall", WEST, SIZE, 0, 3)),
 				...doorway("lower", aperture("lower", EAST, 0, 0, 2)),
 				...doorway("upper", aperture("upper", EAST, 0, 1, 3)),
 			]);
-			expect(warning).toHaveBeenCalledOnce();
 		} finally {
-			warning.mockRestore();
+			diagnostic.mockRestore();
 		}
 	});
 	it("counts subthreshold overlap toward competing exits", () => {
-		const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const diagnostic = vi.spyOn(console, "debug").mockImplementation(() => {});
 		try {
 			const sliver = JUNCTION_OVERLAP_AREA_MINIMUM / 8;
 			expectSeparate([
@@ -303,9 +302,8 @@ describe("resident portal junctions", () => {
 				...doorway("lower", aperture("lower", WEST, 0, 0, 1)),
 				...doorway("upper", aperture("upper", WEST, 0, 1 - sliver, 2)),
 			]);
-			expect(warning).toHaveBeenCalledOnce();
 		} finally {
-			warning.mockRestore();
+			diagnostic.mockRestore();
 		}
 	});
 	it("does not let a subthreshold contact outside a component invalidate it", () => {

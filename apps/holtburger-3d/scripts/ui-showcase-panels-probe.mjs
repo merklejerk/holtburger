@@ -117,10 +117,27 @@ export async function probeUiShowcasePanels(client, evaluate) {
 						chrome.faces.every((face) => face.finite && face.length > 0),
 					);
 					for (const height of ["high", "medium", "low"]) {
-						const point = await evaluate(
+						const target = await evaluate(
 							client,
-							`(() => { const node=document.querySelector('.combat-bar .height.${height}'); const r=node.getBoundingClientRect(); return {x:r.left+r.width/2,y:r.top+r.height/2}; })()`,
+							`(() => {
+								const node = document.querySelector('.combat-bar .height.${height}');
+								const rect = node.getBoundingClientRect();
+								const point = {x: rect.left + rect.width / 2, y: rect.top + rect.height / 2};
+								const hit = document.elementFromPoint(point.x, point.y);
+								return {point, disabled: node.disabled, hit: node.contains(hit), blocker: hit?.outerHTML};
+							})()`,
 						);
+						assert.equal(
+							target.disabled,
+							false,
+							`${height} attack is disabled`,
+						);
+						assert.equal(
+							target.hit,
+							true,
+							`${height} attack is covered by ${target.blocker}`,
+						);
+						const { point } = target;
 						await client.send("Input.dispatchMouseEvent", {
 							type: "mousePressed",
 							button: "left",
@@ -170,10 +187,29 @@ export async function probeUiShowcasePanels(client, evaluate) {
 			retainedAcrossThemeSwitch: true,
 			sameStage: true,
 		});
-		await evaluate(
+		const closedWindow = await evaluate(
 			client,
-			`(()=>{const window=document.querySelector(${JSON.stringify(selector)}).closest('.hud-window');window?.querySelector('.hud-window-close').click();delete globalThis.__SHOWCASE_PANEL_NODE__;})()`,
+			`(() => {
+				const frame = document.querySelector(${JSON.stringify(selector)}).closest('.hud-window');
+				frame?.querySelector('.hud-window-close').click();
+				delete globalThis.__SHOWCASE_PANEL_NODE__;
+				return frame !== null;
+			})()`,
 		);
+		if (panel === "trade") {
+			// Closing a trade waits for authority; the fixture must supply the server reply.
+			const request = await read(() =>
+				window.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.tradeProbe.request(),
+			);
+			assert.equal(request.kind, "close");
+			await read(() =>
+				window.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.tradeProbe.close(),
+			);
+		}
+		if (closedWindow)
+			await wait(
+				`!document.querySelector(${JSON.stringify(selector)})?.getClientRects().length`,
+			);
 	}
 	return results;
 }

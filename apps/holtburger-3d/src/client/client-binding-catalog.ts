@@ -95,6 +95,7 @@ const CLIENT_LABELS: Readonly<Record<ClientShortcut, string>> = {
 	chat: "Open chat",
 	openEmotes: "Open emotes",
 	toggleChatHistory: "Toggle chat history",
+	holdChatHistory: "Interact with chat history (hold)",
 	chatPreviousPage: "Earlier chat page",
 	chatNextPage: "Later chat page",
 };
@@ -131,7 +132,10 @@ function clientRow(action: ClientShortcut): BindingDefinition {
 			? "Movement"
 			: action === "toggleCombat"
 				? "Combat"
-				: chatOnly || action === "chat" || action === "toggleChatHistory"
+				: chatOnly ||
+					  action === "chat" ||
+					  action === "toggleChatHistory" ||
+					  action === "holdChatHistory"
 					? "Chat"
 					: "Targeting & interaction";
 	// Panels remain available during precise aiming and unhandled focused-bar input.

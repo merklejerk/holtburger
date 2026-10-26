@@ -59,6 +59,7 @@ const keyboardSettingsBaseSchema = z
 
 					splitStack: INPUT_DEFAULTS.client.splitStack,
 					toggleChatHistory: INPUT_DEFAULTS.client.toggleChatHistory,
+					holdChatHistory: INPUT_DEFAULTS.client.holdChatHistory,
 					...value,
 				};
 				Reflect.deleteProperty(current, "preciseJumpPowerUp");

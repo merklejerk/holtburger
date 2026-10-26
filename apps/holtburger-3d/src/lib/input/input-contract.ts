@@ -108,6 +108,7 @@ export const CLIENT_SHORTCUT_ACTIONS = [
 	"chat",
 	"openEmotes",
 	"toggleChatHistory",
+	"holdChatHistory",
 	"chatPreviousPage",
 	"chatNextPage",
 ] as const;

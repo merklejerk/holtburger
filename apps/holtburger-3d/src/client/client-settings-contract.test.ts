@@ -54,26 +54,29 @@ describe("current client settings values", () => {
 		});
 	});
 
-	it("fills the missing history toggle while preserving saved alternatives and unbound choices", () => {
-		const { toggleChatHistory, ...olderClient } =
-			CLIENT_KEYBOARD_DEFAULTS.client;
-		const previous = {
-			...CLIENT_KEYBOARD_DEFAULTS,
-			client: { ...olderClient, examine: [{ key: "F9" }] },
-		};
-		expect(clientKeyboardSettingsSchema.parse(previous).client).toEqual({
-			...previous.client,
-			toggleChatHistory,
-		});
-		for (const binding of [[], [{ key: "F10", ctrl: true }]]) {
-			expect(
-				clientKeyboardSettingsSchema.parse({
-					...previous,
-					client: { ...previous.client, toggleChatHistory: binding },
-				}).client.toggleChatHistory,
-			).toEqual(binding);
-		}
-	});
+	it.each(["toggleChatHistory", "holdChatHistory"] as const)(
+		"fills missing %s while preserving saved alternatives and unbound choices",
+		(action) => {
+			const { [action]: defaultBinding, ...olderClient } =
+				CLIENT_KEYBOARD_DEFAULTS.client;
+			const previous = {
+				...CLIENT_KEYBOARD_DEFAULTS,
+				client: { ...olderClient, examine: [{ key: "F9" }] },
+			};
+			expect(clientKeyboardSettingsSchema.parse(previous).client).toEqual({
+				...previous.client,
+				[action]: defaultBinding,
+			});
+			for (const binding of [[], [{ key: "F10", ctrl: true }]]) {
+				expect(
+					clientKeyboardSettingsSchema.parse({
+						...previous,
+						client: { ...previous.client, [action]: binding },
+					}).client[action],
+				).toEqual(binding);
+			}
+		},
+	);
 	it("adds warning thresholds to older UI profiles while preserving font choices", () => {
 		const fonts = { body: "serif", heading: "sans", mono: "mono" } as const;
 		// An explicit Base choice must survive the change in absence defaults.

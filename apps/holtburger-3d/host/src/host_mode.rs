@@ -1,6 +1,7 @@
 //! Host mode and launch-only configuration.
 
 use std::fmt;
+use std::path::PathBuf;
 
 use anyhow::{Result, bail};
 use serde::{Deserialize, Serialize};
@@ -45,6 +46,71 @@ impl HostMode {
             Self::Client => "client",
         }
     }
+}
+
+/// Host startup chooses an exact installation or a bounded, environment-free search.
+#[derive(Debug)]
+pub enum HostContentSelection {
+    /// Explicit archive/directory supplied by the native startup coordinator.
+    Explicit(PathBuf),
+    /// Portable root followed by the shared platform content directory.
+    Automatic(PathBuf),
+}
+
+/// Sidecar arguments, kept separate from game-server launch credentials.
+#[derive(Debug)]
+pub struct HostLaunch {
+    /// Concrete host authority composition.
+    pub mode: HostMode,
+    /// Content selection for this process lifetime.
+    pub content: HostContentSelection,
+}
+
+impl HostLaunch {
+    /// Accepts exactly one mode and one explicit selection or automatic discovery root.
+    pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self> {
+        let mut mode = None;
+        let mut content = None;
+        let mut args = args.into_iter();
+        while let Some(argument) = args.next() {
+            if argument.starts_with("--mode=") {
+                ensure_unique(&mode, "mode")?;
+                mode = Some(HostMode::parse_args([argument])?);
+                continue;
+            }
+            let (name, inline) = match argument.split_once('=') {
+                Some((name, value)) => (name, Some(value.to_owned())),
+                None => (argument.as_str(), None),
+            };
+            if !matches!(name, "--content" | "--discovery-root") {
+                bail!("unsupported host argument {argument:?}");
+            }
+            ensure_unique(&content, "content selection")?;
+            let value = inline
+                .or_else(|| args.next())
+                .ok_or_else(|| anyhow::anyhow!("{name} requires a path"))?;
+            if value.is_empty() || value.starts_with("--") {
+                bail!("{name} requires a nonempty path");
+            }
+            content = Some(if name == "--content" {
+                HostContentSelection::Explicit(value.into())
+            } else {
+                HostContentSelection::Automatic(value.into())
+            });
+        }
+        Ok(Self {
+            mode: mode.ok_or_else(|| anyhow::anyhow!("missing required --mode=explorer|client"))?,
+            content: content
+                .ok_or_else(|| anyhow::anyhow!("missing --content or --discovery-root"))?,
+        })
+    }
+}
+
+fn ensure_unique<T>(value: &Option<T>, name: &str) -> Result<()> {
+    if value.is_some() {
+        bail!("{name} was specified more than once");
+    }
+    Ok(())
 }
 
 /// One launch-only client connection configuration. The password is intentionally redacted from

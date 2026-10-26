@@ -92,7 +92,8 @@ impl ContentDecodeCache {
                         EOR_CELL_NAMESPACE
                     )
                 })?;
-            CellLandblock::unpack(&resource.bytes)
+            resource
+                .decode(|bytes| Ok(CellLandblock::unpack(&bytes)?))
                 .map(Arc::new)
                 .with_context(|| format!("Could not decode CellLandblock 0x{landblock_id:08X}"))
         })
@@ -112,7 +113,8 @@ impl ContentDecodeCache {
                         EOR_CELL_NAMESPACE
                     )
                 })?;
-            LandblockInfo::unpack(&resource.bytes)
+            resource
+                .decode(|bytes| Ok(LandblockInfo::unpack(&bytes)?))
                 .map(Arc::new)
                 .with_context(|| {
                     format!("Could not decode LandblockInfo 0x{landblock_info_id:08X}")
@@ -130,7 +132,8 @@ impl ContentDecodeCache {
                         EOR_CELL_NAMESPACE
                     )
                 })?;
-            EnvCell::unpack(&mut Cursor::new(resource.bytes))
+            resource
+                .decode(|bytes| Ok(EnvCell::unpack(&mut Cursor::new(bytes))?))
                 .map(Arc::new)
                 .with_context(|| format!("Could not decode EnvCell 0x{env_cell_id:08X}"))
         })
@@ -150,7 +153,8 @@ impl ContentDecodeCache {
                         EOR_PORTAL_NAMESPACE
                     )
                 })?;
-            Environment::unpack(&mut Cursor::new(resource.bytes))
+            resource
+                .decode(|bytes| Ok(Environment::unpack(&mut Cursor::new(bytes))?))
                 .map(Arc::new)
                 .with_context(|| format!("Could not decode Environment 0x{environment_id:08X}"))
         })
@@ -175,10 +179,13 @@ impl ContentDecodeCache {
                     EOR_PORTAL_NAMESPACE
                 )
             })?;
-        let region =
-            Arc::new(RegionDesc::unpack(&resource.bytes).with_context(|| {
-                format!("Could not decode RegionDesc 0x{REGION_DESC_FILE_ID:08X}")
-            })?);
+        let region = Arc::new(
+            resource
+                .decode(|bytes| Ok(RegionDesc::unpack(&bytes)?))
+                .with_context(|| {
+                    format!("Could not decode RegionDesc 0x{REGION_DESC_FILE_ID:08X}")
+                })?,
+        );
         *self
             .pinned
             .region_desc
@@ -202,7 +209,8 @@ impl ContentDecodeCache {
                         EOR_PORTAL_NAMESPACE
                     )
                 })?;
-            Scene::unpack(&resource.bytes)
+            resource
+                .decode(|bytes| Ok(Scene::unpack(&bytes)?))
                 .map(Arc::new)
                 .with_context(|| format!("Could not decode Scene 0x{scene_id:08X}"))
         })
@@ -228,7 +236,8 @@ impl ContentDecodeCache {
                         EOR_PORTAL_NAMESPACE
                     )
                 })?;
-            Animation::read(&mut Cursor::new(resource.bytes))
+            resource
+                .decode(|bytes| Ok(Animation::read(&mut Cursor::new(bytes))?))
                 .map(Arc::new)
                 .with_context(|| format!("Could not decode Animation 0x{animation_id:08X}"))
         })
@@ -248,7 +257,8 @@ impl ContentDecodeCache {
                         EOR_PORTAL_NAMESPACE
                     )
                 })?;
-            SetupModel::unpack(&mut Cursor::new(resource.bytes))
+            resource
+                .decode(|bytes| Ok(SetupModel::unpack(&mut Cursor::new(bytes))?))
                 .map(Arc::new)
                 .with_context(|| format!("Could not decode SetupModel 0x{setup_model_id:08X}"))
         })
@@ -264,7 +274,8 @@ impl ContentDecodeCache {
                         EOR_PORTAL_NAMESPACE
                     )
                 })?;
-            GfxObj::unpack(&mut Cursor::new(resource.bytes))
+            resource
+                .decode(|bytes| Ok(GfxObj::unpack(&mut Cursor::new(bytes))?))
                 .map(Arc::new)
                 .with_context(|| format!("Could not decode GfxObj 0x{gfx_obj_id:08X}"))
         })

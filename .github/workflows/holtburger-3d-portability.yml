@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/holtburger-3d-portability.yml"
       - "apps/holtburger-3d/**"
+      - "assets/branding/**"
       - "crates/**"
       - "Cargo.lock"
       - "Cargo.toml"
@@ -77,6 +78,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: apps/holtburger-3d
         run: npm ci
+      - name: Verify branding exports
+        working-directory: apps/holtburger-3d
+        run: npm run check:branding
       - name: Test the Rust host
         run: cargo test -p holtburger-3d-host --all-targets
       - name: Check the frontend and Electron boundary

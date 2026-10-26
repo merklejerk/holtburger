@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 
 import {
 	buildEntryPath,
+	extractContentArguments,
 	collapseRendererArguments,
 	extractElectronLaunchArguments,
 	extractVitePortArguments,
@@ -28,7 +29,11 @@ try {
 		allowPortAlias: entryName !== "client",
 	});
 	requestedVitePort = extracted.vitePort;
-	rawArgs = extracted.args;
+	const content = extractContentArguments(
+		extracted.args,
+		process.env.INIT_CWD ?? process.cwd(),
+	);
+	rawArgs = content.args;
 	const entryArgs = rawArgs.filter((arg) => arg !== "--release");
 	const partitioned =
 		entryName === "client"
@@ -44,6 +49,9 @@ try {
 	const rendererArgs = electronLaunch.args;
 	entryPath = buildEntryPath(entry.path, rendererArgs);
 	electronAppArgs = [
+		...(content.noContentSearch ? ["--no-content-search"] : []),
+		...(content.clearContent ? ["--clear-content"] : []),
+		...(content.contentPath === null ? [] : ["--content", content.contentPath]),
 		...partitioned.launchArguments,
 		...collapseRendererArguments(rendererArgs),
 	];
@@ -184,11 +192,6 @@ const electron = spawn(
 			...process.env,
 			HOLTBURGER_ELECTRON_DEV_ORIGIN: `http://127.0.0.1:${vitePort}`,
 			HOLTBURGER_HOST_BIN: hostBinary,
-			HOLTBURGER_DATS:
-				process.env.HOLTBURGER_DATS ??
-				(existsSync(resolve(workspaceRoot, "dats"))
-					? resolve(workspaceRoot, "dats")
-					: undefined),
 		},
 		stdio: "inherit",
 		shell: false,

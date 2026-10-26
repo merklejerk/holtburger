@@ -396,7 +396,7 @@ impl PossessionCapabilities {
             .filter_map(|stance| {
                 let style = stance as u32;
                 table.style_default(style)?;
-                let charge = retail_jump_charge_profile(stance);
+                let charge = retail_jump_charge_profile(stance as u32);
                 Some(PossessionStanceCapability {
                     style,
                     walk: locomotion_source(

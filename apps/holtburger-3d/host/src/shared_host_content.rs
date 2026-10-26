@@ -20,6 +20,8 @@ use crate::{
 /// Static content discovered once and owned by the selected host composition.
 #[derive(Clone)]
 pub struct SharedHostContent {
+    /// App-local reporting for necessary reads before shared workers flatten error causes.
+    pub failures: crate::content_failure::ContentFailureReporter,
     /// Async content service used by request handlers.
     pub runtime: ContentAssetRuntime,
     /// Immutable repository used by entity preparation and client bootstrap assembly.
@@ -41,21 +43,12 @@ pub struct SharedHostContent {
 }
 
 impl SharedHostContent {
-    /// Discovers the configured DAT repository and builds the shared services.
-    pub fn discover() -> Result<Self> {
-        let repository = Arc::new(ContentRepository::discover(None)?);
-        Self::from_repository_with_catalog(
-            repository,
-            std::env::var_os("HOLTBURGER_WEENIE_CATALOG").map(std::path::PathBuf::from),
-        )
-    }
-
     /// Builds a shared content owner from an injected repository for tests and diagnostics.
     pub fn from_repository(repository: Arc<ContentRepository>) -> Result<Self> {
         Self::from_repository_with_catalog(repository, None)
     }
 
-    fn from_repository_with_catalog(
+    pub(crate) fn from_repository_with_catalog(
         repository: Arc<ContentRepository>,
         override_path: Option<std::path::PathBuf>,
     ) -> Result<Self> {
@@ -74,6 +67,7 @@ impl SharedHostContent {
             std::env::var_os(crate::world_map::IGNORE_CACHE_ENV).is_some_and(|value| value == "1"),
         ));
         Ok(Self {
+            failures: crate::content_failure::ContentFailureReporter::Detached,
             world_map,
             runtime: ContentAssetRuntime::new(service.clone()),
             repository,
@@ -266,13 +260,14 @@ pub async fn dispatch_shared_content(
     command: SharedContentCommand,
 ) -> Result<HostResponse, ProtocolError> {
     use SharedContentCommand::*;
+    let required_error = |error| runtime.content().failures.command_error(error);
 
     match command {
         HostStatus => encode_json(runtime.status()),
         ResolveCharacterCreationAppearance { request } => encode_json(
             request
                 .resolve(&runtime.content().repository)
-                .map_err(application_error)?,
+                .map_err(required_error)?,
         ),
         LoadCharacterCreationCatalog => encode_json(
             crate::character_creation::CharacterCreationCatalog::from_catalog(
@@ -280,10 +275,10 @@ pub async fn dispatch_shared_content(
                     .content()
                     .repository
                     .read_character_gen_catalog()
-                    .map_err(application_error)?,
+                    .map_err(required_error)?,
                 &runtime.content().repository,
             )
-            .map_err(application_error)?,
+            .map_err(required_error)?,
         ),
         OpenWorldMap { request } => encode_json(
             runtime
@@ -304,12 +299,12 @@ pub async fn dispatch_shared_content(
         LoadActiveRegionData => Ok(HostResponse::Binary(
             crate::load_active_region_data_bytes(&runtime.content().runtime)
                 .await
-                .map_err(application_error)?,
+                .map_err(required_error)?,
         )),
         LoadAnimation { request } => Ok(HostResponse::Binary(
             crate::load_animation_bytes(&runtime.content().runtime, &request.animation_id)
                 .await
-                .map_err(application_error)?,
+                .map_err(required_error)?,
         )),
         LoadSetupVisual { request } => Ok(HostResponse::Binary(
             crate::setup_visual_source::load_setup_visual_source_bytes(
@@ -318,7 +313,7 @@ pub async fn dispatch_shared_content(
                 request.appearance,
             )
             .await
-            .map_err(application_error)?,
+            .map_err(required_error)?,
         )),
         LoadAudio { request } => Ok(HostResponse::Binary(
             crate::load_audio_bytes(&runtime.content().runtime, &request.sound_id)
@@ -363,7 +358,7 @@ pub async fn dispatch_shared_content(
                 request.layers,
             )
             .await
-            .map_err(application_error)?,
+            .map_err(required_error)?,
         )),
         LoadLandblockProfile { request } => encode_json(
             crate::load_landblock_profile_response(
@@ -371,12 +366,12 @@ pub async fn dispatch_shared_content(
                 &request.landblock_id,
             )
             .await
-            .map_err(application_error)?,
+            .map_err(required_error)?,
         ),
         LoadSkySource => Ok(HostResponse::Binary(
             crate::load_sky_source_bytes(&runtime.content().runtime)
                 .await
-                .map_err(application_error)?,
+                .map_err(required_error)?,
         )),
         LoadSoulEmotes => {
             let content = runtime.content().clone();
@@ -420,14 +415,14 @@ pub async fn dispatch_shared_content(
         LoadTexturePixels { request } => Ok(HostResponse::Binary(
             crate::load_texture_pixels_bytes(&runtime.content().runtime, request)
                 .await
-                .map_err(application_error)?,
+                .map_err(required_error)?,
         )),
         LoadMotionTableClosure { request } => encode_json(
             crate::load_motion_table_closure_ids(
                 &runtime.content().motion_catalog,
                 &request.motion_table_id,
             )
-            .map_err(application_error)?,
+            .map_err(required_error)?,
         ),
     }
 }

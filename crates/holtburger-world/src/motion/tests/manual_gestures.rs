@@ -349,6 +349,57 @@ fn independent_manual_playback_matches_ordinary_start_and_stop_displacement() {
 }
 
 #[test]
+fn standing_charge_without_ready_retains_pose_without_retaining_walk_displacement() {
+    // Ready and the usual fixture Stand share ordinal 3 in table keys. Use a distinct idle
+    // ordinal so this fixture actually lacks Ready rather than selecting an alias of it.
+    const IDLE: u32 = 0x4000_0004;
+    let catalog = MotionSequenceCatalog::assemble(
+        [MotionTable {
+            id: 0x0900_0001,
+            default_style: STYLE,
+            style_defaults: HashMap::from([(STYLE, IDLE)]),
+            cycles: HashMap::from([
+                (
+                    MotionTable::cycle_key(STYLE, IDLE),
+                    motion(vec![clip(STAND_ANIM, 4.0)], None, None),
+                ),
+                (
+                    MotionTable::cycle_key(STYLE, WALK),
+                    motion(vec![clip(WALK_ANIM, 4.0)], None, None),
+                ),
+            ]),
+            modifiers: HashMap::new(),
+            links: HashMap::new(),
+        }],
+        [animation(STAND_ANIM, 4, 0.0), animation(WALK_ANIM, 4, 1.0)],
+        [],
+    )
+    .unwrap();
+    let table = catalog.table(0x0900_0001).unwrap();
+    assert!(table.cycle(STYLE, MotionCommand::READY.raw()).is_none());
+    let mut runtime = BodyMotionRuntime::new(table);
+    runtime.drive_manual(
+        table,
+        order(WALK),
+        CharacterMotionPresentation::Grounded,
+        0.25,
+    );
+    assert!(runtime.tick().offset.translation.length() > 0.0);
+
+    for _ in 0..4 {
+        runtime.drive_manual(
+            table,
+            MotionOrder::default(),
+            CharacterMotionPresentation::Ready,
+            0.25,
+        );
+        assert_eq!(runtime.tick().offset.translation, Vector3::zero());
+        assert!(runtime.tick().hooks.is_empty());
+        assert!(runtime.motion_playback().is_some());
+    }
+}
+
+#[test]
 fn stop_transition_keeps_owning_displacement_for_every_tick_under_a_gesture() {
     let catalog = build_gesture_catalog(true);
     let table = catalog.table(0x0900_0001).unwrap();

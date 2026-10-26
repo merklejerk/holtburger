@@ -2,21 +2,28 @@ use anyhow::{Context, Result, anyhow};
 use binrw::{BinRead, Endian};
 use directories::ProjectDirs;
 use holtburger_dat::{
-    EOR_PORTAL_NAMESPACE, HbaReader, LayeredResourceResolver, ResourceKey, ResourceSource,
-    StaticResourceKey,
+    EOR_PORTAL_NAMESPACE, LayeredResourceResolver, ResourceKey, ResourceSource, StaticResourceKey,
     file_type::{Animation, ChatPoseTable, DatFileType, MotionTable, SetupModel},
 };
-use std::ffi::OsStr;
-use std::fs;
+use std::collections::{HashMap, HashSet};
 use std::io::Cursor;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::SoulEmoteCatalog;
 use crate::material_capabilities::{MaterialArchiveCapabilityReport, RepositoryResourceIndexEntry};
 use crate::motion_sequence::MotionSequenceCatalog;
+use crate::{ContentResourceError, ContentResourceErrorKind, SoulEmoteCatalog};
+
+mod mounting;
+
+pub use mounting::{ContentSelectionError, ResolvedContent};
 
 const HOLTBURGER_DATS_ENV: &str = "HOLTBURGER_DATS";
+
+fn platform_content_path() -> Option<PathBuf> {
+    ProjectDirs::from("io.github", "merklejerk", "holtburger")
+        .map(|dirs| dirs.data_dir().join("dats"))
+}
 
 /// Ordered candidate locations used to discover installed or portable HBA content.
 ///
@@ -38,8 +45,7 @@ impl ContentRepositoryDiscovery {
             explicit_path,
             environment_path: std::env::var_os(HOLTBURGER_DATS_ENV).map(PathBuf::from),
             portable_path: PathBuf::from("./dats"),
-            platform_data_path: ProjectDirs::from("io.github", "merklejerk", "holtburger")
-                .map(|dirs| dirs.data_dir().join("dats")),
+            platform_data_path: platform_content_path(),
         }
     }
 
@@ -74,6 +80,8 @@ pub struct ContentRepository {
     mounts: Vec<Arc<dyn ResourceSource>>,
     mounted_sources: Vec<MountedContentSource>,
     resource_index: Vec<RepositoryResourceIndexEntry>,
+    /// Sorted, unique archived EnvCell IDs grouped by normalized landblock owner.
+    env_cells_by_landblock: HashMap<u32, Vec<u32>>,
     source_description: Option<String>,
 }
 
@@ -82,8 +90,44 @@ pub struct RepositoryResource {
     pub namespace: String,
     pub file_id: u32,
     pub bytes: Vec<u8>,
-    pub metadata: Option<holtburger_dat::FileMetadata>,
+    /// Every successful read resolves a mounted entry with known availability metadata.
+    pub metadata: holtburger_dat::FileMetadata,
     pub source_description: Option<String>,
+}
+
+impl RepositoryResource {
+    /// Decodes owned bytes while preserving the source resource identity on failure.
+    pub fn decode<T>(self, decode: impl FnOnce(Vec<u8>) -> Result<T>) -> Result<T> {
+        decode(self.bytes).map_err(|source| {
+            ContentResourceError {
+                kind: ContentResourceErrorKind::Invalid,
+                namespace: self.namespace,
+                file_id: self.file_id,
+                source_description: self.source_description,
+                source,
+            }
+            .into()
+        })
+    }
+
+    /// Requires full authored detail for visual consumers, retaining typed optional-absence facts.
+    pub(crate) fn require_full(self) -> Result<Self> {
+        if self.metadata.is_pruned {
+            return Err(ContentResourceError {
+                kind: ContentResourceErrorKind::Pruned,
+                source: anyhow!(
+                    "resource {}:0x{:08X} is pruned",
+                    self.namespace,
+                    self.file_id
+                ),
+                namespace: self.namespace,
+                file_id: self.file_id,
+                source_description: self.source_description,
+            }
+            .into());
+        }
+        Ok(self)
+    }
 }
 
 impl std::fmt::Debug for ContentRepository {
@@ -110,86 +154,41 @@ impl ContentRepository {
         }
     }
 
-    pub fn from_hba_path(path: impl Into<PathBuf>) -> Result<Self> {
-        let path = path.into();
-        let mut mounts = Vec::new();
-        let mut mounted_sources = Vec::new();
-        let mut resource_index = Vec::new();
-
-        if path.extension() == Some(OsStr::new("hba")) {
-            mount_hba_source(
-                &path,
-                &mut mounts,
-                &mut mounted_sources,
-                &mut resource_index,
-            )?;
-            return Ok(Self {
-                mounts,
-                mounted_sources,
-                resource_index,
-                source_description: Some(path.display().to_string()),
-            });
-        }
-
-        let hba_path = path.with_extension("hba");
-        if hba_path.exists() {
-            mount_hba_source(
-                &hba_path,
-                &mut mounts,
-                &mut mounted_sources,
-                &mut resource_index,
-            )?;
-            return Ok(Self {
-                mounts,
-                mounted_sources,
-                resource_index,
-                source_description: Some(hba_path.display().to_string()),
-            });
-        }
-
-        Err(anyhow!(
-            "Could not resolve an HBA archive from {}.",
-            path.display()
-        ))
+    /// Opens exactly the selected file, or a directory with HBA-first family selection.
+    ///
+    /// No environment overrides or sibling-extension probing apply to an explicit selection.
+    pub fn open_selected(path: impl Into<PathBuf>) -> Result<Self> {
+        mounting::open_selection(path.into(), None)
     }
 
-    pub fn from_hba_dir(path: impl Into<PathBuf>) -> Result<Self> {
+    /// Opens an HBA path; extensionless base paths remain supported for tooling callers.
+    pub fn from_hba_path(path: impl Into<PathBuf>) -> Result<Self> {
         let path = path.into();
-        let mut mounts = Vec::new();
-        let mut mounted_sources = Vec::new();
-        let mut resource_index = Vec::new();
+        let path = if path.extension().is_none() {
+            path.with_extension("hba")
+        } else {
+            path
+        };
+        mounting::open_selection(path, Some(mounting::ArchiveFamily::Hba))
+    }
 
-        if !path.is_dir() {
-            return Err(anyhow!(
-                "Expected an HBA directory but {} is not a directory.",
-                path.display()
-            ));
-        }
-
-        discover_hba_mounts_in_dir(
-            &path,
-            &mut mounts,
-            &mut mounted_sources,
-            &mut resource_index,
-        )?;
-        Ok(Self {
-            mounts,
-            mounted_sources,
-            resource_index,
-            source_description: Some(path.display().to_string()),
-        })
+    /// Opens the HBA family in a directory without mounting retail DATs underneath it.
+    pub fn from_hba_dir(path: impl Into<PathBuf>) -> Result<Self> {
+        mounting::open_selection(path.into(), Some(mounting::ArchiveFamily::Hba))
     }
 
     /// Mounts already-constructed sources without a resource index.
     ///
     /// `ResourceSource` cannot enumerate its contents, so index-driven readers — the material
-    /// capability report and the motion contract — see nothing from a repository built this way.
+    /// capability report, additional EnvCell discovery, and the motion contract — see nothing
+    /// from a repository built this way.
     /// Use `from_hba_dir` or `from_hba_path` when a caller needs those.
     pub fn from_mounts(mounts: Vec<Arc<dyn ResourceSource>>) -> Self {
         Self {
             mounts,
             mounted_sources: Vec::new(),
             resource_index: Vec::new(),
+            env_cells_by_landblock: HashMap::new(),
             source_description: None,
         }
     }
@@ -201,7 +200,14 @@ impl ContentRepository {
         let resource = self
             .read_resource(T::RESOURCE_KEY)
             .with_context(|| format!("failed to load {asset_name}"))?;
-        T::read_options(&mut Cursor::new(resource.bytes), Endian::Little, ())
+        resource
+            .decode(|bytes| {
+                Ok(T::read_options(
+                    &mut Cursor::new(bytes),
+                    Endian::Little,
+                    (),
+                )?)
+            })
             .with_context(|| format!("failed to parse {asset_name}"))
     }
 
@@ -211,37 +217,29 @@ impl ContentRepository {
     /// such as terrain, setup-model, gfx-obj, or env-cell requests.
     pub fn read_resource(&self, key: ResourceKey<'_>) -> Result<RepositoryResource> {
         let resources = LayeredResourceResolver::from_sources(self.mounts.clone());
-        let metadata = resources.get_metadata_by_key(key);
-
-        if let Some(metadata) = &metadata
-            && !metadata.is_pruned
-        {
-            let bytes = resources
-                .get_file_by_key(key)
-                .map_err(anyhow::Error::from)?;
-            return Ok(RepositoryResource {
-                namespace: key.namespace.to_string(),
-                file_id: key.file_id,
-                bytes,
-                metadata: Some(metadata.clone()),
-                source_description: self.source_description.clone(),
-            });
-        }
-
-        if metadata.is_some() {
-            let bytes = resources
-                .get_file_by_key(key)
-                .map_err(anyhow::Error::from)?;
-            return Ok(RepositoryResource {
-                namespace: key.namespace.to_string(),
-                file_id: key.file_id,
-                bytes,
-                metadata,
-                source_description: self.source_description.clone(),
-            });
-        }
-
-        Err(missing_asset_error(key, self.source_description.as_deref()))
+        let resource_error = |kind, source| ContentResourceError {
+            kind,
+            namespace: key.namespace.to_owned(),
+            file_id: key.file_id,
+            source_description: self.source_description.clone(),
+            source,
+        };
+        let metadata = resources.get_metadata_by_key(key).ok_or_else(|| {
+            resource_error(
+                ContentResourceErrorKind::Missing,
+                missing_asset_error(key, self.source_description.as_deref()),
+            )
+        })?;
+        let bytes = resources
+            .get_file_by_key(key)
+            .map_err(|error| resource_error(ContentResourceErrorKind::Invalid, error.into()))?;
+        Ok(RepositoryResource {
+            namespace: key.namespace.to_owned(),
+            file_id: key.file_id,
+            bytes,
+            metadata,
+            source_description: self.source_description.clone(),
+        })
     }
 
     /// Opened archive revisions in mount order; injected sources have no filesystem provenance.
@@ -259,6 +257,13 @@ impl ContentRepository {
     /// applies the repository's layered resolution policy.
     pub fn resource_index(&self) -> &[RepositoryResourceIndexEntry] {
         &self.resource_index
+    }
+
+    /// Archived indoor cells for this owner, independent of LandblockInfo's prefetch count.
+    pub(crate) fn archived_env_cells(&self, landblock_id: u32) -> &[u32] {
+        self.env_cells_by_landblock
+            .get(&crate::normalize_landblock_id(landblock_id))
+            .map_or(&[], Vec::as_slice)
     }
 
     pub fn resource_metadata(&self, key: ResourceKey<'_>) -> Option<holtburger_dat::FileMetadata> {
@@ -291,7 +296,7 @@ impl ContentRepository {
             .context("failed to project raw motion content into the runtime motion contract")
     }
 
-    /// Decodes every mounted portal record of one file type, in deterministic index order.
+    /// Decodes each resolved portal resource once, in deterministic index order.
     ///
     /// File types are inferred from the id prefix, which is namespace-blind, so the namespace is
     /// part of the filter: `0x09......` is a motion table under `eor/portal` and a cell record
@@ -301,21 +306,25 @@ impl ContentRepository {
         file_type: DatFileType,
         decode: fn(&mut Cursor<Vec<u8>>) -> binrw::BinResult<T>,
     ) -> Result<Vec<T>> {
+        let mut seen = HashSet::new();
         self.resource_index
             .iter()
             .filter(|entry| {
                 entry.namespace == EOR_PORTAL_NAMESPACE
                     && DatFileType::from_id(entry.file_id) == file_type
+                    && seen.insert(entry.file_id)
             })
             .map(|entry| {
                 let resource =
                     self.read_resource(ResourceKey::new(&entry.namespace, entry.file_id))?;
-                decode(&mut Cursor::new(resource.bytes)).with_context(|| {
-                    format!(
-                        "failed to decode {} {}:0x{:08X}",
-                        file_type, entry.namespace, entry.file_id
-                    )
-                })
+                resource
+                    .decode(|bytes| Ok(decode(&mut Cursor::new(bytes))?))
+                    .with_context(|| {
+                        format!(
+                            "failed to decode {} {}:0x{:08X}",
+                            file_type, entry.namespace, entry.file_id
+                        )
+                    })
             })
             .collect()
     }
@@ -363,161 +372,12 @@ fn missing_asset_error(key: ResourceKey<'_>, source_description: Option<&str>) -
     }
 }
 
-fn discover_hba_mounts_in_dir(
-    dats_path: &Path,
-    mounts: &mut Vec<Arc<dyn ResourceSource>>,
-    mounted_sources: &mut Vec<MountedContentSource>,
-    resource_index: &mut Vec<RepositoryResourceIndexEntry>,
-) -> Result<()> {
-    let mut candidates = Vec::new();
-
-    let entries = fs::read_dir(dats_path).map_err(|error| {
-        anyhow!(
-            "Could not enumerate HBA archives under {}: {}",
-            dats_path.display(),
-            error
-        )
-    })?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension() != Some(OsStr::new("hba")) {
-            continue;
-        }
-
-        let archive = match HbaReader::open(&path) {
-            Ok(archive) => archive,
-            Err(error) => {
-                log::warn!("Could not open HBA archive {}: {}", path.display(), error);
-                continue;
-            }
-        };
-
-        let namespaces = archive
-            .namespaces()
-            .map(|namespace| namespace.to_string())
-            .collect::<Vec<_>>();
-        if namespaces.is_empty() {
-            log::warn!(
-                "Skipping HBA archive {} because it exposes no namespaces",
-                path.display()
-            );
-            continue;
-        }
-
-        candidates.push((path, namespaces, Arc::new(archive)));
-    }
-
-    candidates.sort_by(|left, right| {
-        right
-            .1
-            .len()
-            .cmp(&left.1.len())
-            .then_with(|| left.0.cmp(&right.0))
-    });
-
-    for (path, namespaces, archive) in candidates {
-        mount_archive_source(
-            &path,
-            archive,
-            namespaces,
-            mounts,
-            mounted_sources,
-            resource_index,
-        )?;
-    }
-
-    Ok(())
-}
-
-fn mount_hba_source(
-    path: &Path,
-    mounts: &mut Vec<Arc<dyn ResourceSource>>,
-    mounted_sources: &mut Vec<MountedContentSource>,
-    resource_index: &mut Vec<RepositoryResourceIndexEntry>,
-) -> Result<()> {
-    let archive = HbaReader::open(path)
-        .map_err(|error| anyhow!("Could not open HBA archive {}: {}", path.display(), error))?;
-    let namespaces = archive
-        .namespaces()
-        .map(|namespace| namespace.to_string())
-        .collect::<Vec<_>>();
-
-    if namespaces.is_empty() {
-        return Err(anyhow!(
-            "HBA archive {} exposes no namespaces.",
-            path.display()
-        ));
-    }
-
-    mount_archive_source(
-        path,
-        Arc::new(archive),
-        namespaces,
-        mounts,
-        mounted_sources,
-        resource_index,
-    )
-}
-
-fn mount_archive_source(
-    path: &Path,
-    archive: Arc<HbaReader>,
-    namespaces: Vec<String>,
-    mounts: &mut Vec<Arc<dyn ResourceSource>>,
-    mounted_sources: &mut Vec<MountedContentSource>,
-    resource_index: &mut Vec<RepositoryResourceIndexEntry>,
-) -> Result<()> {
-    log::info!(
-        "Mounted content source {} with namespaces [{}]",
-        path.display(),
-        namespaces.join(", ")
-    );
-
-    let metadata = archive.source_metadata()?;
-    mounted_sources.push(MountedContentSource {
-        path: fs::canonicalize(path)?,
-        size: metadata.len(),
-        modified: metadata.modified()?,
-    });
-    append_archive_index(path, &archive, resource_index)?;
-    mounts.push(archive);
-
-    Ok(())
-}
-
-fn append_archive_index(
-    path: &Path,
-    archive: &HbaReader,
-    resource_index: &mut Vec<RepositoryResourceIndexEntry>,
-) -> Result<()> {
-    let source_description = path.display().to_string();
-
-    for entry in archive.entries() {
-        let entry = entry.with_context(|| {
-            format!(
-                "Could not read HBA index entry while mounting {}",
-                path.display()
-            )
-        })?;
-        resource_index.push(RepositoryResourceIndexEntry {
-            namespace: entry.namespace_id()?.to_string(),
-            file_id: entry.file_id,
-            type_id: entry.type_id,
-            size: entry.size,
-            is_pruned: entry.is_pruned(),
-            source_description: source_description.clone(),
-        });
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use holtburger_common::properties::GfxObjFlags;
     use holtburger_common::{Sphere, Vector3};
+    use holtburger_dat::HbaReader;
     use holtburger_dat::file_type::{
         AnimationPartChange, CharGen, ChatPoseTable, EnvCell, GfxObj, ObjDesc, SkillTable,
         SpellTable, SubPalette, TextureMapChange, XpTable,
@@ -528,6 +388,7 @@ mod tests {
     use holtburger_dat::{
         DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaWriter, LayeredResourceResolver,
     };
+    use std::path::Path;
     use tempfile::tempdir;
 
     fn repo_assets_hba_path() -> PathBuf {
@@ -599,6 +460,79 @@ mod tests {
         assert_eq!(pixels.width, 2);
         assert_eq!(pixels.height, 2);
         assert_eq!(pixels.pixels[0..4], [3, 2, 1, 4]);
+    }
+
+    #[test]
+    fn required_texture_preserves_invalid_dependency_identity_instead_of_skipping_it() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("texture.hba");
+        let texture_id = 0x0500_0001;
+        let broken_id = 0x0600_0001;
+        let mut writer = HbaWriter::new();
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                texture_id,
+                DatFileType::SurfaceTexture as u32,
+                surface_texture_bytes(texture_id, &[broken_id, 0x0600_0002]),
+            )
+            .unwrap();
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                broken_id,
+                DatFileType::Texture as u32,
+                vec![0xff],
+            )
+            .unwrap();
+        writer.write(&path).unwrap();
+        let repository = ContentRepository::open_selected(path).unwrap();
+        let error = repository
+            .resolve_surface_texture_pixels(texture_id, crate::TexturePixelFormat::Rgba8)
+            .unwrap_err();
+        let resource = error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<ContentResourceError>())
+            .unwrap();
+        assert_eq!(resource.kind, ContentResourceErrorKind::Invalid);
+        assert_eq!(resource.file_id, broken_id);
+    }
+
+    #[test]
+    fn required_texture_reports_exhausted_optional_levels_as_a_resource_failure() {
+        let root = tempdir().unwrap();
+        let path = root.path().join("texture.hba");
+        let texture_id = 0x0500_0001;
+        let pruned_id = 0x0600_0002;
+        let mut writer = HbaWriter::new();
+        writer
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                texture_id,
+                DatFileType::SurfaceTexture as u32,
+                surface_texture_bytes(texture_id, &[0x0600_0001, pruned_id]),
+            )
+            .unwrap();
+        writer
+            .add_pruned(
+                EOR_PORTAL_NAMESPACE,
+                pruned_id,
+                DatFileType::Texture as u32,
+                vec![0xff],
+            )
+            .unwrap();
+        writer.write(&path).unwrap();
+        let repository = ContentRepository::open_selected(path).unwrap();
+        let error = repository
+            .resolve_surface_texture_pixels(texture_id, crate::TexturePixelFormat::Rgba8)
+            .unwrap_err();
+        let resource = error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<ContentResourceError>())
+            .unwrap();
+        assert_eq!(resource.kind, ContentResourceErrorKind::Invalid);
+        assert_eq!(resource.file_id, texture_id);
+        assert!(format!("{error:#}").contains("no available RenderSurface levels"));
     }
 
     fn test_chat_pose_table_bytes() -> Vec<u8> {
@@ -1309,7 +1243,7 @@ mod tests {
         assert_eq!(resource.namespace, EOR_CELL_NAMESPACE);
         assert_eq!(resource.file_id, 0x0000_0001);
         assert_eq!(resource.bytes, vec![0xCC]);
-        assert!(resource.metadata.is_some());
+        assert_eq!(resource.metadata.id, resource.file_id);
         assert_eq!(
             resource.source_description.as_deref(),
             Some(dir.path().to_string_lossy().as_ref())
@@ -1715,10 +1649,13 @@ mod tests {
             )
             .expect_err("a non-sentinel missing palette should remain a content error");
 
-        assert!(
-            format!("{error:#}").contains("missing resource eor/portal:0x04000099"),
-            "unexpected error: {error:#}"
-        );
+        let resource = error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<ContentResourceError>())
+            .expect("missing palette identity should survive material assembly");
+        assert_eq!(resource.kind, ContentResourceErrorKind::Missing);
+        assert_eq!(resource.namespace, EOR_PORTAL_NAMESPACE);
+        assert_eq!(resource.file_id, 0x0400_0099);
     }
 
     #[test]

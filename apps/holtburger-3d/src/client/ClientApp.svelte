@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { choosePregameLocation } from "./client-pregame-tuning";
+	import PowerIcon from "../assets/icons/hud-power.svg?component";
 	import { provideItemCooldowns } from "../app/item-cooldowns.svelte";
 	import "./client-canvas.css";
 	import { persistPlayerVisualCapture } from "./client-visual-capture";
@@ -10,6 +11,7 @@
 	import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
 	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
 	import { ClientNavigationWaypointOwner } from "./client-navigation-waypoint";
+	import { runClientAssetsCommand } from "./client-assets-command";
 	import { runClientLocationCommand } from "./client-location-command";
 	import { ClientDeathCommands } from "./client-death-commands";
 	import { runRecallCommand } from "./client-recall-command";
@@ -76,7 +78,7 @@
 		ClientDialogs,
 		type ClientDialogPresentation,
 	} from "./client-dialogs";
-	import { provideAppInputPolicy } from "../lib/input/app-input-policy-context";
+	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type { EscapeContextHandle } from "../lib/input/keyboard-input-policy";
 	import { AppInput } from "../lib/input/app-input";
 	import { provideClientInput } from "./client-input-context";
@@ -108,6 +110,7 @@
 		createElectronHostTransport,
 		startElectronClient,
 		registerElectronClientClose,
+		requestElectronClientClose,
 	} from "../lib/host/electron-host-transport";
 	import type { HostTransport } from "../lib/host/host-transport";
 	import {
@@ -132,6 +135,8 @@
 	import { clientDebugEnabled } from "./client-debug";
 	import ClientCharacterSelect from "./ClientCharacterSelect.svelte";
 	import ClientLoadingPage from "./ClientLoadingPage.svelte";
+	import DisconnectIcon from "../assets/icons/pregame-disconnect.svg?component";
+	import RetryIcon from "../assets/icons/hud-reset.svg?component";
 	import {
 		loadCharacterCreationCatalog,
 		resolveCharacterCreationAppearance,
@@ -236,6 +241,8 @@
 	} from "./client-object-inspection";
 
 	interface Props {
+		/** Canonical startup selection; injected diagnostic hosts can lack filesystem provenance. */
+		readonly contentLocation: string | null;
 		readonly initialUserSettings: ClientUserSettings;
 		/** Bootstrap settings issue captured before the app's toast owner exists. */
 		readonly initialSettingsIssue: string | null;
@@ -244,6 +251,7 @@
 	}
 
 	const {
+		contentLocation,
 		initialUserSettings,
 		initialSettingsIssue,
 		settingsTransport,
@@ -517,7 +525,6 @@
 		void presentationRoot?.retry();
 	}
 
-	onMount(() => keyboard.mount(document));
 	/** View-owned inventory modal entry used by gameplay shortcuts. */
 	let gameplayView = $state<ClientGameplayView | null>(null);
 	let cameraController =
@@ -833,7 +840,7 @@
 		applyFrameGraphics(accepted);
 	}
 	let inputController: CharacterInputController | null = null;
-	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
+	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	/** Explicit attack intent owns cancellation; passive status updates can only retire it. */
 	let combatEscapeContext: EscapeContextHandle | null = null;
 	/** Precise-jump entry owns registration; completion, cancellation and teardown retire it. */
@@ -1265,6 +1272,8 @@
 			return;
 		}
 		if (runClientHelpCommand(message, appendChatLine)) return;
+		if (runClientAssetsCommand(message, contentLocation, appendChatLine))
+			return;
 		const currentSession = session;
 		if (currentSession === null)
 			throw new Error("Chat session is unavailable.");
@@ -2526,13 +2535,44 @@
 			/>
 		{/each}
 	{:else if page.kind === "loading"}
-		<ClientLoadingPage
-			state={page.content}
-			{toast}
-			onDisconnect={session !== null && appState.admission.canDisconnect
-				? disconnect
-				: null}
-		/>
+		<ClientLoadingPage state={page.content} {contentLocation} {toast}>
+			{#snippet footer()}
+				{#if page.content.kind !== "ended"}
+					<button
+						class="pregame-action pregame-quiet ui-button"
+						type="button"
+						disabled={session === null || !appState.admission.canDisconnect}
+						onclick={() => void disconnect()}
+					>
+						<span class="pregame-icon" aria-hidden="true"
+							><DisconnectIcon /></span
+						>
+						Disconnect</button
+					>
+				{/if}
+			{/snippet}
+			{#snippet actions()}
+				{#if page.content.kind === "ended"}
+					<button
+						class="pregame-primary pregame-action ui-button"
+						type="button"
+						onclick={() =>
+							void requestElectronClientClose().catch(console.error)}
+						><span class="pregame-icon" aria-hidden="true"><PowerIcon /></span
+						><span>Quit application</span></button
+					>
+				{:else if page.content.kind === "failed" && page.content.retry !== null}
+					<button
+						class="pregame-action ui-button"
+						type="button"
+						onclick={page.content.retry}
+					>
+						<span class="pregame-icon" aria-hidden="true"><RetryIcon /></span>
+						Try again</button
+					>
+				{/if}
+			{/snippet}
+		</ClientLoadingPage>
 	{/if}
 </div>
 

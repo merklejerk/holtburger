@@ -716,7 +716,11 @@ impl ClientHostRuntime {
             Arc::clone(&state.shutdown_requested)
         };
 
-        let bootstrap = match self.content.client_world_bootstrap() {
+        let bootstrap = match self
+            .content
+            .failures
+            .required(self.content.client_world_bootstrap())
+        {
             Ok(bootstrap) => bootstrap,
             Err(error) => {
                 let _ = self.event_sink.publish_client_event(client_exit_requested(
@@ -732,20 +736,29 @@ impl ClientHostRuntime {
             .world_bootstrap(bootstrap)
             .require_external_world_reveal()
             .collision_source(Arc::new(
-                holtburger_core::ContentClientCollisionSource::new(
-                    Arc::clone(&self.content.service),
-                    Arc::clone(&self.content.repository),
+                crate::reporting_content_source::ReportingContentSource::new(
+                    holtburger_core::ContentClientCollisionSource::new(
+                        Arc::clone(&self.content.service),
+                        Arc::clone(&self.content.repository),
+                    ),
+                    self.content.failures.clone(),
                 ),
             ))
             .dynamic_script_source(Arc::new(
-                holtburger_core::ContentClientDynamicScriptSource::new(Arc::clone(
-                    &self.content.service,
-                )),
+                crate::reporting_content_source::ReportingContentSource::new(
+                    holtburger_core::ContentClientDynamicScriptSource::new(Arc::clone(
+                        &self.content.service,
+                    )),
+                    self.content.failures.clone(),
+                ),
             ))
             .selection_envelope_source(Arc::new(
-                holtburger_core::ContentClientSelectionEnvelopeSource::new(Arc::clone(
-                    &self.content.service,
-                )),
+                crate::reporting_content_source::ReportingContentSource::new(
+                    holtburger_core::ContentClientSelectionEnvelopeSource::new(Arc::clone(
+                        &self.content.service,
+                    )),
+                    self.content.failures.clone(),
+                ),
             ));
         if let Some(distance) = startup.melee_max_chase_distance {
             builder = builder.combat_tuning(holtburger_core::ClientCombatTuning::new(distance)?);

@@ -1,6 +1,18 @@
 use std::process::Command;
 
 fn main() {
+    // The Windows executable owns its shell icon; terminal rendering is unaffected.
+    let icon = "../../assets/branding/icon.ico";
+    println!("cargo:rerun-if-changed={icon}");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        winresource::WindowsResource::new()
+            .set_icon(icon)
+            .set("ProductName", "Holtburger")
+            .set("FileDescription", "Holtburger CLI")
+            .compile()
+            .expect("failed to embed the Holtburger Windows icon");
+    }
+
     let version = std::env::var("HOLTBURGER_BUILD_VERSION")
         .ok()
         .filter(|value| !value.trim().is_empty())

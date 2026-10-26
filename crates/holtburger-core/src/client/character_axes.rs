@@ -1,15 +1,15 @@
 //! Retail-adjusted semantic character axes shared by authored playback and physical launch.
 
-use super::character_kinematics::CharacterMovementKinematics;
+use super::character_kinematics::{
+    CharacterMovementKinematics, RETAIL_WALK_FORWARD_BASE_SPEED_MPS,
+};
 use super::movement_types::{CharacterDrive, Gait, LateralMotion, LongitudinalMotion, Turn};
 use holtburger_common::Vector3;
 use holtburger_world::motion::{MotionCommand, MotionOrder};
 use thiserror::Error;
 
-/// Retail walk animation speed from retail movement state velocity query.
-const RETAIL_WALK_ANIMATION_SPEED: f32 = 3.12;
-/// Retail sidestep animation speed from retail movement state velocity query.
-const RETAIL_SIDESTEP_ANIMATION_SPEED: f32 = 1.25;
+/// Retail sidestep state velocity from retail movement state velocity query.
+const RETAIL_SIDESTEP_BASE_SPEED_MPS: f32 = 1.25;
 /// Retail backward scaling from retail movement adjust motion.
 const RETAIL_BACKWARD_FACTOR: f32 = 0.65;
 /// Retail sidestep scaling from retail movement adjust motion.
@@ -84,7 +84,7 @@ impl AdjustedCharacterAxes {
         });
         let sidestep_speed = self
             .sidestep_rate
-            .map_or(0.0, |rate| RETAIL_SIDESTEP_ANIMATION_SPEED * rate);
+            .map_or(0.0, |rate| RETAIL_SIDESTEP_BASE_SPEED_MPS * rate);
         let mut velocity = Vector3::new(sidestep_speed, forward_speed, 0.0);
         let maximum_speed = kinematics.base_run_forward_speed() * kinematics.run_rate_scalar();
         if velocity.length() > maximum_speed {
@@ -142,7 +142,7 @@ pub fn adjust_character_axes_for_run_rate(
     };
     let base_sidestep_rate = sidestep_sign
         * RETAIL_SIDESTEP_FACTOR
-        * (RETAIL_WALK_ANIMATION_SPEED / RETAIL_SIDESTEP_ANIMATION_SPEED);
+        * (RETAIL_WALK_FORWARD_BASE_SPEED_MPS / RETAIL_SIDESTEP_BASE_SPEED_MPS);
     let sidestep_rate = drive.lateral.map(|_| {
         if running {
             (base_sidestep_rate * run_rate)

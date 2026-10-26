@@ -4,7 +4,7 @@ use crate::SimulationSceneSnapshot;
 use crate::client::character_jump::{
     CharacterJumpReadiness, CharacterJumpRejection, ResolvedJump, resolve_character_jump,
 };
-use crate::client::character_kinematics::jump_kinematics_from_movement_capabilities;
+use crate::client::character_kinematics::retail_jump_kinematics;
 use crate::client::types::{
     ClientCharacterMotionFeedback, ClientCharacterMotionOutcome, ClientCharacterMotionRejection,
 };
@@ -422,8 +422,8 @@ fn prepare_player_jump(
     let context = player_jump_context(world).map_err(reject)?;
     let capabilities = context.capabilities;
     let body = context.body;
-    let kinematics = jump_kinematics_from_movement_capabilities(
-        &capabilities.movement,
+    let kinematics = retail_jump_kinematics(
+        capabilities.run_rate_scalar,
         capabilities.full_extent_jump_height,
     )
     .map_err(|_| reject(ClientCharacterMotionRejection::CapabilityUnavailable))?;

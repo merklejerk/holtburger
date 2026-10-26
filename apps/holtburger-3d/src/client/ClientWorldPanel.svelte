@@ -550,17 +550,17 @@
 			}
 		}
 		waypointMarker.style.display = waypointPlacement === null ? "none" : "";
-		const position = worldMapPlayer(
+		const player = worldMapPlayer(
 			frame.subject,
 			view,
 			canvas.clientWidth,
 			canvas.clientHeight,
 		);
-		playerMarker.style.display = position ? "" : "none";
-		if (position) {
+		playerMarker.style.display = player ? "" : "none";
+		if (player) {
 			playerMarker.setAttribute(
 				"transform",
-				`translate(${position[0]} ${position[1]})`,
+				`translate(${player.position[0]} ${player.position[1]}) rotate(${player.headingDegrees})`,
 			);
 		}
 	}

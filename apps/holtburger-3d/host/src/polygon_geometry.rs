@@ -1,5 +1,5 @@
 use anyhow::{Result, ensure};
-use holtburger_dat::graphics::{CVertexArray, Polygon};
+use holtburger_dat::graphics::{CVertexArray, Polygon, SWVertex, Vec2Duv};
 
 const STIPPLING_REPEAT_POS: u8 = 0x01;
 const STIPPLING_REPEAT_NEG: u8 = 0x02;
@@ -165,11 +165,9 @@ fn validate_side_uvs(
     for (offset, uv_index) in indices.iter().copied().enumerate() {
         let vertex_id = polygon.vertex_ids[offset];
         let vertex = &vertex_array.vertices[&vertex_id];
-        let uv = vertex.uvs.get(usize::from(uv_index)).ok_or_else(|| {
-            anyhow::anyhow!(
-                "polygon {polygon_id} {side:?} side references missing UV {uv_index} on vertex {vertex_id}"
-            )
-        })?;
+        let Some(uv) = render_uv(vertex, uv_index) else {
+            continue;
+        };
         ensure!(
             uv.u.is_finite() && uv.v.is_finite(),
             "polygon {polygon_id} {side:?} side has a non-finite UV on vertex {vertex_id}"
@@ -284,7 +282,7 @@ fn append_side(
             ]);
             let uv = side
                 .uv_indices
-                .map(|indices| &vertex.uvs[usize::from(indices[offset])]);
+                .and_then(|indices| render_uv(vertex, indices[offset]));
             geometry
                 .texture_coordinates
                 .extend([uv.map_or(0.0, |uv| uv.u), uv.map_or(0.0, |uv| uv.v)]);
@@ -292,6 +290,16 @@ fn append_side(
         }
     }
     Ok(())
+}
+
+/// Select a UV using retail's signed-byte index and per-vertex bounds.
+fn render_uv(vertex: &SWVertex, uv_index: u8) -> Option<&Vec2Duv> {
+    // RETAIL QUIRK: acclient.c:433777-433797 (`copyVert`) emits (0, 0) for negative
+    // signed-byte or out-of-range UV indices. Rejecting them prevents shipped objects from
+    // loading. A census of GfxObj 0x010016D3's 62 polygons found two such references,
+    // on polygons 39 and 40; this object blocks dungeon 0x6143's EnvCell preparation.
+    i8::try_from(uv_index).ok()?;
+    vertex.uvs.get(usize::from(uv_index))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -390,10 +398,8 @@ fn expand_bounds(bounds: Option<RenderAabb>, point: RenderVec3) -> RenderAabb {
 mod tests {
     use std::collections::HashMap;
 
-    use holtburger_common::Vector3;
-    use holtburger_dat::graphics::{SWVertex, Vec2Duv};
-
     use super::*;
+    use holtburger_common::Vector3;
 
     #[test]
     fn expands_cull_none_into_both_windings() {
@@ -468,6 +474,56 @@ mod tests {
             build_polygon_set_geometry(&vertices, [(7, &polygon)], include_every_side).unwrap_err();
 
         assert!(error.to_string().contains("2 UV indices for 3 vertices"));
+    }
+
+    #[test]
+    fn emits_zero_uvs_for_out_of_range_indices_on_both_sides() {
+        let vertices = triangle_vertices();
+        let mut polygon = triangle_polygon(CULL_MODE_CLOCKWISE, 0);
+        polygon.pos_uv_indices[1] = 1;
+        polygon.neg_uv_indices[2] = 1;
+
+        let geometry =
+            build_polygon_set_geometry(&vertices, [(39, &polygon)], include_every_side).unwrap();
+
+        assert_eq!(geometry.triangles.len(), 2);
+        assert_eq!(
+            geometry.texture_coordinates,
+            [0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn treats_high_uv_indices_as_signed_bytes_even_when_entries_exist() {
+        let mut vertices = triangle_vertices();
+        for vertex in vertices.vertices.values_mut() {
+            vertex.uvs = vec![Vec2Duv { u: 0.25, v: 0.75 }; 256];
+            vertex.num_uvs = 256;
+        }
+        let mut polygon = triangle_polygon(CULL_MODE_COUNTER_CLOCKWISE, 0);
+        polygon.pos_uv_indices = vec![127, 128, 255];
+
+        let geometry =
+            build_polygon_set_geometry(&vertices, [(7, &polygon)], include_every_side).unwrap();
+
+        assert_eq!(
+            geometry.texture_coordinates,
+            [0.25, 0.75, 0.0, 0.0, 0.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn rejects_non_finite_selected_uvs() {
+        let mut vertices = triangle_vertices();
+        for vertex in vertices.vertices.values_mut() {
+            vertex.uvs[0].u = f32::NAN;
+        }
+        let polygon = triangle_polygon(CULL_MODE_COUNTER_CLOCKWISE, 0);
+
+        let error =
+            build_polygon_set_geometry(&vertices, [(7, &polygon)], include_every_side).unwrap_err();
+
+        assert!(error.to_string().contains("non-finite UV"));
     }
 
     fn triangle_vertices() -> CVertexArray {

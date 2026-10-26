@@ -3,7 +3,9 @@ import "../app/base.css";
 import ContentStartup from "../app/ContentStartup.svelte";
 import ClientApp from "./ClientApp.svelte";
 import { mount } from "svelte";
-import { mountEntryWithProps } from "../app/mount";
+import { UiThemeSelection } from "../app/ui-theme-selection";
+import { createElectronUiThemeTransport } from "../app/ui-theme-transport";
+import { uiThemes, mountEntryWithProps } from "../app/mount";
 import { clientDebugEnabled } from "./client-debug";
 import { createClientShortcuts } from "./ClientShortcutDock.svelte";
 import { createDefaultClientUserSettings } from "./client-settings-defaults";
@@ -11,7 +13,7 @@ import { createElectronClientSettingsTransport } from "./client-settings-transpo
 
 async function startGame(
 	target: HTMLElement,
-	isClosing: () => boolean,
+	signal: AbortSignal,
 	context: Map<unknown, unknown>,
 	contentLocation: string,
 ): Promise<boolean> {
@@ -21,7 +23,7 @@ async function startGame(
 		createClientShortcuts(clientDebugEnabled(window.location.search)).length,
 	);
 	const loadedUserSettings = await settingsTransport.loadUser(defaults);
-	if (isClosing()) return false;
+	if (signal.aborted) return false;
 	const initialUserSettings = {
 		...defaults,
 		...loadedUserSettings.sections,
@@ -49,19 +51,51 @@ async function startGame(
 		}
 	}
 
-	if (isClosing()) return false;
-	mount(ClientApp, {
-		target,
-		context,
-		props: {
-			contentLocation,
-			initialUserSettings,
-			initialSettingsIssue,
-			settingsTransport,
-			visualCacheTransport: createElectronVisualCacheTransport(),
-		},
-	});
-	return true;
+	if (signal.aborted) return false;
+	const themeSelection = new UiThemeSelection(
+		createElectronUiThemeTransport(),
+		uiThemes,
+		signal,
+	);
+	try {
+		await themeSelection.refresh();
+		if (signal.aborted) {
+			await themeSelection.retire();
+			return false;
+		}
+		await themeSelection.select(initialUserSettings.ui.themeId);
+		if (signal.aborted) {
+			await themeSelection.retire();
+			return false;
+		}
+		const themeState = themeSelection.read();
+		const themeIssues = [
+			themeState.catalog.kind === "failed" ? themeState.catalog.message : null,
+			themeState.selection.kind === "failed"
+				? themeState.selection.message
+				: null,
+		].filter((issue) => issue !== null);
+		if (themeIssues.length)
+			initialSettingsIssue = [initialSettingsIssue, ...themeIssues]
+				.filter((issue) => issue !== null)
+				.join("; ");
+		mount(ClientApp, {
+			target,
+			context,
+			props: {
+				contentLocation,
+				themeSelection,
+				initialUserSettings,
+				initialSettingsIssue,
+				settingsTransport,
+				visualCacheTransport: createElectronVisualCacheTransport(),
+			},
+		});
+		return true;
+	} catch (error) {
+		await themeSelection.retire();
+		throw error;
+	}
 }
 
 await mountEntryWithProps(ContentStartup, {

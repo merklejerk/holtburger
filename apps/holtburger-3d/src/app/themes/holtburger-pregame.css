@@ -16,8 +16,8 @@
 		--ui-input-background: var(--ui-color-surface);
 		--ui-radius-control: 0;
 		--ui-radius-surface: 0;
-		--ui-font-heading: Georgia, "Times New Roman", serif;
-		--ui-font-body: Arial, Helvetica, sans-serif;
+		--ui-font-heading: Gelasio, serif;
+		--ui-font-body: Arimo, sans-serif;
 		/* Backdrop shading and control decoration are independent of world scenery. */
 		--pregame-backdrop-color: rgb(0 0 0 / 90%);
 		--pregame-editor-backdrop-color: rgb(0 0 0 / 92%);

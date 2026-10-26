@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { createFixtureThemeSettings } from "./ui-showcase-themes";
 	import { provideClientInput } from "../../client/client-input-context";
 	import { AppInput } from "../../lib/input/app-input";
 	import ClientPregameSettings from "../../client/ClientPregameSettings.svelte";
@@ -17,7 +18,6 @@
 	import type { Snippet } from "svelte";
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { uiThemes } from "../../app/mount";
-	import { defaultUiThemeUrl } from "../../app/ui-theme";
 	import { steelUrl, opaqueUrl } from "./ui-showcase-themes";
 	import ClientCharacterHud from "../../client/ClientCharacterHud.svelte";
 	import ClientStatusTray from "../../client/ClientStatusTray.svelte";
@@ -49,6 +49,9 @@
 		type ClientChatLine,
 	} from "../../client/client-chat-policy";
 	import type { ClientAppPhase } from "../../client/client-app-lifecycle";
+	const fixtureTheme = createFixtureThemeSettings((id) => {
+		settingsUi = { ...settingsUi, themeId: id };
+	});
 
 	/** Live preference fixtures exercise the production pregame drawer without a host session. */
 	let settingsGraphics = $state<ClientGraphicsSettings>({
@@ -162,7 +165,7 @@
 		backdrop = "image";
 		return () => URL.revokeObjectURL(url);
 	});
-	let theme = $state("standard");
+	let theme = $state("base");
 	let opaque = $state(false);
 	let showHidden = $state(false);
 	/** App-local diagnostic control preview. */
@@ -277,7 +280,7 @@
 		};
 		try {
 			await uiThemes.replace(
-				fresh(theme === "standard" ? defaultUiThemeUrl : steelUrl),
+				theme === "base" ? null : fresh(steelUrl),
 				opaque ? fresh(opaqueUrl) : null,
 			);
 			reload = { kind: "loaded" };
@@ -335,8 +338,8 @@
 					bind:value={theme}
 					disabled={reload.kind === "loading"}
 					onchange={reloadTheme}
-					><option value="standard">Holtburger Standard</option><option
-						value="steel">Steel fixture</option
+					><option value="base">Base</option><option value="steel"
+						>Steel fixture</option
 					></select
 				></label
 			>
@@ -593,6 +596,7 @@
 							>
 								{#snippet settings()}
 									<ClientPregameSettings
+										theme={fixtureTheme}
 										graphics={settingsGraphics}
 										audio={settingsAudio}
 										ui={settingsUi}

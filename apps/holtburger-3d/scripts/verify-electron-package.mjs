@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { listPackage } from "@electron/asar";
+import { extractFile, listPackage } from "@electron/asar";
 import { constants } from "node:fs";
-import { access, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { access, readFile, readdir, stat } from "node:fs/promises";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -70,7 +70,30 @@ export async function verifyElectronPackage(packageRoot) {
 		if (!archiveEntries.has(requiredEntry)) {
 			throw new Error(`packaged ASAR is missing ${requiredEntry}`);
 		}
+		// ASAR lists absolute-style entries but extracts by archive-relative name.
+		if (extractFile(archivePath, requiredEntry.slice(1)).length === 0) {
+			throw new Error(`packaged ASAR contains an empty file: ${requiredEntry}`);
+		}
 	}
+	// Compare the source tree, including notices, without maintaining a second font inventory.
+	const fontsRoot = join(appRoot, "public/fonts");
+	for (const entry of await readdir(fontsRoot, {
+		recursive: true,
+		withFileTypes: true,
+	})) {
+		if (!entry.isFile()) continue;
+		const sourcePath = join(entry.parentPath, entry.name);
+		const archiveEntry = `dist/fonts/${relative(fontsRoot, sourcePath).replaceAll("\\", "/")}`;
+		if (!archiveEntries.has(`/${archiveEntry}`)) {
+			throw new Error(`packaged ASAR is missing /${archiveEntry}`);
+		}
+		if (
+			!extractFile(archivePath, archiveEntry).equals(await readFile(sourcePath))
+		) {
+			throw new Error(`packaged ASAR differs from source: /${archiveEntry}`);
+		}
+	}
+
 	if (
 		![...archiveEntries].some(
 			(entry) => entry.startsWith("/dist/assets/") && entry.endsWith(".js"),

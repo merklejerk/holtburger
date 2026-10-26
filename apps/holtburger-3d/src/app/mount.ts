@@ -1,13 +1,20 @@
 import type { Component } from "svelte";
 import { mount } from "svelte";
-import { createUiThemeLoader, defaultUiThemeUrl } from "./ui-theme";
+import { createUiThemeLoader, UI_THEME_CHANGED_EVENT } from "./ui-theme";
 import "./ui-base.css";
 
 /** The application owns one document-wide theme selection. */
 export const uiThemes = createUiThemeLoader(document);
 
+if (import.meta.hot) {
+	// CSS HMR also changes cached canvas colors and measured UI appearance.
+	import.meta.hot.on("vite:afterUpdate", () => {
+		document.dispatchEvent(new Event(UI_THEME_CHANGED_EVENT));
+	});
+}
+
 async function prepareMountTarget(
-	themeUrl: string = defaultUiThemeUrl,
+	themeUrl: string | null = null,
 	overrideUrl: string | null = null,
 ): Promise<HTMLElement> {
 	const target = document.getElementById("app");
@@ -24,7 +31,7 @@ async function prepareMountTarget(
 
 export async function mountEntry(
 	App: Component,
-	themeUrl: string = defaultUiThemeUrl,
+	themeUrl: string | null = null,
 	overrideUrl: string | null = null,
 ): Promise<void> {
 	mount(App, { target: await prepareMountTarget(themeUrl, overrideUrl) });
@@ -36,7 +43,7 @@ export async function mountEntryWithProps<
 >(
 	App: Component<Props>,
 	props: Props,
-	themeUrl: string = defaultUiThemeUrl,
+	themeUrl: string | null = null,
 	overrideUrl: string | null = null,
 ): Promise<void> {
 	mount(App, {

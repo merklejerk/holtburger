@@ -3,13 +3,13 @@ import type { ClientClosePreparation } from "../client/client-close-contract";
 /** Game construction and close delegation span the interval before ClientApp registers cleanup. */
 export class StartupGameLifecycle {
 	readonly #mode: "client" | "explorer";
+	readonly #cancellation = new AbortController();
 	readonly #registrationWaiters = new Set<{
 		resolve: () => void;
 		reject: (error: Error) => void;
 	}>();
 	#mountFailure: Error | null = null;
 	#cleanup: (() => Promise<ClientClosePreparation>) | null = null;
-	#closing = false;
 	#mount: Promise<void> | null = null;
 	#close: Promise<ClientClosePreparation> | null = null;
 
@@ -18,12 +18,12 @@ export class StartupGameLifecycle {
 	}
 
 	/** Starts at most once; a close arriving before admission prevents construction entirely. */
-	start(mount: (isClosing: () => boolean) => Promise<boolean>): Promise<void> {
+	start(mount: (signal: AbortSignal) => Promise<boolean>): Promise<void> {
 		if (this.#mount !== null) return this.#mount;
-		if (this.#closing) return Promise.resolve();
+		if (this.#cancellation.signal.aborted) return Promise.resolve();
 		this.#mount = Promise.resolve().then(async () => {
-			if (this.#closing) return;
-			const mounted = await mount(() => this.#closing);
+			if (this.#cancellation.signal.aborted) return;
+			const mounted = await mount(this.#cancellation.signal);
 			if (this.#mountFailure !== null) throw this.#mountFailure;
 			if (mounted && this.#mode === "client" && this.#cleanup === null)
 				await new Promise<void>((resolve, reject) => {
@@ -54,7 +54,7 @@ export class StartupGameLifecycle {
 
 	/** Joins in-flight settings/mount work before invoking the game delegate exactly once. */
 	prepareClose(): Promise<ClientClosePreparation> {
-		this.#closing = true;
+		this.#cancellation.abort();
 		return (this.#close ??= this.#prepare());
 	}
 

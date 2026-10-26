@@ -1,3 +1,5 @@
+@import "./ui-fonts.css";
+
 @layer base {
 	:root {
 		/* Palette-dependent component defaults resolve at the consumer. */
@@ -13,43 +15,45 @@
 		--ui-emote-wheel-highlight-scale: 1.025;
 		--ui-emote-wheel-transition-duration: 160ms;
 		/* Optional --ui-emote-wheel-highlight-background resolves from local HUD glass at use. */
-		--ui-backdrop-filter: none;
+		--ui-backdrop-filter: blur(0px);
 		/* Tint opacity for default panel/HUD backgrounds; explicit backgrounds bypass it. */
 		--ui-surface-opacity: 1;
 		--ui-color-text: #f4f0e5;
 		--ui-color-muted: #e5ddcb;
-		--ui-color-surface: #242424;
-		--ui-color-well: #181818;
-		--ui-color-control: #444444;
-		--ui-color-border: #b8b8b8;
+		--ui-color-surface: #242522;
+		--ui-color-well: #362e2a;
+		--ui-color-control: #645631;
+		--ui-color-border: #c7ba91;
 		--ui-color-highlight: #f2dfa9;
 		--ui-color-shadow: #0d0806;
-		--ui-color-accent: #c8d8ef;
+		--ui-color-accent: #e6cd8b;
 		/* Foreground color for controls in an active/open state. */
-		--ui-color-active: #90cdd1;
+		--ui-color-active: #c2ffd9;
 		--ui-color-focus: #fff1cc;
 		--ui-color-danger: #ffac9c;
 		--ui-color-warning: #efc46f;
 		--ui-color-success: #bfd398;
+		/* Available upgrades remain distinct from buffed stat values. */
+		--ui-character-upgrade-color: #7dffa3;
 		/* Connection quality stays saturated against the world; traffic dots share one tint. */
 		--ui-connection-good-color: #32e875;
 		--ui-connection-fair-color: #ffc13b;
 		--ui-connection-poor-color: #ff5252;
 		--ui-connection-activity-color: #ffffff;
 		/* Chat category colors are independent of vital bars and status feedback. */
-		--ui-chat-system-text: #87bddd;
-		--ui-chat-npc-text: #c8d8ef;
+		--ui-chat-system-text: #66aaff;
+		--ui-chat-npc-text: #e6cd8b;
 		--ui-chat-error-text: #ffac9c;
-		--ui-chat-combat-text: #dc796a;
+		--ui-chat-combat-text: #ff4444;
 		--ui-chat-trade-text: #efc46f;
 		--ui-chat-emote-text: #bfd398;
 		--ui-chat-party-text: #bfd398;
 		--ui-chat-tell-text: #f0b1e5;
 		--ui-chat-guild-text: #9bdddc;
 		--ui-chat-society-text: #b1c3ff;
-		--ui-color-health: #dc796a;
+		--ui-color-health: #ff4444;
 		--ui-color-stamina: #dfbd63;
-		--ui-color-mana: #87bddd;
+		--ui-color-mana: #66aaff;
 		/* Vital warnings inherit the vital palette. Opacities are fixed while active. */
 		--ui-vital-warning-health-opacity: 0.6;
 		--ui-vital-warning-stamina-opacity: 0.5;
@@ -62,7 +66,7 @@
 		--ui-vital-warning-vein-corner-size: 32%;
 		--ui-vital-warning-glow-clear-extent: 55%;
 		/* Spell shortcuts have their own palette and backing opacity, independent of vitals. */
-		--ui-spell-bar-color: #87bddd;
+		--ui-spell-bar-color: #66aaff;
 		--ui-spell-cell-background-opacity: 27%;
 		--ui-spell-tab-height: 16px;
 		--ui-spell-tab-font-size: 10px;
@@ -80,13 +84,13 @@
 		--ui-combat-text-critical-color: #ffb833;
 		--ui-combat-text-avoidance-color: #a6b3bf;
 		--ui-combat-text-size: 28px;
-		--ui-font-body: Arial, Helvetica, sans-serif;
+		--ui-font-body: Arimo, sans-serif;
 		/* Authored font lengths remain unscaled; each absolute-size consumer applies this once. */
 		--ui-text-scale: 1;
 		/* Authored icon lengths remain raw; consumers apply this multiplier once. */
 		--ui-icon-scale: 1;
-		--ui-font-heading: Georgia, "Times New Roman", serif;
-		--ui-font-mono: "Courier New", monospace;
+		--ui-font-heading: Gelasio, serif;
+		--ui-font-mono: Cousine, monospace;
 		--ui-font-size-body: 15px;
 		--ui-font-size-heading-1: 22px;
 		--ui-font-size-heading-2: 18px;
@@ -97,6 +101,12 @@
 		--ui-line-height-heading: 1.25;
 		--ui-radius-surface: 3px;
 		--ui-radius-control: 2px;
+		/* Panel/header decoration and shared control backgrounds. */
+		--ui-header-stripe-color: #60432d;
+		--ui-header-grain-opacity: 0.16;
+		--ui-surface-shadow: 0 2px 6px #0d080629;
+		--ui-input-background: #362e2a;
+		--ui-button-background-color: #823a16;
 		/* Shared easing for small interactive embellishments. */
 		--ui-easing: cubic-bezier(0.238, 0.55, 0.546, 1.361);
 		/* Notification motion: themes may replace keyframes or use animation-name none. */
@@ -167,6 +177,11 @@
 			drop-shadow(0 0 5px var(--ui-color-accent));
 		--ui-combat-breakpoint-shadow:
 			0 0 5px var(--ui-color-shadow), 0 0 10px var(--ui-color-shadow);
+		/* Shared selection glow for inventory headers and item cells. */
+		--ui-item-selection-color: #ffe2a0;
+		--ui-item-selection-outline: 4px solid gold;
+		--ui-item-selection-shadow: inset 0 0 9px #eab94a99, 0 0 6px #eab94a99;
+		--ui-item-selection-background: #ad751622;
 		/* Item grid density, artwork scaling, strip controls and inventory layout. */
 		/* Shared item-grid minimum and fixed strip/shortcut cell size. */
 		--ui-item-cell-min-size: 36px;
@@ -289,7 +304,7 @@
 		--ui-enchantments-child-indent: 8px;
 		/* Quantity stays legible over artwork without changing the cell geometry. */
 		--ui-item-count-font-size: 16px;
-		--ui-item-count-font-family: Arial, Helvetica, sans-serif;
+		--ui-item-count-font-family: Arimo, sans-serif;
 		--ui-action-bar-label-font-size: 13px;
 		--ui-shortcut-hint-font-size: 10px;
 		--ui-status-badge-font-size: 11px;
@@ -392,6 +407,9 @@
 		--ui-trade-reset-inset: 4px;
 	}
 	@supports (backdrop-filter: blur(1px)) {
+		:root {
+			--ui-surface-opacity: 0.74;
+		}
 		.ui-theme .ui-panel {
 			backdrop-filter: var(--ui-backdrop-filter);
 		}
@@ -497,6 +515,25 @@
 		background: var(--ui-panel-background, var(--ui-color-surface));
 	}
 	.ui-theme .ui-frame {
+		/* Restrict the decorative background to the header’s top edge. */
+		background:
+			repeating-linear-gradient(
+					2deg,
+					transparent 0 3px,
+					color-mix(
+							in srgb,
+							var(--ui-color-shadow) calc(var(--ui-header-grain-opacity) * 100%),
+							transparent
+						)
+						4px,
+					transparent 6px 9px
+				)
+				top / 100% 3px no-repeat,
+			linear-gradient(
+					var(--ui-header-stripe-color),
+					var(--ui-header-stripe-color)
+				)
+				top / 100% 3px no-repeat;
 		padding: 4px 8px;
 		border-radius: var(--ui-radius-surface) var(--ui-radius-surface) 0 0;
 		border-bottom: 1px solid var(--ui-color-border);
@@ -600,6 +637,11 @@
 		border-color: var(--ui-button-border-color, var(--ui-color-accent));
 	}
 	.ui-theme .ui-button:where(:hover:not(:disabled)) {
+		--ui-button-background-color: color-mix(
+			in srgb,
+			var(--ui-color-control) 88%,
+			var(--ui-color-highlight)
+		);
 		border-color: var(--ui-button-border-color, var(--ui-color-accent));
 		background: var(
 			--ui-button-background-color,
@@ -607,6 +649,7 @@
 		);
 	}
 	.ui-theme .ui-button:where(:active:not(:disabled)) {
+		--ui-button-background-color: var(--ui-color-well);
 		background: var(--ui-button-background-color, var(--ui-color-well));
 	}
 	.ui-theme .ui-button:where(:disabled) {

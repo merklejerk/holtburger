@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { UiThemeSettings } from "../app/ui-theme-selection";
 	import ClientEmoteWheel from "./ClientEmoteWheel.svelte";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import ClientLoadoutBuilder from "./ClientLoadoutBuilder.svelte";
@@ -204,6 +205,8 @@
 		readonly onAudioChange: (audio: ClientAudioSettings) => void;
 		/** User graphics snapshot and focused edit operation. */
 		readonly graphics: ClientGraphicsSettings;
+		/** Shared selection owner and settings commit used by both appearance surfaces. */
+		readonly theme: UiThemeSettings;
 		readonly ui: ClientUiSettings;
 		/** Cold environment controls; the readout pulls exclusively from the server source. */
 		readonly clockFormat: ClientClockFormat;
@@ -428,6 +431,7 @@
 		audio,
 		onAudioChange,
 		graphics,
+		theme,
 		ui,
 		clockFormat,
 		environmentOverrides,
@@ -1711,6 +1715,7 @@
 						{/if}
 					{:else if panel === "settings"}
 						<ClientSettingsPanel
+							{theme}
 							{displayPlatform}
 							{audio}
 							{onAudioChange}

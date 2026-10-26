@@ -34,9 +34,9 @@ export type ClientFontFamily = (typeof CLIENT_FONT_FAMILY_OPTIONS)[number];
 export const CLIENT_FONT_FAMILY_CSS: Readonly<
 	Record<Exclude<ClientFontFamily, "theme">, string>
 > = {
-	sans: "Arial, Helvetica, sans-serif",
-	serif: 'Georgia, "Times New Roman", serif',
-	mono: '"Courier New", monospace',
+	sans: "Arimo, sans-serif",
+	serif: "Gelasio, serif",
+	mono: "Cousine, monospace",
 };
 
 /** Fixed recovery buffer prevents warning flicker near the user's threshold. */

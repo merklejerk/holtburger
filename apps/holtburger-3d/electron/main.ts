@@ -2,7 +2,15 @@ import {
 	ClientWindowClose,
 	CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
 } from "./client-window-close.js";
-import { app, BrowserWindow, dialog, ipcMain, Menu, screen } from "electron";
+import {
+	app,
+	BrowserWindow,
+	dialog,
+	ipcMain,
+	Menu,
+	screen,
+	shell,
+} from "electron";
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -52,7 +60,15 @@ import {
 } from "./client-user-data.js";
 import { clientWindowBoundsReachable } from "./client-window-settings.js";
 import { ClientVisualCacheStore } from "./client-visual-cache-store.js";
+import { UiThemeCatalog } from "./ui-theme-catalog.js";
+import {
+	registerUiThemeScheme,
+	installUiThemeProtocol,
+} from "./ui-theme-protocol.js";
+import { uiThemeIdSchema } from "../src/app/ui-theme-contract.js";
 import { playerVisualCaptureSchema } from "../src/client/client-object-preview-contract.js";
+
+registerUiThemeScheme();
 
 const WINDOW_BACKGROUND_COLOR = "#0b0a08";
 const INITIAL_WINDOW_CONTENT_SIZE = Object.freeze({ width: 1440, height: 900 });
@@ -344,9 +360,7 @@ function requireApplicationFrame(
 		event.sender !== applicationContents ||
 		event.senderFrame !== applicationContents.mainFrame
 	)
-		throw new Error(
-			"settings requests are accepted only from the application frame",
-		);
+		throw new Error("requests are accepted only from the application frame");
 }
 
 function requireCharacterGuid(value: unknown): number {
@@ -641,6 +655,24 @@ app.whenReady().then(async () => {
 			`Client window settings unavailable: ${restoredWindow.unavailable}`,
 		);
 	const window = createWindow(entry, restoredWindow?.settings ?? null);
+	const themes = new UiThemeCatalog(
+		join(app.getPath("userData"), "themes"),
+		console.error,
+	);
+	installUiThemeProtocol(window.webContents.session, themes);
+	ipcMain.handle("themes:list", (event) => {
+		requireApplicationFrame(event, window);
+		return themes.list();
+	});
+	ipcMain.handle("themes:resolve", (event, id: unknown) => {
+		requireApplicationFrame(event, window);
+		return themes.resolve(uiThemeIdSchema.parse(id));
+	});
+	ipcMain.handle("themes:open-directory", async (event) => {
+		requireApplicationFrame(event, window);
+		const error = await shell.openPath(await themes.directory());
+		if (error) throw new Error(`Could not open themes directory: ${error}`);
+	});
 	if (settingsStore !== undefined && entry.clientStartup !== undefined) {
 		visualCache = new ClientVisualCacheStore(
 			join(app.getPath("userData"), "character-visuals"),

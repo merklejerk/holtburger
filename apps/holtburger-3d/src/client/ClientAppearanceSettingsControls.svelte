@@ -1,4 +1,6 @@
 <script lang="ts">
+	import UiThemeControls from "../app/UiThemeControls.svelte";
+	import type { UiThemeSettings } from "../app/ui-theme-selection";
 	import type { ClientUiSettings } from "./client-settings-contract";
 	import {
 		CLIENT_FONT_FAMILY_OPTIONS,
@@ -8,11 +10,13 @@
 	} from "./client-settings-values";
 	import "./client-settings-controls.css";
 	interface Props {
+		/** Shared selection owner and settings commit used by both appearance surfaces. */
+		readonly theme: UiThemeSettings;
 		/** User-owned fonts and scale; unrelated UI preferences are preserved on edits. */
 		readonly ui: ClientUiSettings;
 		readonly onUiChange: (ui: ClientUiSettings) => void;
 	}
-	let { ui, onUiChange }: Props = $props();
+	let { theme, ui, onUiChange }: Props = $props();
 	const fontRoles = [
 		{ id: "body", label: "Body text" },
 		{ id: "heading", label: "Headings" },
@@ -20,13 +24,14 @@
 	] as const;
 	const fontFamilyLabels: Readonly<Record<ClientFontFamily, string>> = {
 		theme: "Theme default",
-		sans: "Arial / Helvetica",
-		serif: "Georgia / Times New Roman",
-		mono: "Courier New",
+		sans: "Arimo (sans-serif)",
+		serif: "Gelasio (serif)",
+		mono: "Cousine (monospace)",
 	};
 </script>
 
 <div class="settings-section">
+	<UiThemeControls {theme} preferredId={ui.themeId} />
 	<details class="ui-disclosure ui-disclosure-section" open>
 		<summary>Fonts</summary>
 		<div class="settings-section ui-disclosure-body">

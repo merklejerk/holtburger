@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { createFixtureThemeSettings } from "./ui-showcase-themes";
 	import { untrack } from "svelte";
 	import ClientJumpPowerBar from "../../client/ClientJumpPowerBar.svelte";
 	import { compactInputHint } from "../../lib/input/input-presentation";
@@ -7,6 +8,7 @@
 	import type { ClientInputConfiguration } from "../../lib/input/input-contract";
 	import { createDefaultClientUserSettings } from "../../client/client-settings-defaults";
 	import { EMPTY_CLIENT_SELECTED_DISPLAY } from "../../client/client-selected-entity-tracking";
+	const fixtureTheme = createFixtureThemeSettings(() => {});
 	const {
 		initial,
 		accept,
@@ -38,6 +40,7 @@
 		powerControl={null}
 	/>
 	<ClientSettingsPanel
+		theme={fixtureTheme}
 		audio={defaults.audio}
 		graphics={defaults.graphics}
 		ui={defaults.ui}

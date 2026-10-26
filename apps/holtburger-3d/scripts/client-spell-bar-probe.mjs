@@ -391,8 +391,8 @@ export async function probeSpellBar(
 	await settled();
 	await read(`document.querySelector('.spell-bar-scroll').scrollTo(0,0)`);
 	const backgrounds = [];
-	for (const standard of [false, true]) {
-		await read(`${probe}.theme(${standard})`);
+	for (const alternate of [true, false]) {
+		await read(`${probe}.theme(${alternate})`);
 		await settled();
 		const colors = await read(`(() => {
    const empty=document.querySelector('${cell(0)}'); const full=document.querySelector('${cell(1)}');

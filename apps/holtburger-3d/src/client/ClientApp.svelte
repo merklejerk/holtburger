@@ -1,4 +1,8 @@
 <script lang="ts">
+	import type {
+		UiThemeSelection,
+		UiThemeSettings,
+	} from "../app/ui-theme-selection";
 	import ClientPregameSettings from "./ClientPregameSettings.svelte";
 	import { choosePregameLocation } from "./client-pregame-tuning";
 	import PowerIcon from "../assets/icons/hud-power.svg?component";
@@ -244,6 +248,8 @@
 	interface Props {
 		/** Canonical startup selection; injected diagnostic hosts can lack filesystem provenance. */
 		readonly contentLocation: string | null;
+		/** Already initialized once by bootstrap; this shell owns subsequent retirement. */
+		readonly themeSelection: UiThemeSelection;
 		readonly initialUserSettings: ClientUserSettings;
 		/** Bootstrap settings issue captured before the app's toast owner exists. */
 		readonly initialSettingsIssue: string | null;
@@ -253,12 +259,14 @@
 
 	const {
 		contentLocation,
+		themeSelection,
 		initialUserSettings,
 		initialSettingsIssue,
 		settingsTransport,
 		visualCacheTransport,
 	}: Props = $props();
 	// Bootstrap completes before mount; later prop replacement cannot own live settings lifetime.
+	const startupThemeSelection = untrack(() => themeSelection);
 	const startupUserSettings = untrack(() => initialUserSettings);
 	const startupSettingsIssue = untrack(() => initialSettingsIssue);
 	const startupSettingsTransport = untrack(() => settingsTransport);
@@ -689,9 +697,18 @@
 				gameplayPresentation?.setCombatEffectsAppearance(appearance);
 			},
 			() => gameplayPresentation?.refreshCombatEffectsFontAtlas(),
+			(error) =>
+				toastCenter.publish({ message: error.message, tone: "warning" }),
 		);
 	}
 
+	const theme: UiThemeSettings = {
+		owner: startupThemeSelection,
+		async select(id) {
+			if (await startupThemeSelection.select(id))
+				changeUi({ ...userSettings.ui, themeId: id });
+		},
+	};
 	function changeUi(ui: ClientUiSettings): void {
 		changeUserSection("ui", clientUiSettingsSchema.parse(ui));
 	}
@@ -754,12 +771,14 @@
 	onMount(() => {
 		const prepareResources = async () => {
 			compositionClosing = true;
+			const themeRetirement = startupThemeSelection.retire();
 			characterSettingsOwner.retire();
 			// Withdrawal runs synchronously before flush takes its final producer snapshot.
 			const retirements =
 				retireClientComposition === null ? [] : [retireClientComposition()];
 			const results = await Promise.allSettled([
 				...retirements,
+				themeRetirement,
 				userSettingsPersistence.flush(),
 				characterSettingsOwner.flush(),
 				...pendingVisualCaptures,
@@ -2255,6 +2274,7 @@
 
 	{#if page.kind === "gameplay" && canvasElement !== null && interactionRoot !== null}
 		<ClientGameplayView
+			{theme}
 			onReturnToMainMenu={() => void returnToMainMenu()}
 			onDisconnect={() => void disconnect()}
 			canReturnToMenu={appState.admission.canReturn}
@@ -2536,6 +2556,7 @@
 			>
 				{#snippet settings()}
 					<ClientPregameSettings
+						{theme}
 						graphics={userSettings.graphics}
 						audio={userSettings.audio}
 						ui={userSettings.ui}

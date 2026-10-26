@@ -1,4 +1,4 @@
-/* Independent replacement: intentionally does not import Holtburger Standard. */
+/* Diagnostic theme: overrides the shipped base appearance. */
 @layer theme {
 	:root {
 		--ui-color-surface: #172530;
@@ -6,6 +6,7 @@
 		--ui-color-control: #304553;
 		--ui-color-accent: #a2d7e9;
 		--ui-color-border: #a2bac7;
+		--ui-spell-bar-color: #a2d7e9;
 	}
 	.ui-panel {
 		border-style: dashed;

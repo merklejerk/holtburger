@@ -27,14 +27,17 @@ describe("startup game ownership", () => {
 		const lifecycle = new StartupGameLifecycle("client");
 		const settings = gate();
 		const construct = vi.fn();
-		const mounting = lifecycle.start(async (isClosing) => {
+		const retire = vi.fn();
+		const mounting = lifecycle.start(async (signal) => {
+			signal.addEventListener("abort", retire, { once: true });
 			await settings.promise;
-			if (isClosing()) return false;
+			if (signal.aborted) return false;
 			construct();
 			return true;
 		});
 		await Promise.resolve();
 		const closing = lifecycle.prepareClose();
+		expect(retire).toHaveBeenCalledOnce();
 		settings.open();
 		await mounting;
 		expect(await closing).toEqual({ kind: "prepared" });

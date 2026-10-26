@@ -1,17 +1,4 @@
-// Keep this as a file: the production CSP does not permit data-URL stylesheets.
-import holtburgerStandardUrl from "./themes/holtburger-standard.css?url&no-inline";
-
-// Appearance is published by the stylesheet loader. Absorb asset-module updates so
-// editing the theme in Vite does not reload the page and discard component state.
-if (import.meta.hot) {
-	import.meta.hot.accept(
-		"./themes/holtburger-standard.css?url&no-inline",
-		() => {},
-	);
-}
-
-/** Bundled themes and caller-supplied themes use the same stylesheet URL boundary. */
-export const defaultUiThemeUrl = holtburgerStandardUrl;
+import { UI_THEME_LOAD_TIMEOUT_MS } from "./ui-theme-contract";
 
 /** Cold notification after a complete stylesheet selection has become active. */
 export const UI_THEME_CHANGED_EVENT = "holtburger-ui-theme-changed";
@@ -22,36 +9,64 @@ export function createUiThemeLoader(owner: Document) {
 	let queue = Promise.resolve();
 
 	/** Stage a stylesheet without applying it until the complete selection has loaded. */
-	function load(url: string): Promise<HTMLLinkElement> {
+	function load(url: string, signal: AbortSignal): Promise<HTMLLinkElement> {
 		return new Promise((resolve, reject) => {
+			signal.throwIfAborted();
 			const link = owner.createElement("link");
+			const cleanup = () => {
+				link.onload = null;
+				link.onerror = null;
+				signal.removeEventListener("abort", abort);
+			};
+			const fail = (error: unknown) => {
+				cleanup();
+				link.remove();
+				reject(error);
+			};
+			const abort = () => fail(signal.reason);
 			link.rel = "stylesheet";
 			link.media = "not all";
 			link.href = url;
 			link.onload = () => {
-				link.onload = null;
-				link.onerror = null;
+				cleanup();
 				resolve(link);
 			};
-			link.onerror = () => {
-				link.remove();
-				reject(new Error(`Could not load UI stylesheet: ${url}`));
-			};
+			link.onerror = () =>
+				fail(new Error(`Could not load UI stylesheet: ${url}`));
+			signal.addEventListener("abort", abort, { once: true });
 			owner.head.append(link);
 		});
 	}
 
 	return {
-		/** Replace the whole selection atomically; null removes the optional override. */
-		replace(themeUrl: string, overrideUrl: string | null): Promise<void> {
+		/** Replace optional stylesheets atomically; null selects the base appearance for that slot. */
+		replace(
+			themeUrl: string | null,
+			overrideUrl: string | null,
+			signal?: AbortSignal,
+		): Promise<void> {
 			const update = async () => {
+				signal?.throwIfAborted();
+				const deadline = new AbortController();
+				const timer = setTimeout(
+					() => deadline.abort(new Error("UI stylesheet load timed out")),
+					UI_THEME_LOAD_TIMEOUT_MS,
+				);
+				const request =
+					signal === undefined
+						? deadline.signal
+						: AbortSignal.any([signal, deadline.signal]);
 				const staged: HTMLLinkElement[] = [];
 				try {
-					staged.push(await load(themeUrl));
-					if (overrideUrl !== null) staged.push(await load(overrideUrl));
+					if (themeUrl !== null) staged.push(await load(themeUrl, request));
+					if (overrideUrl !== null)
+						staged.push(await load(overrideUrl, request));
+					request.throwIfAborted();
 				} catch (error) {
 					for (const link of staged) link.remove();
 					throw error;
+				} finally {
+					clearTimeout(timer);
 				}
 				for (const link of staged) link.media = "all";
 				for (const link of active) link.remove();

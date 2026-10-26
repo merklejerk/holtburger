@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { UiThemeSettings } from "../app/ui-theme-selection";
 	import UiTabs from "../app/UiTabs.svelte";
 	import UiTabPanel from "../app/UiTabPanel.svelte";
 	import ClientGraphicsSettingsControls from "./ClientGraphicsSettingsControls.svelte";
@@ -15,6 +16,8 @@
 		/** The same gameplay preferences and mutation owners used by the HUD settings. */
 		readonly graphics: ClientGraphicsSettings;
 		readonly audio: ClientAudioSettings;
+		/** Shared selection owner and settings commit used by both appearance surfaces. */
+		readonly theme: UiThemeSettings;
 		readonly ui: ClientUiSettings;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		readonly onGraphicsChange: (graphics: ClientGraphicsSettings) => void;
@@ -24,6 +27,7 @@
 	let {
 		graphics,
 		audio,
+		theme,
 		ui,
 		textureFilteringCapabilities,
 		onGraphicsChange,
@@ -67,7 +71,7 @@
 			{:else if tab.value === "audio"}
 				<ClientAudioSettingsControls {audio} {onAudioChange} />
 			{:else}
-				<ClientAppearanceSettingsControls {ui} {onUiChange} />
+				<ClientAppearanceSettingsControls {theme} {ui} {onUiChange} />
 			{/if}
 		</UiTabPanel>
 	{/each}

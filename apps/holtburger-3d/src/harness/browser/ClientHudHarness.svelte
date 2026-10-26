@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { createFixtureThemeSettings } from "./ui-showcase-themes";
 	import { createSalvageFixture } from "./client-salvage-fixture";
 	import { ClientSalvageState } from "../../client/client-salvage-state";
 	import "../../client/client-canvas.css";
@@ -52,7 +53,6 @@
 		initialSpellBar,
 	} from "../../client/client-spell-bar-state";
 	import { findWieldedCasterSpell } from "../../client/client-inventory-equipment";
-
 	import { z } from "zod";
 	import { spellInspectionQuerySchema } from "../../client/client-spell-inspection-contract";
 	import { SpellReferences } from "../../app/spell-references";
@@ -173,9 +173,8 @@
 	} from "../../client/client-tuning";
 	import { recordSentChat } from "../../client/client-chat-input-history";
 	import { ClientChatComposer } from "../../client/client-chat-composer.svelte";
-	import { defaultUiThemeUrl } from "../../app/ui-theme";
 	import { uiThemes } from "../../app/mount";
-	import opaqueUrl from "./themes/opaque.css?url&no-inline";
+	import { steelUrl, opaqueUrl } from "./ui-showcase-themes";
 	import type { FrameRates } from "../../app/frame-rate-sampler";
 	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
 	import type { ClientAppPhase } from "../../client/client-app-lifecycle";
@@ -221,6 +220,9 @@
 		createDefaultClientCharacterSettings,
 		createDefaultClientUserSettings,
 	} from "../../client/client-settings-defaults";
+	const fixtureTheme = createFixtureThemeSettings((id) => {
+		userSettings = { ...userSettings, ui: { ...userSettings.ui, themeId: id } };
+	});
 
 	/** Mounted production panel owner for keyboard routing diagnostics. */
 	let gameplayView = $state<ClientGameplayView | null>(null);
@@ -503,9 +505,8 @@
 				element.remove();
 			};
 		},
-		theme: async (standard: boolean) => {
-			if (standard) await uiThemes.replace(defaultUiThemeUrl, null);
-			else await uiThemes.dispose();
+		theme: async (alternate: boolean) => {
+			await uiThemes.replace(alternate ? steelUrl : null, null);
 		},
 		end: () => {
 			releaseSpellKeys?.();
@@ -824,7 +825,7 @@
 			throw new Error("Client chat did not consume the HUD backdrop.");
 
 		try {
-			await uiThemes.replace(defaultUiThemeUrl, opaqueUrl);
+			await uiThemes.replace(null, opaqueUrl);
 			await new Promise<void>((resolve) =>
 				requestAnimationFrame(() => resolve()),
 			);
@@ -848,7 +849,7 @@
 				opaqueOverride: opaque,
 			};
 		} finally {
-			await uiThemes.replace(defaultUiThemeUrl, null);
+			await uiThemes.replace(null, null);
 		}
 	}
 	let activeItemUseProbe: ReturnType<typeof beginItemUseProbe> | null = null;
@@ -5358,6 +5359,7 @@
 		></canvas>
 		{#if gameplayCanvas !== null && interactionRoot !== null}
 			<ClientGameplayView
+				theme={fixtureTheme}
 				canReturnToMenu={true}
 				canDisconnect={true}
 				onReturnToMainMenu={() => void interactionLifecycle.logout()}

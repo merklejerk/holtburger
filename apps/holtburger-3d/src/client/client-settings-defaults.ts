@@ -54,6 +54,7 @@ export function createDefaultClientUserSettings(
 			textScale: CLIENT_TEXT_SCALE.initial,
 			iconScale: CLIENT_ICON_SCALE.initial,
 			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
+			themeId: null,
 			fonts: { body: "theme", heading: "theme", mono: "theme" },
 		},
 		input: structuredClone(CLIENT_INPUT_DEFAULTS),

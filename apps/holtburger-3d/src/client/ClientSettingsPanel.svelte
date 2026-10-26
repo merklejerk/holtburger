@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { UiThemeSettings } from "../app/ui-theme-selection";
 	import {
 		readClientBinding,
 		replaceClientBinding,
@@ -59,6 +60,8 @@
 		readonly audio: ClientAudioSettings;
 		readonly onAudioChange: (audio: ClientAudioSettings) => void;
 		readonly graphics: ClientGraphicsSettings;
+		/** Shared selection owner and settings commit used by both appearance surfaces. */
+		readonly theme: UiThemeSettings;
 		readonly ui: ClientUiSettings;
 		/** User-owned environment presentation choices and cold content catalog. */
 		readonly clockFormat: ClientClockFormat;
@@ -84,6 +87,7 @@
 		audio,
 		onAudioChange,
 		graphics,
+		theme,
 		ui,
 		clockFormat,
 		environmentOverrides,
@@ -373,7 +377,7 @@
 						/>
 					</div>
 				</details>
-				<ClientAppearanceSettingsControls {ui} {onUiChange} />
+				<ClientAppearanceSettingsControls {theme} {ui} {onUiChange} />
 				<details class="ui-disclosure ui-disclosure-section" open>
 					<summary>Vital warnings</summary>
 					<div class="settings-section ui-disclosure-body">

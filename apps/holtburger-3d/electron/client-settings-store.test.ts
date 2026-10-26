@@ -84,7 +84,7 @@ describe("ClientSettingsStore", () => {
 		}
 	});
 
-	it("evolves older UI sections and restores saved text scale without changing sibling preferences", async () => {
+	it("evolves older UI sections and retains theme selection, scales, and sibling preferences", async () => {
 		const path = await temporarySettingsPath();
 		const fonts = { body: "serif", heading: "mono", mono: "sans" } as const;
 		const vitalWarningThresholds = { health: 35, stamina: 15, mana: 25 };
@@ -106,12 +106,14 @@ describe("ClientSettingsStore", () => {
 			expect(
 				(await store.loadUser(defaultUser, "persisted")).sections.ui,
 			).toEqual({
+				themeId: null,
 				fonts,
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.initial,
 				iconScale: CLIENT_ICON_SCALE.initial,
 			});
 			const ui = {
+				themeId: "Midnight 雪",
 				fonts,
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.maximum,

@@ -31,6 +31,95 @@ export async function probeUiShowcase(client, evaluate) {
 			windowsVirtualKeyCode: virtualKey,
 		});
 	};
+	// Verify actual hit testing on the painted rim, not just handle rectangles.
+	const probeResizeFrame = async () => {
+		const targets = await read(() => {
+			const panel = document.querySelector(
+				'.hud-window[aria-label="Component showcase"]',
+			);
+			const rect = panel.getBoundingClientRect();
+			// Read resolved paint geometry so rem/calc theme lengths remain valid.
+			const outset = Number.parseFloat(
+				getComputedStyle(panel).borderImageOutset,
+			);
+			const x = {
+				left: rect.left - outset + 0.5,
+				right: rect.right + outset - 0.5,
+			};
+			const y = {
+				top: rect.top - outset + 0.5,
+				bottom: rect.bottom + outset - 0.5,
+			};
+			return [...panel.querySelectorAll(".hud-window-resize")].map((handle) => {
+				const name = [...handle.classList]
+					.find((value) => value.startsWith("hud-window-resize-"))
+					.slice("hud-window-resize-".length);
+				const point = {
+					x: name.includes("left")
+						? x.left
+						: name.includes("right")
+							? x.right
+							: rect.left + rect.width / 2,
+					y: name.includes("top")
+						? y.top
+						: name.includes("bottom")
+							? y.bottom
+							: rect.top + rect.height / 2,
+				};
+				return {
+					name,
+					point,
+					hit: document.elementFromPoint(point.x, point.y) === handle,
+				};
+			});
+		});
+		assert.equal(targets.length, 8);
+		for (const target of targets)
+			assert.equal(target.hit, true, `Frame resize target: ${target.name}`);
+		const right = targets.find((target) => target.name === "right");
+		assert.ok(right);
+		const width = () =>
+			read(
+				() =>
+					document
+						.querySelector('.hud-window[aria-label="Component showcase"]')
+						.getBoundingClientRect().width,
+			);
+		const before = await width();
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			button: "left",
+			clickCount: 1,
+			...right.point,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			buttons: 1,
+			x: right.point.x + 16,
+			y: right.point.y,
+		});
+		await wait(
+			`Math.abs(document.querySelector('.hud-window[aria-label="Component showcase"]').getBoundingClientRect().width - ${before + 16}) < 1`,
+		);
+		// Return to the starting geometry before releasing the same gesture.
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			buttons: 1,
+			...right.point,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			button: "left",
+			clickCount: 1,
+			...right.point,
+		});
+		assert.ok(Math.abs((await width()) - before) < 1);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			x: 0,
+			y: 0,
+		});
+	};
 	await wait(
 		"document.querySelector('[data-showcase-ready]')?.dataset.showcaseReady === 'true'",
 	);
@@ -116,6 +205,7 @@ export async function probeUiShowcase(client, evaluate) {
 	assert.equal(materials.retained, true);
 	assert.equal(materials.draft, "Retained draft");
 	assert.deepEqual(materials.vitalColors, baseline.vitalColors);
+	await probeResizeFrame();
 	// The new preview drives production navigation, including its own clear action.
 	await read(() =>
 		document.querySelector('[aria-label="Show waypoint guide"]').click(),
@@ -359,6 +449,7 @@ export async function probeUiShowcase(client, evaluate) {
 			control.style.cssText = saved[1];
 		}
 	});
+	await probeResizeFrame();
 	assert.deepEqual(hudFamilies, {
 		iconBackground: true,
 		controlBackground: true,
@@ -394,6 +485,7 @@ export async function probeUiShowcase(client, evaluate) {
 		dropdowns: true,
 		panels,
 		baseRestored: true,
+		frameResizeTargets: true,
 		hudFamilies,
 		retainedClientAndMinimap: true,
 	};

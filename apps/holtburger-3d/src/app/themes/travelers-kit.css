@@ -7,6 +7,7 @@
 		--ui-color-highlight: #f2d6ae;
 		--ui-button-background-color: #735035;
 		--ui-radius-control: 3px;
+		--ui-window-frame-outset: 5px;
 		--ui-item-cell-background: #100c0929;
 		--ui-item-cell-border: 1px solid #98775b66;
 		--ui-item-empty-background: #100c0940;
@@ -61,7 +62,7 @@
 		border-image-source: var(--ui-travelers-frame);
 		border-image-slice: 16;
 		border-image-width: 8px;
-		border-image-outset: 5px;
+		border-image-outset: var(--ui-window-frame-outset);
 		border-image-repeat: stretch;
 		box-shadow:
 			inset 0 0 0 2px #140b0880,

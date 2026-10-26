@@ -30,6 +30,13 @@ a small override uses `@layer overrides`. Follow that convention: unlayered rule
 outrank ordinary layered rules, and `!important` reverses layer precedence.
 Neither is necessary for supported customization.
 
+For outward window frames, `--ui-window-frame-outset` is the shared CSS length
+for frame paint and floating-window resize targets (Base: `0px`, Traveler’s Kit:
+`5px`). Use it as the window's `border-image-outset`; the window shell extends
+all eight resize targets to cover that paint, including the underlying 1px panel
+border, without changing content layout or saved window dimensions. Compact
+non-window overlays may use a separate decorative outset.
+
 Optional themes inherit the shipped base appearance for properties they do not set.
 Tokens belong on `:root`; styling hooks are ordinary classes under `.ui-theme`.
 For example, a theme can change materials as well as palette:

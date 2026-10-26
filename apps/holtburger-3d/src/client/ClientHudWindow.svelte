@@ -223,6 +223,9 @@
 <style>
 	@layer components {
 		.hud-window {
+			/* Absolute children start inside ui-panel's 1px border. Include it so
+			 * targets reach the outermost frame paint while keeping their inner reach. */
+			--_ui-window-resize-outset: calc(var(--ui-window-frame-outset) + 1px);
 			position: absolute;
 			z-index: 100;
 			display: grid;
@@ -284,33 +287,33 @@
 		.hud-window-resize-bottom {
 			left: 8px;
 			width: calc(100% - 16px);
-			height: 8px;
+			height: calc(8px + var(--_ui-window-resize-outset));
 		}
 
 		.hud-window-resize-left,
 		.hud-window-resize-right {
 			top: 8px;
-			width: 8px;
+			width: calc(8px + var(--_ui-window-resize-outset));
 			height: calc(100% - 16px);
 		}
 
 		.hud-window-resize-top {
-			top: 0;
+			top: calc(-1 * var(--_ui-window-resize-outset));
 			cursor: ns-resize;
 		}
 
 		.hud-window-resize-right {
-			right: 0;
+			right: calc(-1 * var(--_ui-window-resize-outset));
 			cursor: ew-resize;
 		}
 
 		.hud-window-resize-bottom {
-			bottom: 0;
+			bottom: calc(-1 * var(--_ui-window-resize-outset));
 			cursor: ns-resize;
 		}
 
 		.hud-window-resize-left {
-			left: 0;
+			left: calc(-1 * var(--_ui-window-resize-outset));
 			cursor: ew-resize;
 		}
 
@@ -318,31 +321,31 @@
 		.hud-window-resize-top-right,
 		.hud-window-resize-bottom-right,
 		.hud-window-resize-bottom-left {
-			width: 12px;
-			height: 12px;
+			width: calc(12px + var(--_ui-window-resize-outset));
+			height: calc(12px + var(--_ui-window-resize-outset));
 		}
 
 		.hud-window-resize-top-left {
-			top: 0;
-			left: 0;
+			top: calc(-1 * var(--_ui-window-resize-outset));
+			left: calc(-1 * var(--_ui-window-resize-outset));
 			cursor: nwse-resize;
 		}
 
 		.hud-window-resize-top-right {
-			top: 0;
-			right: 0;
+			top: calc(-1 * var(--_ui-window-resize-outset));
+			right: calc(-1 * var(--_ui-window-resize-outset));
 			cursor: nesw-resize;
 		}
 
 		.hud-window-resize-bottom-right {
-			right: 0;
-			bottom: 0;
+			right: calc(-1 * var(--_ui-window-resize-outset));
+			bottom: calc(-1 * var(--_ui-window-resize-outset));
 			cursor: nwse-resize;
 		}
 
 		.hud-window-resize-bottom-left {
-			bottom: 0;
-			left: 0;
+			bottom: calc(-1 * var(--_ui-window-resize-outset));
+			left: calc(-1 * var(--_ui-window-resize-outset));
 			cursor: nesw-resize;
 		}
 	}

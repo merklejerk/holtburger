@@ -221,6 +221,8 @@
 		--ui-label-gap: 4px;
 		/* Horizontal gap between a HUD window's close button and its inner right edge. */
 		--ui-hud-window-close-inset: 4px;
+		/* Outward frame paint; floating-window resize targets cover the same extent. */
+		--ui-window-frame-outset: 0px;
 		/* Menus retain their compact command-row density. */
 		--ui-menu-min-width: 140px;
 		--ui-menu-padding: 4px;

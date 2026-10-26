@@ -162,6 +162,11 @@ The current primitive movement surface lives in [src/client/movement_types.rs](s
 
 [src/client/character_kinematics.rs](src/client/character_kinematics.rs) owns validated actor-specific movement and jump capabilities. Motion-table base speeds remain separate from the effective run-rate scalar supplied by the actor-owning layer, so skill, burden, enchantment, and exhaustion policy do not leak into the controller or physical body.
 
+Player jump launch uses retail's interpreter baseline (walk 3.12, run 4.0, sidestep 1.25), not the
+body's animation-derived grounded speeds (`acclient.c:329842-329907,330067-330100`). World jump
+capabilities carry run rate, height, and burden without requiring run/turn clips. Ordinary and
+precise launch share `retail_jump_kinematics`; missing Ready/Falling only limits presentation.
+
 [src/client/character_jump.rs](src/client/character_jump.rs) is the pure release-time resolver. Charge timing and launch capability deliberately do not share a profile: `JumpChargeProfile` describes the frontend gesture, while each call to `resolve_character_jump` receives fresh `CharacterJumpKinematics`. This permits a future actor adapter to sample mutable capabilities and resource policy for every accepted attempt without teaching the interpreter about skills or caching those facts on a physical body. The resolver computes one `ResolvedJump`; later orchestration must pass that same result to local launch and packet construction instead of deriving either velocity again. Gameplay capability sourcing, resource transactions, packet emission, and player prediction remain outside this contract.
 
 The public boundary is `MovementCommand`:
@@ -235,6 +240,13 @@ producer sample feeds each body's ordinary actuation and independent reference f
 tick. After the world publishes accepted body state, core forwards supported timed motion or
 explicit local drive intent to locomotion presentation, and canonical body changes to movement/render
 consumers. Visual locomotion never supplies root motion or hooks to a later tick.
+
+For a locally controlled playable body, world motion selection uses whole-interval mean rates
+when a requested locomotion component is missing: native rates where supported, standard player
+table `0x09000001` rates for absent components. Complete native movement keeps exact root motion.
+Core consumes one resolved physical offset through the existing support/scale gate and solver.
+Native playback owns animation, collision poses, and hooks; server-directed/remote motion retains
+its existing authority.
 
 Server-authored actions do not create another controller. World admission emits transient action
 edges separately from the retained steady order, and the same `MotionRuntimeRegistry` used by bulk

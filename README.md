@@ -1,4 +1,8 @@
-# Holtburger 🍔
+<p align="center">
+  <img src="assets/branding/portal-static.svg" width="160" height="160" alt="Holtburger portal logo" />
+</p>
+
+# Holtburger
 
 Holtburger is a modern, cross-platform, exploratory Asheron's Call client ecosystem written in Rust. It aims to provide a modular, high-performance foundation for a new generation of clients and bots. The TUI client already covers a meaningful set of gameplay, automation, and data-projection workflows, and the stack keeps expanding.
 
@@ -93,6 +97,16 @@ With the stack proven out and scripting in place, work can begin on a full 3D cl
 The current scoping direction for that work lives in [docs/plans/holtburger-3d-scoping-plan.md](/home/cluracan/code/holtburger/docs/plans/holtburger-3d-scoping-plan.md).
 
 The TUI is therefore not a side project or disposable prototype. It is the shortest path to validating the complete client architecture, and it should continue to produce useful standalone value even after the 3D client exists.
+
+## Project branding
+
+The portal is Holtburger's project logo. Its [canonical animated SVG](assets/branding/portal.svg)
+also supplies the client loading animation. The [static mark](assets/branding/portal-static.svg),
+PNG, Windows ICO, and macOS ICNS in `assets/branding/` are generated from its still geometry,
+centered on a square canvas. Browser favicons and the CLI Flatpak icon are generated copies.
+To update the artwork, edit the animated source, then run `npm ci` and
+`npm run generate:branding` from `apps/holtburger-3d`. Commit the resulting assets;
+`npm run check:branding` verifies they match the source. Normal builds use the checked-in exports.
 
 ## Disclaimers
 

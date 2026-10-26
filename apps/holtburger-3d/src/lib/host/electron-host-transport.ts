@@ -1,4 +1,5 @@
 import type { ClientClosePreparation } from "../../client/client-close-contract";
+import type { StartupGameLifecycle } from "../../app/startup-game-lifecycle";
 import type {
 	HostCommandArguments,
 	HostCommandName,
@@ -74,10 +75,28 @@ export async function startElectronClient(): Promise<void> {
 export function registerElectronClientClose(
 	handler: () => Promise<ClientClosePreparation>,
 ): () => void {
+	if (startupCloseOwner === null)
+		throw new Error("Client startup close owner is unavailable");
+	return startupCloseOwner.registerCleanup(handler);
+}
+
+let startupCloseOwner: StartupGameLifecycle | null = null;
+
+/** The stable startup shell owns the sole preload handler and delegates game cleanup later. */
+export function registerElectronStartupClose(
+	owner: StartupGameLifecycle,
+): () => void {
 	const bridge = globalThis.window?.holtburgerClient;
 	if (bridge === undefined)
 		throw new Error("Electron client close bridge is unavailable");
-	return bridge.onPrepareClose(handler);
+	if (startupCloseOwner !== null)
+		throw new Error("Client startup close owner is already registered");
+	startupCloseOwner = owner;
+	const dispose = bridge.onPrepareClose(() => owner.prepareClose());
+	return () => {
+		dispose();
+		startupCloseOwner = null;
+	};
 }
 
 /** Product Quit is explicit; renderer window.close can destroy contents before native interception. */

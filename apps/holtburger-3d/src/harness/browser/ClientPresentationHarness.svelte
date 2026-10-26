@@ -5,6 +5,9 @@
 	import { GamePresentationRuntime } from "../../lib/game/runtime/game-presentation-runtime";
 	import type { ClientClosePreparation } from "../../client/client-close-contract";
 	import ClientApp from "../../client/ClientApp.svelte";
+	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
+	import { registerElectronStartupClose } from "../../lib/host/electron-host-transport";
+	import { StartupGameLifecycle } from "../../app/startup-game-lifecycle";
 	import { createClientShortcuts } from "../../client/ClientShortcutDock.svelte";
 	import { createDefaultClientUserSettings } from "../../client/client-settings-defaults";
 	import { soulEmoteFixture } from "../../client/client-soul-emotes.test-support";
@@ -64,8 +67,11 @@
 	} | null>(null);
 	let props = $state.raw<ComponentProps<typeof ClientApp> | null>(null);
 	let status = $state("Preparing production-client fixture…");
+	// This diagnostic entry supplies the shell policy normally owned by ContentStartup.
+	const { keyboard } = provideAppInputPolicy();
 
 	onMount(() => {
+		const retireKeyboard = keyboard.mount(document);
 		const url = new URLSearchParams(location.search).get("contentHost");
 		if (url === null)
 			throw new Error("Client presentation fixture requires contentHost");
@@ -85,6 +91,7 @@
 		const retirement = loadingGate(false);
 		const captureStaging = loadingGate(false);
 		let prepareClose: (() => Promise<ClientClosePreparation>) | null = null;
+		let retireClose: (() => void) | null = null;
 		let closeResult: ClientClosePreparation | null = null;
 		// Hold actual borrower withdrawal as well as camera IPC: logout can implicitly retire the native camera.
 		const replaceSnapshot =
@@ -251,6 +258,9 @@
 					authority.selection(emptyRoster);
 				},
 			};
+			retireClose = registerElectronStartupClose(
+				new StartupGameLifecycle("client"),
+			);
 			let disconnected = false;
 			let disconnectRequests = 0;
 			window.holtburgerHost = {
@@ -384,6 +394,7 @@
 				notify: authority.notify,
 			};
 			props = {
+				contentLocation: null,
 				initialUserSettings: createDefaultClientUserSettings(
 					{ width: innerWidth, height: innerHeight },
 					createClientShortcuts(false).length,
@@ -424,6 +435,8 @@
 			}
 		});
 		return () => {
+			retireKeyboard();
+			retireClose?.();
 			closed = true;
 			connection.release();
 			scene.release();

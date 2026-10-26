@@ -154,18 +154,17 @@ pub struct ExplorerHostRuntime {
 }
 
 impl ExplorerHostRuntime {
-    /// Discovers configured content and composes one shell-neutral host.
-    pub fn discover(event_sink: Arc<dyn ExplorerEventSink>) -> Result<Self> {
-        let content = SharedHostContent::discover()?;
-        Self::from_content(content, event_sink)
-    }
-
     /// Composes a host from an injected content state, which keeps tests and diagnostics explicit.
     pub fn from_content(
         content: SharedHostContent,
         event_sink: Arc<dyn ExplorerEventSink>,
     ) -> Result<Self> {
-        let collision_source: Arc<dyn CollisionSource> = content.service.clone();
+        let collision_source: Arc<dyn CollisionSource> = Arc::new(
+            crate::reporting_content_source::ReportingContentSource::new(
+                content.service.as_ref().clone(),
+                content.failures.clone(),
+            ),
+        );
         let simulation = Arc::new(HostSimulationRuntime::new(collision_source));
         let motion_catalog = Arc::clone(&content.motion_catalog);
         let explorer_entities = Arc::new(ExplorerEntityRuntime::new(

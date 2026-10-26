@@ -8,6 +8,8 @@ mod contact_eligibility;
 mod contact_interruption;
 #[path = "tests/death_lifecycle.rs"]
 mod death_lifecycle;
+#[path = "tests/local_locomotion.rs"]
+mod local_locomotion;
 #[path = "tests/manual_gestures.rs"]
 mod manual_gestures;
 use crate::entity::{

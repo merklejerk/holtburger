@@ -402,13 +402,32 @@ than as a service. Nothing here caches, records history, or reaches back into co
   directive reduction instead of maintaining a second command-state map. Content rebinding resets
   playback while preserving remote command progress and orientation; entity/runtime reset clears
   them together. Separate local and remote entry points select source ownership before advancing
-  the same authored cursor. Only authored playback supplies root offsets and simulation hooks.
+  the same authored cursor. Native playback alone supplies simulation hooks; local compatibility
+  rates can replace its physical offset for incomplete movement coverage.
   Observed locomotion consumes supported movement after final horizontal contact separation,
   excluding airborne travel and stair lifts. The shared selector preserves action, explicit-pose,
   and one-shot priority; observed gait cannot feed physics or hide an active action. Authored cursor
   lifetime follows entity lifetime. `EntityNetworkMotion::Uninitialized` means that generation has
   supplied no order; `Initialized` includes idle and therefore actively retires a previous cycle.
   A locally predicted order may still precede its server echo without making absence mean stop.
+- `rates.rs` supplies stateless mean rates for incomplete local-player locomotion coverage.
+  Native selection reports its actual row or missing/state-prohibited result. Complete native
+  movement keeps exact root traversal. If a canonical component is absent, the whole physical
+  interval uses native mean rates for supported components and standard player-table `0x09000001`
+  rates for missing ones. This intentionally smooths native stride during a mixed fallback
+  interval. Cycle velocity/omega add to signed root rates weighted by clip duration; modifiers
+  contribute only their explicit vectors, matching native interpretation even if they contain clips.
+  This compatibility policy extends retail's missing-motion rejection
+  (`acclient.c:324297-324330`); the mounted census covered 436 tables, with 286 default-style
+  walk/run cycles and 94 Falling cycles. Counts describe tables, not playable populations.
+  State prohibitions, native zero-rate holds, actions, and death never authorize substitution.
+  Ordinary selection results govern action admission; manual coverage results stay with the
+  locomotion track and cannot revoke an active native gesture. Packet diagnostics always use the
+  ordinary result even while manual movement owns displacement.
+  Playback, hooks, and collision poses stay on the existing native cursor; there are no baseline
+  clips or additional pose clocks. The existing support/scale gate and solver consume one chosen
+  physical offset. Post-solve presentation cannot advance a manual cursor again. Missing Ready
+  suppresses retained translation; missing Falling never prevents a valid physical jump.
 
 Playback supplies shared authored motion semantics and body-observed clip selection. Articulated
 part-frame evaluation and rendering remain frontend responsibilities.

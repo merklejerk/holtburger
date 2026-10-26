@@ -9,7 +9,7 @@
 	overflow="visible"
 >
 	<!--
-  Self-contained scene-loading portal. Geometry, palette, and CSS animation live here.
+  Canonical Holtburger portal logo. Geometry, palette, and CSS animation live here.
   Motion is baked at 1.8x the approved demo's original cycle times; particle delays
   use the same factor to retain their initial distribution. Reduced motion is still.
 -->

@@ -21,8 +21,10 @@ use holtburger_content::MotionSequenceTable;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
+use super::rates::{MotionRates, baseline_row, is_locomotion};
 use super::selection::{
-    ActionSelectionOutcome, select_action, select_motion, set_default_state, stop_motion,
+    ActionSelectionOutcome, MotionSelectionOutcome, NativeSelection, select_action, select_motion,
+    select_native, set_default_state, stop_motion,
 };
 use super::sequence::{CurrentSequenceClip, MotionClipCompletion};
 use super::sequence::{MotionSequenceRuntime, SequenceTick};
@@ -33,7 +35,7 @@ pub const MAX_AUTHORED_ACTIONS: usize = 6;
 
 /// Retail `RunForward` state velocity used by `CMotionInterp::get_adjusted_max_speed`
 /// (`acclient.c:329811-329837,329866-329872`).
-pub(super) const RETAIL_RUN_FORWARD_BASE_SPEED_MPS: f32 = 4.0;
+pub const RETAIL_RUN_FORWARD_BASE_SPEED_MPS: f32 = 4.0;
 
 /// Collision pose selected by the authored motion owner; carries no independent timing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,9 +67,9 @@ pub struct BodyMotionRuntime {
     tick: SequenceTick,
     /// Last valid `RunForward` multiplier, matching retail's persistent `my_run_rate` fact.
     retained_run_rate_multiplier: Option<f32>,
-    /// Explicit ordered channels the current table could not model, retained to deduplicate the
-    /// producer diagnostic until the order changes.
-    unmodelled: UnmodelledMotionChannels,
+    /// Ordinary selection failures, consumed by gesture admission and native-drive diagnostics.
+    /// Local locomotion coverage belongs to its own playback and cannot revoke an active gesture.
+    ordinary_resolution: MotionOrderResolution,
     /// Latest steady destination retained while a transient action owns playback.
     steady_order: MotionOrder,
     /// Local command admission owns this retained order until completion or a new movement source.
@@ -93,6 +95,8 @@ struct LocomotionPlayback {
     sequence: MotionSequenceRuntime,
     /// Selects pre-solve physical advancement versus post-solve observation.
     authority: LocomotionAuthority,
+    /// Coverage of this track's order, consumed by local diagnostics and post-solve presentation.
+    resolution: MotionOrderResolution,
 }
 
 /// Exactly one caller advances the independent locomotion sequence each simulation interval.
@@ -125,6 +129,7 @@ impl LocomotionPlayback {
             sequence,
             authority,
             command_active: false,
+            resolution: MotionOrderResolution::default(),
         }
     }
 }
@@ -149,32 +154,68 @@ pub(crate) enum MotionCommandAdmissionOutcome {
     Unsupported,
 }
 
-/// Explicit order channels rejected by motion-table selection on the latest drive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-struct UnmodelledMotionChannels {
-    /// Requested style that could not be selected.
-    style: Option<MotionCommand>,
-    /// Requested forward/substate command that could not be selected.
-    forward: Option<MotionCommand>,
-    /// Requested sidestep command that could not be selected.
-    sidestep: Option<MotionCommand>,
-    /// Requested turn command that could not be selected.
-    turn: Option<MotionCommand>,
+/// Selection failure or active physical compatibility rate, retained for diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MotionChannelResolution {
+    /// Native playback could not select this command.
+    Unmodelled {
+        /// Requested channel command that could not be selected.
+        command: MotionCommand,
+    },
+    /// A native-absent locomotion component uses the standard player's mean rate.
+    RateFallback {
+        /// Requested component absent from native content.
+        command: MotionCommand,
+        /// Baseline table identity consumed by change-based diagnostics.
+        table_id: u32,
+    },
 }
 
-impl UnmodelledMotionChannels {
+impl MotionChannelResolution {
+    fn from_selection(command: MotionCommand, outcome: MotionSelectionOutcome) -> Option<Self> {
+        (!outcome.is_modelled()).then_some(Self::Unmodelled { command })
+    }
+}
+
+/// One selector-owned result per ordered channel, consumed by arbitration and diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct MotionOrderResolution {
+    /// Style requests never substitute a player stance.
+    style: Option<MotionChannelResolution>,
+    /// Forward/substate selection and its physical source.
+    forward: Option<MotionChannelResolution>,
+    /// Sidestep selection and its physical source.
+    sidestep: Option<MotionChannelResolution>,
+    /// Turn selection and its physical source.
+    turn: Option<MotionChannelResolution>,
+}
+
+impl MotionOrderResolution {
+    fn channels(self) -> [(&'static str, Option<MotionChannelResolution>); 4] {
+        [
+            ("style", self.style),
+            ("forward", self.forward),
+            ("sidestep", self.sidestep),
+            ("turn", self.turn),
+        ]
+    }
+
+    fn has_unmodelled(self) -> bool {
+        self.channels().iter().any(|(_, resolution)| {
+            matches!(resolution, Some(MotionChannelResolution::Unmodelled { .. }))
+        })
+    }
+
     fn newly_present_since(
         self,
         previous: Self,
-    ) -> impl Iterator<Item = (&'static str, MotionCommand)> {
-        [
-            ("style", self.style, previous.style),
-            ("forward", self.forward, previous.forward),
-            ("sidestep", self.sidestep, previous.sidestep),
-            ("turn", self.turn, previous.turn),
-        ]
-        .into_iter()
-        .filter_map(|(channel, current, prior)| (current != prior).then_some((channel, current?)))
+    ) -> impl Iterator<Item = (&'static str, MotionChannelResolution)> {
+        self.channels()
+            .into_iter()
+            .zip(previous.channels())
+            .filter_map(|((channel, current), (_, prior))| {
+                (current != prior).then_some((channel, current?))
+            })
     }
 }
 
@@ -419,8 +460,9 @@ impl BodyMotionRuntime {
             self.interrupt_transitions();
         }
         self.steady_order = order;
-        self.unmodelled = apply_order_channels(table, &mut self.state, &mut self.sequence, order);
-        self.unmodelled.style = style;
+        self.ordinary_resolution =
+            apply_order_channels(table, &mut self.state, &mut self.sequence, order);
+        self.ordinary_resolution.style = style;
         self.classify_ordinary_motion(table);
     }
 
@@ -436,7 +478,7 @@ impl BodyMotionRuntime {
             ordinary_is_locomotion: true,
             tick: SequenceTick::identity(),
             retained_run_rate_multiplier: None,
-            unmodelled: UnmodelledMotionChannels::default(),
+            ordinary_resolution: MotionOrderResolution::default(),
             steady_order: MotionOrder::default(),
             local_command_owned: false,
             pending_gesture: None,
@@ -456,10 +498,21 @@ impl BodyMotionRuntime {
         order: MotionOrder,
         quantum: f32,
     ) -> &SequenceTick {
-        let previous_unmodelled = self.unmodelled;
+        let previous_resolution = self.ordinary_resolution;
         self.drive(table, order, quantum);
-        self.report_selection(table, guid, previous_unmodelled);
+        self.report_selection(table, guid, previous_resolution, self.ordinary_resolution);
         &self.tick
+    }
+
+    /// Diagnostics follow the current drive owner. Ordinary admission retains its independent
+    /// result even when local animation coverage is incomplete.
+    fn reported_resolution(&self) -> MotionOrderResolution {
+        match &self.locomotion {
+            Some(track) if matches!(track.authority, LocomotionAuthority::Manual { .. }) => {
+                track.resolution
+            }
+            _ => self.ordinary_resolution,
+        }
     }
 
     /// Receipt and continuous resolution share one diagnostic path without masking receipt failures.
@@ -467,7 +520,8 @@ impl BodyMotionRuntime {
         &mut self,
         table: &MotionSequenceTable,
         guid: Guid,
-        previous_unmodelled: UnmodelledMotionChannels,
+        previous_resolution: MotionOrderResolution,
+        current_resolution: MotionOrderResolution,
     ) {
         for action in std::mem::take(&mut self.rejected_actions) {
             // Missing action routes are normal: ACE can request human NPC twitches absent
@@ -482,13 +536,21 @@ impl BodyMotionRuntime {
                 action.action_sequence,
             );
         }
-        for (channel, command) in self.unmodelled.newly_present_since(previous_unmodelled) {
-            log::warn!(
-                "body 0x{guid:08X} motion table 0x{:08X} cannot play admitted {channel} command 0x{:08X} in style 0x{:08X}",
-                table.id,
-                command.raw(),
-                self.state.style.raw(),
-            );
+        for (channel, resolution) in current_resolution.newly_present_since(previous_resolution) {
+            match resolution {
+                MotionChannelResolution::Unmodelled { command } => log::warn!(
+                    "body 0x{guid:08X} motion table 0x{:08X} cannot play admitted {channel} command 0x{:08X} in style 0x{:08X}",
+                    table.id,
+                    command.raw(),
+                    self.state.style.raw(),
+                ),
+                MotionChannelResolution::RateFallback { command, table_id } => log::warn!(
+                    "body 0x{guid:08X} motion table 0x{:08X} uses mean movement rates from table 0x{table_id:08X} for native-absent {channel} command 0x{:08X} in style 0x{:08X}",
+                    table.id,
+                    command.raw(),
+                    self.state.style.raw(),
+                ),
+            }
         }
     }
 
@@ -572,13 +634,18 @@ impl BodyMotionRuntime {
         quantum: f32,
     ) -> bool {
         self.bind_table(table);
+        if let Some(track) = &self.locomotion
+            && matches!(track.authority, LocomotionAuthority::Manual { .. })
+        {
+            return !track.resolution.has_unmodelled();
+        }
         let locomotion = self.locomotion.get_or_insert_with(|| {
             LocomotionPlayback::new(table, self.state.style, LocomotionAuthority::Presentation)
         });
         locomotion.authority = LocomotionAuthority::Presentation;
         locomotion.command_active =
             order.forward.is_some() || order.sidestep.is_some() || order.turn.is_some();
-        let unmodelled = apply_order(
+        let resolution = apply_order(
             table,
             &mut locomotion.state,
             &mut locomotion.sequence,
@@ -586,7 +653,7 @@ impl BodyMotionRuntime {
         );
         locomotion.sequence.remove_transition_prefix();
         locomotion.sequence.advance_presentation(quantum);
-        unmodelled == UnmodelledMotionChannels::default()
+        !resolution.has_unmodelled()
     }
 
     pub fn state(&self) -> &MotionState {
@@ -664,7 +731,7 @@ impl BodyMotionRuntime {
 
     /// Unrelated queued actions and unsupported playback retain exclusive body ownership.
     fn gesture_actions_allow_locomotion(&self) -> bool {
-        self.unmodelled == UnmodelledMotionChannels::default()
+        !self.ordinary_resolution.has_unmodelled()
             && self
                 .active_action
                 .iter()
@@ -717,6 +784,17 @@ impl BodyMotionRuntime {
         presentation: super::CharacterMotionPresentation,
         quantum: f32,
     ) -> &SequenceTick {
+        self.drive_manual_with_fallback(table, None, order, presentation, quantum)
+    }
+
+    pub(crate) fn drive_manual_with_fallback(
+        &mut self,
+        table: &MotionSequenceTable,
+        baseline: Option<&MotionSequenceTable>,
+        order: MotionOrder,
+        presentation: super::CharacterMotionPresentation,
+        quantum: f32,
+    ) -> &SequenceTick {
         self.bind_table(table);
         let established_style = self.state.style;
         let grounded = matches!(
@@ -756,7 +834,7 @@ impl BodyMotionRuntime {
                 },
                 false,
             );
-        } else if !self.permits_gesture_locomotion(table) {
+        } else if !self.permits_gesture_locomotion(table) && self.ordinary_owns_body_semantics() {
             // Unknown/custom actions keep ordinary authored arbitration.
             return self.drive(table, order, quantum);
         }
@@ -773,12 +851,13 @@ impl BodyMotionRuntime {
             )
         });
         let previous_style = locomotion.state.style;
-        let unmodelled = apply_order(
+        let selected = select_order_channels(
             table,
             &mut locomotion.state,
             &mut locomotion.sequence,
             order,
         );
+        let (resolution, fallback_rates) = selected.resolve_local(baseline);
         if presentation == super::CharacterMotionPresentation::Falling
             && locomotion.state.style != previous_style
             && locomotion.state.substate == MotionCommand::FALLING
@@ -799,7 +878,23 @@ impl BodyMotionRuntime {
         locomotion.authority = LocomotionAuthority::Manual {
             displacing: manual_displacement,
         };
-        let locomotion_tick = locomotion.sequence.advance(quantum);
+        let mut locomotion_tick = locomotion.sequence.advance(quantum);
+        if let Some(rates) = fallback_rates {
+            // One whole-interval physical source: never add rates to a retained native root tick.
+            // Native playback still owns poses, collision frames, and gameplay hooks.
+            locomotion_tick.offset = rates.offset(quantum);
+        }
+        if presentation == super::CharacterMotionPresentation::Ready
+            && resolution.forward
+                == Some(MotionChannelResolution::Unmodelled {
+                    command: MotionCommand::READY,
+                })
+        {
+            // A creature may lack Ready. Retaining its native pose must not retain a running
+            // cycle's travel while charging a standing jump (acclient.c:330397-330404).
+            locomotion_tick.offset.translation = holtburger_common::Vector3::zero();
+        }
+        locomotion.resolution = resolution;
         let ordinary_hooks = self.ordinary_owns_body_semantics();
         self.advance_authored(table, self.steady_order, quantum);
         if manual_displacement || !ordinary_hooks {
@@ -811,7 +906,6 @@ impl BodyMotionRuntime {
         if !ordinary_hooks {
             self.tick.hooks = locomotion_tick.hooks;
         }
-        self.unmodelled = unmodelled;
         &self.tick
     }
 
@@ -861,7 +955,7 @@ impl BodyMotionRuntime {
                 self.sticky.complete_action();
             }
             self.active_action = None;
-            self.unmodelled = apply_order(
+            self.ordinary_resolution = apply_order(
                 table,
                 &mut self.state,
                 &mut self.sequence,
@@ -1108,14 +1202,31 @@ impl MotionRuntimeRegistry {
         presentation: super::CharacterMotionPresentation,
         quantum: f32,
     ) -> &SequenceTick {
+        self.drive_manual_with_fallback(table, None, guid, order, presentation, quantum)
+    }
+
+    pub(crate) fn drive_manual_with_fallback(
+        &mut self,
+        table: &MotionSequenceTable,
+        baseline: Option<&MotionSequenceTable>,
+        guid: Guid,
+        order: MotionOrder,
+        presentation: super::CharacterMotionPresentation,
+        quantum: f32,
+    ) -> &SequenceTick {
         let runtime = self
             .bodies
             .entry(guid)
             .or_insert_with(|| BodyMotionRuntime::new(table));
         runtime.remote_motion = None;
-        let previous_unmodelled = runtime.unmodelled;
-        runtime.drive_manual(table, order, presentation, quantum);
-        runtime.report_selection(table, guid, previous_unmodelled);
+        let previous_resolution = runtime.reported_resolution();
+        runtime.drive_manual_with_fallback(table, baseline, order, presentation, quantum);
+        runtime.report_selection(
+            table,
+            guid,
+            previous_resolution,
+            runtime.reported_resolution(),
+        );
         &runtime.tick
     }
 
@@ -1140,20 +1251,79 @@ impl MotionRuntimeRegistry {
     }
 }
 
-/// Applies one order in retail's fixed order: style, then locomotion, then sidestep, then turn.
-///
-/// Each layer is stopped explicitly when its command is absent, because retail stops the motion
-/// rather than letting it keep running (`MotionInterp::apply_interpreted_movement`).
+/// Transient native selection facts. Only the diagnostic summary survives this call.
+struct SelectedOrder<'a> {
+    /// Existing per-channel diagnostic lifetime, shared by native and manual playback.
+    resolution: MotionOrderResolution,
+    /// Actual selector results in forward, sidestep, turn order; consumed by rate resolution.
+    channels: [Option<(MotionCommand, f32, NativeSelection<'a>)>; 3],
+}
+
+impl SelectedOrder<'_> {
+    fn resolve_local(
+        mut self,
+        baseline: Option<&MotionSequenceTable>,
+    ) -> (MotionOrderResolution, Option<MotionRates>) {
+        if !self
+            .channels
+            .iter()
+            .flatten()
+            .any(|(command, _, selection)| {
+                is_locomotion(*command) && matches!(selection, NativeSelection::Missing)
+            })
+        {
+            return (self.resolution, None);
+        }
+        let mut rates = MotionRates::default();
+        for (channel, diagnostic) in self.channels.iter().zip([
+            &mut self.resolution.forward,
+            &mut self.resolution.sidestep,
+            &mut self.resolution.turn,
+        ]) {
+            let Some((command, speed, selection)) = *channel else {
+                continue;
+            };
+            let row = match selection {
+                NativeSelection::Selected(row) => Some(row),
+                NativeSelection::Missing => baseline.and_then(|table| {
+                    let row = baseline_row(table, command)?;
+                    *diagnostic = Some(MotionChannelResolution::RateFallback {
+                        command,
+                        table_id: table.id,
+                    });
+                    Some(row)
+                }),
+                NativeSelection::AlreadyActive | NativeSelection::Prohibited => None,
+            };
+            if let Some(row) = row {
+                rates.add(row.rates(), speed);
+            }
+        }
+        (self.resolution, Some(rates))
+    }
+}
+
+/// Applies retail's fixed order: style, forward, sidestep, turn. An absent channel is explicitly
+/// stopped rather than retaining its previous movement (`MotionInterp::apply_interpreted_movement`).
 fn apply_order(
     table: &MotionSequenceTable,
     state: &mut MotionState,
     sequence: &mut MotionSequenceRuntime,
     order: MotionOrder,
-) -> UnmodelledMotionChannels {
+) -> MotionOrderResolution {
+    select_order_channels(table, state, sequence, order).resolution
+}
+
+fn select_order_channels<'a>(
+    table: &'a MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    order: MotionOrder,
+) -> SelectedOrder<'a> {
     let style = select_order_style(table, state, sequence, order);
-    let mut unmodelled = apply_order_channels(table, state, sequence, order);
-    unmodelled.style = style;
-    unmodelled
+    let mut selected = select_channels(table, state, sequence, order);
+    selected.resolution.style = style;
+    selected
 }
 
 fn select_order_style(
@@ -1161,13 +1331,13 @@ fn select_order_style(
     state: &mut MotionState,
     sequence: &mut MotionSequenceRuntime,
     order: MotionOrder,
-) -> Option<MotionCommand> {
-    if let Some(style) = order.style
-        && !select_motion(table, state, sequence, style, 1.0).is_modelled()
-    {
-        return Some(style);
-    }
-    None
+) -> Option<MotionChannelResolution> {
+    order.style.and_then(|style| {
+        MotionChannelResolution::from_selection(
+            style,
+            select_motion(table, state, sequence, style, 1.0),
+        )
+    })
 }
 
 fn apply_order_channels(
@@ -1175,21 +1345,25 @@ fn apply_order_channels(
     state: &mut MotionState,
     sequence: &mut MotionSequenceRuntime,
     order: MotionOrder,
-) -> UnmodelledMotionChannels {
-    let mut unmodelled = UnmodelledMotionChannels::default();
-    match order.forward {
-        Some((command, speed)) => {
-            if !select_motion(table, state, sequence, command, speed).is_modelled() {
-                unmodelled.forward = Some(command);
-            }
-        }
+) -> MotionOrderResolution {
+    select_channels(table, state, sequence, order).resolution
+}
+
+fn select_channels<'a>(
+    table: &'a MotionSequenceTable,
+    state: &mut MotionState,
+    sequence: &mut MotionSequenceRuntime,
+    order: MotionOrder,
+) -> SelectedOrder<'a> {
+    let forward = match order.forward {
+        Some((command, speed)) => Some((
+            command,
+            speed,
+            select_native(table, state, sequence, command, speed),
+        )),
         None => {
-            // Stopping locomotion means returning to the style's default substate, which is what
-            // `stop_motion` does for whatever substate is currently running. Sidestep and turn
-            // command IDs also carry the substate bit, however, and retail can resolve either one
-            // through a cycle before its modifier fallback (`acclient.c:324330-324520`). Preserve
-            // that cycle while its own semantic channel remains ordered or re-applying this order
-            // every tick would stop and restart it before it advances.
+            // Dual-class side/turn commands can own the cycle. Do not stop and restart their
+            // phase merely because the separate forward channel is absent.
             let running = state.substate;
             if running.is_substate()
                 && Some(running.raw()) != table.style_default(state.style.raw())
@@ -1198,37 +1372,47 @@ fn apply_order_channels(
             {
                 stop_motion(table, state, sequence, running);
             }
+            None
         }
-    }
-
-    unmodelled.sidestep = apply_modifier(
+    };
+    let sidestep = apply_modifier(
         table,
         state,
         sequence,
         order.sidestep,
         MotionCommand::SIDESTEP,
     );
-    unmodelled.turn = apply_modifier(table, state, sequence, order.turn, MotionCommand::TURN);
-    unmodelled
+    let turn = apply_modifier(table, state, sequence, order.turn, MotionCommand::TURN);
+    let channels = [forward, sidestep, turn];
+    let [forward, sidestep, turn] = channels.map(|channel| {
+        channel.and_then(|(command, _, selection)| {
+            MotionChannelResolution::from_selection(command, selection.outcome())
+        })
+    });
+    SelectedOrder {
+        resolution: MotionOrderResolution {
+            forward,
+            sidestep,
+            turn,
+            ..Default::default()
+        },
+        channels,
+    }
 }
 
-fn apply_modifier(
-    table: &MotionSequenceTable,
+fn apply_modifier<'a>(
+    table: &'a MotionSequenceTable,
     state: &mut MotionState,
     sequence: &mut MotionSequenceRuntime,
     ordered: Option<(MotionCommand, f32)>,
     family: MotionCommand,
-) -> Option<MotionCommand> {
+) -> Option<(MotionCommand, f32, NativeSelection<'a>)> {
     match ordered {
-        Some((command, speed)) => {
-            // Retail reapplies every interpreted channel in fixed order, so a dual-class command
-            // can become the primary cycle once an earlier channel returns to the default
-            // substate (`CMotionInterp::apply_interpreted_movement`, acclient.c:330395-330430).
-            // Selection owns the invariant that one command cannot remain a modifier after that
-            // promotion.
-            let outcome = select_motion(table, state, sequence, command, speed);
-            (!outcome.is_modelled()).then_some(command)
-        }
+        Some((command, speed)) => Some((
+            command,
+            speed,
+            select_native(table, state, sequence, command, speed),
+        )),
         None => {
             stop_motion(table, state, sequence, family);
             None

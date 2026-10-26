@@ -40,9 +40,12 @@ function ignoreApplicationSource(path) {
 module.exports = {
 	packagerConfig: {
 		asar: true,
+		icon: resolve(__dirname, "../../assets/branding/icon"),
+		extendInfo: { CFBundleIconFile: "holtburger.icns" },
 		extraResource: [
 			resolve(__dirname, "../../target/release", hostBinary),
 			resolve(__dirname, "../../LICENSE.md"),
+			resolve(__dirname, "../../assets/branding/icon.png"),
 		],
 		ignore: ignoreApplicationSource,
 	},

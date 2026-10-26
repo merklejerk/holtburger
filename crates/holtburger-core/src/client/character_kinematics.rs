@@ -1,14 +1,16 @@
 //! Actor-specific numeric character capabilities shared by supported drive and jump launch.
 
-use holtburger_world::SelfMovementCapabilities;
 use thiserror::Error;
+
+/// Retail walk state velocity, independent of body animation (`acclient.c:329860-329872`).
+pub(super) const RETAIL_WALK_FORWARD_BASE_SPEED_MPS: f32 = 3.12;
 
 /// Validated actor-specific planar inputs shared by supported drive and jump launch.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CharacterMovementKinematics {
-    /// Base walk-forward speed authored by the active motion table.
+    /// Base walk-forward speed for this behavior; player launch uses retail's baseline.
     base_walk_forward_speed: f32,
-    /// Base run-forward speed authored by the active motion table.
+    /// Base run-forward speed for this behavior; player launch uses retail's baseline.
     base_run_forward_speed: f32,
     /// Effective actor run-rate scalar resolved by the owning gameplay layer.
     run_rate_scalar: f32,
@@ -82,17 +84,16 @@ impl CharacterJumpKinematics {
     }
 }
 
-/// Reuses ordinary player motion-table resolution while leaving vertical capability to the later
-/// playable-client adapter. `full_extent_jump_height` is an already resolved numeric fact, not a
-/// skill or resource input.
-pub fn jump_kinematics_from_movement_capabilities(
-    movement: &SelfMovementCapabilities,
+/// Retail interpreter launch speeds do not depend on body animation coverage
+/// (`CMotionInterp::get_state_velocity`, acclient.c:329842-329907; ACE MotionInterp.cs).
+pub fn retail_jump_kinematics(
+    run_rate_scalar: f32,
     full_extent_jump_height: f32,
 ) -> Result<CharacterJumpKinematics, CharacterKinematicsError> {
     let movement = CharacterMovementKinematics::new(
-        movement.base_walk_forward_speed(),
-        movement.base_run_forward_speed(),
-        movement.run_rate_scalar,
+        RETAIL_WALK_FORWARD_BASE_SPEED_MPS,
+        holtburger_world::motion::RETAIL_RUN_FORWARD_BASE_SPEED_MPS,
+        run_rate_scalar,
     )?;
     CharacterJumpKinematics::new(movement, full_extent_jump_height)
 }

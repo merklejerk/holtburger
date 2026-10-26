@@ -13,6 +13,7 @@ pub struct RepositoryResourceIndexEntry {
     pub namespace: String,
     pub file_id: u32,
     pub type_id: u32,
+    /// Entry size as recorded by its archive: stored DAT bytes or decoded HBA bytes.
     pub size: u32,
     pub is_pruned: bool,
     pub source_description: String,

@@ -63,7 +63,8 @@ impl<'a> ContentSourceReader<'a> {
                         )
                     })?;
                 Arc::new(
-                    Scene::unpack(&resource.bytes)
+                    resource
+                        .decode(|bytes| Ok(Scene::unpack(&bytes)?))
                         .with_context(|| format!("Could not decode Scene 0x{scene_id:08X}"))?,
                 )
             }
@@ -90,9 +91,11 @@ impl<'a> ContentSourceReader<'a> {
                         )
                     })?;
                 Arc::new(
-                    SetupModel::unpack(&mut Cursor::new(resource.bytes)).with_context(|| {
-                        format!("Could not decode SetupModel 0x{setup_model_id:08X}")
-                    })?,
+                    resource
+                        .decode(|bytes| Ok(SetupModel::unpack(&mut Cursor::new(bytes))?))
+                        .with_context(|| {
+                            format!("Could not decode SetupModel 0x{setup_model_id:08X}")
+                        })?,
                 )
             }
         };
@@ -119,7 +122,8 @@ impl<'a> ContentSourceReader<'a> {
                         )
                     })?;
                 Arc::new(
-                    GfxObj::unpack(&mut Cursor::new(resource.bytes))
+                    resource
+                        .decode(|bytes| Ok(GfxObj::unpack(&mut Cursor::new(bytes))?))
                         .with_context(|| format!("Could not decode GfxObj 0x{gfx_obj_id:08X}"))?,
                 )
             }

@@ -288,9 +288,11 @@ async fn wait_for_characters(
         match recv_before(events, deadline, "character selection").await? {
             ClientViewEvent::LifecycleChanged(ClientLifecycleState::CharacterSelection {
                 characters,
+                ..
             }) => return Ok(characters),
             ClientViewEvent::ApplicationSnapshot(snapshot) => {
-                if let ClientLifecycleState::CharacterSelection { characters } = snapshot.lifecycle
+                if let ClientLifecycleState::CharacterSelection { characters, .. } =
+                    snapshot.lifecycle
                 {
                     return Ok(characters);
                 }

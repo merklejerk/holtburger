@@ -19,16 +19,42 @@ canonical DAT-derived queries.
 - **Share immutable decoded graphs**: `ContentDecodeCache` retains decoded records through `Arc`.
   Repeated landblock derivations do not clone heavy Environment, Scene, SetupModel, or GfxObj
   graphs.
-- **Frontend HBA first**: runtime consumers mount namespaced HBA bundles through
-  `holtburger-dat` source composition rather than pointing clients at raw retail DATs.
+- **One resource contract across archive formats**: explicit selections mount namespaced HBA
+  bundles or retail DATs through the same `holtburger-dat` source composition. Directories prefer
+  HBA content; retail DATs are mounted when no HBA is present. Required assets are resolved when
+  consumed rather than through an exhaustive startup audit.
 
 ## Key Components
 
 ### Repository Surface ([src/repository.rs](src/repository.rs))
 
-`ContentRepository` owns HBA path or directory discovery, mounted-source precedence, raw resource
+`ContentRepository` owns archive mounting, mounted-source precedence, raw resource
 access, and focused material/texture queries. Repository construction remains frontend or tool
 policy; shared orchestration receives an already constructed repository.
+
+`ResolvedContent::open` opens an exact archive or selected directory without environment overrides
+or sibling-extension probing, returning a repository and canonical selection identity together.
+`ResolvedContent::discover` tries an app-supplied portable directory followed by the shared platform
+data directory. Missing locations and directories without archives are skipped; invalid selected
+archives fail explicitly. Legacy `ContentRepository::discover` retains HBA/environment discovery
+for existing TUI and tooling consumers; h3d uses the explicit selection APIs.
+
+Retail role identification uses header dataset/subset, allowing one base portal, optional highres
+portal, cell, and language archive per installation. Highres shares `eor/portal` and takes precedence
+when it contains the requested resource, matching retail `CLCache::GetDiskController`
+(`acclient.c:282498`). Duplicate roles are errors. HBA and DAT resources are not silently mixed.
+HBA ordering remains namespace breadth followed by path, with full records preferred over pruned
+records by the existing layered resolver.
+
+Both formats provide an entry census and opened-handle filesystem revisions for cache identity.
+The census describes physical entries; motion projection resolves each logical resource key once.
+DAT entry sizes describe stored bytes, while HBA entry sizes describe decoded bytes. Inventory
+building does not decompress all resources to normalize those sizes.
+
+`ContentResourceError` preserves the namespace, file ID, source description, and original cause for
+read/decode failures. Necessity belongs to the consuming operation; missing optional content does
+not become a required-content failure merely because a lookup was attempted. Application setup,
+remembered locations, and recovery UI remain outside this crate.
 
 ### Shared Decode Cache ([src/decode_cache.rs](src/decode_cache.rs))
 
@@ -145,7 +171,7 @@ before an entity animating from a table may activate.
 
 ### What Belongs Here
 
-- HBA discovery, mount ordering, and typed source access
+- HBA/DAT selection, mount ordering, and typed source access
 - decoded-record caching and source-domain joins
 - canonical terrain, object, building, restriction, generated-scenery, and interior facts
 - retail-derived generated-scenery population semantics
@@ -171,10 +197,10 @@ bounds, and spatial structures.
 
 ```mermaid
 sequenceDiagram
-    participant App as holtburger-3d Tauri host
+    participant App as holtburger-3d Rust host
     participant Core as ContentAssetService
     participant Content as holtburger-content
-    participant DAT as Mounted HBA sources
+    participant DAT as Mounted HBA or retail DAT sources
 
     App->>Core: Landblock(id)
     Core->>Content: assemble shallow foundation
@@ -203,7 +229,7 @@ demonstrating a need.
 
 ## Dependencies
 
-- **`holtburger-dat`**: HBA/resource composition and low-level file parsers.
+- **`holtburger-dat`**: HBA/DAT resource composition and low-level file parsers.
 - **`holtburger-common`**: shared math and source-domain primitives.
 - **`binrw`**: binary decoding support for focused content queries.
 

@@ -915,7 +915,7 @@ impl MovementSystem {
         let run_rate = world
             .player_run_rate()
             .ok_or_else(|| anyhow::anyhow!("client-directed locomotion run-rate is unavailable"))?;
-        Self::local_drive_order(world, state, run_rate).map(|(_, order)| Some(order))
+        Self::local_drive_order(world, state, run_rate).map(Some)
     }
 
     /// Shared command-to-table mapping for authored manual motion and local visual locomotion.
@@ -923,20 +923,13 @@ impl MovementSystem {
         world: &WorldState,
         state: CharacterDrive,
         run_rate: f32,
-    ) -> Result<(MotionCommand, MotionOrder)> {
-        let resolution = world
-            .resolve_player_motion_table_profile()
-            .map_err(|error| anyhow::anyhow!("local motion table unavailable: {error}"))?;
+    ) -> Result<MotionOrder> {
         let stance = world
-            .player_entity()
-            .and_then(|entity| entity.network_motion.snapshot())
-            .and_then(|snapshot| snapshot.current_style)
-            .or(world.player.last_server_motion_style)
-            .map(|style| MotionCommand(style as u32))
-            .unwrap_or(MotionCommand(resolution.movement_profile.stance));
-        let order = crate::motion_order_for_drive(state, run_rate, stance)
-            .map_err(|error| anyhow::anyhow!("local motion order invalid: {error}"))?;
-        Ok((stance, order))
+            .resolve_player_motion_style()
+            .map_err(|error| anyhow::anyhow!("local motion table unavailable: {error}"))?;
+        let stance = MotionCommand(stance);
+        crate::motion_order_for_drive(state, run_rate, stance)
+            .map_err(|error| anyhow::anyhow!("local motion order invalid: {error}"))
     }
 
     /// Advances the held local drive's authored motion once and returns that complete tick.
@@ -1050,7 +1043,7 @@ impl MovementSystem {
             _ => return Ok(None),
         };
 
-        let (stance, order) = Self::local_drive_order(world, state, run_rate)?;
+        let order = Self::local_drive_order(world, state, run_rate)?;
         let body_id = SpatialBodyId::LocalPlayer(guid);
         let contact = world
             .runtime_body_view(body_id)
@@ -1064,20 +1057,6 @@ impl MovementSystem {
             MotionContact::Unrestricted(_) => CharacterMotionPresentation::Grounded,
             MotionContact::RequiresSupport(contact) => self.character_presentation(contact),
         };
-        let required_command = match presentation {
-            CharacterMotionPresentation::Ready => Some(MotionCommand::READY),
-            CharacterMotionPresentation::Falling => Some(MotionCommand::FALLING),
-            CharacterMotionPresentation::Grounded | CharacterMotionPresentation::StanceDefault => {
-                None
-            }
-        };
-        if let Some(command) = required_command {
-            world
-                .require_authored_motion_cycle_for_body(guid, stance, command)
-                .map_err(|error| {
-                    anyhow::anyhow!("manual local jump presentation unavailable: {error}")
-                })?;
-        }
         // Retail accepts turn-in-place while unsupported but replaces planar locomotion with
         // `Falling` until walkable contact returns (`CMotionInterp::apply_interpreted_movement`,
         // `acclient.c:330390-330453`). World arbitration applies this presentation after resolving

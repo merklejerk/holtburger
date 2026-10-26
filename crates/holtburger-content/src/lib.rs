@@ -13,6 +13,7 @@ pub mod motion_sequence;
 pub mod object_collision;
 pub mod render_surface_pixels;
 pub mod repository;
+mod resource_error;
 pub mod selection_envelope;
 pub mod soul_emote;
 mod source_reader;
@@ -71,7 +72,8 @@ pub use object_collision::{
     OutdoorBuildingTransit, PlacedCollider, PlacedCollisionShape, StaticColliderPlacement,
     resolve_gfx_obj_collision_shape, resolve_setup_volume_collision_shapes,
 };
-pub use repository::ContentRepository;
+pub use repository::{ContentRepository, ContentSelectionError, ResolvedContent};
+pub use resource_error::{ContentResourceError, ContentResourceErrorKind};
 pub use selection_envelope::{
     SelectionEnvelopeProfile, compute_selection_envelope_radius, resolve_selection_envelope_profile,
 };

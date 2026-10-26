@@ -1335,20 +1335,22 @@
 				/>
 			{/key}
 		</ClientHudPanel>
-		<ClientHudPanel
-			label="Frame rate"
-			placement={hudLayout.frameRate}
-			editable={hudMode === "layout"}
-			minWidth={CLIENT_UI_DEFAULTS.frameRate.minSize.width}
-			minHeight={CLIENT_UI_DEFAULTS.frameRate.minSize.height}
-			resizable={CLIENT_UI_DEFAULTS.frameRate.resizable}
-			contentHitTesting="descendants"
-			{viewport}
-			onPlacementChange={(placement) =>
-				changeHudPlacement("frameRate", placement)}
-		>
-			<ClientFpsCounter {readFrameRates} />
-		</ClientHudPanel>
+		{#if ui.showFps}
+			<ClientHudPanel
+				label="Frame rate"
+				placement={hudLayout.frameRate}
+				editable={hudMode === "layout"}
+				minWidth={CLIENT_UI_DEFAULTS.frameRate.minSize.width}
+				minHeight={CLIENT_UI_DEFAULTS.frameRate.minSize.height}
+				resizable={CLIENT_UI_DEFAULTS.frameRate.resizable}
+				contentHitTesting="descendants"
+				{viewport}
+				onPlacementChange={(placement) =>
+					changeHudPlacement("frameRate", placement)}
+			>
+				<ClientFpsCounter {readFrameRates} />
+			</ClientHudPanel>
+		{/if}
 		{#if selectedEntityGuid !== null || hudMode === "layout"}
 			<ClientHudPanel
 				label="Selected entity"

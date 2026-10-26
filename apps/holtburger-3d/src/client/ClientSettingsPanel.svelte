@@ -392,6 +392,14 @@
 									})}
 							/> Always show entity nameplates</label
 						>
+						<label class="ui-checkbox"
+							><input
+								type="checkbox"
+								checked={ui.showFps}
+								onchange={(event) =>
+									onUiChange({ ...ui, showFps: event.currentTarget.checked })}
+							/> Show FPS</label
+						>
 					</div>
 				</details>
 				<details class="ui-disclosure ui-disclosure-section" open>

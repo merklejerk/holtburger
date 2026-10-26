@@ -2725,6 +2725,19 @@ export async function probeClientSettingsTabs(
 			}
 			window.querySelector('#settings-tab-ui').click();
 			await new Promise((resolve) => requestAnimationFrame(resolve));
+			const fpsToggle = [...window.querySelectorAll('#settings-section-ui label')]
+				.find((label) => label.textContent.trim() === 'Show FPS')
+				?.querySelector('input[type="checkbox"]');
+			if (!fpsToggle || fpsToggle.checked || document.querySelector('.client-fps-counter'))
+				throw new Error('FPS HUD must start hidden with its setting unchecked');
+			fpsToggle.click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			if (!fpsToggle.checked || !document.querySelector('.client-fps-counter'))
+				throw new Error('Show FPS did not mount the FPS HUD');
+			fpsToggle.click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			if (fpsToggle.checked || document.querySelector('.client-fps-counter'))
+				throw new Error('Show FPS did not unmount the FPS HUD');
 			const nameplateToggle = () => [...window.querySelectorAll('#settings-section-ui label')]
 				.find((label) => label.textContent.trim() === 'Always show entity nameplates')
 				?.querySelector('input[type="checkbox"]');

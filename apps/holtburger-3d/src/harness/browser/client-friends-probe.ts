@@ -1,3 +1,4 @@
+import gameplayPreferencesFixture from "./fixtures/gameplay-preferences.json";
 import { mount, tick, unmount } from "svelte";
 import ClientSocialPanel from "../../client/ClientSocialPanel.svelte";
 import { ClientPartyState } from "../../client/client-party-state";
@@ -65,6 +66,7 @@ export async function probeFriends(options: {
 		emit("client-friends-updated", { friends: baseline });
 		emit("client-character-preferences-updated", {
 			appearance: { showHelmet: true, showCloak: true },
+			gameplay: gameplayPreferencesFixture,
 			party: { shareXp: true, shareLoot: false, ignoreRequests: false },
 			friends: { appearOffline: false },
 			allegiance: { showLogons: false },

@@ -318,6 +318,7 @@ function currentState(player: DynamicEntityView): ClientCurrentState {
 		knownSpells: null,
 		enchantments: null,
 		appearanceOptions: null,
+		gameplayPreferences: null,
 		party: null,
 		partyPreferences: null,
 		friends: null,

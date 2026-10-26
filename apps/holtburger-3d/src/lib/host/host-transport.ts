@@ -1,3 +1,4 @@
+import type { ClientGameplayPreferences } from "../../client/client-gameplay-options-contract";
 import type {
 	SalvagePreviewResult,
 	SalvageSubmitResult,
@@ -179,6 +180,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"recall_client",
 	"toggle_client_combat_mode",
 	"set_client_appearance_option",
+	"set_client_gameplay_option",
 	"cast_client_spell",
 	"begin_client_combat_engagement",
 	"update_client_combat_profile",
@@ -414,6 +416,7 @@ export interface HostEventPayloadMap {
 	"client-player-enchantments-updated": unknown;
 	"client-character-preferences-updated": {
 		appearance: ClientAppearanceOptions;
+		gameplay: ClientGameplayPreferences;
 		party: PartyPreferences;
 		friends: FriendsPreferences;
 		allegiance: AllegiancePreferences;

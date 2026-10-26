@@ -1,3 +1,4 @@
+import gameplayPreferencesFixture from "../harness/browser/fixtures/gameplay-preferences.json";
 import { playerVisualCaptureSchema } from "./client-object-preview-contract";
 import previewFixture from "./fixtures/object-preview-wire.json";
 import { persistPlayerVisualCapture } from "./client-visual-capture";
@@ -309,6 +310,7 @@ describe("ClientLifecycleSession", () => {
 		});
 		transport.emit("client-character-preferences-updated", {
 			appearance: { showHelmet: true, showCloak: true },
+			gameplay: gameplayPreferencesFixture,
 			party: { shareXp: true, shareLoot: false, ignoreRequests: false },
 			friends: { appearOffline: false },
 			allegiance: { showLogons: true },
@@ -2060,6 +2062,7 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-friends-updated", { friends });
 		transport.emit("client-character-preferences-updated", {
 			appearance: { showHelmet: true, showCloak: true },
+			gameplay: gameplayPreferencesFixture,
 			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
 			friends: { appearOffline: false },
 			allegiance: { showLogons: false },
@@ -2095,6 +2098,54 @@ describe("ClientLifecycleSession", () => {
 		expect(session.friends.read().known).toBe(false);
 	});
 
+	it("recovers Gameplay options, mirrors updates, and rejects edits outside active gameplay", async () => {
+		const transport = new FakeClientTransport();
+		const initial = { ...gameplayPreferencesFixture, craftSuccessDialog: true };
+		const snapshot = { ...currentState(42), gameplayPreferences: initial };
+		transport.setCurrentState(snapshot);
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		expect(session.state().gameplayPreferences).toEqual(initial);
+		await session.setGameplayOption("confirmRareUse", true);
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "set_client_gameplay_option",
+			args: { option: "confirmRareUse", enabled: true },
+		});
+		// Queue acceptance alone must not invent a mirrored update.
+		expect(session.state().gameplayPreferences?.confirmRareUse).toBe(false);
+		const updated = { ...initial, confirmRareUse: true };
+		transport.emit("client-character-preferences-updated", {
+			appearance: { showHelmet: true, showCloak: true },
+			gameplay: updated,
+			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
+			friends: { appearOffline: false },
+			allegiance: { showLogons: false },
+		});
+		expect(session.state().gameplayPreferences).toEqual(updated);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			worldGeneration: 2,
+			cause: "teleport",
+		});
+		expect(session.state().gameplayPreferences).toEqual(updated);
+		const before = transport.invocations.length;
+		await expect(
+			session.setGameplayOption("confirmRareUse", false),
+		).rejects.toThrow("active character");
+		expect(transport.invocations).toHaveLength(before);
+		transport.emit("client-state-resyncing", null);
+		expect(session.state().gameplayPreferences).toBeNull();
+		transport.emit("client-current-state", snapshot);
+		expect(session.state().gameplayPreferences).toEqual(initial);
+		transport.emit("client-lifecycle-changed", {
+			kind: "entering-world",
+			characterGuid: 99,
+		});
+		expect(session.state().gameplayPreferences).toBeNull();
+		session.stop();
+		expect(session.state().gameplayPreferences).toBeNull();
+	});
+
 	it("retains appearance updates and submits an appearance change", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -2102,6 +2153,7 @@ describe("ClientLifecycleSession", () => {
 
 		transport.emit("client-character-preferences-updated", {
 			appearance: { showHelmet: false, showCloak: true },
+			gameplay: gameplayPreferencesFixture,
 			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
 			friends: { appearOffline: false },
 			allegiance: { showLogons: false },
@@ -2144,6 +2196,7 @@ describe("ClientLifecycleSession", () => {
 		expect(session.state().appearanceOptions).toBeNull();
 		transport.emit("client-character-preferences-updated", {
 			appearance: options,
+			gameplay: gameplayPreferencesFixture,
 			party: { shareXp: false, shareLoot: false, ignoreRequests: false },
 			friends: { appearOffline: false },
 			allegiance: { showLogons: false },
@@ -2297,6 +2350,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		knownSpells: null,
 		enchantments: null,
 		appearanceOptions: null,
+		gameplayPreferences: null,
 		party: null,
 		partyPreferences: null,
 		friends: null,

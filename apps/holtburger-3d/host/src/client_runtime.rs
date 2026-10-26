@@ -405,6 +405,11 @@ pub enum ClientHostCommand {
     },
     /// Toggle peace and the current equipment-derived stance in core.
     ToggleClientCombatMode,
+    /// Change one server-saved option exposed by Gameplay settings.
+    SetClientGameplayOption {
+        option: crate::client_gameplay::ClientGameplayOption,
+        enabled: bool,
+    },
     /// Change one server-backed appearance preference exposed by the client UI.
     SetClientAppearanceOption {
         option: ClientAppearanceOption,
@@ -626,6 +631,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "teleport_client_to_map_position",
     "toggle_client_combat_mode",
     "set_client_appearance_option",
+    "set_client_gameplay_option",
     "cast_client_spell",
     "begin_client_combat_engagement",
     "update_client_combat_profile",
@@ -1102,6 +1108,14 @@ pub async fn dispatch_client(
             .send_command(ClientCommand::SetCharacterTitle {
                 character,
                 title_id,
+            })
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        SetClientGameplayOption { option, enabled } => runtime
+            .send_command(ClientCommand::SetCharacterOption {
+                option: option.into(),
+                value: enabled,
             })
             .await
             .map(|()| HostResponse::Unit)

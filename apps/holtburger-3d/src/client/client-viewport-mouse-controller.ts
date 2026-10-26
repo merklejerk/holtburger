@@ -127,6 +127,8 @@ export class ClientViewportMouseController {
 		const middle = movementEnabled && (this.#buttons & MIDDLE) !== 0;
 		const both =
 			movementEnabled && (this.#buttons & (LEFT | RIGHT)) === (LEFT | RIGHT);
+		const startedForward =
+			(middle && !this.#middleForward) || (both && !this.#bothForward);
 		if (middle || both) this.#click = null;
 		if (middle !== this.#middleForward) {
 			this.#middleForward = middle;
@@ -142,6 +144,12 @@ export class ClientViewportMouseController {
 				: (this.#buttons & LEFT) !== 0
 					? "orbit"
 					: null;
+		// A lone right press retains examine until dragging; movement chords commit immediately.
+		if (
+			mode === "steer" &&
+			(startedForward || (mode !== this.#mode && this.#click === null))
+		)
+			this.#options.camera()?.followRear(performance.now());
 		if (mode === this.#mode) return;
 		const wasCameraGesture = this.#mode !== null;
 		this.#mode = mode;
@@ -152,7 +160,6 @@ export class ClientViewportMouseController {
 		}
 		if (!wasCameraGesture || this.#motion === null)
 			this.#motion = beginClientViewportPointerGesture();
-		if (mode === "steer") this.#options.camera()?.followRear(performance.now());
 		// Acquire on the button edge, before motion, and retain capture across steer/orbit handoffs.
 		this.#requestLock();
 	}
@@ -190,6 +197,8 @@ export class ClientViewportMouseController {
 			advance.gesture.kind === "dragging" && this.#mode === "orbit",
 		);
 		if (advance.dragDelta === null) return;
+		if (this.#mode === "steer" && this.#click?.kind === "examine")
+			this.#options.camera()?.followRear(performance.now());
 		this.#click = null;
 		if (this.#mode === "steer") {
 			this.#steer(advance.dragDelta.x, advance.dragDelta.y);

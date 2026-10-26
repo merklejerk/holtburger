@@ -1,3 +1,8 @@
+<script module lang="ts">
+	/** The startup intro is shared across all pregame mounts in this app launch. */
+	let wordmarkIntroConsumed = false;
+</script>
+
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import PortalLogo from "../../../../assets/branding/portal.svg?component";
@@ -21,6 +26,44 @@
 	const { branding, showPortalLogo, backdrop, children, footer }: Props =
 		$props();
 	const { keyboard } = useAppInputPolicy();
+
+	/** Measure the loaded font so every letter starts at the wordmark's center. */
+	function revealWordmark(node: HTMLSpanElement) {
+		if (wordmarkIntroConsumed) return;
+		// Consume before font loading or reduced-motion checks so remounts cannot replay it.
+		wordmarkIntroConsumed = true;
+		if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+		let disposed = false;
+		const animations: Animation[] = [];
+		node.style.opacity = "0";
+		void document.fonts.ready.then(() => {
+			if (disposed) return;
+			const bounds = node.getBoundingClientRect();
+			const center = bounds.left + bounds.width / 2;
+			for (const letter of node.querySelectorAll<HTMLSpanElement>(
+				".hero-letter",
+			)) {
+				const bounds = letter.getBoundingClientRect();
+				const offset = center - (bounds.left + bounds.width / 2);
+				animations.push(
+					letter.animate(
+						[
+							{ transform: `translateX(${offset}px)`, opacity: 0 },
+							{ transform: "translateX(0)", opacity: 1 },
+						],
+						{ duration: 2000, easing: "cubic-bezier(0.16, 1, 0.3, 1)" },
+					),
+				);
+			}
+			node.style.removeProperty("opacity");
+		});
+		return {
+			destroy() {
+				disposed = true;
+				for (const animation of animations) animation.cancel();
+			},
+		};
+	}
 </script>
 
 <main
@@ -34,7 +77,16 @@
 		{#if showPortalLogo}
 			<span class="pregame-logo" aria-hidden="true"><PortalLogo /></span>
 		{/if}
-		<span>Holtburger</span>
+		{#if branding === "hero"}
+			<span role="img" aria-label="Holtburger" use:revealWordmark>
+				{#each [..."Holtburger"] as letter, index (index)}<span
+						class="hero-letter"
+						aria-hidden="true">{letter}</span
+					>{/each}
+			</span>
+		{:else}
+			<span>Holtburger</span>
+		{/if}
 	</header>
 	<div class="pregame-content">{@render children()}</div>
 	<footer class="pregame-footer">
@@ -47,6 +99,9 @@
 
 <style>
 	@layer components {
+		.hero-letter {
+			display: inline-block;
+		}
 		.client-pregame-screen {
 			position: relative;
 			display: grid;

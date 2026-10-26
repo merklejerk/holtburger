@@ -43,6 +43,8 @@ export interface ClientUiPanel extends ClientUiPlacement {
 
 /** Client-owned HUD defaults, independent of Svelte composition and live layout state. */
 export interface ClientUiDefaults {
+	/** Retained app-local portal Snake easter egg. */
+	readonly logopolis: Omit<ClientUiPanel, "resizable">;
 	/** Player identity and vitals. */
 	readonly character: ClientUiPanel;
 	/** Combat-focused roster; its minimum extent follows resolved CSS theme dimensions. */

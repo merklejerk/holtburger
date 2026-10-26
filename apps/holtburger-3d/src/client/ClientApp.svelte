@@ -17,6 +17,7 @@
 	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
 	import { ClientNavigationWaypointOwner } from "./client-navigation-waypoint";
 	import { runClientAssetsCommand } from "./client-assets-command";
+	import { isLogopolisCommand } from "./client-logopolis";
 	import { runClientLocationCommand } from "./client-location-command";
 	import { ClientDeathCommands } from "./client-death-commands";
 	import { runRecallCommand } from "./client-recall-command";
@@ -1271,6 +1272,12 @@
 		toastCenter.publish({ message, tone: "status" });
 	}
 
+	/** Explicit launches remain cold UI events; the board owns its run lifetime. */
+	let logopolisLaunchRevision = $state(0);
+	$effect(() => {
+		if (lifecycle.kind !== "in-world") logopolisLaunchRevision = 0;
+	});
+
 	async function sendChat(
 		message: string,
 		resolution: ChatComposeResolution,
@@ -1289,6 +1296,10 @@
 				resolution.kind === "send" ? [resolution.request] : resolution.requests,
 				(request) => currentSession.sendChat(request),
 			);
+			return;
+		}
+		if (isLogopolisCommand(message)) {
+			logopolisLaunchRevision += 1;
 			return;
 		}
 		if (runClientHelpCommand(message, appendChatLine)) return;
@@ -2524,6 +2535,7 @@
 			{chatMessages}
 			{chatComposer}
 			{sentChatHistory}
+			{logopolisLaunchRevision}
 			onSendChat={sendChat}
 			onSendChatError={appendChatError}
 			{canvasElement}

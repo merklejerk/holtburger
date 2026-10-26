@@ -209,11 +209,13 @@ Every pair of planes in an admitted component must also coincide, preventing a c
 plane offsets from licensing a non-coincident continuation.
 
 The exemption is bounded per pixel up to a numerical overlap tolerance. A component is declined,
-with a logged warning and no ids, when three exits from one render domain overlap pairwise by more
-than `JUNCTION_OVERLAP_AREA_EPSILON` (1e-12 m²). This is separate from the larger
+with a debug-level console diagnostic and no ids, when three exits from one render domain overlap
+pairwise by more than `JUNCTION_OVERLAP_AREA_EPSILON` (1e-12 m²). This is separate from the larger
 component-connectivity threshold, so smaller meaningful overlaps still count towards ambiguity.
 The graph triangle test is conservative: it can decline pairwise overlaps without a common triple
 intersection.
+The diagnostic is available in DevTools at the Verbose level and forwarded to the Electron
+terminal when `HOLTBURGER_RENDERER_VERBOSE=1`.
 Disjoint partition pieces can share a component with a larger opposite opening without competing
 at a pixel. Outside the numerical contact tolerance, reciprocal suppression leaves at most one
 equal-depth continuation.

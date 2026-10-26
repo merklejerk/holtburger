@@ -163,7 +163,7 @@ export const CLIENT_TUNING = {
 		distance: {
 			initial: 4.5,
 			minimum: 1.2,
-			maximum: 50,
+			maximum: 125,
 		},
 		orbit: {
 			maximumPitchRadians: 1.35,

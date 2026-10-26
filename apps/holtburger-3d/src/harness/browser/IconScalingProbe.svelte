@@ -27,6 +27,7 @@
 {#each [{ label: "Scale tray fixture", width: 1000 }, { label: "Constrained scale tray fixture", width: 100 }] as fixture}
 	<ClientHudTray
 		label={fixture.label}
+		gapCount={0}
 		placement={{
 			horizontal: { alignment: "start", offset: 16 },
 			vertical: { alignment: "start", offset: 96 },

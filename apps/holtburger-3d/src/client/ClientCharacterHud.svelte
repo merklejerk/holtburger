@@ -155,9 +155,10 @@
 		.character-hud {
 			display: grid;
 			box-sizing: border-box;
-			height: 100%;
+			/* Fit the painted HUD to its rows, independently of saved layout height. */
+			height: fit-content;
 			grid-template-rows: min-content min-content;
-			align-content: space-between;
+			align-content: start;
 			gap: var(--ui-character-hud-gap);
 		}
 		.identity-block {
@@ -202,13 +203,12 @@
 		.vitals {
 			display: flex;
 			flex-direction: column;
-			gap: 2px;
-			/* The focused row gets half the bar area; reserve its scaled text line plus both gaps. */
+			/* Contiguous bars: the focused row gets half the area for its scaled text line. */
 			block-size: max(
 				36px,
 				calc(
 					2 * var(--ui-font-size-micro) * var(--ui-text-scale) *
-						var(--ui-line-height-body) + 4px
+						var(--ui-line-height-body)
 				)
 			);
 		}

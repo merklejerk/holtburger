@@ -235,12 +235,16 @@
 	</section>
 	<section class="hud target" style={placement("selectedEntity")}>
 		<div class="target-row ui-hud-group">
-			<button class="ui-hud-button" title="Interact" aria-label="Interact"
-				><ClientHudIcon name="interact" /></button
+			<button
+				class="ui-hud-button ui-icon-button"
+				title="Interact"
+				aria-label="Interact"><ClientHudIcon name="interact" /></button
 			>
 			<strong data-contrast="target">Drudge Prowler</strong>
-			<button class="ui-hud-button" title="Examine" aria-label="Examine"
-				><ClientHudIcon name="examine" /></button
+			<button
+				class="ui-hud-button ui-icon-button"
+				title="Examine"
+				aria-label="Examine"><ClientHudIcon name="examine" /></button
 			>
 		</div>
 		<div
@@ -370,7 +374,7 @@
 				value="Another round?"
 			/>
 			<button
-				class="ui-hud-button"
+				class="ui-hud-button ui-icon-button"
 				type="submit"
 				aria-label="Send message"
 				title="Send message"
@@ -389,8 +393,10 @@
 		style={placement("shortcuts")}
 	>
 		{#each shortcuts as name}
-			<button class="ui-hud-button" aria-label={name} title={name}
-				><ClientHudIcon {name} /></button
+			<button
+				class="ui-hud-button ui-icon-button"
+				aria-label={name}
+				title={name}><ClientHudIcon {name} /></button
 			>
 		{/each}
 	</nav>

@@ -23,6 +23,7 @@ export function createElectronUiThemeTransport(): UiThemeTransport {
 	if (bridge === undefined)
 		throw new Error("Electron theme bridge is unavailable");
 	return {
+		initialIds: [],
 		async list() {
 			return uiThemeCatalogSchema.parse(await bridge.list());
 		},

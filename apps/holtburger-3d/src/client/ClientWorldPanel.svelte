@@ -718,7 +718,7 @@
 					</g>
 				</svg>
 				<button
-					class="ui-hud-button world-map-recall"
+					class="ui-hud-button ui-icon-button world-map-recall"
 					type="button"
 					aria-label="Recall destinations"
 					aria-haspopup="menu"
@@ -732,7 +732,7 @@
 					}}><ClientHudIcon name="teleport" /></button
 				>
 				<button
-					class="ui-hud-button world-map-visibility"
+					class="ui-hud-button ui-icon-button world-map-visibility"
 					type="button"
 					aria-label="Map visibility"
 					aria-haspopup="menu"
@@ -745,7 +745,7 @@
 				<button
 					bind:this={resetButton}
 					hidden
-					class="ui-hud-button world-map-reset"
+					class="ui-hud-button ui-icon-button world-map-reset"
 					type="button"
 					aria-label="Reset view"
 					title="Reset view — show the whole world"

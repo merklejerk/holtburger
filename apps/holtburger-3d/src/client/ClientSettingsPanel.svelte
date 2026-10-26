@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UiRange from "../app/UiRange.svelte";
 	import type { UiThemeSettings } from "../app/ui-theme-selection";
 	import {
 		readClientBinding,
@@ -386,8 +387,7 @@
 								>{vital.label} threshold: {ui.vitalWarningThresholds[
 									vital.kind
 								]}%
-								<input
-									type="range"
+								<UiRange
 									aria-label={`${vital.label} warning threshold`}
 									min={CLIENT_VITAL_WARNING_PERCENT.minimum}
 									max={CLIENT_VITAL_WARNING_PERCENT.maximum}

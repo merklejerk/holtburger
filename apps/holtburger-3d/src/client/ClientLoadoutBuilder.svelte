@@ -139,7 +139,7 @@
 						</div>
 						<button
 							type="button"
-							class="ui-item-cell ui-item-selection ui-hud-button loadout-item-cell"
+							class="ui-item-cell ui-item-selection ui-hud-control loadout-item-cell"
 							data-loadout-slot={slot.mask}
 							data-item-guid={binding?.item ?? undefined}
 							data-empty={binding?.item == null}

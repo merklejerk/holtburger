@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+/** Persisted bundled-theme ID and display label, shared without importing renderer assets. */
+export const TRAVELERS_KIT_THEME_ID = "Traveler’s Kit";
+
 /** Theme folders are portable single path components; names double as display labels. */
 export const uiThemeIdSchema = z
 	.string()
@@ -33,6 +36,8 @@ export const uiThemeUrlSchema = z
 
 /** Renderer-owned discovery capability; native code owns all filesystem paths. */
 export interface UiThemeTransport {
+	/** Choices available before discovery; the selection owner retains them on failure or timeout. */
+	readonly initialIds: readonly string[];
 	list(): Promise<readonly string[]>;
 	resolve(id: string): Promise<string>;
 	openDirectory(): Promise<void>;

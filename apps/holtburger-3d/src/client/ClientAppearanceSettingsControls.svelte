@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UiRange from "../app/UiRange.svelte";
 	import UiThemeControls from "../app/UiThemeControls.svelte";
 	import type { UiThemeSettings } from "../app/ui-theme-selection";
 	import type { ClientUiSettings } from "./client-settings-contract";
@@ -62,8 +63,7 @@
 		<div class="settings-section ui-disclosure-body">
 			<label
 				>Text scaling: {Math.round(ui.textScale * 100)}%
-				<input
-					type="range"
+				<UiRange
 					aria-label="Text scaling"
 					min={CLIENT_TEXT_SCALE.minimum}
 					max={CLIENT_TEXT_SCALE.maximum}
@@ -82,8 +82,7 @@
 			</p>
 			<label
 				>Icon scaling: {Math.round(ui.iconScale * 100)}%
-				<input
-					type="range"
+				<UiRange
 					aria-label="Icon scaling"
 					min={CLIENT_ICON_SCALE.minimum}
 					max={CLIENT_ICON_SCALE.maximum}

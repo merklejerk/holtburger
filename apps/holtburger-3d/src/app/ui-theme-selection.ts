@@ -80,10 +80,7 @@ export class UiThemeSelection {
 		void this.retire();
 	};
 	readonly #listeners = new Set<(state: UiThemeState) => void>();
-	#state: UiThemeState = {
-		catalog: { kind: "ready", ids: [] },
-		selection: { kind: "ready", activeId: null },
-	};
+	#state: UiThemeState;
 	#queue = Promise.resolve();
 	#retired = false;
 	#operation: AbortController | null = null;
@@ -94,6 +91,10 @@ export class UiThemeSelection {
 		lifetime?: AbortSignal,
 	) {
 		this.#transport = transport;
+		this.#state = {
+			catalog: { kind: "ready", ids: transport.initialIds },
+			selection: { kind: "ready", activeId: null },
+		};
 		this.#loader = loader;
 		this.#lifetime = lifetime;
 		lifetime?.addEventListener("abort", this.#abort, { once: true });

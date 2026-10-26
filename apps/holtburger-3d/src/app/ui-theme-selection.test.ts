@@ -20,6 +20,7 @@ function deferred<Value>() {
 
 function fixture() {
 	const transport: UiThemeTransport = {
+		initialIds: [],
 		list: vi.fn(async () => ["night"]),
 		resolve: vi.fn(async (id) => `https://fixture/${id}.css`),
 		openDirectory: vi.fn(async () => {}),

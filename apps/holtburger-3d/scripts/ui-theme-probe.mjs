@@ -196,7 +196,7 @@ export async function probeUiTheme(client, evaluateExpression, saveScreenshot) {
 			const style = document.createElement("style");
 			style.id = "hud-filter-probe";
 			style.textContent =
-				"@layer overrides { .ui-theme :is(.ui-readout, .ui-hud-group, .ui-hud-button, .ui-hud-surface, .ui-meter) { --ui-backdrop-filter: blur(7px); } }";
+				"@layer overrides { .ui-theme :is(.ui-readout, .ui-hud-group, .ui-hud-button, .ui-hud-control, .ui-hud-surface, .ui-meter) { --ui-backdrop-filter: blur(7px); } }";
 			document.head.append(style);
 			if (
 				getComputedStyle(panel).backdropFilter !== "blur(3px)" ||

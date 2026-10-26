@@ -30,7 +30,7 @@
 
 <button
 	bind:this={button}
-	class="client-system-menu ui-hud-button"
+	class="client-system-menu ui-hud-button ui-icon-button"
 	type="button"
 	aria-label="System menu"
 	title="System menu"

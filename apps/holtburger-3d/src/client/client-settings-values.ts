@@ -1,3 +1,8 @@
+import { TRAVELERS_KIT_THEME_ID } from "../app/ui-theme-contract.js";
+
+/** Theme used by fresh/reset settings and sections without an explicit theme choice. */
+export const CLIENT_DEFAULT_THEME_ID = TRAVELERS_KIT_THEME_ID;
+
 /** Editable client graphics ranges, shared by durable validation and controls. */
 export const CLIENT_GRAPHICS_RANGES = {
 	viewDistance: { minimum: 0, maximum: 8, step: 1 },

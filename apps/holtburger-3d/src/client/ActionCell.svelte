@@ -102,7 +102,7 @@
 
 <button
 	type="button"
-	class="action-cell ui-shortcut-cell ui-item-cell ui-item-selection ui-hud-button"
+	class="action-cell ui-shortcut-cell ui-item-cell ui-item-selection ui-hud-control"
 	data-action-bar={bar}
 	data-action-cell={digit}
 	style:anchor-name={anchorName}

@@ -34,6 +34,7 @@ import { fileURLToPath } from "node:url";
 
 import { findAvailablePort, parseVitePort } from "./dev-port.mjs";
 import { probeUiTheme } from "./ui-theme-probe.mjs";
+import { probeUiShowcase } from "./ui-showcase-probe.mjs";
 
 const DEFAULT_CHROME_PATH = "/opt/google/chrome/chrome";
 const READY_KIND = "holtburger-3d-dev-landblock-content-host-ready";
@@ -121,7 +122,13 @@ try {
 		}
 	}
 	let report;
-	if (options.clientPresentation) {
+	if (options.uiShowcase) {
+		report = {
+			suite: "ui-showcase",
+			evidence: result.uiShowcase,
+			browserErrors,
+		};
+	} else if (options.clientPresentation) {
 		report = {
 			suite: options.userThemeLifecycle
 				? "user-theme-lifecycle"
@@ -640,6 +647,7 @@ function parseArgs(args) {
 		clientWaypoint: false,
 		clientHousing: false,
 		clientHud: false,
+		uiShowcase: false,
 		itemCooldowns: false,
 		clientNearby: false,
 		clientSpells: false,
@@ -939,6 +947,10 @@ function parseArgs(args) {
 				break;
 			case "--ui-theme":
 				parsed.uiTheme = true;
+				break;
+			case "--ui-showcase":
+				parsed.clientHud = true;
+				parsed.uiShowcase = true;
 				break;
 			case "--full-report":
 				parsed.reportMode = "full";
@@ -2153,6 +2165,7 @@ Options:
   --ui-theme           Review CSS themes over the live world, bright/dark backdrops, override
                        removal, filter fallback, and a replacement fixture; verify contrast and input.
                        With --screenshot, also writes <path>.<variant>.png.
+  --ui-showcase        Verify theme lifecycle and controls in the asset-independent UI showcase.
   --client-party-screenshots <dir> Capture the real party HUD at one through four columns.
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --character-sheet     Exercise the Character panel with synthetic quotes in the client HUD.
@@ -4640,7 +4653,12 @@ async function runClientHudHarness({ viteUrl }) {
 		join(tmpdir(), "holtburger-3d-client-hud-harness-"),
 	);
 	tempDirectories.push(userDataDirectory);
-	const pageUrl = `${viteUrl}/harness/browser/?${options.itemCooldowns ? "item-cooldowns" : "client-hud"}=1`;
+	const page = options.uiShowcase
+		? "ui-showcase"
+		: options.itemCooldowns
+			? "item-cooldowns"
+			: "client-hud";
+	const pageUrl = `${viteUrl}/harness/browser/?${page}=1`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -4677,6 +4695,24 @@ async function runClientHudHarness({ viteUrl }) {
 			});
 		});
 		await client.send("Runtime.enable");
+		if (options.uiShowcase) {
+			const uiShowcase = await probeUiShowcase(client, evaluateExpression);
+			return {
+				uiShowcase,
+				consoleMessages,
+				state: { error: null, ready: true },
+				...(options.screenshotPath
+					? {
+							screenshot: (
+								await client.send("Page.captureScreenshot", {
+									format: "png",
+									captureBeyondViewport: false,
+								})
+							).data,
+						}
+					: {}),
+			};
+		}
 		if (options.itemCooldowns) {
 			const started = Date.now();
 			while (

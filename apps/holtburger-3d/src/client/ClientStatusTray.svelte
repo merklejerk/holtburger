@@ -91,6 +91,7 @@
 	<ClientHudTray
 		label="Status tray"
 		{placement}
+		gapCount={0}
 		{editable}
 		{viewport}
 		{onPlacementChange}
@@ -98,7 +99,7 @@
 		{#each statuses as status (status.kind)}
 			<button
 				type="button"
-				class="status-icon ui-hud-button"
+				class="status-icon ui-hud-button ui-icon-button"
 				use:hudAttention={status.identity}
 				title={status.label}
 				aria-label={status.label}
@@ -110,7 +111,7 @@
 		{#if burdenPresentation.warning !== null}
 			<button
 				type="button"
-				class="status-icon burden-icon ui-hud-button"
+				class="status-icon burden-icon ui-hud-button ui-icon-button"
 				use:hudAttention={burdenPresentation.level}
 				data-level={burdenPresentation.level}
 				title={burdenPresentation.warning.tooltip}

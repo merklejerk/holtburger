@@ -98,11 +98,11 @@
 			bottom: calc(1px * var(--ui-icon-scale));
 			padding: 0 calc(2px * var(--ui-icon-scale));
 			border-radius: calc(2px * var(--ui-icon-scale));
-			background: var(--ui-item-equipped-background, #000b);
-			color: var(--ui-item-equipped-color, #4ade80);
+			background: var(--ui-item-equipped-background);
+			color: var(--ui-item-equipped-color);
 			font: bold
-				calc(var(--ui-item-equipped-font-size, 16px) * var(--ui-icon-scale)) /
-				1.2 sans-serif;
+				calc(var(--ui-item-equipped-font-size) * var(--ui-icon-scale)) / 1.2
+				sans-serif;
 			pointer-events: none;
 		}
 		.item-equipped.above-count {

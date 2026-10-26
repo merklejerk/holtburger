@@ -4,6 +4,11 @@ import { once } from "node:events";
 import { resolve } from "node:path";
 import electron from "electron";
 
+const packageRootIndex = process.argv.indexOf("--package-root");
+const packageRoot =
+	packageRootIndex < 0 ? undefined : process.argv[packageRootIndex + 1];
+if (packageRootIndex >= 0 && packageRoot === undefined)
+	throw new Error("Missing --package-root value");
 const appRoot = resolve(import.meta.dirname, "..");
 const server = await createServer({
 	root: appRoot,
@@ -18,13 +23,16 @@ try {
 		[
 			resolve(appRoot, "dist-electron/electron/ui-theme-probe.js"),
 			`--probe-origin=${origin.replace(/\/$/, "")}`,
+			...(packageRoot === undefined
+				? []
+				: [`--probe-package-root=${resolve(packageRoot)}`]),
 		],
 		{ cwd: appRoot, stdio: "inherit" },
 	);
 	const timeout = setTimeout(() => {
 		console.error("User theme probe timed out");
 		child.kill();
-	}, 60_000);
+	}, 120_000);
 	try {
 		const [code] = await once(child, "exit");
 		if (code !== 0)

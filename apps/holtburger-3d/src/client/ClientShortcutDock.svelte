@@ -146,6 +146,7 @@
 <ClientHudTray
 	label="Game shortcuts"
 	placement={trayPlacement}
+	gapCount={shortcuts.length - 1}
 	{editable}
 	{viewport}
 	{onPlacementChange}
@@ -173,7 +174,7 @@
 			{@const combatActive = combatMode !== "peace" && combatMode !== "unknown"}
 			<button
 				type="button"
-				class="ui-hud-button"
+				class="ui-hud-button ui-icon-button"
 				title={combat
 					? `Combat stance: ${combatMode}. Toggle peace/combat (${combatShortcut.description})`
 					: panel === null

@@ -138,8 +138,6 @@
 		--ui-party-mana-height: 8px;
 		--ui-party-vital-gap: 3px;
 		--ui-party-grid-gap: 4px;
-		/* Native scrollbar room affects the live minimum editable width. */
-		--ui-party-scrollbar-allowance: 32px;
 		--ui-party-name-font-size: var(--ui-font-size-micro);
 		--ui-party-name-gap: 4px;
 		--ui-party-leader-icon-size: 12px;
@@ -183,8 +181,10 @@
 		--ui-item-selection-shadow: inset 0 0 9px #eab94a99, 0 0 6px #eab94a99;
 		--ui-item-selection-background: #ad751622;
 		/* Item grid density, artwork scaling, strip controls and inventory layout. */
-		/* Shared item-grid minimum and fixed strip/shortcut cell size. */
+		/* Shared item-grid minimum and fixed strip cell size. */
 		--ui-item-cell-min-size: 36px;
+		/* Spell/action bar cells; their measured geometry also determines HUD bounds. */
+		--ui-shortcut-cell-size: 40px;
 		--ui-item-cell-padding: 1px;
 		/* Shared horizontal/vertical cursor clearance for item, loadout, and spell drag previews. */
 		--ui-drag-ghost-offset: 12px;
@@ -285,7 +285,7 @@
 		/* Shared HUD, character-sheet, and item XP bars use a saturated green. */
 		--ui-character-xp-color: #32d85b;
 		/* Character HUD spacing: identity-to-vitals gap and gaps within the identity row. */
-		--ui-character-hud-gap: 4px;
+		--ui-character-hud-gap: 0px;
 		--ui-character-hud-inline-gap: calc(6em / 13);
 		/* HUD-only XP thickness; the track and its grid row share this value. */
 		--ui-character-hud-xp-height: 3px;
@@ -316,6 +316,15 @@
 		--ui-item-count-shadow:
 			-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
 		--ui-item-count-background: transparent;
+		/* Equipped markers share a translucent feathered backing on item and action cells. */
+		--ui-item-equipped-background: radial-gradient(
+			ellipse closest-side,
+			#0009 0%,
+			#0006 60%,
+			transparent 100%
+		);
+		--ui-item-equipped-color: #4ade80;
+		--ui-item-equipped-font-size: 16px;
 		--ui-item-count-inset: 1px;
 		/* Remaining structure is a slim, bottom-filled track along the icon's right edge. */
 		--ui-item-structure-width: 3px;
@@ -415,7 +424,8 @@
 		}
 		/* Filter the owning backing, keeping foreground text and glyphs sharp. */
 		.ui-theme :is(.ui-hud-surface, .ui-meter),
-		.ui-theme :is(.ui-readout, .ui-hud-group, .ui-hud-button)::before {
+		.ui-theme
+			:is(.ui-readout, .ui-hud-group, .ui-hud-button, .ui-hud-control)::before {
 			backdrop-filter: var(--ui-backdrop-filter);
 		}
 	}
@@ -425,7 +435,7 @@
 		:is(.ui-panel:not(:modal), .ui-hud-surface, .ui-meter),
 	.ui-theme
 		:is(.ui-panel, .ui-hud-surface, .ui-meter)
-		:is(.ui-readout, .ui-hud-group, .ui-hud-button)::before {
+		:is(.ui-readout, .ui-hud-group, .ui-hud-button, .ui-hud-control)::before {
 		backdrop-filter: none;
 	}
 
@@ -437,7 +447,8 @@
 			.ui-meter,
 			.ui-readout,
 			.ui-hud-group,
-			.ui-hud-button
+			.ui-hud-button,
+			.ui-hud-control
 		) {
 		--_ui-hud-background-color: var(
 			--ui-hud-background-color,
@@ -958,13 +969,14 @@
 		box-shadow: none;
 	}
 
-	/* Backing for HUD readouts, grouped content, and icon actions. */
-	.ui-theme :where(.ui-readout, .ui-hud-group, .ui-hud-button) {
+	/* Shared presentation for HUD readouts, groups and both interactive families. */
+	.ui-theme
+		:where(.ui-readout, .ui-hud-group, .ui-hud-button, .ui-hud-control) {
 		/* Decoration needs a containing block, but component-owned placement must win. */
 		position: relative;
 	}
 	.ui-theme .ui-readout,
-	.ui-theme .ui-hud-button {
+	.ui-theme :is(.ui-hud-button, .ui-hud-control) {
 		isolation: isolate;
 		background: transparent;
 		color: var(--ui-color-text);
@@ -989,7 +1001,7 @@
 	   Readouts and groups keep the horizontal fade inside their owner. */
 	.ui-theme .ui-readout::before,
 	.ui-theme .ui-hud-group::before,
-	.ui-theme .ui-hud-button::before {
+	.ui-theme :is(.ui-hud-button, .ui-hud-control)::before {
 		content: "";
 		position: absolute;
 		inset: -6px -14px;
@@ -1019,43 +1031,66 @@
 	}
 
 	/* A group owns one backing; child readouts and actions only provide content and state. */
-	.ui-theme .ui-hud-group > :is(.ui-readout, .ui-hud-button)::before {
+	.ui-theme
+		.ui-hud-group
+		> :is(.ui-readout, .ui-hud-button, .ui-hud-control)::before {
 		content: none;
 	}
-	.ui-theme .ui-hud-button::before {
-		background: var(
+	/* Standalone icon actions and compound controls share Base paint, not theme hooks. */
+	.ui-theme .ui-hud-button {
+		--_ui-hud-action-background: var(
 			--ui-hud-button-background,
 			var(--_ui-hud-background-color)
 		);
+		--_ui-hud-action-indicator-color: var(
+			--ui-hud-button-indicator-color,
+			transparent
+		);
+	}
+	.ui-theme .ui-hud-control {
+		--_ui-hud-action-background: var(
+			--ui-hud-control-background,
+			var(--_ui-hud-background-color)
+		);
+		--_ui-hud-action-indicator-color: var(
+			--ui-hud-control-indicator-color,
+			transparent
+		);
+	}
+	.ui-theme :is(.ui-hud-button, .ui-hud-control)::before {
+		background: var(--_ui-hud-action-background);
 		inset: -6px;
 		mask-image: radial-gradient(ellipse, black 45%, transparent 75%);
 	}
-	.ui-theme .ui-hud-button {
+	.ui-theme :is(.ui-hud-button, .ui-hud-control) {
 		color: var(--ui-color-text);
-		box-shadow: inset 0 -1px var(--ui-hud-button-indicator-color, transparent);
+		box-shadow: inset 0 -1px var(--_ui-hud-action-indicator-color);
 		min-height: 24px;
 		cursor: pointer;
 	}
-	.ui-theme .ui-hud-button:where([aria-pressed="true"]:not(:disabled)) {
+	.ui-theme
+		:is(.ui-hud-button, .ui-hud-control):where(
+			[aria-pressed="true"]:not(:disabled)
+		) {
 		color: var(--ui-color-active);
 	}
-	.ui-theme .ui-hud-button:where(:hover:not(:disabled)) {
+	.ui-theme :is(.ui-hud-button, .ui-hud-control):where(:hover:not(:disabled)) {
 		color: var(--ui-color-highlight);
 	}
-	.ui-theme .ui-hud-button:where(:active:not(:disabled)) {
+	.ui-theme :is(.ui-hud-button, .ui-hud-control):where(:active:not(:disabled)) {
 		color: var(--ui-color-text);
 	}
-	.ui-theme .ui-hud-button svg {
+	.ui-theme :is(.ui-hud-button, .ui-hud-control) svg {
 		transition: transform 0.25s var(--ui-easing);
 	}
 	.ui-theme
-		.ui-hud-button:where(:hover:not(:disabled))
+		:is(.ui-hud-button, .ui-hud-control):where(:hover:not(:disabled))
 		svg:not(.ui-waypoint-pin) {
 		transform: scale(1.5);
 	}
-	.ui-theme .ui-hud-button:where(:disabled) {
+	.ui-theme :is(.ui-hud-button, .ui-hud-control):where(:disabled) {
 		color: var(--ui-color-muted);
-		box-shadow: inset 0 -1px var(--ui-hud-button-indicator-color, transparent);
+		box-shadow: inset 0 -1px var(--_ui-hud-action-indicator-color);
 		cursor: not-allowed;
 		opacity: 1;
 	}
@@ -1065,7 +1100,7 @@
 		background: var(--ui-color-well);
 		color: var(--ui-color-danger);
 	}
-	.ui-theme .ui-hud-button:focus-visible {
+	.ui-theme :is(.ui-hud-button, .ui-hud-control):focus-visible {
 		outline: 2px solid var(--ui-color-focus);
 		outline-offset: 2px;
 	}
@@ -1144,7 +1179,7 @@
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.ui-theme .ui-button,
-		.ui-theme .ui-hud-button svg {
+		.ui-theme :is(.ui-hud-button, .ui-hud-control) svg {
 			transition: none;
 		}
 	}

@@ -109,7 +109,7 @@
 	</div>
 	{#if canScrollBack}
 		<button
-			class="strip-arrow strip-arrow-up ui-item-strip-arrow ui-hud-button"
+			class="strip-arrow strip-arrow-up ui-item-strip-arrow ui-hud-control"
 			type="button"
 			aria-label={orientation === "horizontal"
 				? "Scroll items left"
@@ -122,7 +122,7 @@
 	{/if}
 	{#if canScrollForward}
 		<button
-			class="strip-arrow strip-arrow-down ui-item-strip-arrow ui-hud-button"
+			class="strip-arrow strip-arrow-down ui-item-strip-arrow ui-hud-control"
 			type="button"
 			aria-label={orientation === "horizontal"
 				? "Scroll items right"

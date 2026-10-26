@@ -1,4 +1,5 @@
 import {
+	CLIENT_DEFAULT_THEME_ID,
 	CLIENT_TEXT_SCALE,
 	CLIENT_ICON_SCALE,
 	CLIENT_VITAL_WARNING_THRESHOLDS,
@@ -54,7 +55,7 @@ export function createDefaultClientUserSettings(
 			textScale: CLIENT_TEXT_SCALE.initial,
 			iconScale: CLIENT_ICON_SCALE.initial,
 			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
-			themeId: null,
+			themeId: CLIENT_DEFAULT_THEME_ID,
 			fonts: { body: "theme", heading: "theme", mono: "theme" },
 		},
 		input: structuredClone(CLIENT_INPUT_DEFAULTS),

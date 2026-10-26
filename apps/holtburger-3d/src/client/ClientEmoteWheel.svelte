@@ -193,7 +193,7 @@
 			{#if category !== null}
 				<button
 					type="button"
-					class="emote-back ui-hud-button"
+					class="emote-back ui-hud-button ui-icon-button"
 					tabindex="-1"
 					aria-label="Back to emote categories"
 					title="Back to emote categories (Escape)"

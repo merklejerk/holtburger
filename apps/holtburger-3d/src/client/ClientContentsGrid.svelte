@@ -83,7 +83,7 @@
 		<h3>
 			<button
 				type="button"
-				class="contents-header ui-item-selection ui-hud-button"
+				class="contents-header ui-item-selection ui-hud-control"
 				data-item-guid={section.container.guid}
 				aria-pressed={selectedGuid === section.container.guid}
 				disabled={pending || section.container.description.kind === "pending"}

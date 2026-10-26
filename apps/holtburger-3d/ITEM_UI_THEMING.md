@@ -65,7 +65,9 @@ at that size and expand to fill each row; pack-strip cells use that size exactly
 The strip adds its horizontal insets, and the inventory panel allocates space for
 the resulting width plus its divider. No independent strip-width setting is needed.
 Cell-edge navigation measures the rendered layout, so changing the basis does not
-require changing the scroll implementation.
+require changing the scroll implementation. Spell/action bars use
+`--ui-shortcut-cell-size` (40px in Base) for their fixed cells, with the same
+`--ui-icon-scale` multiplier.
 
 ## Stack counts
 
@@ -106,7 +108,9 @@ as capacity is consumed. Container tooltips always retain `[used / capacity]` wh
 occupancy is known. Equipped markers move above stack counts and beside bars to
 avoid overlap. Equipment-strip slots suppress the redundant checkmark while retaining
 equipped status in their accessible labels and tooltips. Their theme variables are `--ui-item-equipped-background`,
-`--ui-item-equipped-color`, and `--ui-item-equipped-font-size`.
+`--ui-item-equipped-color`, and `--ui-item-equipped-font-size`. Base defines a
+translucent radial fade for the badge backing; the green checkmark stays sharp
+and badge placement is unchanged. These defaults also apply to action cells.
 
 `--ui-icon-rendering` defaults to `pixelated`; themes may select another CSS
 `image-rendering` value. Cell padding and size control enlargement without changing

@@ -531,7 +531,7 @@
 			</div>
 			<button
 				type="button"
-				class="chat-history-toggle ui-hud-button"
+				class="chat-history-toggle ui-hud-button ui-icon-button"
 				aria-label="Interact with chat history"
 				aria-pressed={historyInteractive}
 				title={historyInteractive

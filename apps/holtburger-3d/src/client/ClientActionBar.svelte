@@ -381,7 +381,7 @@
 			position: absolute;
 			visibility: hidden;
 			pointer-events: none;
-			width: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
+			width: calc(var(--ui-shortcut-cell-size) * var(--ui-icon-scale));
 			height: calc(var(--ui-action-bar-strip-gap) * var(--ui-icon-scale));
 		}
 		.action-menu-metric {

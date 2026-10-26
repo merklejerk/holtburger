@@ -1,4 +1,8 @@
 <script lang="ts">
+	import type {
+		ClientGameplayOption,
+		ClientGameplayPreferences,
+	} from "./client-gameplay-options-contract";
 	import type { UiThemeSettings } from "../app/ui-theme-selection";
 	import ClientEmoteWheel from "./ClientEmoteWheel.svelte";
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
@@ -162,6 +166,13 @@
 	import ClientSystemMenu from "./ClientSystemMenu.svelte";
 
 	interface Props {
+		/** Current character Gameplay controls, independent of local preference storage. */
+		readonly gameplayPreferences: ClientGameplayPreferences | null;
+		readonly gameplayEnabled: boolean;
+		readonly onGameplayOptionChange: (
+			option: ClientGameplayOption,
+			enabled: boolean,
+		) => Promise<void>;
 		/** Authority-admitted application session actions, independent of panel selection. */
 		readonly canReturnToMenu: boolean;
 		/** Full disconnect has independent admission during world entry and portals. */
@@ -531,6 +542,9 @@
 		vitals,
 		vitalWarningsEnabled,
 		readConnection,
+		gameplayPreferences,
+		gameplayEnabled,
+		onGameplayOptionChange,
 		appearanceOptions,
 		onAppearanceOptionChange,
 		jumpChargeActive,
@@ -1731,29 +1745,34 @@
 							{/key}
 						{/if}
 					{:else if panel === "settings"}
-						<ClientSettingsPanel
-							{theme}
-							{displayPlatform}
-							{audio}
-							{onAudioChange}
-							{graphics}
-							{ui}
-							{input}
-							{textureFilteringCapabilities}
-							selectedTab={settingsTab}
-							onSelectTab={(tab) => (settingsTab = tab)}
-							{onGraphicsChange}
-							{onUiChange}
-							{clockFormat}
-							{environmentOverrides}
-							{weatherPresets}
-							{environmentIssue}
-							{onClockFormatChange}
-							{onEnvironmentOverridesChange}
-							{onInputChange}
-							canResetHudPlacements={resetActionBars !== null}
-							onResetHudPlacements={resetHudPlacements}
-						/>
+						{#key characterGuid}
+							<ClientSettingsPanel
+								{gameplayPreferences}
+								{gameplayEnabled}
+								{onGameplayOptionChange}
+								{theme}
+								{displayPlatform}
+								{audio}
+								{onAudioChange}
+								{graphics}
+								{ui}
+								{input}
+								{textureFilteringCapabilities}
+								selectedTab={settingsTab}
+								onSelectTab={(tab) => (settingsTab = tab)}
+								{onGraphicsChange}
+								{onUiChange}
+								{clockFormat}
+								{environmentOverrides}
+								{weatherPresets}
+								{environmentIssue}
+								{onClockFormatChange}
+								{onEnvironmentOverridesChange}
+								{onInputChange}
+								canResetHudPlacements={resetActionBars !== null}
+								onResetHudPlacements={resetHudPlacements}
+							/>
+						{/key}
 					{:else}
 						<ClientDebugPanel
 							{entityMetadata}

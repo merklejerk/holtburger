@@ -24,6 +24,7 @@ pub mod character_creation;
 pub mod client_allegiance;
 pub mod client_contracts;
 pub mod client_friends;
+pub mod client_gameplay;
 pub mod client_host;
 pub mod client_party;
 pub mod client_projection;

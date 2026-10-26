@@ -2677,7 +2677,34 @@ export async function probeClientSettingsTabs(
 			const window = document.querySelector('.hud-window[aria-label="Settings"]');
 			if (!window) throw new Error('Settings shortcut did not open its HUD window');
 			const tabs = [...window.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent.trim());
-			if (tabs.join(',') !== 'Graphics,Audio,UI,Input') throw new Error('Settings tabs are incomplete');
+			if (tabs.join(',') !== 'Graphics,Audio,UI,Input,Gameplay') throw new Error('Settings tabs are incomplete');
+
+			window.querySelector('#settings-tab-gameplay').click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			const gameplay = window.querySelector('#settings-section-gameplay');
+			const labels = [...gameplay.querySelectorAll('label')];
+			const craft = labels.find((label) => label.textContent.includes('Confirm crafting attempts'))?.querySelector('input');
+			const rare = labels.find((label) => label.textContent.includes('Confirm rare gem use'))?.querySelector('input');
+			if (!craft || !rare || craft.disabled || rare.disabled) throw new Error('Gameplay confirmation controls are unavailable');
+			const original = craft.checked;
+			const originalRare = rare.checked;
+			globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.deferNextGameplayUpdate();
+			craft.click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			if (craft.checked !== original) throw new Error('Craft toggle changed before mirrored option delivery');
+			globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.flushGameplayUpdate();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			if (craft.checked !== !original) throw new Error('Craft confirmation preference was not applied');
+			if (rare.checked !== originalRare) throw new Error('Craft preference changed rare confirmation');
+			window.querySelector('#settings-tab-ui').click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			window.querySelector('#settings-tab-gameplay').click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			const restored = [...window.querySelectorAll('#settings-section-gameplay label')].find((label) => label.textContent.includes('Confirm crafting attempts'))?.querySelector('input');
+			if (restored?.checked !== !original) throw new Error('Gameplay preference was lost across tabs');
+			restored.click();
+			window.querySelector('#settings-tab-graphics').click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
 			const graphicsTab = window.querySelector('#settings-tab-graphics');
 			graphicsTab.focus();
 			const tabEvent = new KeyboardEvent('keydown', { key: 'Tab', code: 'Tab', bubbles: true, cancelable: true });
@@ -2688,7 +2715,7 @@ export async function probeClientSettingsTabs(
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 			const selectedAfterArrow = window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim();
 			if (selectedAfterArrow !== 'Audio') throw new Error('Settings tabs ignored keyboard navigation');
-			for (const [key, expected] of [['End', 'input'], ['ArrowRight', 'graphics'], ['ArrowLeft', 'input'], ['Home', 'graphics']]) {
+			for (const [key, expected] of [['End', 'gameplay'], ['ArrowRight', 'graphics'], ['ArrowLeft', 'gameplay'], ['Home', 'graphics']]) {
 				const current = window.querySelector('[role="tab"][aria-selected="true"]');
 				current.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
 				await new Promise((resolve) => requestAnimationFrame(resolve));

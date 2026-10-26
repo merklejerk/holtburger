@@ -40,6 +40,11 @@
 		powerControl={null}
 	/>
 	<ClientSettingsPanel
+		gameplayPreferences={null}
+		gameplayEnabled={false}
+		onGameplayOptionChange={async () => {
+			throw new Error("No character is active in this fixture.");
+		}}
 		theme={fixtureTheme}
 		audio={defaults.audio}
 		graphics={defaults.graphics}

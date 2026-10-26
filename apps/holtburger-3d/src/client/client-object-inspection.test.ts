@@ -72,6 +72,7 @@ class FakeInspectionSession {
 			knownSpells: null,
 			enchantments: null,
 			appearanceOptions: null,
+			gameplayPreferences: null,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
 			vitals: [],

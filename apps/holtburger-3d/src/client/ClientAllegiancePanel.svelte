@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount, onDestroy, untrack } from "svelte";
 	import UiDialog from "../app/UiDialog.svelte";
+	import UiQuantity from "../app/UiQuantity.svelte";
 	import { formatQuantity } from "../app/quantity-format";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import type { ClientAllegianceState } from "./client-allegiance-state";
@@ -112,7 +113,7 @@
 				: ` · Level ${member.level}`}</span
 		>
 		{#if showContribution}<span class="ui-muted"
-				>Contributed XP: {formatQuantity(member.contributedXp)}</span
+				>Contributed XP: <UiQuantity value={member.contributedXp} /></span
 			>{/if}
 	</div>
 {/snippet}
@@ -189,7 +190,7 @@
 				<div class="ui-disclosure-body">
 					<dl class="ui-facts">
 						<dt>Contributed XP</dt>
-						<dd>{formatQuantity(profile.selfMember.contributedXp)}</dd>
+						<dd><UiQuantity value={profile.selfMember.contributedXp} /></dd>
 					</dl>
 				</div>
 			</details>

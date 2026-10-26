@@ -1895,7 +1895,7 @@ export async function probeCharacterSheet(
 		globalThis.__CHARACTER_SHEET_PROBE_BASE__ = sheet;
 		harness.setCharacterSheet(sheet);
 		const effect = (spellId, kind, statModValue, remainingSeconds = null, layer = 1) => ({ key: { spellId, layer }, spellCategory: 7, powerLevel: 5, kind, remainingSeconds, statModType: 1, statModKey: 1, statModValue });
-		harness.setEnchantments({
+		harness.setEnchantments({ cooldowns: [],
 			instances: [effect(123, 'beneficial', 2, 90, 0), effect(456, 'beneficial', 1, 120, 0), effect(2303, 'beneficial', 0.9), effect(2304, 'beneficial', 0.9), effect(2305, 'beneficial', 2), effect(2306, 'beneficial', 4), effect(2307, 'harmful', -10), effect(666, 'vitae', 0.9)],
 			groups: [
 				{ affectedStat: { kind: 'attribute', key: 1 }, statName: 'Strength', operation: 'additive', channel: 'ordinary', spellCategory: 7, effective: { spellId: 123, layer: 0 }, overridden: [{ spellId: 456, layer: 0 }] },
@@ -1987,7 +1987,9 @@ export async function probeCharacterSheet(
 		`(async () => {
 		const harness = globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__;
 		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
-		if (!panel || !panel.textContent.includes('9,007,199,254,740,993')) throw new Error('Character panel lost exact XP.');
+		if (!panel) throw new Error('Character panel is missing.');
+		const balance = panel.querySelector('.progression-balances strong [title]');
+		if (balance?.title !== '9,007,199,254,740,993' || balance.querySelector('[aria-hidden="true"]')?.textContent !== '9007.2T') throw new Error('Character XP did not pair a compact balance with its exact tooltip.');
 		if (panel.querySelector('.character-name')?.textContent !== 'Delulu' || panel.querySelector('select[aria-label="Character title"]')?.selectedOptions[0]?.textContent.trim() !== 'Adventurer') throw new Error('Character identity is missing.');
 		if (panel.querySelector('progress[aria-label="Level experience"]')?.value !== 10 || panel.querySelector('progress[aria-label="Luminance capacity"]')?.value !== 25) throw new Error('Character progress bars did not reflect authoritative balances.');
 		if (document.querySelector('.character-hud progress')?.value !== 10) throw new Error('HUD experience did not reflect authoritative level progress.');
@@ -2074,7 +2076,7 @@ export async function probeCharacterSheet(
 			getComputedStyle(lumBar).color,
 			getComputedStyle(xpBar, '::-webkit-progress-bar').backgroundColor,
 			getComputedStyle(strength.querySelector('summary')).backgroundColor,
-			getComputedStyle(button.querySelector('.action-shape')).color,
+			getComputedStyle(button.querySelector('.ui-stat-action-shape')).color,
 			getComputedStyle(effectRow('Strength').querySelector('.stat-effect')).color,
 			getComputedStyle(effectRow('Max Mana').querySelector('.stat-effect')).color,
 			getComputedStyle(triangle).color,
@@ -2089,7 +2091,7 @@ export async function probeCharacterSheet(
 			if (after[1] !== before[1]) throw new Error('The dedicated XP color changed with the general palette.');
 			for (const token of ['xp', 'luminance', 'buff', 'debuff', 'upgrade']) panel.style.setProperty('--ui-character-' + token + '-color', '#ab12cd');
 			const overridden = readPaint();
-			if (![1, 2, 6, 7, 8].every((index) => overridden[index] === 'rgb(171, 18, 205)') || getComputedStyle(button.querySelector('.action-shape')).color !== overridden[8]) throw new Error('Independent character color overrides were ignored.');
+			if (![1, 2, 6, 7, 8].every((index) => overridden[index] === 'rgb(171, 18, 205)') || getComputedStyle(button.querySelector('.ui-stat-action-shape')).color !== overridden[8]) throw new Error('Independent character color overrides were ignored.');
 		} finally {
 			if (originalStyle === null) panel.removeAttribute('style'); else panel.setAttribute('style', originalStyle);
 		}
@@ -2101,7 +2103,7 @@ export async function probeCharacterSheet(
 		if (!otherTen || otherTen.disabled) throw new Error('Another target was locked or its ten-rank quote was lost.');
 		otherTen.dispatchEvent(new PointerEvent('pointerenter'));
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		if (other.querySelector('.action-cost')?.textContent !== '1,000 XP') throw new Error('Hovered bulk action did not show its quoted cost.');
+		if (other.querySelector('.action-cost [title]')?.title !== '1,000') throw new Error('Hovered bulk action did not show its quoted cost.');
 		otherTen.click();
 		const submissions = harness.inventoryDragCommands().filter((entry) => entry.command === 'submit_client_progression');
 		if (submissions.length !== 2 || submissions[0].args.quote.quote.xp_spent !== 200 || submissions[1].args.quote.quote.xp_spent !== 1000) throw new Error('Repeat click or quoted spend was incorrect.');
@@ -2117,7 +2119,7 @@ export async function probeCharacterSheet(
 		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
 		const row = panel?.querySelector('details.stat-row');
 		if (row?.querySelector('.upgrade-indicator')) throw new Error('Pending stat still advertises an available upgrade.');
-		if (!row?.querySelector('.actions button')?.disabled || row.querySelector('.action-cost')?.textContent !== '200 XP') throw new Error('Pending stat did not retain a disabled action and its quoted cost.');
+		if (!row?.querySelector('.actions button')?.disabled || row.querySelector('.action-cost [title]')?.title !== '200') throw new Error('Pending stat did not retain a disabled action and its quoted cost.');
 		row.open = true;
 		if (!row.textContent.includes('Starting value: 10') || !row.textContent.includes(': +2') || row.textContent.includes('Final rounding:') || row.textContent.includes('Overridden:') || row.textContent.includes('Purchased ranks:')) throw new Error('Expanded details did not stay focused on starting value and applied enchantments.');
 		return { ...${JSON.stringify(first)}, pendingAfterReopen: true, expanded: true };
@@ -2149,7 +2151,7 @@ export async function probeCharacterSheet(
 			}],
 		};
 		harness.setCharacterSheet(sheet);
-		harness.setEnchantments({ instances: [{ key: { spellId: 666, layer: 1 }, spellCategory: 7, powerLevel: 5, kind: 'vitae', remainingSeconds: null, statModType: 1, statModKey: 1, statModValue: 0.8 }, { key: { spellId: 2308, layer: 1 }, spellCategory: 7, powerLevel: 5, kind: 'harmful', remainingSeconds: null, statModType: 1, statModKey: 3, statModValue: -2 }], groups: [{ affectedStat: { kind: 'attribute', key: 3 }, statName: 'Quickness', operation: 'additive', channel: 'ordinary', spellCategory: 7, effective: { spellId: 2308, layer: 1 }, overridden: [] }] });
+		harness.setEnchantments({ cooldowns: [], instances: [{ key: { spellId: 666, layer: 1 }, spellCategory: 7, powerLevel: 5, kind: 'vitae', remainingSeconds: null, statModType: 1, statModKey: 1, statModValue: 0.8 }, { key: { spellId: 2308, layer: 1 }, spellCategory: 7, powerLevel: 5, kind: 'harmful', remainingSeconds: null, statModType: 1, statModKey: 3, statModValue: -2 }], groups: [{ affectedStat: { kind: 'attribute', key: 3 }, statName: 'Quickness', operation: 'additive', channel: 'ordinary', spellCategory: 7, effective: { spellId: 2308, layer: 1 }, overridden: [] }] });
 		const request = harness.inventoryDragCommands().filter((entry) => entry.command === 'evaluate_client_progression').at(-1);
 		if (!request) throw new Error('Resource change did not request fresh quotes.');
 		const quickness = { Attribute: 'QuicknessAttr' };
@@ -2193,19 +2195,19 @@ export async function probeCharacterSheet(
 		if (row('Strength').querySelector('.stat-effect') || row('Max Health').querySelector('.stat-effect') || row('Melee Defense').querySelector('.stat-effect')) throw new Error('Unchanged stat values were tinted.');
 		if (row('Quickness').querySelector('.upgrade-indicator') || row('Health').querySelector('.upgrade-indicator') || !row('Melee Defense').querySelector('.upgrade-indicator') || !row('Heavy Weapons').querySelector('.upgrade-indicator')) throw new Error('Upgrade triangles did not follow refreshed quotes.');
 		row('Quickness').open = true;
-		if (!button('Quickness', '+1')?.disabled || row('Quickness').querySelector('.action-cost')?.textContent !== '200 XP') throw new Error('Unaffordable stat did not retain its disabled action and required XP cost.');
+		if (!button('Quickness', '+1')?.disabled || row('Quickness').querySelector('.action-cost [title]')?.title !== '200') throw new Error('Unaffordable stat did not retain its disabled action and required XP cost.');
 		row('Health').open = true;
 		if (row('Health').querySelector('.actions') || !row('Health').querySelector('.action-status')?.textContent.includes('Rank cap')) throw new Error('Capped vital did not explain why it has no next-rank action.');
 		row('Melee Defense').open = true;
 		const train = button('Melee Defense', 'Train');
 		if (train?.getClientRects().length === 0) throw new Error('Selected skill did not reveal its Train action.');
-		if (!train || train.disabled || row('Melee Defense').querySelector('.action-cost')?.textContent !== '2 credits') throw new Error('Train did not show its quoted credit cost.');
+		if (!train || train.disabled || row('Melee Defense').querySelector('.action-cost [title]')?.title !== '2') throw new Error('Train did not show its quoted credit cost.');
 		row('Heavy Weapons').open = true;
 		const max = [...row('Heavy Weapons').querySelectorAll('button')].find((candidate) => candidate.title.includes('Raise maximum'));
-		if (!max || max.disabled || !max.textContent.includes('+4') || !max.querySelector('.action-shape svg')) throw new Error('Max quote did not show its rank gain and triangle.');
+		if (!max || max.disabled || !max.textContent.includes('+4') || !max.querySelector('.ui-stat-action-shape svg')) throw new Error('Max quote did not show its rank gain and triangle.');
 		max.dispatchEvent(new PointerEvent('pointerenter'));
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		if (row('Heavy Weapons').querySelector('.action-cost')?.textContent !== '100 XP') throw new Error('Hovered action did not show its quoted XP cost.');
+		if (row('Heavy Weapons').querySelector('.action-cost [title]')?.title !== '100') throw new Error('Hovered action did not show its quoted XP cost.');
 		train.click(); max.click();
 		const submissions = harness.inventoryDragCommands().filter((entry) => entry.command === 'submit_client_progression');
 		if (submissions.length !== 4 || submissions[2].args.quote.quote.credits_spent !== 2 || submissions[3].args.quote.quote.xp_spent !== 100) throw new Error('Train or Max did not submit the displayed quote once.');
@@ -2221,7 +2223,7 @@ export async function probeCharacterSheet(
 		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
 		const trainRow = [...panel.querySelectorAll('details.stat-row')].find((candidate) => candidate.textContent.includes('Melee Defense'));
 		const train = trainRow?.querySelector('.actions button');
-		if (!panel.textContent.includes('synthetic send failure') || !train?.disabled || !train.title.includes('Awaiting') || trainRow.querySelector('.action-cost')?.textContent !== '2 credits') throw new Error('Ambiguous send failure did not retain its disabled action, cost, and feedback.');
+		if (!panel.textContent.includes('synthetic send failure') || !train?.disabled || !train.title.includes('Awaiting') || trainRow.querySelector('.action-cost [title]')?.title !== '2') throw new Error('Ambiguous send failure did not retain its disabled action, cost, and feedback.');
 		const feedback = panel.querySelector('.feedback');
 		panel.style.setProperty('--ui-color-warning', '#ab12cd');
 		if (getComputedStyle(feedback).color !== 'rgb(171, 18, 205)') throw new Error('Character feedback ignored the warning palette.');
@@ -2238,7 +2240,8 @@ export async function probeCharacterSheet(
 		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
 		if (panel.querySelector('.character-name')?.textContent !== 'Renamed' || panel.querySelector('.character-title')) throw new Error('Character identity did not refresh.');
 		if (panel.querySelector('progress[aria-label="Level experience"]') || panel.querySelector('progress[aria-label="Luminance capacity"]')) throw new Error('Capped experience or unknown luminance capacity is misleading.');
-		if (document.querySelector('.character-hud progress')?.value !== 100) throw new Error('HUD experience did not show a completed bar at the level cap.');
+		const hudXp = document.querySelector('.character-hud progress');
+		if (hudXp?.value !== 100 || hudXp.title !== 'Maximum level · 9,007,199,254,740,993 total XP' || hudXp.getAttribute('aria-valuetext') !== hudXp.title) throw new Error('HUD experience did not explain its completed bar at the level cap.');
 		for (const label of ['Strength', 'Max Health', 'Heavy Weapons']) {
 			const row = [...panel.querySelectorAll('details.stat-row')].find((candidate) => candidate.querySelector('summary')?.textContent.includes(label));
 			if (row?.querySelector('.rank-cap')?.textContent !== 'Max' || row.querySelector('.upgrade-indicator')) throw new Error(label + ' did not indicate its rank cap after an external update.');
@@ -2253,7 +2256,8 @@ export async function probeCharacterSheet(
 			await new Promise((resolve) => setTimeout(resolve, 250));
 			const summary = panel.querySelector('.progression-summary');
 			if (summary.textContent.includes('Luminance') !== visible || Boolean(summary.querySelector('progress[aria-label="Luminance capacity"]')) !== visible) throw new Error('Luminance visibility did not follow level and capacity.');
-			if (summary.querySelector('progress[aria-label="Level experience"]') || !panel.querySelector('.progression-balances').textContent.includes('9,007,199,254,740,993')) throw new Error('Capped summary did not retain spendable XP without level progress.');
+			if (visible && summary.querySelector('.luminance-track [title="1,000,000"] [aria-hidden="true"]')?.textContent !== '1M') throw new Error('Luminance capacity did not use compact quantity presentation.');
+			if (summary.querySelector('progress[aria-label="Level experience"]') || panel.querySelector('.progression-balances strong [title]')?.title !== '9,007,199,254,740,993') throw new Error('Capped summary did not retain spendable XP without level progress.');
 		}
 		const untrained = { ...base.skills[0], stat: { ...base.skills[0].stat, training: 'Untrained', next_rank_xp: null } };
 		harness.setCharacterSheet({ ...base, level: { ...base.level, unspentSkillPoints: 1 }, skills: [untrained] });
@@ -2264,7 +2268,7 @@ export async function probeCharacterSheet(
 		const trainingRow = [...panel.querySelectorAll('details.stat-row')].find((row) => row.querySelector('summary')?.textContent.includes('Heavy Weapons'));
 		trainingRow.open = true;
 		const trainingButton = trainingRow.querySelector('.actions button');
-		if (!trainingButton?.disabled || trainingRow.querySelector('.action-cost')?.textContent !== untrained.stat.trained_cost + ' credits') throw new Error('Insufficient credits hid the Train action or its required cost.');
+		if (!trainingButton?.disabled || trainingRow.querySelector('.action-cost [title]')?.title !== String(untrained.stat.trained_cost)) throw new Error('Insufficient credits hid the Train action or its required cost.');
 		if (!globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.retireCharacterSheet(globalThis.__CHARACTER_SHEET_PROBE_BASE__)) throw new Error('Retired character details survived the exit boundary.');
 		return { ...${JSON.stringify(failed)}, zeroVitaeHidden: true, insufficientCredits: true, tabIsolation: true, fixedBalances: true };
 	})()`,

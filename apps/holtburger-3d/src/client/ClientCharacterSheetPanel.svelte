@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { untrack } from "svelte";
 	import ClientSpellsPanel from "./ClientSpellsPanel.svelte";
+	import UiQuantity from "../app/UiQuantity.svelte";
 	import UiTabs from "../app/UiTabs.svelte";
 	import UiTabPanel from "../app/UiTabPanel.svelte";
 	import UpgradeTriangle from "../assets/icons/character-upgrade-triangle.svg?component";
@@ -151,9 +152,6 @@
 	function name(value: string): string {
 		return value.replace(/Attr$/, "").replace(/([a-z])([A-Z])/g, "$1 $2");
 	}
-	function xp(value: string | number): string {
-		return formatQuantity(BigInt(value));
-	}
 	function effectGroups(stat: EffectStat) {
 		if (enchantments === null) return [];
 		if (stat.kind === "vitae") {
@@ -230,7 +228,7 @@
 			if (world === "AlreadyTrained") return "Already trained";
 			if (typeof world === "object" && world !== null) {
 				if ("InsufficientXp" in world)
-					return `Requires ${xp(world.InsufficientXp.required)} XP; ${xp(world.InsufficientXp.available)} available`;
+					return `Requires ${formatQuantity(world.InsufficientXp.required)} XP; ${formatQuantity(BigInt(world.InsufficientXp.available))} available`;
 				if ("InsufficientCredits" in world)
 					return `Requires ${world.InsufficientCredits.required} skill credits; ${world.InsufficientCredits.available} available`;
 			}
@@ -244,7 +242,13 @@
 	): {
 		readonly key: string;
 		readonly label: string;
-		readonly cost: string;
+		/** Structured cost lets the quantity component own display formatting. */
+		readonly cost: {
+			/** Exact amount quoted by progression evaluation. */
+			readonly quantity: number;
+			/** Currency consumed by this action. */
+			readonly unit: "XP" | "credits";
+		} | null;
 		readonly disabled: boolean;
 		readonly reason: string;
 		readonly purchase: () => void;
@@ -255,14 +259,14 @@
 			evaluation?.result && "Ok" in evaluation.result
 				? evaluation.result.Ok
 				: null;
-		let cost =
+		let cost: ReturnType<typeof action>["cost"] =
 			quote === null
-				? ""
+				? null
 				: "Train" in intent
-					? `${quote.quote.credits_spent} credits`
-					: `${xp(quote.quote.xp_spent)} XP`;
+					? { quantity: quote.quote.credits_spent, unit: "credits" }
+					: { quantity: quote.quote.xp_spent, unit: "XP" };
 		if (
-			cost === "" &&
+			cost === null &&
 			evaluation?.result &&
 			"Err" in evaluation.result &&
 			typeof evaluation.result.Err === "object" &&
@@ -270,9 +274,12 @@
 		) {
 			const reason = evaluation.result.Err.World;
 			if (typeof reason === "object" && "InsufficientXp" in reason)
-				cost = `${xp(reason.InsufficientXp.required)} XP`;
+				cost = { quantity: reason.InsufficientXp.required, unit: "XP" };
 			else if (typeof reason === "object" && "InsufficientCredits" in reason)
-				cost = `${reason.InsufficientCredits.required} credits`;
+				cost = {
+					quantity: reason.InsufficientCredits.required,
+					unit: "credits",
+				};
 		}
 		const rankGain =
 			quote !== null && "RaiseMax" in intent
@@ -290,9 +297,9 @@
 				? "Awaiting a server update for this stat"
 				: evaluation?.result && "Err" in evaluation.result
 					? unavailableReason(evaluation.result.Err)
-					: quote === null
+					: cost === null
 						? "Calculating cost…"
-						: `${description} immediately for ${cost}`,
+						: `${description} immediately for ${formatQuantity(cost.quantity)} ${cost.unit}`,
 			purchase: () => {
 				if (quote !== null) void owner.purchase(quote);
 			},
@@ -404,7 +411,7 @@
 	statName: string,
 	buttons: ReturnType<typeof raiseActions>,
 )}
-	{#if buttons.length > 0 && buttons.every((button) => button.disabled && button.cost === "" && button.reason === buttons[0].reason)}
+	{#if buttons.length > 0 && buttons.every((button) => button.disabled && button.cost === null && button.reason === buttons[0].reason)}
 		<span class="action-status">{buttons[0].reason}</span>
 	{:else if buttons.length > 0}
 		{@const selected =
@@ -432,7 +439,11 @@
 					<span class="ui-stat-action-label">{button.label}</span>
 				</button>
 			{/each}
-			<small class="action-cost">{selected.cost || "—"}</small>
+			<small class="action-cost">
+				{#if selected.cost !== null}
+					<UiQuantity value={selected.cost.quantity} /> {selected.cost.unit}
+				{:else}—{/if}
+			</small>
 		</span>
 	{/if}
 {/snippet}
@@ -570,9 +581,9 @@
 							<div class="progress-track">
 								<div class="track-label">
 									<span>Level {sheet.level.level + 1}</span><span
-										>{xp(sheet.level.xpIntoLevel)} / {xp(
-											sheet.level.xpForNextLevel,
-										)} XP</span
+										><UiQuantity value={BigInt(sheet.level.xpIntoLevel)} /> / <UiQuantity
+											value={BigInt(sheet.level.xpForNextLevel)}
+										/> XP</span
 									>
 								</div>
 								<progress
@@ -592,9 +603,11 @@
 							<div class="progress-track luminance-track">
 								<div class="track-label">
 									<span>Luminance</span><span
-										>{xp(sheet.level.availableLuminance)} / {xp(
-											sheet.maximumLuminance,
-										)}</span
+										><UiQuantity
+											value={BigInt(sheet.level.availableLuminance)}
+										/> / <UiQuantity
+											value={BigInt(sheet.maximumLuminance)}
+										/></span
 									>
 								</div>
 								<progress
@@ -698,7 +711,7 @@
 				<footer class="progression-balances">
 					<div>
 						<small>Available XP</small><strong
-							>{xp(sheet.level.unspentXp)}</strong
+							><UiQuantity value={BigInt(sheet.level.unspentXp)} /></strong
 						>
 					</div>
 					<div>

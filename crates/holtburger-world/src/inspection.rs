@@ -246,6 +246,8 @@ pub struct ItemInspection {
     pub mana: Option<ManaInfo>,
     /// Independently optional item-state facts.
     pub status: ItemStatus,
+    /// Latest server appraisal of a currently locked object.
+    pub lockpicking: Option<LockpickingInfo>,
     /// Stack count and maximum when the item is stackable.
     pub stack: Option<CountInfo>,
     /// Remaining and maximum structure/uses.
@@ -310,6 +312,8 @@ pub struct CreatureInspection {
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InspectionSupplement {
+    /// Lock facts classified from this response alone, never inherited from merged properties.
+    pub lockpicking: Option<LockpickingInfo>,
     /// Equipment enchantability derived from the current response's ResistMagic property.
     pub equipment_unenchantable: Option<bool>,
     /// Raw armor-location values decoded into game meaning.
@@ -504,6 +508,7 @@ impl InspectionSupplement {
         };
 
         Self {
+            lockpicking: LockpickingInfo::from_properties(properties),
             equipment_unenchantable: properties
                 .get_int_prop(PropertyInt::ResistMagic)
                 .map(|value| value >= UNENCHANTABLE_THRESHOLD as i32),
@@ -637,6 +642,33 @@ pub struct CapacityInfo {
     pub items: Option<u32>,
     /// Maximum subcontainer slots.
     pub containers: Option<u32>,
+}
+
+/// Independently disclosed lock facts from one successful server appraisal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LockpickingInfo {
+    /// Effective resistance, including server-applied lock enchantments.
+    pub difficulty: Option<i32>,
+    /// Examiner-specific integer percentage points at appraisal time; not a live prediction.
+    pub success_percent: Option<i32>,
+}
+
+impl LockpickingInfo {
+    fn from_properties(properties: &WorldObjectProperties) -> Option<Self> {
+        // Retail Appraisal_ShowLockAppraiseInfo (acclient.c:221868) uses ResistLockpick
+        // as a skill bonus when Locked is absent. Only an explicitly locked appraisal
+        // establishes difficulty; ACE AppraiseInfo.cs supplies the effective resistance.
+        if properties.get_bool_prop_opt(PropertyBool::Locked) != Some(true) {
+            return None;
+        }
+        let difficulty = properties.get_int_prop(PropertyInt::ResistLockpick);
+        let success_percent = properties.get_int_prop(PropertyInt::AppraisalLockpickSuccessPercent);
+        (difficulty.is_some() || success_percent.is_some()).then_some(Self {
+            difficulty,
+            success_percent,
+        })
+    }
 }
 
 /// Item status properties for which absence is semantically distinct from `false`.
@@ -1288,6 +1320,10 @@ impl ItemInspection {
                     .supplement
                     .and_then(|supplement| supplement.equipment_unenchantable),
             },
+            lockpicking: object
+                .supplement
+                .and_then(|supplement| supplement.lockpicking)
+                .filter(|_| object.get_bool_prop_opt(PropertyBool::Locked) == Some(true)),
             stack: CountInfo::stack_from_object(object),
             uses: CountInfo::uses_from_object(object),
             armor: object
@@ -2472,6 +2508,82 @@ mod tests {
         };
         let titles = CharacterTitleCatalog::from_assets(&mapper, &strings).unwrap();
         ObjectInspection::from_entity(entity, InspectionContext::new(&titles))
+    }
+
+    #[test]
+    fn lockpicking_uses_current_appraisal_and_current_lock_state() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Door".into(), WorldPosition::default());
+        let mut response = IdentifyObjectResponseEventData {
+            object_guid: guid,
+            success: true,
+            ..Default::default()
+        };
+        let read = |entity: &Entity| {
+            let ObjectInspectionDetails::Item(item) = inspect_entity(entity).unwrap().details
+            else {
+                panic!("door should use item inspection");
+            };
+            item.lockpicking
+        };
+        assert_eq!(read(&entity), None);
+        response
+            .properties
+            .set_bool_prop(PropertyBool::Locked, true);
+        for (difficulty, success_percent) in [
+            (Some(250), Some(73)),
+            (Some(0), Some(0)),
+            (Some(250), None),
+            (None, Some(100)),
+        ] {
+            response.properties.ints.0.clear();
+            if let Some(value) = difficulty {
+                response
+                    .properties
+                    .set_int_prop(PropertyInt::ResistLockpick, value);
+            }
+            if let Some(value) = success_percent {
+                response
+                    .properties
+                    .set_int_prop(PropertyInt::AppraisalLockpickSuccessPercent, value);
+            }
+            assert!(entity.apply_identify_response(&response));
+            assert_eq!(
+                read(&entity),
+                Some(LockpickingInfo {
+                    difficulty,
+                    success_percent
+                })
+            );
+        }
+
+        // Live unlocks hide retained appraisal facts before another appraisal arrives.
+        entity.set_bool_prop(PropertyBool::Locked, false);
+        assert_eq!(read(&entity), None);
+        response
+            .properties
+            .set_bool_prop(PropertyBool::Locked, false);
+        assert!(entity.apply_identify_response(&response));
+        assert_eq!(read(&entity), None);
+
+        // An absent Locked property must not classify a skill bonus using retained lock state.
+        entity.set_bool_prop(PropertyBool::Locked, true);
+        response.properties.bools.0.clear();
+        response
+            .properties
+            .set_int_prop(PropertyInt::ResistLockpick, 25);
+        assert!(entity.apply_identify_response(&response));
+        assert_eq!(read(&entity), None);
+
+        // Omitted facts in a later successful appraisal replace the old disclosure.
+        response
+            .properties
+            .set_bool_prop(PropertyBool::Locked, true);
+        assert!(entity.apply_identify_response(&response));
+        assert!(read(&entity).is_some());
+        response.properties.ints.0.clear();
+        assert!(entity.apply_identify_response(&response));
+        assert_eq!(read(&entity), None);
     }
 
     #[test]

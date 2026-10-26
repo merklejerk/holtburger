@@ -44,6 +44,20 @@
 	const { inspection, nameColor, item, spells, icons, onSetWaypoint }: Props =
 		$props();
 	const statuses = $derived(formatItemStatuses(item.status));
+	const lockpickingText = $derived(
+		item.lockpicking === null
+			? null
+			: [
+					item.lockpicking.difficulty === null
+						? null
+						: formatInspectionNumber(item.lockpicking.difficulty),
+					item.lockpicking.successPercent === null
+						? null
+						: `${formatInspectionNumber(item.lockpicking.successPercent)}%`,
+				]
+					.filter((value) => value !== null)
+					.join(" / "),
+	);
 	const cooldownStatus = useItemCooldown(() => item.cooldown, "inspection");
 	const imbues = $derived(formatInspectionImbuedEffects(item.imbuedEffects));
 	const collapsedDescription = $derived(
@@ -354,7 +368,7 @@
 		</section>
 	{/if}
 
-	{#if item.mana !== null || item.stack !== null || item.uses !== null || item.capacity.items !== null || item.capacity.containers !== null || statuses.length > 0}
+	{#if item.mana !== null || item.stack !== null || item.uses !== null || item.capacity.items !== null || item.capacity.containers !== null || statuses.length > 0 || item.lockpicking !== null}
 		<section>
 			<h3 class="ui-section-heading">State</h3>
 			<dl class="inspection-facts">
@@ -396,6 +410,10 @@
 				{#if item.capacity.containers !== null}<div>
 						<dt>Container capacity</dt>
 						<dd>{formatInspectionNumber(item.capacity.containers)}</dd>
+					</div>{/if}
+				{#if lockpickingText !== null}<div>
+						<dt>Lockpick difficulty</dt>
+						<dd>{lockpickingText}</dd>
 					</div>{/if}
 				{#if statuses.length > 0}<div class="inspection-wide">
 						<dt>Status</dt>

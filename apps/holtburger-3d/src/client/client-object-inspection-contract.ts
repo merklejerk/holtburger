@@ -268,6 +268,13 @@ const itemInspectionSchema = z
 			.strict()
 			.nullable(),
 		status: itemStatusSchema,
+		lockpicking: z
+			.object({
+				difficulty: i32.nullable(),
+				successPercent: i32.nullable(),
+			})
+			.strict()
+			.nullable(),
 		stack: countSchema.nullable(),
 		uses: countSchema.nullable(),
 		/** Static reuse definition; live countdown comes from the player registry. */

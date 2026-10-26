@@ -3,6 +3,29 @@ import fixture from "./fixtures/object-inspection-wire.json";
 import { decodeObjectInspectionResult } from "./client-object-inspection-contract";
 
 describe("object inspection host contract", () => {
+	it("preserves independently disclosed lock difficulty and integer percentage points", () => {
+		for (const lockpicking of [
+			null,
+			{ difficulty: 250, successPercent: 73 },
+			{ difficulty: 0, successPercent: 0 },
+			{ difficulty: null, successPercent: 100 },
+			{ difficulty: 250, successPercent: null },
+		]) {
+			const item = structuredClone(fixture.item);
+			Object.assign(item.outcome.inspection.details.details, { lockpicking });
+			expect(decodeObjectInspectionResult(item)).toEqual(item);
+		}
+		for (const lockpicking of [
+			{ difficulty: 1.5, successPercent: 73 },
+			{ difficulty: 250, successPercent: 0.73 },
+			{ difficulty: 250 },
+		]) {
+			const item = structuredClone(fixture.item);
+			Object.assign(item.outcome.inspection.details.details, { lockpicking });
+			expect(() => decodeObjectInspectionResult(item)).toThrow();
+		}
+	});
+
 	it("preserves independently disclosed healing-kit modifiers and rejects mixed effects", () => {
 		const item = structuredClone(fixture.item);
 		const details = item.outcome.inspection.details.details;

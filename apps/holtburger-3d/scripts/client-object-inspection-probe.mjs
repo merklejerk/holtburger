@@ -698,6 +698,31 @@ export async function probeObjectInspection(
 			false,
 		);
 
+		// Numeric lock facts preserve a disclosed zero percent and disappear on replacement.
+		await read(
+			`document.querySelector('button[aria-label="Close Harness Healing Kit"]').click()`,
+		);
+		await select(7);
+		await click('button[aria-label="Examine"]');
+		await respond("locked", 7);
+		await waitFor(
+			(value) => value.window?.title === "Harness Locked Chest",
+			"Locked chest inspection did not open",
+		);
+		const lockRows = await read(`
+			[...document.querySelectorAll('.inspection-item .inspection-facts > div')]
+			.filter((row) => row.querySelector('dt').textContent.startsWith('Lockpick'))
+			.map((row) => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()])
+		`);
+		assert.deepEqual(lockRows, [["Lockpick difficulty", "250 / 0%"]]);
+		await sendBinding();
+		await respond("item-plain", 7);
+		await waitFor(
+			(value) =>
+				value.window !== null && !value.window.text.includes("Lockpick"),
+			"Replacement appraisal retained lockpicking rows",
+		);
+
 		// Lifecycle reset owns teardown; no selection mutation is required.
 		await read(probe + ".resync()");
 		const reset = await snapshot();

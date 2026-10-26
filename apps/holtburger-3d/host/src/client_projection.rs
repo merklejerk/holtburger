@@ -2725,6 +2725,7 @@ mod tests {
             enchantable: true,
         };
         character.inspection_supplement = Some(InspectionSupplement {
+            lockpicking: None,
             equipment_unenchantable: None,
             armor_coverage: Some(ArmorCoverage {
                 head: enchantable(312),

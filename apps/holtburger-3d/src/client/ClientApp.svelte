@@ -1,4 +1,5 @@
 <script lang="ts">
+	import ClientPregameSettings from "./ClientPregameSettings.svelte";
 	import { choosePregameLocation } from "./client-pregame-tuning";
 	import PowerIcon from "../assets/icons/hud-power.svg?component";
 	import { provideItemCooldowns } from "../app/item-cooldowns.svelte";
@@ -2532,7 +2533,19 @@
 				onChoose={chooseCharacter}
 				onEnter={enterWorld}
 				onDisconnect={disconnect}
-			/>
+			>
+				{#snippet settings()}
+					<ClientPregameSettings
+						graphics={userSettings.graphics}
+						audio={userSettings.audio}
+						ui={userSettings.ui}
+						{textureFilteringCapabilities}
+						onGraphicsChange={changeGraphics}
+						onAudioChange={changeAudio}
+						onUiChange={changeUi}
+					/>
+				{/snippet}
+			</ClientCharacterSelect>
 		{/each}
 	{:else if page.kind === "loading"}
 		<ClientLoadingPage state={page.content} {contentLocation} {toast}>

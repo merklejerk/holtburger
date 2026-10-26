@@ -1,4 +1,17 @@
 <script lang="ts">
+	import { provideClientInput } from "../../client/client-input-context";
+	import { AppInput } from "../../lib/input/app-input";
+	import ClientPregameSettings from "../../client/ClientPregameSettings.svelte";
+	import { CLIENT_GRAPHICS_DEFAULTS } from "../../client/client-settings-policy";
+	import {
+		createDefaultClientUserSettings,
+		CLIENT_AUDIO_DEFAULTS,
+	} from "../../client/client-settings-defaults";
+	import type {
+		ClientGraphicsSettings,
+		ClientAudioSettings,
+		ClientUiSettings,
+	} from "../../client/client-settings-contract";
 	import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
 	import { SHARED_FRONTEND_TUNING } from "../../lib/frontend-tuning";
 	import type { Snippet } from "svelte";
@@ -37,7 +50,17 @@
 	} from "../../client/client-chat-policy";
 	import type { ClientAppPhase } from "../../client/client-app-lifecycle";
 
+	/** Live preference fixtures exercise the production pregame drawer without a host session. */
+	let settingsGraphics = $state<ClientGraphicsSettings>({
+		...CLIENT_GRAPHICS_DEFAULTS,
+	});
+	let settingsAudio = $state<ClientAudioSettings>({ ...CLIENT_AUDIO_DEFAULTS });
+	let settingsUi = $state<ClientUiSettings>(
+		createDefaultClientUserSettings({ width: 1280, height: 720 }, 0).ui,
+	);
+
 	provideAppInputPolicy();
+	provideClientInput(new AppInput(INPUT_DEFAULTS));
 	/** Showcase geometry follows the available stage, independently of client placement defaults. */
 	let stageWidth = $state(960);
 	let windowHeight = $state(720);
@@ -567,7 +590,19 @@
 								onDisconnect={() => {
 									characters = { ...characters, selectedGuid: null };
 								}}
-							/>
+							>
+								{#snippet settings()}
+									<ClientPregameSettings
+										graphics={settingsGraphics}
+										audio={settingsAudio}
+										ui={settingsUi}
+										textureFilteringCapabilities={null}
+										onGraphicsChange={(value) => (settingsGraphics = value)}
+										onAudioChange={(value) => (settingsAudio = value)}
+										onUiChange={(value) => (settingsUi = value)}
+									/>
+								{/snippet}
+							</ClientCharacterSelect>
 						{:else if tab === "diagnostics"}
 							<ClientDebugPanel
 								entityMetadata={{

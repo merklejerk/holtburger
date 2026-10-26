@@ -334,6 +334,35 @@
 		}
 	}
 
+	/* Character-selection settings drawer. */
+	.client-pregame-screen .pregame-settings-drawer {
+		color: var(--ui-color-text);
+		background: var(--pregame-editor-backdrop-color);
+		border-color: var(--ui-color-border);
+		box-shadow: -16px 0 48px rgb(0 0 0 / 45%);
+	}
+	.client-pregame-screen .pregame-settings-drawer::backdrop {
+		background: rgb(0 0 0 / 35%);
+	}
+	.client-pregame-screen .pregame-settings-heading {
+		border-bottom: 1px solid var(--ui-color-border);
+	}
+	.client-pregame-screen .pregame-settings-heading h2 {
+		font-family: var(--ui-font-heading);
+		font-size: calc(24px * var(--ui-text-scale));
+		font-weight: 400;
+		color: var(--ui-color-highlight);
+		letter-spacing: 0.08em;
+	}
+	.client-pregame-screen .pregame-settings .ui-tab {
+		font-family: var(--ui-font-heading);
+		background: transparent;
+	}
+	.client-pregame-screen .pregame-settings .ui-tab[aria-selected="true"] {
+		color: var(--ui-color-highlight);
+		box-shadow: inset 0 -2px var(--ui-color-accent);
+	}
+
 	/* ClientLoadingPage. */
 	.client-pregame-screen .loading-flavor {
 		color: var(--ui-color-muted);

@@ -4,6 +4,10 @@
 		replaceClientBinding,
 	} from "../lib/input/client-keyboard-bindings";
 
+	import ClientGraphicsSettingsControls from "./ClientGraphicsSettingsControls.svelte";
+	import ClientAudioSettingsControls from "./ClientAudioSettingsControls.svelte";
+	import ClientAppearanceSettingsControls from "./ClientAppearanceSettingsControls.svelte";
+	import "./client-settings-controls.css";
 	import UiTabs from "../app/UiTabs.svelte";
 	import ClientEnvironmentSettings from "./ClientEnvironmentSettings.svelte";
 	import type {
@@ -12,7 +16,6 @@
 	} from "./client-environment-settings";
 	import type { ClientWeatherPreset } from "./client-environment";
 	import { onMount } from "svelte";
-	import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
 	import ClientBindingDialog from "./ClientBindingDialog.svelte";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import {
@@ -27,25 +30,15 @@
 		CLIENT_INPUT_DEFAULTS,
 		CLIENT_KEYBOARD_DEFAULTS,
 	} from "./client-input-settings";
-	import { ENTITY_SHADOW_MODES } from "../lib/game/renderer/entity-shadow-modes";
-	import {
-		resolveTextureFilteringPolicy,
-		supportedTextureFilteringPolicies,
-		type TextureFilteringCapabilities,
-	} from "../lib/game/renderer/texture-filtering-policy";
+	import { type TextureFilteringCapabilities } from "../lib/game/renderer/texture-filtering-policy";
 	import type {
 		ClientAudioSettings,
 		ClientGraphicsSettings,
 		ClientUiSettings,
 	} from "./client-settings-contract";
 	import {
-		CLIENT_FONT_FAMILY_OPTIONS,
 		CLIENT_VITAL_WARNING_PERCENT,
 		CLIENT_VITAL_WARNING_KINDS,
-		CLIENT_GRAPHICS_RANGES,
-		CLIENT_TEXT_SCALE,
-		CLIENT_ICON_SCALE,
-		type ClientFontFamily,
 	} from "./client-settings-values";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type {
@@ -293,36 +286,6 @@
 		});
 		closeBindingDialog();
 	}
-	let supportedFiltering = $derived(
-		textureFilteringCapabilities === null
-			? []
-			: supportedTextureFilteringPolicies(textureFilteringCapabilities),
-	);
-	let effectiveFiltering = $derived(
-		textureFilteringCapabilities === null
-			? null
-			: resolveTextureFilteringPolicy(
-					graphics.textureFiltering,
-					textureFilteringCapabilities,
-				),
-	);
-	const renderScales = [0.5, 0.75, 1, 1.5, 2] as const;
-	const fontRoles = [
-		{ id: "body", label: "Body text" },
-		{ id: "heading", label: "Headings" },
-		{ id: "mono", label: "Monospace" },
-	] as const;
-	const fontFamilyLabels: Readonly<Record<ClientFontFamily, string>> = {
-		theme: "Theme default",
-		sans: "Arial / Helvetica",
-		serif: "Georgia / Times New Roman",
-		mono: "Courier New",
-	};
-	const audioControls = [
-		{ key: "masterVolume", label: "Master" },
-		{ key: "effectVolume", label: "Sound effects" },
-		{ key: "ambientVolume", label: "Ambience" },
-	] as const;
 	const tabs = (
 		[
 			{ value: "graphics", label: "Graphics" },
@@ -359,121 +322,11 @@
 				aria-labelledby="settings-tab-graphics"
 				class="settings-section"
 			>
-				<label
-					>View distance: {graphics.viewDistance} landblocks
-					<input
-						type="range"
-						min={CLIENT_GRAPHICS_RANGES.viewDistance.minimum}
-						max={CLIENT_GRAPHICS_RANGES.viewDistance.maximum}
-						step={CLIENT_GRAPHICS_RANGES.viewDistance.step}
-						value={graphics.viewDistance}
-						onchange={(event) =>
-							onGraphicsChange({
-								...graphics,
-								viewDistance: event.currentTarget.valueAsNumber,
-							})}
-					/>
-				</label>
-				<p class="ui-muted">
-					Terrain and buildings extend to this distance; smaller objects stay
-					nearby.
-				</p>
-				<label
-					>Field of view: {graphics.verticalFovDegrees}°
-					<input
-						type="range"
-						min={CLIENT_GRAPHICS_RANGES.verticalFovDegrees.minimum}
-						max={CLIENT_GRAPHICS_RANGES.verticalFovDegrees.maximum}
-						step={CLIENT_GRAPHICS_RANGES.verticalFovDegrees.step}
-						value={graphics.verticalFovDegrees}
-						onchange={(event) =>
-							onGraphicsChange({
-								...graphics,
-								verticalFovDegrees: event.currentTarget.valueAsNumber,
-							})}
-					/>
-				</label>
-				<label class="ui-checkbox"
-					><input
-						type="checkbox"
-						checked={graphics.ambientOcclusionEnabled}
-						onchange={(event) =>
-							onGraphicsChange({
-								...graphics,
-								ambientOcclusionEnabled: event.currentTarget.checked,
-							})}
-					/> Ambient occlusion</label
-				>
-				<label
-					>Entity shadows
-					<select
-						value={graphics.entityShadowMode}
-						onchange={(event) =>
-							onGraphicsChange({
-								...graphics,
-								entityShadowMode: event.currentTarget
-									.value as ClientGraphicsSettings["entityShadowMode"],
-							})}
-					>
-						{#each ENTITY_SHADOW_MODES as mode}<option value={mode}
-								>{mode === "none"
-									? "Off"
-									: mode === "simple"
-										? "Simple"
-										: "Shadow maps"}</option
-							>{/each}
-					</select>
-				</label>
-				<label
-					>Texture filtering
-					<select
-						value={graphics.textureFiltering}
-						disabled={textureFilteringCapabilities === null}
-						onchange={(event) =>
-							onGraphicsChange({
-								...graphics,
-								textureFiltering: event.currentTarget
-									.value as ClientGraphicsSettings["textureFiltering"],
-							})}
-					>
-						{#if textureFilteringCapabilities === null}<option
-								value={graphics.textureFiltering}>Detecting GPU…</option
-							>{/if}
-						{#if textureFilteringCapabilities !== null && effectiveFiltering !== graphics.textureFiltering}
-							<option value={graphics.textureFiltering}
-								>{graphics.textureFiltering} (saved; using {effectiveFiltering})</option
-							>
-						{/if}
-						{#each supportedFiltering as mode}<option value={mode}
-								>{mode}</option
-							>{/each}
-					</select>
-				</label>
-				<label
-					>Render scale
-					<select
-						value={graphics.renderScale}
-						onchange={(event) =>
-							onGraphicsChange({
-								...graphics,
-								renderScale: Number(event.currentTarget.value),
-							})}
-					>
-						{#each renderScales as scale}<option value={scale}>{scale}×</option
-							>{/each}
-					</select>
-				</label>
-				<label class="ui-checkbox"
-					><input
-						type="checkbox"
-						checked={graphics.weatherEnabled}
-						onchange={(event) =>
-							onGraphicsChange({
-								...graphics,
-								weatherEnabled: event.currentTarget.checked,
-							})}
-					/> Weather</label
-				>
+				<ClientGraphicsSettingsControls
+					{graphics}
+					{textureFilteringCapabilities}
+					{onGraphicsChange}
+				/>
 			</div>
 		{:else if selectedTab === "audio"}
 			<div
@@ -482,37 +335,7 @@
 				aria-labelledby="settings-tab-audio"
 				class="settings-section"
 			>
-				{#each audioControls as control}
-					<label
-						>{control.label}: {Math.round(audio[control.key] * 100)}%
-						<input
-							type="range"
-							min="0"
-							max="1"
-							step="0.01"
-							value={audio[control.key]}
-							oninput={(event) =>
-								onAudioChange({
-									...audio,
-									[control.key]: event.currentTarget.valueAsNumber,
-								})}
-						/>
-					</label>
-				{/each}
-				<label class="ui-checkbox"
-					><input
-						type="checkbox"
-						checked={audio.muted}
-						onchange={(event) =>
-							onAudioChange({ ...audio, muted: event.currentTarget.checked })}
-					/> Mute all</label
-				>
-				<button
-					type="button"
-					class="ui-button"
-					onclick={() => onAudioChange(CLIENT_AUDIO_DEFAULTS)}
-					>Reset audio</button
-				>
+				<ClientAudioSettingsControls {audio} {onAudioChange} />
 			</div>
 		{:else if selectedTab === "ui"}
 			<div
@@ -550,32 +373,7 @@
 						/>
 					</div>
 				</details>
-				<details class="ui-disclosure ui-disclosure-section" open>
-					<summary>Fonts</summary>
-					<div class="settings-section ui-disclosure-body">
-						{#each fontRoles as role}
-							<label
-								>{role.label} font
-								<select
-									value={ui.fonts[role.id]}
-									onchange={(event) =>
-										onUiChange({
-											...ui,
-											fonts: {
-												...ui.fonts,
-												[role.id]: event.currentTarget
-													.value as ClientFontFamily,
-											},
-										})}
-								>
-									{#each CLIENT_FONT_FAMILY_OPTIONS as family}
-										<option value={family}>{fontFamilyLabels[family]}</option>
-									{/each}
-								</select>
-							</label>
-						{/each}
-					</div>
-				</details>
+				<ClientAppearanceSettingsControls {ui} {onUiChange} />
 				<details class="ui-disclosure ui-disclosure-section" open>
 					<summary>Vital warnings</summary>
 					<div class="settings-section ui-disclosure-body">
@@ -604,54 +402,7 @@
 						{/each}
 					</div>
 				</details>
-				<details class="ui-disclosure ui-disclosure-section" open>
-					<summary>Scaling</summary>
-					<div
-						id="settings-ui-scaling"
-						class="settings-section ui-disclosure-body"
-					>
-						<label
-							>Text scaling: {Math.round(ui.textScale * 100)}%
-							<input
-								type="range"
-								aria-label="Text scaling"
-								min={CLIENT_TEXT_SCALE.minimum}
-								max={CLIENT_TEXT_SCALE.maximum}
-								step={CLIENT_TEXT_SCALE.step}
-								value={ui.textScale}
-								oninput={(event) =>
-									onUiChange({
-										...ui,
-										textScale: event.currentTarget.valueAsNumber,
-									})}
-							/>
-						</label>
-						<p class="ui-muted">
-							Scales client text. Icon labels, map labels, nameplates, and
-							combat text keep their own sizes.
-						</p>
-						<label
-							>Icon scaling: {Math.round(ui.iconScale * 100)}%
-							<input
-								type="range"
-								aria-label="Icon scaling"
-								min={CLIENT_ICON_SCALE.minimum}
-								max={CLIENT_ICON_SCALE.maximum}
-								step={CLIENT_ICON_SCALE.step}
-								value={ui.iconScale}
-								oninput={(event) =>
-									onUiChange({
-										...ui,
-										iconScale: event.currentTarget.valueAsNumber,
-									})}
-							/>
-						</label>
-						<p class="ui-muted">
-							Scales UI artwork, cells, and their badges. Inline symbols follow
-							text; world markers keep their own sizes.
-						</p>
-					</div>
-				</details>
+
 				<details class="ui-disclosure ui-disclosure-section" open>
 					<summary>HUD layout</summary>
 					<div class="settings-section ui-disclosure-body">
@@ -809,24 +560,6 @@
 			box-sizing: border-box;
 			height: 100%;
 			overflow: auto;
-		}
-		.settings-section {
-			display: grid;
-			gap: 12px;
-		}
-		.settings-section label:not(.ui-checkbox) {
-			display: grid;
-			gap: var(--ui-label-gap);
-		}
-		.settings-section input[type="range"],
-		.settings-section select {
-			width: 100%;
-		}
-		.settings-section input[type="range"] {
-			margin-inline: 0;
-		}
-		.settings-section p {
-			margin: 0;
 		}
 		.binding-group {
 			display: block;

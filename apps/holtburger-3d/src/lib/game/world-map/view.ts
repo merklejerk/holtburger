@@ -65,25 +65,36 @@ export function projectWorldMapPoint(
 	];
 }
 
+/** Coherent screen placement and facing for the north-up world-map marker. */
+interface WorldMapPlayerPlacement {
+	/** Marker center in canvas CSS pixels. */
+	readonly position: readonly [number, number];
+	/** Clockwise SVG rotation from the icon's north-facing baseline. */
+	readonly headingDegrees: number;
+}
+
 /** Only a coherent outdoor player supplies a current-position marker. */
 export function worldMapPlayer(
 	subject: MinimapSubject | null,
 	view: WorldMapView,
 	width: number,
 	height: number,
-): readonly [number, number] | null {
+): WorldMapPlayerPlacement | null {
 	if (
 		subject?.kind !== "controlled-entity" ||
 		subject.anchor.residency === null ||
 		subject.anchor.residency.envCellId !== null
 	)
 		return null;
-	return projectWorldMapPoint(
-		{ x: subject.anchor.worldX, z: subject.anchor.worldZ },
-		view,
-		width,
-		height,
-	);
+	return {
+		position: projectWorldMapPoint(
+			{ x: subject.anchor.worldX, z: subject.anchor.worldZ },
+			view,
+			width,
+			height,
+		),
+		headingDegrees: (subject.anchor.headingRadians * 180) / Math.PI,
+	};
 }
 
 /** Resolve a canvas CSS-pixel point to terrain coordinates; fit margins have no location. */

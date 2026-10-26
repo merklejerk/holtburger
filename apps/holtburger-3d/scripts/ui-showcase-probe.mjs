@@ -1,6 +1,91 @@
 import assert from "node:assert/strict";
 import { probeUiShowcasePanels } from "./ui-showcase-panels-probe.mjs";
 
+/** Verify pregame control styles and preference inheritance against the loaded theme. */
+async function probePregameThemeBoundary(read) {
+	const pregameBoundary = await read(() => {
+		const theme = [...document.querySelectorAll('link[rel="stylesheet"]')].find(
+			(link) => link.href.includes("travelers-kit") && link.media === "all",
+		);
+		if (!theme) throw new Error("Traveler’s Kit stylesheet missing");
+		const preferences = document.createElement("section");
+		preferences.className = "ui-theme";
+		preferences.style.cssText =
+			"--ui-text-scale:1.4;--ui-icon-scale:1.2;--ui-font-mono:monospace";
+		const fixture = document.createElement("main");
+		fixture.className = "client-pregame-screen ui-theme";
+		fixture.style.cssText = "position:fixed;left:-10000px;top:0";
+		fixture.innerHTML = `
+			<button class="pregame-action pregame-quiet ui-button">Settings</button>
+			<button class="client-character ui-button ui-option" aria-pressed="true">Character</button>
+			<button class="pregame-primary ui-button" disabled>Enter world</button>
+			<div class="creation-navigation ui-theme"><button class="ui-tab" aria-selected="true">Appearance</button></div>
+			<input class="ui-input"><input type="checkbox" checked>
+			<input type="range" class="ui-range" style="--ui-range-progress:50%">
+			<section class="ui-well"><h2 class="ui-section-heading">Skills</h2></section>
+			<dialog class="ui-dialog ui-theme"><header class="ui-frame">Confirmation</header><button class="ui-button">Cancel</button></dialog>`;
+		preferences.append(fixture);
+		document.querySelector("#app").append(preferences);
+		const dialog = fixture.querySelector("dialog");
+		const snapshot = () =>
+			[fixture, ...fixture.querySelectorAll("*")].flatMap((node) =>
+				[
+					null,
+					"::before",
+					"::after",
+					"::-webkit-slider-runnable-track",
+					"::-webkit-slider-thumb",
+				].map((pseudo) => {
+					const style = getComputedStyle(node, pseudo);
+					return {
+						element: `${node.tagName.toLowerCase()}.${node.className}`,
+						pseudo,
+						style: Object.fromEntries(
+							[
+								"background",
+								"box-shadow",
+								"text-shadow",
+								"border-image-source",
+								"border-radius",
+								"color",
+								"font-family",
+								"filter",
+								"appearance",
+								"--ui-surface-opacity",
+								"--ui-button-background-color",
+								"--ui-header-stripe-color",
+								"--ui-item-selection-shadow",
+							].map((property) => [property, style.getPropertyValue(property)]),
+						),
+					};
+				}),
+			);
+		try {
+			dialog.showModal();
+			// Finish control transitions so the comparison measures settled CSS.
+			for (const node of fixture.querySelectorAll("*"))
+				node.style.transition = "none";
+			const themed = snapshot();
+			theme.disabled = true;
+			const base = snapshot();
+			const style = getComputedStyle(fixture);
+			const typography = [
+				"--ui-text-scale",
+				"--ui-icon-scale",
+				"--ui-font-mono",
+			].map((property) => style.getPropertyValue(property).trim());
+			return { themed, base, typography };
+		} finally {
+			theme.disabled = false;
+			dialog.close();
+			preferences.remove();
+		}
+	});
+	assert.deepEqual(pregameBoundary.themed, pregameBoundary.base);
+	assert.deepEqual(pregameBoundary.typography, ["1.4", "1.2", "monospace"]);
+	return true;
+}
+
 /** DOM and interaction verification only; visual review belongs to the user. */
 export async function probeUiShowcase(client, evaluate) {
 	const read = (fn) => evaluate(client, `(${fn.toString()})()`);
@@ -135,6 +220,7 @@ export async function probeUiShowcase(client, evaluate) {
 	await wait(
 		"[...document.querySelectorAll('link[rel=stylesheet]')].some(link => link.href.includes('travelers-kit') && link.media === 'all')",
 	);
+	const pregameThemeBoundary = await probePregameThemeBoundary(read);
 	const baseline = await read(() => {
 		const panel = document.querySelector(
 			'.hud-window[aria-label="Component showcase"]',
@@ -474,6 +560,7 @@ export async function probeUiShowcase(client, evaluate) {
 		delete window.__SHOWCASE_CHECKED__;
 	});
 	return {
+		pregameThemeBoundary,
 		oneClientStage: true,
 		materials,
 		halfFullXp: true,

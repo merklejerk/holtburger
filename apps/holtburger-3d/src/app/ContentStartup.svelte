@@ -16,7 +16,7 @@
 		/** Own asynchronous entry bootstrap and mount; false means close cancelled construction. */
 		startGame: (
 			target: HTMLElement,
-			isClosing: () => boolean,
+			signal: AbortSignal,
 			context: Map<unknown, unknown>,
 			contentLocation: string,
 		) => Promise<boolean>;
@@ -133,10 +133,10 @@
 			if (next.phase.kind === "ready") {
 				const contentLocation = next.phase.location;
 				void lifecycle
-					.start(async (isClosing) => {
+					.start(async (signal) => {
 						const started = await startGame(
 							gameTarget,
-							isClosing,
+							signal,
 							context,
 							contentLocation,
 						);

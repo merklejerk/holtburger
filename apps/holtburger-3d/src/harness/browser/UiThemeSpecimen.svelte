@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy, tick } from "svelte";
 	import LayoutHandleIcon from "../../app/LayoutHandleIcon.svelte";
-	import { defaultUiThemeUrl } from "../../app/ui-theme";
 	import { uiThemes } from "../../app/mount";
 	import steelUrl from "./themes/steel.css?url&no-inline";
 	import opaqueUrl from "./themes/opaque.css?url&no-inline";
@@ -61,7 +60,7 @@
 
 	function updateTheme(): Promise<void> {
 		return uiThemes.replace(
-			alternate ? steelUrl : defaultUiThemeUrl,
+			alternate ? steelUrl : null,
 			opaqueOverride ? opaqueUrl : null,
 		);
 	}
@@ -109,13 +108,15 @@
 				if (!child || !panel || !button || !frame)
 					throw new Error("Missing theme fixture controls.");
 				const inputValue = child.value;
+				const baseRadius = getComputedStyle(button).borderRadius;
+				const baseHeader = getComputedStyle(frame).backgroundImage;
 				try {
 					await uiThemes.replace(steelUrl, null);
 					if (
 						getComputedStyle(panel).borderStyle !== "dashed" ||
 						getComputedStyle(frame).backgroundImage !== "none"
 					)
-						throw new Error("Replacement retained default theme decoration.");
+						throw new Error("Theme did not override base decoration.");
 					await uiThemes.replace(steelUrl, opaqueUrl);
 					if (getComputedStyle(button).borderRadius !== "11px")
 						throw new Error("Override did not win.");
@@ -128,7 +129,7 @@
 					URL.revokeObjectURL(missingUrl);
 					let rejected = false;
 					try {
-						await uiThemes.replace(defaultUiThemeUrl, missingUrl);
+						await uiThemes.replace(steelUrl, missingUrl);
 					} catch (error) {
 						if (
 							!(error instanceof Error) ||
@@ -154,7 +155,16 @@
 					]);
 					if (getComputedStyle(button).borderRadius !== "8px")
 						throw new Error("Queued theme selection finished out of order.");
+					await uiThemes.replace(null, null);
+					if (
+						getComputedStyle(button).borderRadius !== baseRadius ||
+						getComputedStyle(frame).backgroundImage !== baseHeader
+					)
+						throw new Error(
+							"Removing optional sheets did not restore the base appearance.",
+						);
 					return {
+						baseRestored: true,
 						queuedSelection: true,
 						replacement: true,
 						overrideRemoval: true,
@@ -163,7 +173,7 @@
 					};
 				} finally {
 					await uiThemes.dispose();
-					await uiThemes.replace(defaultUiThemeUrl, null);
+					await uiThemes.replace(null, null);
 				}
 			},
 			async configure(next: {
@@ -248,7 +258,7 @@
 		<span class="ui-readout" data-contrast="frame rate">120 fps</span>
 	</div>
 	<aside class="specimen-settings ui-well">
-		<strong>{alternate ? "Steel fixture" : "Holtburger Standard"}</strong><span
+		<strong>{alternate ? "Steel fixture" : "Base"}</strong><span
 			class="ui-muted">HUD material study</span
 		>
 		<label class="settings-row"

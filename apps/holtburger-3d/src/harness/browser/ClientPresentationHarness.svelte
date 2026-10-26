@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { createFixtureThemeSettings } from "./ui-showcase-themes";
 	import { onMount, type ComponentProps } from "svelte";
 	import { encode } from "@msgpack/msgpack";
 	import { z } from "zod";
@@ -26,6 +27,7 @@
 	import { pregameGameplayFixture } from "./pregame-gameplay-fixture";
 	import { pregameEquipmentComposition } from "./pregame-equipment-probe";
 	import type { ObjectPreviewSource } from "../../client/client-object-preview-contract";
+	const fixtureTheme = createFixtureThemeSettings(() => {});
 
 	/** Controllable host response barrier; diagnostic code never changes production readiness. */
 	function loadingGate(heldInitially: boolean) {
@@ -148,6 +150,7 @@
 		});
 		const bridge = globalThis as typeof globalThis & {
 			__HOLTBURGER_CLIENT_PRESENTATION__?: {
+				theme: () => ReturnType<typeof fixtureTheme.owner.read>;
 				read(): {
 					worldCanvases: number;
 					worldContextRequests: number;
@@ -337,6 +340,7 @@
 				},
 			};
 			bridge.__HOLTBURGER_CLIENT_PRESENTATION__ = {
+				theme: () => fixtureTheme.owner.read(),
 				read: () => ({
 					worldCanvases: worlds.size,
 					worldContextRequests,
@@ -394,6 +398,7 @@
 				notify: authority.notify,
 			};
 			props = {
+				themeSelection: fixtureTheme.owner,
 				contentLocation: null,
 				initialUserSettings: createDefaultClientUserSettings(
 					{ width: innerWidth, height: innerHeight },

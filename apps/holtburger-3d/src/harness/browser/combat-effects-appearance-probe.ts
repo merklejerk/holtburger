@@ -14,12 +14,16 @@ export async function probeCombatEffectsAppearance(): Promise<boolean> {
 	target.style.setProperty("--ui-font-body", "monospace");
 	document.body.append(target);
 	let latest: CombatEffectsAppearance | null = null;
+	const fontFailures: Error[] = [];
 	const observer = observeCombatEffectsAppearance(
 		target,
 		(value) => {
 			latest = value;
 		},
 		() => {},
+		(error) => {
+			fontFailures.push(error);
+		},
 	);
 	const loader = createUiThemeLoader(document);
 	const require = (condition: boolean, message: string) => {
@@ -67,6 +71,7 @@ export async function probeCombatEffectsAppearance(): Promise<boolean> {
 		require(readCombatEffectsAppearance(target).fontSize ===
 			40, "UI text scaling changed the theme-owned combat text size");
 		published();
+		require(fontFailures.length === 0, "Unexpected combat font-load failure");
 		return true;
 	} finally {
 		observer.destroy();

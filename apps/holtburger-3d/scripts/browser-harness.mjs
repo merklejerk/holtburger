@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { extractContentArguments } from "./entry-paths.mjs";
 import { probeSalvage } from "./client-salvage-probe.mjs";
+import { probeUserThemeLifecycle } from "./user-theme-lifecycle-probe.mjs";
 import { probeClientPresentation } from "./client-presentation-probe.mjs";
 import { probeClientMouseMovement } from "./client-mouse-movement-probe.mjs";
 import { probeSpellBar } from "./client-spell-bar-probe.mjs";
@@ -122,7 +123,9 @@ try {
 	let report;
 	if (options.clientPresentation) {
 		report = {
-			suite: "client-presentation",
+			suite: options.userThemeLifecycle
+				? "user-theme-lifecycle"
+				: "client-presentation",
 			passed: true,
 			evidence: result.clientPresentation,
 			browserErrors,
@@ -631,6 +634,7 @@ function parseArgs(args) {
 		pregamePreview: false,
 		pregameLocation: 0,
 		clientPresentation: false,
+		userThemeLifecycle: false,
 		worldMap: false,
 		clientWorldMap: false,
 		clientWaypoint: false,
@@ -805,6 +809,10 @@ function parseArgs(args) {
 			case "--client-connection":
 				parsed.clientHud = true;
 				parsed.clientConnection = true;
+				break;
+			case "--user-theme-lifecycle":
+				parsed.userThemeLifecycle = true;
+				parsed.clientPresentation = true;
 				break;
 			case "--client-presentation":
 				parsed.clientPresentation = true;
@@ -2168,6 +2176,7 @@ Options:
   --client-selected-actions Exercise selected HUD action eligibility, dispatch, and menu dismissal.
   --client-precise-jump Verify phased aim feedback, cadence, stale progress, and first-success activation.
   --client-nearby       Exercise nearby catalog, name alerts, chat and minimap integration.
+  --user-theme-lifecycle Verify real ClientApp theme switches retain the roster/gameplay canvas and runtime.
   --client-text-scaling Verify text/icon scaling, theme composition, native dialogs, and retained UI.
   --client-mouse-movement Verify held mouse movement, steering, and cancellation.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
@@ -5345,11 +5354,11 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		});
 		await client.send("Runtime.enable");
 		if (options.clientPresentation) {
-			const clientPresentation = await probeClientPresentation(
-				client,
-				evaluateExpression,
-				consoleMessages,
-			);
+			const clientPresentation = await (
+				options.userThemeLifecycle
+					? probeUserThemeLifecycle
+					: probeClientPresentation
+			)(client, evaluateExpression, consoleMessages);
 			return {
 				clientPresentation,
 				consoleMessages,

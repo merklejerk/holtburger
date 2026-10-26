@@ -408,9 +408,8 @@ while closed, and character replacement during a pending static lookup.
 
 ## UI themes
 
-Both modes use **Holtburger Standard** from
-`src/app/themes/holtburger-standard.css`. Its appearance is owned by that stylesheet
-and can evolve freely.
+Both modes use the complete base appearance in `src/app/ui-base.css`.
+Its colors, shared controls, and decoration can evolve together in that stylesheet.
 CSS themes can replace variables and styling rules; component CSS owns layout.
 
 Toast entrances use `--ui-toast-pop-animation`, `--ui-toast-pop-duration`,
@@ -442,9 +441,19 @@ input reach the viewport. Held power input clears on release, focus loss and mod
 to orbit the camera; a click launches on release. Configured turn controls (A/D by
 default) rotate the character in place while precise targeting blocks translation.
 
-Default and custom stylesheets use the same
-loader, with an optional override sheet, without recreating runtime owners.
-User-file discovery, saved selection, and an editor remain deferred.
+Optional theme and override stylesheets use the same loader without recreating
+runtime owners. Both inherit unspecified properties from the base appearance;
+removing both sheets restores the base without loading another stylesheet.
+The client supports local theme folders with CSS, images, and fonts. In pregame or
+in-game Settings → UI, use **Open themes folder**, add a subfolder containing
+`theme.css`, click **Refresh list**, and select it. **Reload theme** refreshes the
+bundle while preserving the running client. Selection is saved; a missing theme
+falls back visibly to Base while retaining its ID for retry. Explicit font choices
+continue to override theme defaults. Explorer retains Base.
+
+See [UI_STYLE_GUIDE.md](UI_STYLE_GUIDE.md#installing-and-using-local-themes) for the
+folder contract, supported assets, cascade rules, and recovery. Run
+`npm run probe:user-themes` for the focused Electron verification.
 
 For lightweight theme iteration, run `npm run dev:ui` from this directory. It opens
 real production HUD components with fixture data and no world renderer or Rust host.
@@ -773,9 +782,18 @@ the browser and Flatpak copies. Commit these exports after artwork changes and r
 
 `npm run package` builds an unpacked application and `npm run make` creates the configured ZIP.
 Both commands build the frontend, Electron main/preload code, and release Rust sidecar first.
-`npm run check:package` verifies the native host, compiled entries, branding assets, application license, and
-Electron/Chromium notices in the unpacked package. After `npm run make`, `npm run check:archive`
+`npm run check:package` verifies the native host, compiled entries, branding assets, bundled fonts
+and their licenses, application license, and Electron/Chromium notices in the unpacked package.
+Required ASAR files must be nonempty. After `npm run make`, `npm run check:archive`
 extracts the ZIP and applies the same inspection to the downloadable shape.
+Font packaging checks compare every file under `public/fonts/` with its packaged bytes,
+so adding or replacing fonts and notices does not require updating a verification inventory.
+
+The portability workflow also runs `npm run probe:user-themes:built` after building, reusing the
+compiled frontend and Electron output. It checks native theme loading and bundled font decoding
+in development HTTP and built-file modes, discovering registered faces from the Base font roles
+rather than assuming particular families or a fixed face count. Linux CI runs it under Xvfb. Use
+`npm run probe:user-themes` locally when those outputs need rebuilding first.
 
 The packages are unsigned experimental artifacts. Hosted CI has built and structurally inspected
 Linux x86-64, Windows x86-64, and macOS arm64 packages, but that does not certify GPU, input, audio,

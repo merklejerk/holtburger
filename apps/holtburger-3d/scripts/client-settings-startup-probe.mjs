@@ -101,15 +101,17 @@ try {
 		() =>
 			evaluate(
 				client,
-				`() => document.querySelector("#app")?.childElementCount > 0`,
+				`() => document.querySelector(".client-appearance-scope") !== null`,
 			).catch(() => false),
-		"client renderer mount",
+		"client settings bootstrap and appearance mount",
 	);
 	const result = await evaluate(
 		client,
 		`async () => {
 			const bridge = window.holtburgerSettings;
 			if (!bridge) throw new Error("Settings preload bridge is missing");
+			const themes = window.holtburgerThemes;
+			if (!themes || !Array.isArray(await themes.list())) throw new Error("Theme discovery preload bridge is missing");
 			const { createDefaultClientUserSettings } =
 				await import("/src/client/client-settings-defaults.ts");
 			const defaults = createDefaultClientUserSettings(
@@ -122,6 +124,7 @@ try {
 				before.sections.ui.fonts.body !== "mono")
 				throw new Error("Startup repair did not preserve valid sibling preferences");
 			const expectedUi = ${JSON.stringify(savedUi)};
+			if (before.sections.ui.themeId !== null) throw new Error("Older UI preferences did not restore Base");
 			if (before.sections.ui?.textScale !== expectedUi.textScale)
 				throw new Error("Saved text scale did not cross the preload bridge");
 			const scope = document.querySelector('.client-appearance-scope');
@@ -144,7 +147,7 @@ try {
 				sections: { chatFilters: defaults.chatFilters },
 				hudPlacements: { characterSheet: { ...expectedPanel, preferredWidth: 700 } }
 			});
-			return { bridgeReady: true, unavailable: before.unavailable };
+			return { bridgeReady: true, themesReady: true, unavailable: before.unavailable };
 		}`,
 	);
 	const collection = JSON.parse(await readFile(settingsPath, "utf8"));

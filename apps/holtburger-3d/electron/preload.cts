@@ -69,6 +69,18 @@ contextBridge.exposeInMainWorld("holtburgerContent", {
 	},
 });
 
+contextBridge.exposeInMainWorld("holtburgerThemes", {
+	list(): Promise<unknown> {
+		return ipcRenderer.invoke("themes:list");
+	},
+	resolve(id: string): Promise<unknown> {
+		return ipcRenderer.invoke("themes:resolve", id);
+	},
+	openDirectory(): Promise<void> {
+		return ipcRenderer.invoke("themes:open-directory");
+	},
+});
+
 if (process.argv.includes("--holtburger-mode=client")) {
 	// Preload is ready before Svelte: retain an early native close request until the app registers.
 	type PreparationHandler = () => Promise<unknown>;

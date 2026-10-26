@@ -15,7 +15,7 @@ Cells and inventory section headers share `.ui-item-selection[aria-pressed="true
 Selection does not change their geometry. These optional properties control the
 whole selection decoration, rather than prescribing a colored border:
 
-| Property                             | Base fallback            |
+| Property                             | Recipe fallback          |
 | ------------------------------------ | ------------------------ |
 | `--ui-item-selection-color`          | `--ui-color-active`      |
 | `--ui-item-selection-outline`        | `2px solid currentColor` |
@@ -23,8 +23,9 @@ whole selection decoration, rather than prescribing a colored border:
 | `--ui-item-selection-shadow`         | `none`                   |
 | `--ui-item-selection-background`     | `transparent`            |
 
-Holtburger Standard sets the outline to `none`, adds an inset/outer golden glow,
-and uses warm gold text and a light gold tint. The inset glow remains visible
+The shipped base appearance sets a gold outline, adds an inset/outer golden glow,
+and uses warm gold text and a light gold tint. These defaults live on `:root` in
+`ui-base.css`; the table describes recipe fallbacks when those properties are unset. The inset glow remains visible
 when a cell is against a clipping boundary. Keyboard focus has its own outline
 using `--ui-color-focus`, independent of selection. Cells repeat the selection
 outline/glow on a pointer-transparent overlay above opaque icon artwork.

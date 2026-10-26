@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { uiThemeIdSchema } from "../app/ui-theme-contract.js";
 import { entityAlertRulesSchema } from "./client-entity-alerts.js";
 import { loadoutActionContentSchema } from "./client-loadout.js";
 
@@ -156,6 +157,8 @@ export type ClientVitalWarningThresholds = z.infer<
 /** User-scoped typography, artwork sizing, and vital warning thresholds. */
 export const clientUiSettingsSchema = z
 	.object({
+		/** Missing older preferences use Base; IDs survive unavailable-theme recovery. */
+		themeId: uiThemeIdSchema.nullable().default(null),
 		/** Older sections inherit neutral scaling without losing fonts or warning thresholds. */
 		textScale: finiteNumber
 			.min(CLIENT_TEXT_SCALE.minimum)

@@ -6,20 +6,21 @@ stylesheet changes.
 
 ## Edit points
 
-| Concern                                   | Owner                                    |
-| ----------------------------------------- | ---------------------------------------- |
-| Holtburger Standard colors and decoration | `src/app/themes/holtburger-standard.css` |
-| Neutral tokens and shared control states  | `src/app/ui-base.css`                    |
-| Stylesheet loading and replacement        | `src/app/ui-theme.ts`                    |
-| Startup selection                         | `src/app/mount.ts`                       |
-| Browser defaults and cascade order        | `src/app/base.css`                       |
-| Initial client HUD arrangement            | `src/client/client-ui-defaults.ts`       |
-| Explorer layout                           | `src/explorer/explorer.css`              |
+| Concern                                               | Owner                                                           |
+| ----------------------------------------------------- | --------------------------------------------------------------- |
+| Shipped appearance, tokens, and shared control states | `src/app/ui-base.css`                                           |
+| Stylesheet loading and replacement                    | `src/app/ui-theme.ts`                                           |
+| Client selection and bootstrap                        | `src/app/ui-theme-selection.ts`, `src/client/main.ts`           |
+| Desktop discovery and serving                         | `electron/ui-theme-catalog.ts`, `electron/ui-theme-protocol.ts` |
+| Browser defaults and cascade order                    | `src/app/base.css`                                              |
+| Initial client HUD arrangement                        | `src/client/client-ui-defaults.ts`                              |
+| Explorer layout                                       | `src/explorer/explorer.css`                                     |
 
-`mountEntry` loads the selected theme before mounting Svelte. Its optional URL
-arguments select a replacement theme and an override sheet; the defaults select
-Holtburger Standard with no override. Both bundled and caller-supplied stylesheets use
-this same loader. There is no theme picker or saved selection yet.
+`mountEntry` imports the complete base appearance from `ui-base.css`. Its optional URL
+arguments select a theme and an override sheet, loaded before mounting Svelte. Both
+default to `null`, so ordinary startup requires no optional stylesheet. The client
+then restores its selected user theme after settings load and before mounting its UI.
+Explorer retains Base.
 
 ## Authoring a replacement or override
 
@@ -29,9 +30,9 @@ a small override uses `@layer overrides`. Follow that convention: unlayered rule
 outrank ordinary layered rules, and `!important` reverses layer precedence.
 Neither is necessary for supported customization.
 
-A replacement starts from the neutral base and does not inherit Holtburger Standard.
+Optional themes inherit the shipped base appearance for properties they do not set.
 Tokens belong on `:root`; styling hooks are ordinary classes under `.ui-theme`.
-For example, a replacement can change materials as well as palette:
+For example, a theme can change materials as well as palette:
 
 ```css
 @layer theme {
@@ -68,10 +69,11 @@ Load a selection through the app-owned loader:
 ```ts
 import { uiThemes } from "./src/app/mount";
 
-await uiThemes.replace(themeUrl, overrideUrl); // null means no override
+await uiThemes.replace(themeUrl, overrideUrl); // either URL may be null
+await uiThemes.replace(null, null); // restore the base appearance
 ```
 
-Requests are serialized. Both sheets load before publication; a resource failure
+Requests are serialized. All selected sheets load before publication; a resource failure
 rejects the request and preserves the previous selection. Removing an override or
 replacing a theme removes its stylesheet rather than retaining its declarations.
 CSS syntax and property values follow browser parsing rules; successful loading
@@ -81,9 +83,107 @@ does not certify that every declaration is valid. The loader does not sanitize C
 
 Use URLs that the current app document can load. Relative `url(...)` and CSS imports
 resolve from the stylesheet location, so distribute images/fonts beside the sheet.
-Bundled Holtburger Standard is imported as a Vite asset URL, including in built entries.
-User-file discovery and an Electron file-serving policy remain separate work;
-a filesystem path is not automatically a browser-loadable URL.
+Bundled optional stylesheets can be imported as Vite asset URLs, including in built entries.
+The base appearance is a normal CSS import and updates through Vite CSS HMR.
+Desktop theme discovery and asset serving are owned by Electron; a filesystem path
+is not passed directly to the stylesheet loader.
+
+## Installing and using local themes
+
+In either client settings surface, open **UI → Theme → Open themes folder**. This
+opens `themes/` under the current Electron user-data profile. Development and
+packaged profiles have separate directories; overriding `--settings-file` does
+not move the theme directory.
+
+Each immediate subdirectory containing `theme.css` is a theme. The folder name is
+its ID and display label. Spaces and Unicode are supported; use a portable folder
+name without path separators or Windows-reserved filename characters.
+
+```text
+themes/
+  Midnight Blue/
+    theme.css
+    styles/controls.css
+    images/panel.png
+    fonts/heading.woff2
+```
+
+For example, `theme.css` may contain:
+
+```css
+@import url("./styles/controls.css");
+
+@font-face {
+	font-family: "Midnight Heading";
+	src: url("./fonts/heading.woff2") format("woff2");
+}
+
+@layer theme {
+	:root {
+		--ui-font-heading: "Midnight Heading", serif;
+		--ui-color-accent: #a2d7e9;
+	}
+	.ui-theme .ui-frame {
+		background: url("./images/panel.png") repeat;
+	}
+}
+```
+
+Click **Refresh list**, then select the theme. Selection applies immediately and
+is remembered in the client UI settings section. **Reload theme** rereads the
+selected bundle without restarting the client or clearing drafts/window layout.
+Reload gives relative CSS imports, images, and font sources new URLs too. There
+is no automatic filesystem watching. Keep asset URLs relative to their stylesheet
+and within the theme folder; nested CSS may use `../` to reach sibling assets.
+
+Supported files are CSS, PNG, JPEG, GIF, WebP, AVIF, SVG, ICO, WOFF, WOFF2, TTF, and
+OTF. Electron serves these through `holtburger-theme://local/...`; it checks real
+paths and rejects escapes outside a theme or the themes directory, including
+symlink escapes. Remote resources are not enabled by this feature. The same
+resource permissions apply in development and built-file entries.
+
+Explicit Body/Heading/Monospace font preferences take precedence over inherited
+theme defaults. Choose **Theme default** to use a theme's font. Existing scoped
+pregame styling remains in the `overrides` layer. Custom CSS is not isolated from
+layout; follow the shared hooks and layer conventions.
+
+Base ships Arimo (body), Gelasio (headings), and Cousine (monospace), including
+regular, bold, italic, and bold italic. Pregame and explicit font preferences use
+these same families. `src/app/ui-fonts.css` loads the bundled files without host
+font substitution or network requests. Generic fallbacks cover loading failures
+and missing glyphs; `font-display: swap` allows text to appear while files load.
+Sources and redistribution licenses ship in `public/fonts/` (built `dist/fonts/`).
+
+A failed selection keeps the previous appearance and preference. If a saved theme
+is missing at startup, Base is active and the unavailable preferred ID remains
+visible for retry. Restore its folder and use Reload, or explicitly select Base.
+Refresh list alone never changes the saved preference. `--ignore-config` starts
+with default Base through the existing configuration bypass; it does not delete
+installed themes.
+
+The load deadline is `UI_THEME_LOAD_TIMEOUT_MS` in `src/app/ui-theme-contract.ts`.
+Closing cancels pending selection work before settings flush; a selection still
+loading when close begins is not saved. A disk-save error uses the existing
+settings failure/retry path and does not roll back the applied appearance.
+
+Stylesheet success is not whole-bundle validation. Invalid CSS follows browser
+parsing rules; missing/corrupt images and fonts retain browser fallback behavior
+and produce resource diagnostics. Combat font-load failures also show a warning
+instead of failing application startup. Files are read live, so editing multiple
+files during a reload is not an atomic bundle replacement.
+
+The programmatic loader's optional override slot remains available for diagnostics
+and composition. The user picker selects one theme; no manifest, editor, archive
+installer, or Explorer theme picker is included.
+
+Run `npm run probe:user-themes` for automated Electron checks of serving,
+dependency reloads, fonts, cancellation/timeouts, both settings surfaces,
+persistence, and missing-theme recovery. The fixture fonts and images are original
+checked-in diagnostic assets; no game files or system fonts are needed.
+
+With local game content available, run
+`npm run harness:browser -- --user-theme-lifecycle --brief` to switch themes on the
+real ClientApp roster and during gameplay while verifying canvas/runtime retention.
 
 ## Tokens and styling hooks
 
@@ -159,7 +259,7 @@ color is also used in disabled-state color arithmetic. Color variables accept al
 from text-control borders. Variables beginning `--_ui-` are private implementation
 details, not theme controls.
 
-For example, inside Holtburger Standard's existing `@layer theme` block:
+For example, inside an optional stylesheet’s `@layer theme` block:
 
 ```css
 .ui-button {
@@ -193,16 +293,16 @@ Normal CSS cascade rules apply: a declaration on the button takes precedence ove
 one inherited from a container or `:root`. Within a layer, specificity and then source
 order decide competing selectors. Put your rules after the defaults, and use equally
 specific state selectors (or `:where()` states) when source order should decide.
-The default theme uses selected/checked, then hover, then physical-press order.
+The base appearance uses selected/checked, then hover, then physical-press order.
 Disabled controls are excluded from its interaction selectors.
 
 Palette fallbacks still resolve locally when a component property is unset. Use the
 palette tokens for shared text and state colors, then scope ordinary `color` rules to
 an individual control when it needs an exception.
 
-Holtburger Standard additionally owns `--holtburger-header-stripe-color` (color) and
-`--holtburger-header-grain-opacity` (0–1), limited to its decorative header strip.
-Replacement themes need not implement them. Use ordinary CSS for other styling;
+The base appearance defines `--ui-header-stripe-color` (color) and
+`--ui-header-grain-opacity` (0–1) for the decorative header strip.
+Optional themes can override these or replace the header background entirely. Use ordinary CSS for other styling;
 a property does not need a variable for every state or component instance.
 
 | Hook                                                           | Role                                                       |
@@ -288,8 +388,8 @@ checkerboards, grading plots, world nameplates, selection
 outlines, lighting, and scene colors remain visualization-owned. Chat classification
 remains in client policy; CSS consumes its semantic roles.
 
-Holtburger Standard is the bundled default, with no fixed aesthetic contract.
-Edit its stylesheet freely; the shared hooks and loader do not prescribe its look.
+The base appearance has no fixed aesthetic contract. Edit `ui-base.css` freely;
+the shared hooks and optional stylesheet loader do not prescribe its look.
 
 If a theme uses backdrop filtering, provide an opaque fallback when unsupported.
 Avoid compounding filters on ordinary nested panels. Native modal dialogs can own
@@ -349,12 +449,14 @@ production resize constraints. **Reset layout** restores the showcase arrangemen
 The Debug shortcut reopens a
 closed showcase window.
 
-Save `src/app/themes/holtburger-standard.css`, then click **Reload theme**. Reload
-requests fresh stylesheet URLs without remounting components, preserving drafts,
-selection, and window placement. A failed load leaves the previous theme active
-and displays an error. Theme asset updates are accepted at the Vite module boundary
-so edits do not trigger a full-page reload. Changes to component source still use
-Svelte's normal development behavior.
+Edit `src/app/ui-base.css` to develop the shipped appearance; Vite updates the CSS
+without remounting components. The **Base** selection removes optional stylesheets.
+For the Steel fixture or opaque override, save its CSS and click **Reload theme**.
+Reload requests fresh optional stylesheet URLs without remounting components,
+preserving drafts, selection, and window placement. A failed load leaves the previous
+selection active and displays an error. Fixture asset updates are accepted at the
+Vite module boundary so edits wait for Reload theme. Changes to component source
+still use Svelte’s normal development behavior.
 
 The route loads its composition lazily. It does not load world/presentation owners,
 create a canvas, or start a content host. A few shared tuning-policy modules and
@@ -367,7 +469,7 @@ contrast and material tests; it is not the production-component showcase.
 ## Verification
 
 Run the normal Svelte/TypeScript, ESLint, Knip, formatting, and build checks. The
-browser specimen tests independent replacement, override precedence/removal,
+browser specimen tests theme application, base restoration, override precedence/removal,
 resource failure recovery, queued selections, DOM identity, interaction, contrast, and filter fallback.
 Its Steel and opaque stylesheets are diagnostic fixtures, not shipped selections.
 

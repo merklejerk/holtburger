@@ -76,6 +76,7 @@ describe("current client settings values", () => {
 	it("adds warning thresholds to older UI profiles while preserving font choices", () => {
 		const fonts = { body: "serif", heading: "sans", mono: "mono" } as const;
 		expect(clientUiSettingsSchema.parse({ fonts })).toEqual({
+			themeId: null,
 			fonts,
 			textScale: CLIENT_TEXT_SCALE.initial,
 			iconScale: CLIENT_ICON_SCALE.initial,
@@ -88,6 +89,7 @@ describe("current client settings values", () => {
 			vitalWarningThresholds: { health: 35, stamina: 15, mana: 25 },
 		};
 		expect(clientUiSettingsSchema.parse(older)).toEqual({
+			themeId: null,
 			...older,
 			textScale: CLIENT_TEXT_SCALE.initial,
 			iconScale: CLIENT_ICON_SCALE.initial,
@@ -98,6 +100,7 @@ describe("current client settings values", () => {
 			CLIENT_TEXT_SCALE.maximum,
 		]) {
 			expect(clientUiSettingsSchema.parse({ ...older, textScale })).toEqual({
+				themeId: null,
 				...older,
 				textScale,
 				iconScale: CLIENT_ICON_SCALE.initial,

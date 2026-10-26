@@ -11,6 +11,8 @@
 		"src/harness/browser/portal-seam-probe.ts",
 		"src/svg.d.ts",
 		"electron/main.ts",
+		"electron/ui-theme-probe.ts",
+		"src/harness/user-theme-probe.ts",
 		"electron/preload.cts",
 		"forge.config.cjs",
 		"scripts/entry-paths.mjs"

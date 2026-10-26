@@ -92,9 +92,23 @@ jobs:
       - name: Test the frontend and Electron main process
         working-directory: apps/holtburger-3d
         run: npm run test:ts
+      - name: Install the virtual display for Linux Electron probes
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xvfb
       - name: Build the native Electron package
         working-directory: apps/holtburger-3d
         run: npm run package
+      - name: Verify native themes and bundled font decoding
+        working-directory: apps/holtburger-3d
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            xvfb-run --auto-servernum npm run probe:user-themes:built
+          else
+            npm run probe:user-themes:built
+          fi
       - name: Exercise the real sidecar protocol without production content
         working-directory: apps/holtburger-3d
         run: npm run smoke:sidecar
@@ -114,7 +128,7 @@ jobs:
           echo '### Experimental Holtburger 3D portability probe' >> "$GITHUB_STEP_SUMMARY"
           echo '' >> "$GITHUB_STEP_SUMMARY"
           echo 'This package is an unsupported, short-lived development artifact.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Hosted CI verifies build, protocol, and package structure only; real GPU, input, audio, display scaling, and OS launch behavior remain unverified.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Hosted CI verifies build, protocol, package structure, native themes, and font decoding; real GPU, input, audio, display scaling, and user-facing OS launch behavior remain unverified.' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload unsupported diagnostic package
         uses: actions/upload-artifact@v4
         with:

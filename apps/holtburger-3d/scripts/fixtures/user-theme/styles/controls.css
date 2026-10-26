@@ -1,0 +1,5 @@
+@layer theme {
+	#image {
+		--probe-import: first;
+	}
+}

@@ -57,16 +57,31 @@ export function observeCombatEffectsAppearance(
 	element: HTMLElement,
 	publish: (appearance: CombatEffectsAppearance) => void,
 	fontsChanged: () => void,
+	reportFontFailure: (error: Error) => void,
 ) {
 	const document = element.ownerDocument;
+	let retired = false;
+	let lastFontFailure: string | null = null;
 	const refresh = () => {
 		const appearance = readCombatEffectsAppearance(element);
 		publish(appearance);
 		// Canvas text is not a DOM font consumer; explicitly request theme font faces.
 		// loadingdone invalidates any glyphs rasterized before that request completed.
-		void document.fonts.load(
-			`bold ${appearance.fontSize}px ${appearance.font}`,
-		);
+		void document.fonts
+			.load(`bold ${appearance.fontSize}px ${appearance.font}`)
+			.then(
+				() => {
+					if (!retired) lastFontFailure = null;
+				},
+				(cause: unknown) => {
+					const message = `Could not load combat font ${appearance.font}: ${String(cause)}`;
+					// A missing theme font must preserve browser fallback, not become a startup failure.
+					if (!retired && message !== lastFontFailure) {
+						lastFontFailure = message;
+						reportFontFailure(new Error(message, { cause }));
+					}
+				},
+			);
 	};
 	const refreshFonts = () => {
 		refresh();
@@ -76,6 +91,7 @@ export function observeCombatEffectsAppearance(
 	document.fonts.addEventListener("loadingdone", refreshFonts);
 	return {
 		destroy() {
+			retired = true;
 			stopTheme();
 			document.fonts.removeEventListener("loadingdone", refreshFonts);
 		},

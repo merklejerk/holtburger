@@ -10,7 +10,6 @@ import {
 	CLIENT_TEXT_SCALE,
 } from "../../client/client-settings-values";
 import { uiThemes } from "../../app/mount";
-import { defaultUiThemeUrl } from "../../app/ui-theme";
 import steelUrl from "./themes/steel.css?url&no-inline";
 
 /** Exercise live settings, CSS inheritance, top-layer dialogs and measured HUD geometry. */
@@ -421,7 +420,7 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 		await unmount(iconFixture);
 		fixture.remove();
 		independent.remove();
-		await uiThemes.replace(defaultUiThemeUrl, null);
+		await uiThemes.replace(null, null);
 		await edit(CLIENT_TEXT_SCALE.initial);
 		const iconControl = element<HTMLInputElement>(
 			'input[aria-label="Icon scaling"]',

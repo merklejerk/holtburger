@@ -33,3 +33,8 @@ await import(
 		import.meta.url,
 	).href
 );
+
+// Theme discovery consumes app-local codecs from Node ESM as well as the renderer.
+await import(
+	new URL("../dist-electron/electron/ui-theme-catalog.js", import.meta.url).href
+);

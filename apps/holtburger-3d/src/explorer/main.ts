@@ -7,10 +7,10 @@ import { mount } from "svelte";
 
 async function startGame(
 	target: HTMLElement,
-	isClosing: () => boolean,
+	signal: AbortSignal,
 	context: Map<unknown, unknown>,
 ): Promise<boolean> {
-	if (isClosing()) return false;
+	if (signal.aborted) return false;
 	mount(ExplorerApp, { target, context });
 	return true;
 }

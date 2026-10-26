@@ -2082,7 +2082,7 @@ export async function probeCharacterSheet(
 		try {
 			const before = readPaint();
 			for (const [token, value] of [['accent', '#123456'], ['success', '#234567'], ['danger', '#345678'], ['well', '#456789'], ['text', '#56789a']]) panel.style.setProperty('--ui-color-' + token, value);
-			// Remove the standard theme's intentional green to verify the generic success default.
+			// Clear the base appearance's intentional green to verify the generic success default.
 			panel.style.setProperty('--ui-character-upgrade-color', 'initial');
 			const after = readPaint();
 			if (after.some((value, index) => index !== 1 && value === before[index]) || after[8] !== after[2]) throw new Error('Character paint did not follow its inherited palette.');

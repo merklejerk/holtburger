@@ -75,14 +75,11 @@ const waitFor = async (predicate, description) => {
 };
 const configureOverride = (opaque) =>
 	read(async (opaque) => {
-		const { defaultUiThemeUrl } = await import(
-			new URL("/src/app/ui-theme.ts", location.origin).href
-		);
 		const { uiThemes } = await import(
 			new URL("/src/app/mount.ts", location.origin).href
 		);
 		await uiThemes.replace(
-			defaultUiThemeUrl,
+			null,
 			opaque
 				? new URL("/src/harness/browser/themes/opaque.css", location.origin)
 						.href

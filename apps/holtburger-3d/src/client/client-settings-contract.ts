@@ -81,6 +81,7 @@ const clientHudLayoutSchema = z
 		salvage: hudPlacementSchema,
 		vendor: hudPlacementSchema,
 		houseCrystal: hudPlacementSchema,
+		logopolis: hudPlacementSchema,
 		trade: hudPlacementSchema,
 		inspection: hudPlacementSchema,
 		book: hudPlacementSchema,

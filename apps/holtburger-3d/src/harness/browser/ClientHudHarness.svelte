@@ -92,6 +92,7 @@
 	import { ClientItemInteractions } from "../../client/client-item-interactions";
 	import { probeClientTargeting } from "./client-targeting-probe";
 	import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
+	import { isLogopolisCommand } from "../../client/client-logopolis";
 	import { installKeyboardPolicyFixture } from "./keyboard-policy-fixture";
 	import { clientSelectedEntity } from "../../client/client-selected-entity";
 	import { ClientPartyState } from "../../client/client-party-state";
@@ -1067,6 +1068,7 @@
 		});
 	};
 
+	let logopolisLaunchRevision = $state(0);
 	let keyboardFixture: ReturnType<typeof installKeyboardPolicyFixture> | null =
 		null;
 	interface ClientHudHarnessApi {
@@ -5359,6 +5361,7 @@
 		></canvas>
 		{#if gameplayCanvas !== null && interactionRoot !== null}
 			<ClientGameplayView
+				{logopolisLaunchRevision}
 				theme={fixtureTheme}
 				canReturnToMenu={true}
 				canDisconnect={true}
@@ -5616,6 +5619,8 @@
 								chatRequests.push(request);
 							},
 						);
+					} else if (isLogopolisCommand(message)) {
+						logopolisLaunchRevision += 1;
 					} else if (runClientHelpCommand(message, appendChat)) {
 						return;
 					} else if (waypointProbeEnabled) submitWaypointChat(message);

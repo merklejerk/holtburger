@@ -1321,6 +1321,10 @@
 			logopolisLaunchRevision += 1;
 			return;
 		}
+		if (/^[/@]fps$/i.test(message.trim())) {
+			changeUi({ ...userSettings.ui, showFps: !userSettings.ui.showFps });
+			return;
+		}
 		if (runClientHelpCommand(message, appendChatLine)) return;
 		if (runClientAssetsCommand(message, contentLocation, appendChatLine))
 			return;

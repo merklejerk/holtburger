@@ -108,6 +108,7 @@ describe("ClientSettingsStore", () => {
 				(await store.loadUser(defaultUser, "persisted")).sections.ui,
 			).toEqual({
 				themeId: CLIENT_DEFAULT_THEME_ID,
+				showFps: false,
 				fonts,
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.initial,
@@ -115,6 +116,7 @@ describe("ClientSettingsStore", () => {
 			});
 			const ui = {
 				themeId: "Midnight 雪",
+				showFps: true,
 				fonts,
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.maximum,

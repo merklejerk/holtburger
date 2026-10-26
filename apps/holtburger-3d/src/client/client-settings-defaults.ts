@@ -52,6 +52,7 @@ export function createDefaultClientUserSettings(
 		graphics: { ...CLIENT_GRAPHICS_DEFAULTS },
 		audio: { ...CLIENT_AUDIO_DEFAULTS },
 		ui: {
+			showFps: false,
 			textScale: CLIENT_TEXT_SCALE.initial,
 			iconScale: CLIENT_ICON_SCALE.initial,
 			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,

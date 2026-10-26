@@ -8,7 +8,7 @@
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { useClientInput } from "./client-input-context";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
-	import { tick } from "svelte";
+	import { onDestroy, tick } from "svelte";
 	import PopupMenu from "../app/PopupMenu.svelte";
 	import type { ClientChatComposer } from "./client-chat-composer.svelte";
 	import type { ClientClockFormat } from "./client-environment-settings";
@@ -116,6 +116,21 @@
 	let bufferElement = $state<HTMLDivElement | null>(null);
 	/** Deliberate history interaction survives editor blur and viewport clicks. */
 	let explicitHistory = $state(false);
+	/** A disposable physical press enables history interaction without focusing the editor. */
+	let heldHistory = $state<{ readonly release: () => void } | null>(null);
+	function endHeldHistory(): void {
+		const held = heldHistory;
+		heldHistory = null;
+		held?.release();
+		// Pointer selection may have acquired history focus during the hold. Preserve deliberate activation.
+		if (
+			held !== null &&
+			!explicitHistory &&
+			bufferElement?.contains(document.activeElement)
+		)
+			keyboard.returnToGame();
+	}
+	onDestroy(endHeldHistory);
 
 	/** The component-local prompt never replaces the completed destination until accepted. */
 	let recipientOpen = $state(false);
@@ -163,7 +178,7 @@
 			);
 	});
 	const historyInteractive = $derived(
-		explicitHistory || editorFocused || recipientOpen,
+		explicitHistory || editorFocused || recipientOpen || heldHistory !== null,
 	);
 	const visibleMessages = $derived(
 		messages.filter((line) => clientChatFiltersAllow(enabledTags, line)),
@@ -319,6 +334,16 @@
 	}
 
 	function activateHistory(event: KeyboardEvent): boolean {
+		if (clientInput.shortcut("holdChatHistory", event)) {
+			if (!historyInteractive) {
+				heldHistory = {
+					release: keyboard.bindKeyRelease(event, endHeldHistory),
+				};
+				// Enable pointer interaction while other gameplay shortcuts keep their existing owner.
+				event.preventDefault();
+			}
+			return false;
+		}
 		if (!clientInput.shortcut("toggleChatHistory", event)) return false;
 		if (explicitHistory) {
 			event.preventDefault();
@@ -468,10 +493,19 @@
 	}
 </script>
 
+<svelte:document
+	onvisibilitychange={() => {
+		if (document.hidden) endHeldHistory();
+	}}
+/>
+
 <svelte:window
 	onpointermove={updateBufferHover}
 	onpointerleave={clearBufferHover}
-	onblur={clearBufferHover}
+	onblur={() => {
+		clearBufferHover();
+		endHeldHistory();
+	}}
 />
 
 <section class="chat-panel" class:interactive={historyInteractive}>
@@ -486,7 +520,7 @@
 				aria-live="polite"
 				aria-label="Chat messages"
 				onpointerdown={() => {
-					explicitHistory = true;
+					if (heldHistory === null) explicitHistory = true;
 				}}
 				use:followBuffer
 				use:keyboard.scope={{

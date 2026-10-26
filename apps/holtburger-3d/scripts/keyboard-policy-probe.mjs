@@ -545,11 +545,58 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 				backgroundImage: getComputedStyle(buffer).backgroundImage,
 				pressed: document.querySelector(${JSON.stringify(historyToggle)}).getAttribute('aria-pressed') };
 		})()`);
+		await key("keyDown", "Control", "ControlLeft", 17, { modifiers: 2 });
+		assert.equal(
+			(await historyState()).pressed,
+			"true",
+			"Holding Ctrl enables history",
+		);
+		assert.equal(
+			(await capture()).gameActive,
+			true,
+			"Holding Ctrl preserves gameplay keyboard ownership",
+		);
+		await click(".chat-buffer");
+		assert.equal((await capture()).focusLabel, "Chat messages");
+		await key("keyUp", "Control", "ControlLeft", 17);
+		assert.equal(
+			(await historyState()).pressed,
+			"false",
+			"Selection during a hold does not latch history open",
+		);
+		assert.equal((await capture()).gameActive, true);
+		await key("keyDown", "Control", "ControlRight", 17, { modifiers: 2 });
+		assert.equal(
+			(await historyState()).pressed,
+			"true",
+			"Right Ctrl also enables history",
+		);
+		await evaluate("window.dispatchEvent(new Event('blur'))");
+		assert.equal(
+			(await historyState()).pressed,
+			"false",
+			"Focus loss retires held history",
+		);
+		await key("keyUp", "Control", "ControlRight", 17);
+		await click(historyToggle);
+		await press("Control", "ControlLeft", 17, { modifiers: 2 });
+		assert.equal(
+			(await historyState()).pressed,
+			"true",
+			"Ctrl release preserves explicit history activation",
+		);
+		await press("Escape", "Escape", 27);
 		await click(chatInput);
 		assert.equal(
 			(await historyState()).pressed,
 			"true",
 			"Editor focus activates history",
+		);
+		await press("Control", "ControlLeft", 17, { modifiers: 2 });
+		assert.equal(
+			(await capture()).focusLabel,
+			"Chat message",
+			"Ctrl preserves an active editor",
 		);
 		await press("Escape", "Escape", 27);
 		await press("c", "KeyC", 67, { modifiers: 2 });

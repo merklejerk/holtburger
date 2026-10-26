@@ -196,6 +196,47 @@ export async function probeClientBindings(options: {
 				CLIENT_KEYBOARD_DEFAULTS.preciseJump.increasePower,
 				"windows",
 			).toUpperCase(), "Power default did not restore its keycap");
+		const historyLabel = "Interact with chat history (hold)";
+		const historyRow = Array.from(target.querySelectorAll(".binding-row")).find(
+			(row) =>
+				row.querySelector(".binding-label")?.textContent === historyLabel,
+		);
+		const historyKey =
+			historyRow?.querySelector<HTMLButtonElement>(".binding-key");
+		if (!historyKey) throw new Error("Missing held-history binding row");
+		historyKey.click();
+		await tick();
+		await click(`Add key for ${historyLabel}`);
+		press("F11", "F11");
+		await tick();
+		options.keyboard.returnToGame();
+		press("Control", "ControlLeft", { ctrlKey: true });
+		await tick();
+		require(document.querySelector(".chat-panel.interactive") ===
+			null, "Old Ctrl binding still activated history after remapping");
+		document.body.dispatchEvent(
+			new KeyboardEvent("keydown", {
+				key: "F11",
+				code: "F11",
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+		await tick();
+		require(document.querySelector(".chat-panel.interactive") !==
+			null, "Remapped key did not enable production chat history");
+		document.body.dispatchEvent(
+			new KeyboardEvent("keyup", {
+				key: "F11",
+				code: "F11",
+				bubbles: true,
+				cancelable: true,
+			}),
+		);
+		await tick();
+		require(document.querySelector(".chat-panel.interactive") ===
+			null, "Releasing the remapped key did not end history interaction");
+		await click(`Restore default keys for ${historyLabel}`);
 		return {
 			passed: true,
 			original,
@@ -203,6 +244,7 @@ export async function probeClientBindings(options: {
 			oldKeyStopped: true,
 			splitStackRemapped: true,
 			precisePowerRemapped: true,
+			heldHistoryRemapped: true,
 			featureSubmissions: options.submissions() - before,
 		};
 	} finally {

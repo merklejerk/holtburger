@@ -133,6 +133,8 @@ export const INPUT_DEFAULTS = {
 		toggleChatHistory: [
 			{ key: "c", ctrl: true, shift: false, alt: false, meta: false },
 		],
+		/** Temporarily enable history pointer interaction without taking typing focus. */
+		holdChatHistory: [{ key: "Control" }],
 		/** Scroll toward earlier messages while chat owns focus. */
 		chatPreviousPage: [{ key: "PageUp" }],
 		/** Scroll toward later messages while chat owns focus. */

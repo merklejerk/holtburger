@@ -1,7 +1,20 @@
 @import "./ui-fonts.css";
 
 @layer base {
+	/* User typography preferences inherit across the gameplay/pregame boundary. */
 	:root {
+		--ui-font-body: Arimo, sans-serif;
+		/* Authored font lengths remain unscaled; each absolute-size consumer applies this once. */
+		--ui-text-scale: 1;
+		/* Authored icon lengths remain raw; consumers apply this multiplier once. */
+		--ui-icon-scale: 1;
+		--ui-font-heading: Gelasio, serif;
+		--ui-font-mono: Cousine, monospace;
+	}
+
+	/* Reset inherited theme tokens at the pregame boundary before its own palette applies. */
+	:root,
+	.client-pregame-screen {
 		/* Palette-dependent component defaults resolve at the consumer. */
 		/* Frosted HUD backings shared by the combat gauge and social wheel. */
 		--ui-hud-glass-color: color-mix(
@@ -84,13 +97,6 @@
 		--ui-combat-text-critical-color: #ffb833;
 		--ui-combat-text-avoidance-color: #a6b3bf;
 		--ui-combat-text-size: 28px;
-		--ui-font-body: Arimo, sans-serif;
-		/* Authored font lengths remain unscaled; each absolute-size consumer applies this once. */
-		--ui-text-scale: 1;
-		/* Authored icon lengths remain raw; consumers apply this multiplier once. */
-		--ui-icon-scale: 1;
-		--ui-font-heading: Gelasio, serif;
-		--ui-font-mono: Cousine, monospace;
 		--ui-font-size-body: 15px;
 		--ui-font-size-heading-1: 22px;
 		--ui-font-size-heading-2: 18px;
@@ -418,7 +424,8 @@
 		--ui-trade-reset-inset: 4px;
 	}
 	@supports (backdrop-filter: blur(1px)) {
-		:root {
+		:root,
+		.client-pregame-screen {
 			--ui-surface-opacity: 0.74;
 		}
 		.ui-theme .ui-panel {

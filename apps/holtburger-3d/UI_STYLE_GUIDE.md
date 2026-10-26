@@ -38,24 +38,34 @@ border, without changing content layout or saved window dimensions. Compact
 non-window overlays may use a separate decorative outset.
 
 Optional themes inherit the shipped base appearance for properties they do not set.
-Tokens belong on `:root`; styling hooks are ordinary classes under `.ui-theme`.
+Tokens belong on the scope root (`:scope`); styling hooks are ordinary classes under `.ui-theme`.
+Wrap optional theme rules in `@scope (:root) to (.client-pregame-screen)` so
+pregame and its descendants retain their independently authored appearance.
+Base token defaults are declared again at that boundary to stop inherited theme
+palette and component defaults. Typography preferences (font roles, text scale,
+and icon scale) continue to inherit across modes; pregame retains its existing
+body/heading font overrides. The scope also excludes modal dialogs in the
+pregame subtree, even when the browser paints them in the top layer.
+Traveler’s Kit follows this convention; custom stylesheets must follow it too.
 For example, a theme can change materials as well as palette:
 
 ```css
-@layer theme {
-	:root {
-		--ui-color-surface: #172530;
-		--ui-color-control: #304553;
-		--ui-color-accent: #a2d7e9;
-		--ui-font-heading: Arial, sans-serif;
-	}
-	.ui-theme .ui-panel {
-		background: var(--ui-color-surface);
-		border-style: dashed;
-		box-shadow: none;
-	}
-	.ui-theme .ui-button {
-		border-radius: 8px;
+@scope (:root) to (.client-pregame-screen) {
+	@layer theme {
+		:scope {
+			--ui-color-surface: #172530;
+			--ui-color-control: #304553;
+			--ui-color-accent: #a2d7e9;
+			--ui-font-heading: Arial, sans-serif;
+		}
+		.ui-theme .ui-panel {
+			background: var(--ui-color-surface);
+			border-style: dashed;
+			box-shadow: none;
+		}
+		.ui-theme .ui-button {
+			border-radius: 8px;
+		}
 	}
 }
 ```
@@ -63,10 +73,12 @@ For example, a theme can change materials as well as palette:
 An override may change a single token or an entire appearance rule:
 
 ```css
-@layer overrides {
-	.ui-theme .ui-panel {
-		background: var(--ui-color-surface);
-		backdrop-filter: none;
+@scope (:root) to (.client-pregame-screen) {
+	@layer overrides {
+		.ui-theme .ui-panel {
+			background: var(--ui-color-surface);
+			backdrop-filter: none;
+		}
 	}
 }
 ```
@@ -130,7 +142,7 @@ themes/
     fonts/heading.woff2
 ```
 
-For example, `theme.css` may contain:
+For example, `theme.css` may contain (imported control styles must use the same scope):
 
 ```css
 @import url("./styles/controls.css");
@@ -140,13 +152,15 @@ For example, `theme.css` may contain:
 	src: url("./fonts/heading.woff2") format("woff2");
 }
 
-@layer theme {
-	:root {
-		--ui-font-heading: "Midnight Heading", serif;
-		--ui-color-accent: #a2d7e9;
-	}
-	.ui-theme .ui-frame {
-		background: url("./images/panel.png") repeat;
+@scope (:root) to (.client-pregame-screen) {
+	@layer theme {
+		:scope {
+			--ui-font-heading: "Midnight Heading", serif;
+			--ui-color-accent: #a2d7e9;
+		}
+		.ui-theme .ui-frame {
+			background: url("./images/panel.png") repeat;
+		}
 	}
 }
 ```

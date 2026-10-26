@@ -88,65 +88,61 @@
 		{editable}
 		{resizable}
 		{onPlacementChange}
-		minWidth={geometry.cellSize.width + geometry.scrollbarAllowance}
+		minWidth={geometry.cellSize.width}
 		minHeight={geometry.cellSize.height}
 		contentHitTesting="descendants"
 	>
-		<div
-			class="party-hud-scroll"
+		<section
+			class="party-hud"
 			style:--party-maximum-columns={PARTY_HUD_MAXIMUM_COLUMNS}
+			aria-label={preview ? "Party HUD preview" : "Party vitals"}
 		>
-			<section
-				class="party-hud"
-				aria-label={preview ? "Party HUD preview" : "Party vitals"}
-			>
-				{#if display !== null}
-					{#each display.members as member (member.guid)}
-						<button
-							type="button"
-							class="party-member ui-hud-button ui-hud-surface"
-							aria-label={`Select ${member.name}`}
-							disabled={preview || editable}
-							onclick={() => onSelectEntity(member.guid)}
-						>
-							<span class="party-member__name ui-readout" title={member.name}>
-								{#if member.guid === display.leader}
-									<span
-										class="party-member__leader"
-										role="img"
-										aria-label="Party leader"
-										><ClientHudIcon name="leader" /></span
-									>
-								{/if}
-								<strong>{member.name}</strong>
-							</span>
-							{#each CLIENT_HUD_VITALS as bar}
-								{@const value = partyVitalDisplay(
-									member.vitals[vitalIndices[bar.kind].current],
-									member.vitals[vitalIndices[bar.kind].maximum],
-								)}
+			{#if display !== null}
+				{#each display.members as member (member.guid)}
+					<button
+						type="button"
+						class="party-member ui-hud-control ui-hud-surface"
+						aria-label={`Select ${member.name}`}
+						disabled={preview || editable}
+						onclick={() => onSelectEntity(member.guid)}
+					>
+						<span class="party-member__name ui-readout" title={member.name}>
+							{#if member.guid === display.leader}
 								<span
-									class={`party-member__vital ui-meter ui-meter--${bar.kind}`}
-									style:height={`var(--ui-party-${bar.kind}-height)`}
-									role="meter"
-									aria-label={`${member.name}: ${bar.label}`}
-									aria-valuemin="0"
-									aria-valuemax="100"
-									aria-valuenow={value.percent ?? undefined}
-									aria-valuetext={value.quantity}
-									title={`${bar.label}: ${value.quantity}`}
+									class="party-member__leader"
+									role="img"
+									aria-label="Party leader"
+									><ClientHudIcon name="leader" /></span
 								>
-									{#if value.percent !== null}<span
-											class="vital-fill"
-											style:width={`${value.percent}%`}
-										></span>{/if}
-								</span>
-							{/each}
-						</button>
-					{/each}
-				{/if}
-			</section>
-		</div>
+							{/if}
+							<strong>{member.name}</strong>
+						</span>
+						{#each CLIENT_HUD_VITALS as bar}
+							{@const value = partyVitalDisplay(
+								member.vitals[vitalIndices[bar.kind].current],
+								member.vitals[vitalIndices[bar.kind].maximum],
+							)}
+							<span
+								class={`party-member__vital ui-meter ui-meter--${bar.kind}`}
+								style:height={`var(--ui-party-${bar.kind}-height)`}
+								role="meter"
+								aria-label={`${member.name}: ${bar.label}`}
+								aria-valuemin="0"
+								aria-valuemax="100"
+								aria-valuenow={value.percent ?? undefined}
+								aria-valuetext={value.quantity}
+								title={`${bar.label}: ${value.quantity}`}
+							>
+								{#if value.percent !== null}<span
+										class="vital-fill"
+										style:width={`${value.percent}%`}
+									></span>{/if}
+							</span>
+						{/each}
+					</button>
+				{/each}
+			{/if}
+		</section>
 	</ClientHudPanel>
 {/if}
 
@@ -169,6 +165,9 @@
 					var(--ui-party-vital-gap)
 			);
 			display: grid;
+			/* Roster rows extend past the saved panel height without clipping or scrolling. */
+			overflow: visible;
+			pointer-events: auto;
 			/* Keep themed cell dimensions fixed. Width changes the number of columns;
 			 * viewport fitting may shrink a single cell when even its minimum cannot fit. */
 			grid-template-columns: repeat(
@@ -185,14 +184,6 @@
 			gap: var(--ui-party-grid-gap);
 			grid-auto-rows: var(--_ui-party-cell-height);
 		}
-		.party-hud-scroll {
-			/* Scrollbar spacing cannot admit additional tracks into the inner grid. */
-			max-height: 100%;
-			overflow: auto;
-			/* Reserve scroll space so adding a scrollbar cannot oscillate the column count. */
-			scrollbar-gutter: stable;
-			pointer-events: auto;
-		}
 		.party-hud-theme-metrics {
 			position: fixed;
 			left: -10000px;
@@ -202,11 +193,9 @@
 			box-sizing: content-box;
 			width: var(--ui-party-cell-width);
 			height: var(--_ui-party-cell-height);
-			padding-right: var(--ui-party-scrollbar-allowance);
 			max-width: none;
 			max-height: none;
 			overflow: hidden;
-			scrollbar-gutter: auto;
 		}
 		.party-member {
 			padding: 0;
@@ -217,7 +206,7 @@
 			gap: var(--ui-party-vital-gap);
 		}
 		.party-member::before {
-			/* Fixed grid cells own their full extent; button backing must not enlarge scrollable overflow. */
+			/* Keep each backing within its fixed cell. */
 			inset: 0;
 		}
 		.party-member__name {

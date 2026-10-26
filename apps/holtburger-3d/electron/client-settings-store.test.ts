@@ -22,6 +22,7 @@ import { loadoutActionContentSchema } from "../src/client/client-loadout";
 import { bindActionCell } from "../src/client/client-action-bar-state";
 import {
 	CLIENT_ICON_SCALE,
+	CLIENT_DEFAULT_THEME_ID,
 	CLIENT_TEXT_SCALE,
 } from "../src/client/client-settings-values";
 
@@ -106,7 +107,7 @@ describe("ClientSettingsStore", () => {
 			expect(
 				(await store.loadUser(defaultUser, "persisted")).sections.ui,
 			).toEqual({
-				themeId: null,
+				themeId: CLIENT_DEFAULT_THEME_ID,
 				fonts,
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.initial,

@@ -1,0 +1,637 @@
+/* Candidate material treatment; content backings retain the base theme's opacity. */
+@layer theme {
+	:root {
+		--ui-color-border: #98775b;
+		--ui-color-control: #594331;
+		--ui-color-accent: #d6b18a;
+		--ui-color-highlight: #f2d6ae;
+		--ui-button-background-color: #735035;
+		--ui-radius-control: 3px;
+		--ui-item-cell-background: #100c0929;
+		--ui-item-cell-border: 1px solid #98775b66;
+		--ui-item-empty-background: #100c0940;
+		--ui-item-empty-border: 1px solid #98775b66;
+		--ui-item-selection-color: #f2d6ae;
+		--ui-item-selection-outline: 2px solid #d6b18a;
+		--ui-item-selection-shadow: inset 0 0 6px #c58d4d55;
+		--ui-item-selection-background: #ad751622;
+		/* The same authored materials serve windows, overlays and control families. */
+		--ui-travelers-frame: url("../../assets/icons/travelers-kit-frame.svg");
+		--ui-travelers-leather: url("../../assets/icons/travelers-kit-leather.svg");
+		--ui-travelers-pressed-shadow:
+			inset 0 2px 3px #140b08b3, inset 1px 0 #2c170f99, inset 0 -1px #d39f6b66,
+			0 0 0 1px #160e0ab3;
+		--ui-travelers-inset-shadow:
+			inset 0 2px 3px #080503cc, inset 1px 0 #08050380, 0 1px #e4b78666;
+		--ui-filter-pill-radius: 3px;
+		--ui-spell-bar-color: #c49766;
+		--ui-spell-tab-color: #d7c4ad;
+		--ui-spell-tab-active-color: #f2d6ae;
+		--ui-spell-tab-border: 1px solid #98775b99;
+		--ui-spell-tab-radius: 2px 2px 0 0;
+		--ui-spell-tab-active-background: #735035cc;
+		--ui-spell-tab-active-shadow:
+			inset 0 2px 3px #140b0899, inset 0 -2px #d6b18a;
+		--ui-spell-scrollbar-color: #c49766;
+		--ui-spell-scrollbar-track-opacity: 28%;
+		--ui-spell-scrollbar-thumb-opacity: 75%;
+		--ui-combat-foreground-color: #f2d6ae;
+		--ui-combat-outline-color: #573621;
+		--ui-combat-track-color: #65452f;
+		--ui-combat-height-color: #3b281dcc;
+		--ui-combat-height-selected-color: #8e603dcf;
+		--ui-combat-height-hover-color: #a4774dcf;
+	}
+
+	.ui-theme :is(.ui-panel, .ui-dialog) {
+		/* The nine-sliced moulding paints around the existing 1px border without
+		   changing layout or covering the translucent center. Smooth edges stretch;
+		   corner straps and studs retain their size. */
+		border-image-source: var(--ui-travelers-frame);
+		border-image-slice: 16;
+		border-image-width: 8px;
+		border-image-outset: 5px;
+		border-image-repeat: stretch;
+		box-shadow:
+			inset 0 0 0 2px #140b0880,
+			0 2px 0 3px #140b0866,
+			0 5px 12px #0d080666;
+	}
+
+	.ui-theme .ui-frame {
+		/* The thread has a lit upper strand, a darker body and recessed holes.
+		   Stitches and grain repeat independently of the fixed frame corners. */
+		background:
+			repeating-linear-gradient(90deg, #f1c993 0 4px, transparent 4px 8px) left
+				0 bottom 4px / 100% 1px no-repeat,
+			repeating-linear-gradient(90deg, #bc8758 0 4px, transparent 4px 8px) left
+				0 bottom 3px / 100% 1px no-repeat,
+			repeating-linear-gradient(90deg, #160b09e6 0 5px, transparent 5px 8px)
+				left 0 bottom 2px / 100% 2px no-repeat,
+			var(--ui-travelers-leather) left top / 96px 32px repeat,
+			linear-gradient(180deg, #56312a, #39211e 45%, #301c19);
+		box-shadow:
+			inset 0 2px #edc6a333,
+			inset 1px 0 #edc6a326,
+			inset 0 -2px 3px #160d0bcc,
+			0 1px #d6a16c66;
+		color: var(--ui-color-highlight);
+		font-family: var(--ui-font-heading);
+	}
+
+	.ui-theme .ui-frame .ui-button {
+		font-family: var(--ui-font-body);
+	}
+
+	.ui-theme .ui-button {
+		/* A raised copper face inside a dark socket; state colors remain owned by
+		   the existing control rules. Bevels do not change the hit rectangle. */
+		background-image: linear-gradient(
+			180deg,
+			#f8d4a461,
+			#edb9781a 42%,
+			#30180e33 58%,
+			#160a0780
+		);
+		box-shadow:
+			inset 0 1px #ffe0ada6,
+			inset 1px 0 #d39f6b80,
+			inset -1px 0 #2c170f99,
+			inset 0 -2px #2c170fb3,
+			0 0 0 1px #160e0ab3,
+			0 2px 2px #0d080666;
+		text-shadow: 0 1px 1px #160c09;
+	}
+
+	.ui-theme .hud-window-close {
+		/* Use the larger existing hit dimension on both axes: a circular copper
+		   cap without shrinking the close target at any supported text scale. */
+		--close-diameter: max(28px, calc(1em + 10px), calc(1.35em + 6px));
+		width: var(--close-diameter);
+		height: var(--close-diameter);
+		border-radius: 50%;
+	}
+
+	.ui-theme
+		.ui-button:where(
+			:active:not(:disabled),
+			[aria-pressed="true"]:not(:disabled),
+			[aria-selected="true"]:not(:disabled)
+		) {
+		background-image: linear-gradient(180deg, #160a0766, #edb9781a);
+		box-shadow: var(--ui-travelers-pressed-shadow);
+	}
+
+	.ui-theme .ui-button:where(:disabled) {
+		background-image: linear-gradient(180deg, #e0c6a61a, #140b084d);
+		box-shadow:
+			inset 0 1px #e0c6a633,
+			inset 0 -1px #140b0866,
+			0 0 0 1px #160e0a80;
+	}
+
+	/* Compact overlays use the window's metal at a smaller scale. Their existing
+	   backings, modality, focus ownership and placement are unchanged. */
+	.ui-theme :is(.ui-overlay-surface:not(.ui-dialog), .ui-tooltip) {
+		border-image-source: var(--ui-travelers-frame);
+		border-image-slice: 16;
+		border-image-width: 6px;
+		border-image-outset: 3px;
+		border-image-repeat: stretch;
+		box-shadow:
+			inset 0 0 0 1px #d6b18a26,
+			0 4px 12px #0d080680;
+	}
+
+	.ui-theme :is(.ui-input, select):not(.ui-hud-input) {
+		background-image: linear-gradient(180deg, #08050366, transparent 65%);
+		box-shadow: var(--ui-travelers-inset-shadow);
+	}
+
+	.ui-theme :is(.ui-well, .ui-inset) {
+		box-shadow: var(--ui-travelers-inset-shadow);
+	}
+
+	.ui-theme .ui-tab {
+		--ui-travelers-tab-face: linear-gradient(180deg, #42291f, #251710);
+		background:
+			var(--ui-travelers-leather) left top / 96px 32px repeat,
+			var(--ui-travelers-tab-face);
+		border-radius: 3px 3px 0 0;
+		box-shadow:
+			inset 0 1px #d6b18a66,
+			inset 1px 0 #d6b18a33,
+			inset -1px 0 #140b0899,
+			inset 0 -1px #140b08cc;
+	}
+
+	.ui-theme
+		.ui-tab:where(:hover:not(:disabled)):not([aria-selected="true"]):not(
+			[aria-pressed="true"]
+		) {
+		--ui-travelers-tab-face: linear-gradient(180deg, #65442e, #382217);
+		color: var(--ui-color-highlight);
+	}
+
+	.ui-theme .ui-tab:where([aria-selected="true"], [aria-pressed="true"]) {
+		--ui-travelers-tab-face: linear-gradient(180deg, #80573a, #4a2e1f);
+		color: var(--ui-color-highlight);
+		box-shadow:
+			var(--ui-travelers-pressed-shadow),
+			inset 0 -2px var(--ui-color-accent);
+	}
+
+	.ui-theme
+		.ui-tabs[aria-orientation="vertical"]
+		.ui-tab:where([aria-selected="true"], [aria-pressed="true"]) {
+		box-shadow:
+			var(--ui-travelers-pressed-shadow),
+			inset -2px 0 var(--ui-color-accent);
+	}
+
+	.ui-theme .ui-tab:disabled {
+		color: var(--ui-color-muted);
+		filter: grayscale(0.8);
+	}
+
+	.ui-theme :is(.ui-pill, .ui-filter-pill) {
+		/* Preserve category-specific filter colors beneath a shallow stamped face. */
+		background-image: linear-gradient(180deg, #f1c99326, #140b0833);
+		box-shadow:
+			inset 0 1px #e4b78640,
+			inset 0 -1px #140b0899;
+	}
+
+	.ui-theme .ui-filter-pill[aria-pressed="true"] {
+		box-shadow: var(--ui-travelers-pressed-shadow);
+	}
+
+	.ui-theme .ui-menu-item:where(.highlighted, [aria-selected="true"]) {
+		background-image: linear-gradient(180deg, #e4b78626, #140b0826);
+		box-shadow: inset 2px 0 var(--ui-color-accent);
+	}
+
+	.ui-theme :is(.hud-window-content, .ui-overlay-surface) {
+		/* Do not override the chat buffer's deliberately fading scrollbars. */
+		scrollbar-color: var(--ui-color-border) #140b0840;
+	}
+
+	.ui-theme :is(.action-bar, .spell-bar) {
+		/* Rail paint stays outside the measured cell grid, leaving artwork and
+		   hit geometry intact. Individual slots retain their translucent wells. */
+		box-shadow:
+			0 0 0 1px #c69765,
+			0 0 0 3px #3a2418,
+			0 1px 0 4px #a6754c66,
+			0 4px 8px #0d080666;
+	}
+
+	.ui-theme .ui-item-cell:not([aria-pressed="true"]) {
+		box-shadow:
+			inset 0 2px 3px #08050399,
+			inset 0 -1px #e4b78640;
+	}
+
+	.ui-theme .ui-shortcut-hint {
+		padding-inline: 2px;
+		border-radius: 2px;
+		background: #21140db3;
+		box-shadow: 0 1px #d6b18a66;
+	}
+
+	.ui-theme
+		button.ui-hud-button:where(
+			:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+		) {
+		--ui-travelers-icon-face: radial-gradient(
+			circle at 35% 25%,
+			#d6ae7e,
+			#91603d 45%,
+			#58331f 75%,
+			#2b190f
+		);
+		border-radius: 50%;
+		background-image: none;
+		box-shadow:
+			inset 0 0 0 1px #24150f,
+			0 1px 0 1px #160c09b3,
+			0 3px 4px #0d080680;
+	}
+
+	.ui-theme
+		button.ui-hud-button:where(
+			:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+		)::before {
+		/* A domed copper cap replaces the feathered backing. Keep the original
+		   hit rectangle; the rim and highlights belong to its decorative face. */
+		content: "";
+		inset: 1px;
+		border-radius: inherit;
+		mask-image: none;
+		backdrop-filter: none;
+		background: var(--ui-travelers-icon-face);
+		box-shadow:
+			inset 0 1px 1px #ffe2b6cc,
+			inset 1px 0 1px #e4b78680,
+			inset -1px -2px 2px #2b160dcc,
+			inset 0 0 0 1px #b88655;
+	}
+
+	.ui-theme
+		button.ui-hud-button:where(
+			:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+		)
+		svg {
+		/* Quiet color/edge feedback replaces the base icon enlargement. */
+		transform: none;
+	}
+
+	.ui-theme
+		button.ui-hud-button:where(:hover:not(:disabled)):where(
+			:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+		) {
+		--ui-travelers-icon-face: radial-gradient(
+			circle at 35% 25%,
+			#edc798,
+			#a9754b 45%,
+			#694027 75%,
+			#382015
+		);
+	}
+
+	.ui-theme
+		button.ui-hud-button:where(
+			:active:not(:disabled),
+			[aria-pressed="true"]:not(:disabled)
+		):where(:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)) {
+		--ui-travelers-icon-face: linear-gradient(180deg, #21140e, #3e291c);
+		box-shadow:
+			inset 0 1px 3px #140b08cc,
+			0 0 0 1px #98775b99;
+	}
+
+	.ui-theme
+		button.ui-hud-button:where(:disabled):where(
+			:not(.ui-item-cell, .ui-readout, .party-member, .spell-tab)
+		) {
+		--ui-travelers-icon-face: linear-gradient(180deg, #30251e, #241b16);
+		box-shadow: inset 0 0 0 1px #38271c;
+	}
+
+	.ui-theme .party-member {
+		box-shadow:
+			inset 0 0 0 1px #98775b80,
+			0 1px 2px #0d080666;
+	}
+
+	.ui-theme .party-member__name {
+		background-image: linear-gradient(180deg, #d6b18a1a, #140b0833);
+		box-shadow: inset 0 -1px #98775b66;
+	}
+
+	.ui-theme :is(.ui-meter, .selected-entity__health) {
+		border-radius: 2px;
+		box-shadow:
+			inset 0 1px 3px #080503b3,
+			0 0 0 1px #98775b99;
+	}
+
+	.ui-theme :is(.ui-meter > span, .selected-entity__health-fill) {
+		/* An enamel sheen overlays, rather than replaces, semantic vital colors. */
+		background-image: linear-gradient(
+			180deg,
+			#ffffff4d,
+			transparent 45%,
+			#0805034d
+		);
+		box-shadow:
+			inset 0 1px #ffffff40,
+			inset 0 -1px #08050366;
+	}
+
+	/* Shared copper rails enclose HUD content without adding an opaque backing. */
+	.ui-theme :is(.character-hud, .selected-entity, .chat-panel.interactive) {
+		border-radius: 3px;
+		box-shadow:
+			0 0 0 1px #bf9363,
+			0 0 0 3px #382217,
+			0 2px 4px #0d080666;
+	}
+
+	.ui-theme .chat-panel.interactive {
+		/* The shared copper rails replace chat's active outline without changing its fade. */
+		outline: none;
+	}
+
+	.ui-theme :is(.character-hud .identity-block, .selected-entity__heading) {
+		background:
+			var(--ui-travelers-leather) left top / 96px 32px repeat,
+			linear-gradient(180deg, #493026, #2b1d16);
+		box-shadow:
+			inset 0 1px #d6b18a66,
+			inset 0 -1px #98775b80;
+	}
+
+	.ui-theme
+		:is(
+			.character-hud .identity-block .ui-readout,
+			.selected-entity__heading
+		)::before {
+		/* Each heading now owns its contained material, replacing its feathered backing. */
+		content: none;
+	}
+
+	.ui-theme :is(.character-hud .identity, .selected-entity__heading strong) {
+		font-family: var(--ui-font-heading);
+		font-weight: 700;
+	}
+
+	.ui-theme .selected-entity {
+		/* Fit the rails to actual rows, leaving the reserved HUD placement unpainted.
+		   A visible health row matches the focused vitals bar's scaled line height. */
+		height: fit-content;
+		grid-template-rows: auto;
+		grid-auto-rows: max(
+			16px,
+			calc(
+				var(--ui-font-size-micro) * var(--ui-text-scale) *
+					var(--ui-line-height-body)
+			)
+		);
+		gap: var(--ui-character-hud-gap);
+	}
+
+	.ui-theme .xp-progress {
+		box-shadow:
+			inset 0 1px 2px #080503b3,
+			0 0 0 1px #98775b80;
+	}
+
+	.ui-theme .ui-progress::-webkit-progress-value {
+		background-image: linear-gradient(
+			180deg,
+			#ffffff40,
+			transparent 45%,
+			#0805034d
+		);
+	}
+
+	.ui-theme .spell-tab {
+		background-image:
+			var(--ui-travelers-leather), linear-gradient(180deg, #6d493033, #140b0866);
+		background-size:
+			96px 32px,
+			auto;
+		box-shadow: inset 0 1px #d6b18a66;
+	}
+
+	.ui-theme .spell-tab::before {
+		inset: 0;
+		mask-image: none;
+		border-radius: inherit;
+	}
+	.ui-theme .spell-tab[aria-pressed="true"] {
+		box-shadow: var(--ui-spell-tab-active-shadow);
+	}
+
+	.ui-theme .combat-bar .gauge-background {
+		filter: none;
+		background:
+			var(--ui-travelers-leather) left top / 96px 32px repeat,
+			linear-gradient(180deg, #493026cc, #21140dcc);
+		box-shadow:
+			inset 0 1px #d6b18a99,
+			inset 0 -1px #140b08cc,
+			0 2px 4px #0d080666;
+	}
+
+	.ui-theme .combat-bar .height {
+		background-image: linear-gradient(
+			180deg,
+			#e4b78626,
+			transparent 45%,
+			#140b0866
+		);
+		box-shadow:
+			inset 0 1px #d6b18a66,
+			inset 0 -1px #140b08cc;
+	}
+
+	.ui-theme .combat-bar .height.selected {
+		box-shadow: var(--ui-travelers-pressed-shadow);
+	}
+	.ui-theme .combat-bar .power-handle {
+		fill: #c49766;
+		stroke: #f2d6ae;
+	}
+
+	.ui-theme .minimap-frame {
+		/* Concentric rings follow the existing disc and leave its projection and
+		   compass overflow unchanged. Only the proportional rim is material. */
+		background:
+			var(--ui-travelers-leather) left top / 96px 32px repeat,
+			linear-gradient(135deg, #bd8b5c, #52331f);
+		box-shadow:
+			inset 0 0 0 1px #e4b786,
+			inset 0 0 0 3px #382217,
+			inset 0 0 0 4px #a8784e,
+			0 0 0 1px #20130c,
+			0 3px 6px #0d080680;
+	}
+
+	.ui-theme .minimap-disc {
+		box-shadow:
+			0 0 0 1px #d6b18a99,
+			0 0 0 3px #20130cb3;
+	}
+
+	.ui-theme
+		:is(
+			.contents-header,
+			.trade-side-heading,
+			.vendor-catalog h3,
+			.queue-heading,
+			.inventory-bottom-bar,
+			.inventory-equipment-toolbar
+		) {
+		background-image: linear-gradient(180deg, #d6b18a1a, #140b0833);
+		box-shadow:
+			inset 0 1px #d6b18a33,
+			inset 0 -1px #140b0899;
+	}
+
+	.ui-theme
+		:is(
+			.contents-packs,
+			.inventory-equipment-strip,
+			.vendor-queue,
+			.trade-side,
+			.salvage-queue,
+			.salvage-output-content
+		) {
+		box-shadow:
+			inset 0 0 0 1px #98775b66,
+			inset 0 2px 3px #08050366;
+	}
+
+	.ui-theme .vendor-offer-row {
+		box-shadow: inset 0 -1px #98775b40;
+	}
+
+	.ui-theme .vendor-offer-row:where(:hover:not(:disabled)) {
+		background-image: linear-gradient(180deg, #d6b18a26, #140b0826);
+	}
+
+	.ui-theme .vendor-offer-row[aria-pressed="true"] {
+		box-shadow: var(--ui-travelers-pressed-shadow);
+	}
+
+	.ui-theme .ui-section-heading {
+		color: var(--ui-color-accent);
+		text-shadow: 0 1px #140b08;
+		box-shadow: inset 0 -1px #98775b80;
+	}
+
+	.ui-theme .book-page + .book-page {
+		border-top: 1px solid #98775b66;
+		padding-top: 1rem;
+	}
+
+	.ui-theme .book-scroll blockquote {
+		border-left: 2px solid var(--ui-color-border);
+		padding-left: 1rem;
+	}
+	.ui-theme .book-author {
+		color: var(--ui-color-accent);
+		font-family: var(--ui-font-heading);
+	}
+
+	/* These remain native inputs. In forced-colors mode, retain their native
+	   appearance rather than replacing the platform's high-contrast controls. */
+	@media (forced-colors: none) {
+		.ui-theme input[type="checkbox"] {
+			appearance: none;
+			width: 15px;
+			height: 15px;
+			padding: 0;
+			border: 1px solid var(--ui-color-border);
+			border-radius: 2px;
+			background: linear-gradient(180deg, #160d09, #362319);
+			box-shadow: var(--ui-travelers-inset-shadow);
+			vertical-align: middle;
+			cursor: pointer;
+		}
+
+		.ui-theme input[type="checkbox"]:checked {
+			background:
+				url("../../assets/icons/travelers-kit-check.svg") center / contain
+					no-repeat,
+				linear-gradient(180deg, #382217, #6b472b);
+		}
+
+		.ui-theme input[type="checkbox"]:hover:not(:disabled) {
+			border-color: var(--ui-color-highlight);
+		}
+
+		.ui-theme input:is([type="checkbox"], [type="range"]):disabled {
+			filter: grayscale(0.8);
+			opacity: 0.65;
+			cursor: not-allowed;
+		}
+
+		.ui-theme input.ui-range {
+			appearance: none;
+			height: 20px;
+			margin-inline: 0;
+			background: transparent;
+			cursor: pointer;
+		}
+
+		/* UiRange supplies the live filled fraction; the browser still owns native
+		   gestures and keyboard steps. Unconverted/specialized ranges stay native. */
+		.ui-theme input.ui-range::-webkit-slider-runnable-track {
+			box-sizing: border-box;
+			height: 6px;
+			border: 1px solid var(--ui-color-border);
+			border-radius: 4px;
+			background:
+				linear-gradient(180deg, #e2b98455, transparent 50%, #38201566),
+				linear-gradient(
+					90deg,
+					#ad794d var(--ui-range-progress),
+					#20130d var(--ui-range-progress)
+				);
+			box-shadow:
+				inset 0 1px 2px #080503cc,
+				0 1px #e4b78666;
+		}
+
+		.ui-theme input.ui-range::-webkit-slider-thumb {
+			appearance: none;
+			box-sizing: border-box;
+			width: 16px;
+			height: 16px;
+			/* The 6px track has a 4px content box inside its border. */
+			margin-top: -6px;
+			border: 1px solid #8e5c37;
+			border-radius: 50%;
+			background:
+				radial-gradient(circle at 30% 20%, #ffe3b399, transparent 55%),
+				linear-gradient(135deg, #d7a974, #9e6b43 50%, #58341e);
+			box-shadow:
+				inset 1px 1px #f0c99a80,
+				inset -1px -1px #3b2316a6,
+				0 1px 2px #080503b3;
+		}
+
+		.ui-theme input.ui-range:hover:not(:disabled)::-webkit-slider-thumb {
+			border-color: var(--ui-color-highlight);
+		}
+
+		.ui-theme input.ui-range:active:not(:disabled)::-webkit-slider-thumb {
+			box-shadow:
+				inset 0 1px 3px #3b2316cc,
+				0 1px #f0c99a66;
+		}
+	}
+}

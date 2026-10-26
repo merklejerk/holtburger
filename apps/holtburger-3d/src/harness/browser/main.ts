@@ -2,7 +2,7 @@ import "../../app/base.css";
 import "../../explorer/explorer.css";
 import { mountEntry } from "../../app/mount";
 
-/** Load only the selected composition; the UI showcase never imports the world runtime. */
+/** Load only the selected browser composition. */
 async function start(): Promise<void> {
 	const query = new URLSearchParams(window.location.search);
 	const { default: App } = query.has("item-cooldowns")

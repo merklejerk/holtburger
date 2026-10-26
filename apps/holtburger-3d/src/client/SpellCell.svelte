@@ -47,7 +47,7 @@
 
 <button
 	type="button"
-	class="spell-cell ui-shortcut-cell ui-item-cell ui-item-selection ui-hud-button"
+	class="spell-cell ui-shortcut-cell ui-item-cell ui-item-selection ui-hud-control"
 	style:grid-column={gridPosition?.column}
 	style:grid-row={gridPosition?.row}
 	data-spell-tab={address?.tab}
@@ -75,7 +75,7 @@
 <style>
 	@layer components {
 		.spell-cell {
-			--ui-hud-button-background: var(
+			--ui-hud-control-background: var(
 				--ui-spell-cell-background,
 				color-mix(
 					in srgb,

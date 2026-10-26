@@ -135,7 +135,7 @@
 								{@const label = `${cell.name}${cell.count > 1 ? ` ×${cell.count.toLocaleString()}` : ""}. Examine (${examineShortcut.description}) or right-click to inspect.`}
 								<button
 									type="button"
-									class="trade-cell ui-item-cell ui-item-selection ui-hud-button"
+									class="trade-cell ui-item-cell ui-item-selection ui-hud-control"
 									data-trade-item={cell.guid}
 									aria-pressed={selectedGuid === cell.guid}
 									aria-label={label}

@@ -245,7 +245,7 @@ export const CLIENT_TUNING = {
 export const CLIENT_ACTION_BAR_TUNING = {
 	/** Thickness of the numbered menu strip beside the action cells. */
 	menuStripSize: 24,
-	/** Initial CSS basis before the mounted bar measures the active inventory theme. */
+	/** Provisional cell extent before the mounted bar measures its active theme. */
 	initialCellSize: 36,
 	/** Minimum spacing between a new clone and existing action bars. */
 	cloneGap: 4,

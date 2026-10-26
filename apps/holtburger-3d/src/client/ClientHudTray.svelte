@@ -13,6 +13,8 @@
 		readonly label: string;
 		/** Fixed dimensions and saved viewport anchor. */
 		readonly placement: ClientHudPlacement;
+		/** Additional long-axis gaps excluded from the placement's nominal dimensions. */
+		readonly gapCount: number;
 		readonly editable: boolean;
 		readonly viewport: ClientHudViewport;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
@@ -21,6 +23,7 @@
 	const {
 		label,
 		placement,
+		gapCount,
 		editable,
 		viewport,
 		onPlacementChange,
@@ -97,8 +100,8 @@
 	<div class="tray-scroll" class:constrained={dimensions.constrained}>
 		<div
 			class="hud-tray"
-			style:width={`calc(${placement.preferredWidth}px * var(--ui-icon-scale))`}
-			style:height={`calc(${placement.preferredHeight}px * var(--ui-icon-scale))`}
+			style:width={`calc((${placement.preferredWidth}px + ${orientation === "horizontal" ? gapCount : 0} * var(--ui-hud-icon-gap)) * var(--ui-icon-scale))`}
+			style:height={`calc((${placement.preferredHeight}px + ${orientation === "vertical" ? gapCount : 0} * var(--ui-hud-icon-gap)) * var(--ui-icon-scale))`}
 			use:measureDimensions
 			class:vertical={orientation === "vertical"}
 		>

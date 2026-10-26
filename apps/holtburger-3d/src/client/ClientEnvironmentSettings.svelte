@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UiRange from "../app/UiRange.svelte";
 	import {
 		MINUTES_PER_GAME_DAY,
 		type ClientClockFormat,
@@ -67,9 +68,8 @@
 	)}
 	<label class="ui-label">
 		Fixed time: {timeLabel}
-		<input
-			type="range"
-			min="0"
+		<UiRange
+			min={0}
 			max={MINUTES_PER_GAME_DAY - 1}
 			step="1"
 			value={overrides.time.minuteOfDay}

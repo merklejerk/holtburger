@@ -1,0 +1,60 @@
+/* Candidate material treatment; content backings retain the base theme's opacity. */
+@layer theme {
+	:root {
+		--ui-color-border: #98775b;
+		--ui-color-control: #594331;
+		--ui-color-accent: #d6b18a;
+		--ui-color-highlight: #f2d6ae;
+		--ui-button-background-color: #513626;
+		--ui-item-cell-background: #100c0929;
+		--ui-item-cell-border: 1px solid #98775b66;
+		--ui-item-empty-background: #100c0940;
+		--ui-item-empty-border: 1px solid #98775b66;
+		--ui-item-selection-color: #f2d6ae;
+		--ui-item-selection-outline: 2px solid #d6b18a;
+		--ui-item-selection-shadow: inset 0 0 6px #c58d4d55;
+		--ui-item-selection-background: #ad751622;
+	}
+
+	.ui-theme .hud-window {
+		box-shadow:
+			inset 0 0 0 1px #d6b18a1a,
+			0 3px 10px #0d080640;
+	}
+
+	.ui-theme .ui-frame {
+		/* Fixed fittings, periodic stitches and grain resize independently. The
+		   header owns all material paint; nothing covers the translucent body. */
+		background:
+			url("../../assets/icons/travelers-kit-rivet.svg") left 1px top 1px / 6px
+				6px no-repeat,
+			url("../../assets/icons/travelers-kit-rivet.svg") right 1px top 1px / 6px
+				6px no-repeat,
+			repeating-linear-gradient(90deg, #c89b6b66 0 3px, transparent 3px 7px)
+				left 12px bottom 3px / calc(100% - 24px) 1px no-repeat,
+			url("../../assets/icons/travelers-kit-leather.svg") left top / 96px 32px
+				repeat,
+			linear-gradient(180deg, #56312a, #39211e 45%, #301c19);
+		box-shadow:
+			inset 0 1px #edc6a326,
+			inset 0 -1px #160d0bb3;
+		color: var(--ui-color-highlight);
+		font-family: var(--ui-font-heading);
+	}
+
+	.ui-theme .ui-frame .ui-button {
+		font-family: var(--ui-font-body);
+	}
+
+	.ui-theme .ui-button {
+		/* Background color remains owned by existing hover/pressed/disabled rules. */
+		background-image: linear-gradient(180deg, #f5d4b00a, #140b081a);
+		box-shadow:
+			inset 0 1px #e9b98b26,
+			inset 0 -1px #140b0866;
+	}
+
+	.ui-theme .ui-button:where(:active:not(:disabled)) {
+		box-shadow: inset 0 1px 3px #140b0866;
+	}
+}

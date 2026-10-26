@@ -338,7 +338,7 @@
 						)}
 						<button
 							type="button"
-							class="ui-hud-button"
+							class="spell-tab ui-hud-control"
 							aria-label={`Spell tab ${(tab + 1) % 10} (${binding.description})`}
 							title={`Spell tab ${(tab + 1) % 10} — ${binding.description}`}
 							aria-pressed={configuration.selected === tab}
@@ -441,7 +441,7 @@
 			position: absolute;
 			visibility: hidden;
 			pointer-events: none;
-			width: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
+			width: calc(var(--ui-shortcut-cell-size) * var(--ui-icon-scale));
 			height: calc(var(--ui-spell-tab-height) * var(--ui-icon-scale));
 		}
 		.spell-scrollbar-metrics {
@@ -472,7 +472,7 @@
 			height: calc(var(--ui-spell-tab-height) * var(--ui-icon-scale));
 		}
 		.spell-tabs button {
-			--ui-hud-button-background: var(
+			--ui-hud-control-background: var(
 				--ui-spell-tab-background,
 				color-mix(
 					in srgb,
@@ -496,7 +496,7 @@
 			white-space: nowrap;
 		}
 		.spell-tabs button[aria-pressed="true"] {
-			--ui-hud-button-background: var(
+			--ui-hud-control-background: var(
 				--ui-spell-tab-active-background,
 				color-mix(
 					in srgb,

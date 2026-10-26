@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UiRange from "../app/UiRange.svelte";
 	import type { ClientGraphicsSettings } from "./client-settings-contract";
 	import { CLIENT_GRAPHICS_RANGES } from "./client-settings-values";
 	import { ENTITY_SHADOW_MODES } from "../lib/game/renderer/entity-shadow-modes";
@@ -36,8 +37,7 @@
 <div class="settings-section">
 	<label
 		>View distance: {graphics.viewDistance} landblocks
-		<input
-			type="range"
+		<UiRange
 			min={CLIENT_GRAPHICS_RANGES.viewDistance.minimum}
 			max={CLIENT_GRAPHICS_RANGES.viewDistance.maximum}
 			step={CLIENT_GRAPHICS_RANGES.viewDistance.step}
@@ -54,8 +54,7 @@
 	</p>
 	<label
 		>Field of view: {graphics.verticalFovDegrees}°
-		<input
-			type="range"
+		<UiRange
 			min={CLIENT_GRAPHICS_RANGES.verticalFovDegrees.minimum}
 			max={CLIENT_GRAPHICS_RANGES.verticalFovDegrees.maximum}
 			step={CLIENT_GRAPHICS_RANGES.verticalFovDegrees.step}

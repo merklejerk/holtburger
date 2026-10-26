@@ -1,0 +1,197 @@
+/* Candidate material treatment; content backings retain the base theme's opacity. */
+@layer theme {
+	:root {
+		--ui-color-border: #98775b;
+		--ui-color-control: #594331;
+		--ui-color-accent: #d6b18a;
+		--ui-color-highlight: #f2d6ae;
+		--ui-button-background-color: #735035;
+		--ui-radius-control: 3px;
+		--ui-item-cell-background: #100c0929;
+		--ui-item-cell-border: 1px solid #98775b66;
+		--ui-item-empty-background: #100c0940;
+		--ui-item-empty-border: 1px solid #98775b66;
+		--ui-item-selection-color: #f2d6ae;
+		--ui-item-selection-outline: 2px solid #d6b18a;
+		--ui-item-selection-shadow: inset 0 0 6px #c58d4d55;
+		--ui-item-selection-background: #ad751622;
+	}
+
+	.ui-theme .ui-panel {
+		/* The nine-sliced moulding paints around the existing 1px border without
+		   changing layout or covering the translucent center. Smooth edges stretch;
+		   corner straps and studs retain their size. */
+		border-image-source: url("../../assets/icons/travelers-kit-frame.svg");
+		border-image-slice: 16;
+		border-image-width: 8px;
+		border-image-outset: 5px;
+		border-image-repeat: stretch;
+		box-shadow:
+			inset 0 0 0 2px #140b0880,
+			0 2px 0 3px #140b0866,
+			0 5px 12px #0d080666;
+	}
+
+	.ui-theme .ui-frame {
+		/* The thread has a lit upper strand, a darker body and recessed holes.
+		   Stitches and grain repeat independently of the fixed frame corners. */
+		background:
+			repeating-linear-gradient(90deg, #f1c993 0 4px, transparent 4px 8px) left
+				0 bottom 4px / 100% 1px no-repeat,
+			repeating-linear-gradient(90deg, #bc8758 0 4px, transparent 4px 8px) left
+				0 bottom 3px / 100% 1px no-repeat,
+			repeating-linear-gradient(90deg, #160b09e6 0 5px, transparent 5px 8px)
+				left 0 bottom 2px / 100% 2px no-repeat,
+			url("../../assets/icons/travelers-kit-leather.svg") left top / 96px 32px
+				repeat,
+			linear-gradient(180deg, #56312a, #39211e 45%, #301c19);
+		box-shadow:
+			inset 0 2px #edc6a333,
+			inset 1px 0 #edc6a326,
+			inset 0 -2px 3px #160d0bcc,
+			0 1px #d6a16c66;
+		color: var(--ui-color-highlight);
+		font-family: var(--ui-font-heading);
+	}
+
+	.ui-theme .ui-frame .ui-button {
+		font-family: var(--ui-font-body);
+	}
+
+	.ui-theme .ui-button {
+		/* A raised copper face inside a dark socket; state colors remain owned by
+		   the existing control rules. Bevels do not change the hit rectangle. */
+		background-image: linear-gradient(
+			180deg,
+			#f8d4a461,
+			#edb9781a 42%,
+			#30180e33 58%,
+			#160a0780
+		);
+		box-shadow:
+			inset 0 1px #ffe0ada6,
+			inset 1px 0 #d39f6b80,
+			inset -1px 0 #2c170f99,
+			inset 0 -2px #2c170fb3,
+			0 0 0 1px #160e0ab3,
+			0 2px 2px #0d080666;
+		text-shadow: 0 1px 1px #160c09;
+	}
+
+	.ui-theme .hud-window-close {
+		/* Use the larger existing hit dimension on both axes: a circular copper
+		   cap without shrinking the close target at any supported text scale. */
+		--close-diameter: max(28px, calc(1em + 10px), calc(1.35em + 6px));
+		width: var(--close-diameter);
+		height: var(--close-diameter);
+		border-radius: 50%;
+	}
+
+	.ui-theme
+		.ui-button:where(
+			:active:not(:disabled),
+			[aria-pressed="true"]:not(:disabled),
+			[aria-selected="true"]:not(:disabled)
+		) {
+		background-image: linear-gradient(180deg, #160a0766, #edb9781a);
+		box-shadow:
+			inset 0 2px 3px #140b08b3,
+			inset 1px 0 #2c170f99,
+			inset 0 -1px #d39f6b66,
+			0 0 0 1px #160e0ab3;
+	}
+
+	.ui-theme .ui-button:where(:disabled) {
+		background-image: linear-gradient(180deg, #e0c6a61a, #140b084d);
+		box-shadow:
+			inset 0 1px #e0c6a633,
+			inset 0 -1px #140b0866,
+			0 0 0 1px #160e0a80;
+	}
+
+	/* These remain native inputs. In forced-colors mode, retain their native
+	   appearance rather than replacing the platform's high-contrast controls. */
+	@media (forced-colors: none) {
+		.ui-theme input[type="checkbox"] {
+			appearance: none;
+			width: 15px;
+			height: 15px;
+			padding: 0;
+			border: 1px solid var(--ui-color-border);
+			border-radius: 2px;
+			background: linear-gradient(180deg, #160d09, #362319);
+			box-shadow:
+				inset 0 2px 3px #080503cc,
+				inset 1px 0 #08050380,
+				0 1px #e4b78666;
+			vertical-align: middle;
+			cursor: pointer;
+		}
+
+		.ui-theme input[type="checkbox"]:checked {
+			background:
+				url("../../assets/icons/travelers-kit-check.svg") center / contain
+					no-repeat,
+				linear-gradient(180deg, #382217, #6b472b);
+		}
+
+		.ui-theme input[type="checkbox"]:hover:not(:disabled) {
+			border-color: var(--ui-color-highlight);
+		}
+
+		.ui-theme input:is([type="checkbox"], [type="range"]):disabled {
+			filter: grayscale(0.8);
+			opacity: 0.65;
+			cursor: not-allowed;
+		}
+
+		.ui-theme input[type="range"] {
+			appearance: none;
+			height: 20px;
+			margin-inline: 0;
+			background: transparent;
+			cursor: pointer;
+		}
+
+		/* Electron/Chromium owns the slider's value, gestures and keyboard steps;
+		   the trough and thumb are paint only, with no scripted progress state. */
+		.ui-theme input[type="range"]::-webkit-slider-runnable-track {
+			box-sizing: border-box;
+			height: 6px;
+			border: 1px solid var(--ui-color-border);
+			border-radius: 4px;
+			background: linear-gradient(180deg, #130b08, #3b271b);
+			box-shadow:
+				inset 0 1px 2px #080503cc,
+				0 1px #e4b78666;
+		}
+
+		.ui-theme input[type="range"]::-webkit-slider-thumb {
+			appearance: none;
+			box-sizing: border-box;
+			width: 16px;
+			height: 16px;
+			/* The 6px track has a 4px content box inside its border. */
+			margin-top: -6px;
+			border: 1px solid #8e5c37;
+			border-radius: 50%;
+			background:
+				radial-gradient(circle at 30% 20%, #ffe3b399, transparent 55%),
+				linear-gradient(135deg, #d7a974, #9e6b43 50%, #58341e);
+			box-shadow:
+				inset 1px 1px #f0c99a80,
+				inset -1px -1px #3b2316a6,
+				0 1px 2px #080503b3;
+		}
+
+		.ui-theme input[type="range"]:hover:not(:disabled)::-webkit-slider-thumb {
+			border-color: var(--ui-color-highlight);
+		}
+
+		.ui-theme input[type="range"]:active:not(:disabled)::-webkit-slider-thumb {
+			box-shadow:
+				inset 0 1px 3px #3b2316cc,
+				0 1px #f0c99a66;
+		}
+	}
+}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UiRange from "../app/UiRange.svelte";
 	import type { ClientAudioSettings } from "./client-settings-contract";
 	import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
 	import "./client-settings-controls.css";
@@ -19,10 +20,9 @@
 	{#each audioControls as control}
 		<label
 			>{control.label}: {Math.round(audio[control.key] * 100)}%
-			<input
-				type="range"
-				min="0"
-				max="1"
+			<UiRange
+				min={0}
+				max={1}
 				step="0.01"
 				value={audio[control.key]}
 				oninput={(event) =>

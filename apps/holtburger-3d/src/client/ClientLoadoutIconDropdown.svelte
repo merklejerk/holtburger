@@ -60,7 +60,7 @@
 
 <button
 	type="button"
-	class="ui-shortcut-cell ui-hud-button loadout-icon-dropdown"
+	class="ui-shortcut-cell ui-hud-control loadout-icon-dropdown"
 	data-loadout-result
 	bind:this={button}
 	use:register={owner}

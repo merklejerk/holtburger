@@ -52,7 +52,7 @@
 			<p role="status">Loading pages {reader.loaded} of {reader.total}…</p>
 		{:else if reader.kind === "failed"}
 			<p role="alert">{reader.error}</p>
-			<button type="button" onclick={onRetry}>Retry</button>
+			<button type="button" class="ui-button" onclick={onRetry}>Retry</button>
 		{:else}
 			{#if !hasText}<p>This book has no text.</p>{/if}
 			{#each reader.book.pages as page (page.index)}

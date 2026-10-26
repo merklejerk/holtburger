@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { TRAVELERS_KIT_THEME_ID } from "../app/ui-theme-contract";
 import { createDefaultClientUserSettings } from "./client-settings-defaults";
+
+// Vitest stubs CSS modules; the native probe verifies Vite's emitted asset URL.
+vi.mock("../app/themes/travelers-kit.css?url&no-inline", () => ({
+	default: "/assets/travelers-kit.css",
+}));
 
 interface StartupProps {
 	mode: "client";
@@ -17,7 +23,12 @@ const { mountShell, mountGame, bridge, themes, loader } = vi.hoisted(() => ({
 	>(async () => {}),
 	mountGame: vi.fn(),
 	bridge: { loadUser: vi.fn(), resetUser: vi.fn() },
-	themes: { list: vi.fn(), resolve: vi.fn(), openDirectory: vi.fn() },
+	themes: {
+		initialIds: [],
+		list: vi.fn(),
+		resolve: vi.fn(),
+		openDirectory: vi.fn(),
+	},
 	loader: { replace: vi.fn() },
 }));
 vi.mock("../app/mount", () => ({
@@ -91,6 +102,7 @@ it("defers Client construction and composes saved HUD placements after content r
 			props: expect.objectContaining({
 				contentLocation: "/selected/assets",
 				initialUserSettings: expect.objectContaining({
+					ui: expect.objectContaining({ themeId: TRAVELERS_KIT_THEME_ID }),
 					hudLayout: expect.objectContaining({
 						inventory,
 						journal: defaults.hudLayout.journal,
@@ -99,6 +111,11 @@ it("defers Client construction and composes saved HUD placements after content r
 				}),
 			}),
 		}),
+	);
+	expect(loader.replace).toHaveBeenCalledWith(
+		expect.stringContaining("/assets/travelers-kit.css"),
+		null,
+		expect.any(AbortSignal),
 	);
 	expect(bridge.resetUser).not.toHaveBeenCalled();
 });
@@ -223,4 +240,37 @@ it("close aborts pending theme resolution before any stylesheet or client can mo
 	await Promise.resolve();
 	expect(loader.replace).not.toHaveBeenCalled();
 	expect(mountGame).not.toHaveBeenCalled();
+});
+
+it("restores the bundled alternate before mounting even when user discovery fails", async () => {
+	savedTheme(TRAVELERS_KIT_THEME_ID);
+	themes.list.mockRejectedValueOnce(new Error("User themes unavailable"));
+	const shell = await startup();
+	expect(
+		await shell.startGame(
+			{} as HTMLElement,
+			new AbortController().signal,
+			new Map(),
+			"/assets",
+		),
+	).toBe(true);
+	expect(themes.resolve).not.toHaveBeenCalled();
+	expect(loader.replace).toHaveBeenCalledWith(
+		expect.stringContaining("travelers-kit"),
+		null,
+		expect.any(AbortSignal),
+	);
+	expect(mountGame).toHaveBeenCalledWith(
+		expect.anything(),
+		expect.objectContaining({
+			props: expect.objectContaining({
+				initialSettingsIssue: expect.stringContaining(
+					"User themes unavailable",
+				),
+				initialUserSettings: expect.objectContaining({
+					ui: expect.objectContaining({ themeId: TRAVELERS_KIT_THEME_ID }),
+				}),
+			}),
+		}),
+	);
 });

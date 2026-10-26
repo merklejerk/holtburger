@@ -5,6 +5,7 @@
 		type UiThemeSettings,
 	} from "../app/ui-theme-selection";
 	import { createElectronUiThemeTransport } from "../app/ui-theme-transport";
+	import { withBundledUiThemes } from "../app/ui-bundled-themes";
 	import { uiThemes } from "../app/mount";
 	import { createElectronClientSettingsTransport } from "../client/client-settings-transport";
 	import { createDefaultClientUserSettings } from "../client/client-settings-defaults";
@@ -22,7 +23,7 @@
 	);
 	const transport = createElectronClientSettingsTransport();
 	const owner = new UiThemeSelection(
-		createElectronUiThemeTransport(),
+		withBundledUiThemes(createElectronUiThemeTransport()),
 		uiThemes,
 	);
 	const { keyboard } = provideAppInputPolicy();

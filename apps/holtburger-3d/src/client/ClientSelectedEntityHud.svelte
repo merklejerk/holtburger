@@ -268,7 +268,7 @@
 	<div class="selected-entity__heading ui-hud-group">
 		{#if actions.length > 1}
 			<button
-				class="ui-hud-button"
+				class="ui-hud-button ui-icon-button"
 				type="button"
 				aria-label="Selected entity actions"
 				title="Selected entity actions"
@@ -281,7 +281,7 @@
 		{:else}
 			{#each actions as action (action.action)}
 				<button
-					class="ui-hud-button"
+					class="ui-hud-button ui-icon-button"
 					type="button"
 					aria-label={action.label}
 					title={action.description ?? action.label}
@@ -294,7 +294,7 @@
 			><span>{displayName}</span></strong
 		>
 		<button
-			class="ui-hud-button"
+			class="ui-hud-button ui-icon-button"
 			type="button"
 			disabled={examinePending}
 			onclick={onExamine}
@@ -348,16 +348,24 @@
 <style>
 	@layer components {
 		.selected-entity {
+			/* Header priority stays local to this HUD. */
+			isolation: isolate;
+			/* One dimension keeps header controls and their reserved grid column aligned. */
+			--selected-action-size: calc(32px * var(--ui-icon-scale));
 			display: grid;
 			box-sizing: border-box;
 			width: 100%;
 			height: 100%;
-			grid-template-rows: 24px 5px;
+			grid-template-rows: auto 5px;
+			align-content: start;
 			gap: 3px;
 		}
 		.selected-entity__heading {
+			/* Header controls and their painted edges must stay above the following health row. */
+			z-index: 1;
 			display: grid;
-			grid-template-columns: auto minmax(0, 1fr) 24px;
+			grid-template-columns: auto minmax(0, 1fr) var(--selected-action-size);
+			min-height: var(--selected-action-size);
 			gap: 4px;
 			align-items: center;
 		}
@@ -365,6 +373,8 @@
 			/* Keep the name centered when no left-side action is available. */
 			grid-column: 2;
 			font-weight: 600;
+			font-size: calc(var(--ui-font-size-heading-2) * var(--ui-text-scale));
+			line-height: 1.25;
 			text-align: center;
 			white-space: nowrap;
 			min-width: 0;
@@ -376,15 +386,15 @@
 		}
 		.selected-entity__heading button {
 			display: grid;
-			width: 24px;
-			height: 24px;
-			padding: 4px;
+			width: var(--selected-action-size);
+			height: var(--selected-action-size);
+			padding: calc(6px * var(--ui-icon-scale));
 			place-items: center;
 			pointer-events: auto;
 		}
 		.selected-entity__heading button :global(svg) {
-			width: 16px;
-			height: 16px;
+			width: calc(20px * var(--ui-icon-scale));
+			height: calc(20px * var(--ui-icon-scale));
 		}
 		.selected-entity__health {
 			overflow: hidden;

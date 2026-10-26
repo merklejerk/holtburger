@@ -5,6 +5,7 @@ import ClientApp from "./ClientApp.svelte";
 import { mount } from "svelte";
 import { UiThemeSelection } from "../app/ui-theme-selection";
 import { createElectronUiThemeTransport } from "../app/ui-theme-transport";
+import { withBundledUiThemes } from "../app/ui-bundled-themes";
 import { uiThemes, mountEntryWithProps } from "../app/mount";
 import { clientDebugEnabled } from "./client-debug";
 import { createClientShortcuts } from "./ClientShortcutDock.svelte";
@@ -53,7 +54,7 @@ async function startGame(
 
 	if (signal.aborted) return false;
 	const themeSelection = new UiThemeSelection(
-		createElectronUiThemeTransport(),
+		withBundledUiThemes(createElectronUiThemeTransport()),
 		uiThemes,
 		signal,
 	);

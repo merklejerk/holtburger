@@ -12,6 +12,7 @@ import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout.js"
 import { ENTITY_SHADOW_MODES } from "../lib/game/renderer/entity-shadow-modes.js";
 import { TEXTURE_FILTERING_POLICIES } from "../lib/game/renderer/texture-filtering-policy.js";
 import {
+	CLIENT_DEFAULT_THEME_ID,
 	CLIENT_FONT_FAMILY_OPTIONS,
 	CLIENT_VITAL_WARNING_PERCENT,
 	CLIENT_VITAL_WARNING_THRESHOLDS,
@@ -157,8 +158,8 @@ export type ClientVitalWarningThresholds = z.infer<
 /** User-scoped typography, artwork sizing, and vital warning thresholds. */
 export const clientUiSettingsSchema = z
 	.object({
-		/** Missing older preferences use Base; IDs survive unavailable-theme recovery. */
-		themeId: uiThemeIdSchema.nullable().default(null),
+		/** Absent choices use the client default; explicit Base/null and saved IDs are retained. */
+		themeId: uiThemeIdSchema.nullable().default(CLIENT_DEFAULT_THEME_ID),
 		/** Older sections inherit neutral scaling without losing fonts or warning thresholds. */
 		textScale: finiteNumber
 			.min(CLIENT_TEXT_SCALE.minimum)

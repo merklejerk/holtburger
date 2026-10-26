@@ -19,7 +19,7 @@ stylesheet changes.
 `mountEntry` imports the complete base appearance from `ui-base.css`. Its optional URL
 arguments select a theme and an override sheet, loaded before mounting Svelte. Both
 default to `null`, so ordinary startup requires no optional stylesheet. The client
-then restores its selected user theme after settings load and before mounting its UI.
+then restores its selected theme after settings load and before mounting its UI.
 Explorer retains Base.
 
 ## Authoring a replacement or override
@@ -88,6 +88,21 @@ The base appearance is a normal CSS import and updates through Vite CSS HMR.
 Desktop theme discovery and asset serving are owned by Electron; a filesystem path
 is not passed directly to the stylesheet loader.
 
+## Built-in themes
+
+**Traveler’s Kit** ships alongside Base and is available in pregame or in-game
+**Settings → UI → Theme**. Traveler’s Kit is the client default. It uses leather,
+stitching and copper fittings while retaining transparent content backgrounds.
+Selection, reload and saved preferences use the same owner as local themes.
+`src/app/ui-bundled-themes.ts` composes trusted Vite-emitted assets with the
+validated desktop transport; native URL validation remains unchanged.
+
+The name `Traveler’s Kit` is reserved. A local folder with that exact name makes
+catalog refresh report a collision; rename the folder and refresh. Previously
+available choices remain usable. Built-in choices remain available even if user
+folder discovery fails or times out. No built-in files are installed into the
+user-data directory.
+
 ## Installing and using local themes
 
 In either client settings surface, open **UI → Theme → Open themes folder**. This
@@ -153,12 +168,23 @@ these same families. `src/app/ui-fonts.css` loads the bundled files without host
 font substitution or network requests. Generic fallbacks cover loading failures
 and missing glyphs; `font-display: swap` allows text to appear while files load.
 Sources and redistribution licenses ship in `public/fonts/` (built `dist/fonts/`).
+Traveler’s Kit reuses those same bundled families; its serif HUD/header treatments
+use Gelasio rather than introducing another font.
+
+**Bundle any additional font your theme introduces.** Include its redistribution
+license and every weight/style the theme uses, then load it with `@font-face`.
+For local themes, keep font files inside the theme folder and use relative URLs
+as in the example above. Shipped themes should package font files with the app
+(e.g. under `public/fonts/`) and retain their notices. Avoid relying on a host
+installation or `local()` substitution for consistent rendering and metrics;
+generic fallback families should remain available for loading failures and
+missing glyphs.
 
 A failed selection keeps the previous appearance and preference. If a saved theme
 is missing at startup, Base is active and the unavailable preferred ID remains
 visible for retry. Restore its folder and use Reload, or explicitly select Base.
 Refresh list alone never changes the saved preference. `--ignore-config` starts
-with default Base through the existing configuration bypass; it does not delete
+with the current default Traveler’s Kit through the existing configuration bypass; it does not delete
 installed themes.
 
 The load deadline is `UI_THEME_LOAD_TIMEOUT_MS` in `src/app/ui-theme-contract.ts`.
@@ -178,7 +204,9 @@ installer, or Explorer theme picker is included.
 
 Run `npm run probe:user-themes` for automated Electron checks of serving,
 dependency reloads, fonts, cancellation/timeouts, both settings surfaces,
-persistence, and missing-theme recovery. The fixture fonts and images are original
+persistence, bundled assets, collisions, and missing-theme recovery. Pass `-- --package-root out/holtburger-3d-linux-x64` to `npm run probe:user-themes:built`
+to also load the diagnostic entry and theme assets from a Forge package’s ASAR
+(use the matching platform/architecture directory). The fixture fonts and images are original
 checked-in diagnostic assets; no game files or system fonts are needed.
 
 With local game content available, run
@@ -211,10 +239,10 @@ physical press, selection, an open panel, or disabled controls.
 | `--ui-easing`                                                                                                                                               | CSS easing function for small interactive motion details.                                                                             |
 | `--ui-button-background-color`, `--ui-button-border-color`                                                                                                  | Background color and border color for text buttons and tabs. Disabled buttons desaturate the background color.                        |
 | `--ui-hud-button-background`, `--ui-hud-button-indicator-color`                                                                                             | Optional full background for an icon's feathered backing (shared HUD tint by default), and underline color.                           |
+| `--ui-hud-control-background`, `--ui-hud-control-indicator-color`                                                                                           | Independent full backing and underline for labelled/compound HUD controls and cells.                                                  |
 | `--ui-combat-idle-opacity`, `--ui-combat-emphasis-duration`, `--ui-combat-opacity-transition-duration`                                                      | Whole-component idle opacity, full-emphasis hold time, and fade/hover transition time.                                                |
 | `--ui-combat-foreground-color`, `--ui-combat-outline-color`, `--ui-combat-track-color`, `--ui-combat-charge-color`                                          | Combat gauge ink, handle outline, unfilled track, and animated charge colors at full emphasis.                                        |
 | `--ui-combat-height-color`, `--ui-combat-height-selected-color`, `--ui-combat-height-hover-color`                                                           | Complete colors for the combat gauge's three attack-height button states.                                                             |
-| `--ui-combat-backdrop-color`, `--ui-combat-backdrop-filter`                                                                                                 | Combat gauge semicircle backing color and CSS filter, including `none`.                                                               |
 | `--ui-combat-handle-filter`, `--ui-combat-handle-focus-filter`, `--ui-combat-breakpoint-shadow`                                                             | Complete CSS filter and text-shadow recipes for the combat handle and breakpoint labels.                                              |
 | `--ui-option-background`, `--ui-option-border-color`                                                                                                        | Full background and border color for `ui-option` list rows. Rows implemented as `ui-button` use button properties.                    |
 | `--ui-input-background`, `--ui-input-border-color`                                                                                                          | Full background and border color for inputs. Use `::placeholder`, `:disabled`, and `[aria-invalid="true"]` for text and state colors. |
@@ -228,7 +256,17 @@ and `--ui-enchantments-heading-text-transform`. The overridden-spell tree uses
 The inline More.../Less... school-filter toggle uses the shared `ui-inline-button`
 style. Its pills retain the shared filter color, radius, and spacing tokens.
 
-Spell shortcuts use the same transparent cell face and feathered `ui-hud-button`
+Combat material layers use `.gauge-decoration` (rim, engravings and fasteners)
+and `.height-face` (button outlines). Base hides these optional SVG paint layers;
+Traveler’s Kit reveals them and hides `.gauge-background`. The component derives
+their paths from the same arc and row dimensions used by the hit targets, and
+marks the layers as noninteractive. Its per-instance `--combat-metal` URL points
+to a locally scoped gradient; it is an internal paint reference, not a theme-size
+setting. Themes style the gradient stops with `.gauge-metal-light`,
+`.gauge-metal-mid` and `.gauge-metal-dark`. Slider semantics, charge progression,
+idle/emphasis opacity and shortcut disclosure remain component-owned.
+
+Spell shortcuts use the same transparent cell face and feathered `ui-hud-control`
 backing as action cells. Their blue palette is independent of the mana meter:
 
 | Property                                                                            | Purpose                                                                      |
@@ -243,7 +281,9 @@ backing as action cells. Their blue palette is independent of the mana meter:
 | `--ui-spell-tab-border`, `--ui-spell-tab-radius`, `--ui-spell-tab-active-shadow`    | Tab decoration and selected indicator.                                       |
 | `--ui-spell-drop-outline`                                                           | Drop-target feedback.                                                        |
 
-Cell size follows `--ui-item-cell-min-size`, just like action bars. Both bars use
+Spell and action bar cells follow `--ui-shortcut-cell-size` (40px in Base),
+multiplied once by `--ui-icon-scale`. The same measured size determines their
+grids, clipping and HUD bounds. Both bars use
 the same inward-facing grid button: click to toggle between one ten-cell strip
 and two five-cell strips. Spell tabs retain their compact ten-button
 row in either shape; toggling shape preserves spell addresses and selected tab.
@@ -305,35 +345,48 @@ The base appearance defines `--ui-header-stripe-color` (color) and
 Optional themes can override these or replace the header background entirely. Use ordinary CSS for other styling;
 a property does not need a variable for every state or component instance.
 
-| Hook                                                           | Role                                                       |
-| -------------------------------------------------------------- | ---------------------------------------------------------- |
-| `ui-hud-surface`                                               | HUD backing on an element itself (chat, meters, map frame) |
-| `ui-panel`                                                     | Window, inspector, or dialog surface                       |
-| `ui-frame`, `ui-body`                                          | Panel header and content                                   |
-| `ui-well`                                                      | Reading/editing area                                       |
-| `ui-button`, `ui-tab`                                          | Buttons and tabs                                           |
-| `ui-input`, `ui-label`                                         | Inputs/selects and field grouping                          |
-| `ui-hud-input`                                                 | HUD chat entry, combined with `ui-input`                   |
-| `ui-hud-button`, `ui-readout`, `ui-hud-group`                  | HUD icon actions, readouts, and shared HUD backings        |
-| `ui-meter`, `ui-meter--health/stamina/mana`                    | Vital meters                                               |
-| `ui-disclosure`, `ui-option`                                   | Expandable groups and selectable results                   |
-| `ui-error`, `ui-tooltip`                                       | Errors and tooltips                                        |
-| `ui-muted`, `ui-mono`, `ui-danger`, `ui-warning`, `ui-success` | Text roles                                                 |
-| `ui-layout-editable`, `ui-icon-button`, `ui-tabs`              | Edit outline, icon controls, tab groups                    |
+| Hook                                                            | Role                                                            |
+| --------------------------------------------------------------- | --------------------------------------------------------------- |
+| `ui-hud-surface`                                                | HUD backing on an element itself (chat, meters, map frame)      |
+| `ui-panel`                                                      | Window, inspector, or dialog surface                            |
+| `ui-frame`, `ui-body`                                           | Panel header and content                                        |
+| `ui-well`                                                       | Reading/editing area                                            |
+| `ui-button`, `ui-tab`                                           | Buttons and tabs                                                |
+| `ui-input`, `ui-label`                                          | Inputs/selects and field grouping                               |
+| `ui-hud-input`                                                  | HUD chat entry, combined with `ui-input`                        |
+| `ui-hud-button`, `ui-hud-control`, `ui-readout`, `ui-hud-group` | Standalone icon actions, compound controls, readouts and groups |
+| `ui-meter`, `ui-meter--health/stamina/mana`                     | Vital meters                                                    |
+| `ui-disclosure`, `ui-option`                                    | Expandable groups and selectable results                        |
+| `ui-error`, `ui-tooltip`                                        | Errors and tooltips                                             |
+| `ui-muted`, `ui-mono`, `ui-danger`, `ui-warning`, `ui-success`  | Text roles                                                      |
+| `ui-layout-editable`, `ui-icon-button`, `ui-tabs`               | Edit outline, icon controls, tab groups                         |
 
 Use actual `disabled`, `aria-pressed`, `aria-selected`, and `aria-invalid` states.
 Keep keyboard focus distinct from selection. Native range and checkbox controls
 retain their behavior. Theme authors should preserve visible focus and readable
 contrast and respect the existing reduced-motion styling.
 
-Selected tabs/options use `aria-selected="true"`; toggle buttons and the showcase's
-page buttons use `aria-pressed="true"`. Dock buttons use that same accessible toggle
+Selected tabs/options use `aria-selected="true"`; toggle buttons use `aria-pressed="true"`. Dock buttons use that same accessible toggle
 state to indicate an open panel. Physical pointer press is `:active`.
 
-HUD icon backgrounds affect their feathered `::before` backing, keeping the button
-itself transparent. `ui-hud-group` owns one shared backing for adjacent HUD content;
-child readouts and icon buttons remain transparent inside it. Use `ui-button` or `ui-tab`
-for text controls even when they live in the HUD; reserve `ui-hud-button` for icon actions.
+HUD controls have two distinct style families. Use `ui-hud-button` for standalone
+single-icon actions and `ui-hud-control` for labelled or compound controls, item
+cells, party rows and spell tabs. They share Base interaction and focus styling
+and retain identical default backing recipes, but expose independent theme hooks.
+The standalone icon class is the safe target for circular nailhead treatments;
+compound controls keep their feature-owned geometry. `ui-icon-button` remains the
+shared icon-layout marker, including for ordinary `ui-button` controls.
+
+`--ui-hud-button-background` and `--ui-hud-button-indicator-color` apply only to
+standalone icons. Compound controls use `--ui-hud-control-background` and
+`--ui-hud-control-indicator-color`. Backgrounds paint their feathered `::before`
+backing, leaving the element transparent in Base. `ui-hud-group` owns one shared
+backing for adjacent content; child readouts and both interactive families remain
+transparent inside it. Ordinary text commands still use `ui-button` or `ui-tab`.
+Item-strip arrows are compound controls with a continuous strip-sized click area;
+their `ui-item-strip-arrow` hook can receive a full-width pill face independently
+of standalone icon styling.
+
 Recipes consume the same component
 properties in every state and supply palette-based defaults when those properties
 are unset. The theme chooses state colors through CSS selectors.
@@ -403,7 +456,14 @@ For example, a HUD-only treatment uses the same property:
 
 ```css
 .ui-theme
-	:is(.ui-readout, .ui-hud-group, .ui-hud-button, .ui-hud-surface, .ui-meter) {
+	:is(
+		.ui-readout,
+		.ui-hud-group,
+		.ui-hud-button,
+		.ui-hud-control,
+		.ui-hud-surface,
+		.ui-meter
+	) {
 	--ui-backdrop-filter: blur(8px);
 }
 ```
@@ -462,6 +522,13 @@ The route loads its composition lazily. It does not load world/presentation owne
 create a canvas, or start a content host. A few shared tuning-policy modules and
 the components' bounded UI sampling timers are still used. The GPU-backed minimap
 and rendered world remain covered by the client/browser harness, not this showcase.
+
+The sidebar’s **Minimap → Show waypoint guide** toggle sets a sample destination
+through the fixture’s navigation owner. It previews the production off-disc arrow
+and distance footer; clearing the destination in that footer also clears the
+checkbox. This works with every showcase theme and retains the same minimap.
+Traveler’s Kit styles the shared north letter and optional
+`.minimap-north-ornament` SVG; Base keeps the original cardinal lettering.
 
 The older `?ui-theme=1` recipe specimen remains a separate diagnostic for controlled
 contrast and material tests; it is not the production-component showcase.

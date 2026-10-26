@@ -444,7 +444,8 @@ default) rotate the character in place while precise targeting blocks translatio
 Optional theme and override stylesheets use the same loader without recreating
 runtime owners. Both inherit unspecified properties from the base appearance;
 removing both sheets restores the base without loading another stylesheet.
-The client supports local theme folders with CSS, images, and fonts. In pregame or
+The client defaults to **Traveler’s Kit**, selectable alongside Base in Settings → UI → Theme.
+Existing saved theme choices are preserved. It also supports local theme folders with CSS, images, and fonts. In pregame or
 in-game Settings → UI, use **Open themes folder**, add a subfolder containing
 `theme.css`, click **Refresh list**, and select it. **Reload theme** refreshes the
 bundle while preserving the running client. Selection is saved; a missing theme
@@ -456,8 +457,14 @@ folder contract, supported assets, cascade rules, and recovery. Run
 `npm run probe:user-themes` for the focused Electron verification.
 
 For lightweight theme iteration, run `npm run dev:ui` from this directory. It opens
-real production HUD components with fixture data and no world renderer or Rust host.
-Edit the theme CSS and click **Reload theme** to preserve the current UI state.
+one fixture-backed client stage with the real HUD, minimap, action bars and floating
+windows, without a Rust host or game server. The sidebar opens panel specimens in
+place and controls backdrops, text/icon scale, layout editing and low-vitals
+screen-edge effects. Common controls, dropdowns, dialogs and pregame samples live
+in the **Component showcase** window. Hiding that window retains its contents.
+Edit the theme CSS and click **Reload theme** to preserve the running client and drafts.
+Visual review belongs to the user; browser probes exercise DOM and interactions,
+and the showcase probe captures screenshots only when explicitly requested.
 
 See the [UI style guide](UI_STYLE_GUIDE.md) for configuration, recipes, extension
 rules, semantic visualization exceptions, accessibility, and browser verification.
@@ -479,7 +486,6 @@ The party HUD reads `--ui-party-*` properties from the active theme. Defaults li
 	--ui-party-name-font-size: 12px;
 	--ui-party-name-gap: 4px;
 	--ui-party-leader-icon-size: 12px;
-	--ui-party-scrollbar-allowance: 32px;
 }
 ```
 
@@ -487,7 +493,8 @@ Cell height is derived from the four row heights plus three vital gaps, so bar a
 spacing edits stay consistent. CSS lengths such as `rem` and `calc()` are supported.
 Cell dimensions and minimum resize bounds update with the theme; the saved window
 position and preferred size remain user layout preferences. The four-column cap is
-app behavior. Health, stamina, mana, and backing colors use the existing shared theme hooks.
+app behavior. Rows beyond the saved panel height remain visible without scrolling.
+Health, stamina, mana, and backing colors use the existing shared theme hooks.
 
 Capture the real component with eight synthetic teammates using
 `npm run harness:browser -- --client-party-screenshots /tmp/party-hud --viewport-height 1000`.

@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { TRAVELERS_KIT_THEME_ID } from "../src/app/ui-theme-contract.js";
+import { CLIENT_DEFAULT_THEME_ID } from "../src/client/client-settings-values.js";
 import { clientUserSettingsPatchSchema } from "../src/client/client-settings-sections.js";
 import { z } from "zod";
 import { ClientSettingsStore } from "./client-settings-store.js";
@@ -31,6 +33,9 @@ const origin = process.argv
 	.find((arg) => arg.startsWith("--probe-origin="))
 	?.slice("--probe-origin=".length);
 if (origin === undefined) throw new Error("Missing --probe-origin");
+const packageRoot = process.argv
+	.find((arg) => arg.startsWith("--probe-package-root="))
+	?.slice("--probe-package-root=".length);
 const directory = mkdtempSync(join(tmpdir(), "holtburger-user-theme-probe-"));
 app.setPath("userData", join(directory, "profile"));
 app.whenReady().then(async () => {
@@ -53,7 +58,11 @@ app.whenReady().then(async () => {
 			maximized: false,
 		});
 		await store.load();
-		ipcMain.handle("themes:list", () => catalog.list());
+		let failCatalog = false;
+		ipcMain.handle("themes:list", () => {
+			if (failCatalog) throw new Error("Diagnostic user catalog failure");
+			return catalog.list();
+		});
 		ipcMain.handle("themes:resolve", (_event, id: string) =>
 			catalog.resolve(id),
 		);
@@ -83,7 +92,10 @@ app.whenReady().then(async () => {
 			if (level === "error") consoleErrors.push(`${sourceId}: ${message}`);
 		});
 		const read = async (expression: string): Promise<unknown> =>
-			target.webContents.executeJavaScript(expression);
+			target.webContents.executeJavaScript(`(async () => {
+     try { return await (${expression}); }
+     catch (error) { throw new Error(String(error)); }
+    })()`);
 		const wait = async (expression: string) => {
 			for (let attempt = 0; attempt < 200; attempt++) {
 				if (await read(expression)) return;
@@ -115,20 +127,37 @@ app.whenReady().then(async () => {
 			read(
 				`[...document.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(text)}).click()`,
 			);
-		const modes = ["development", "built-file"] as const;
-		for (const mode of modes) {
+		// Each entry carries its load target; packaged paths only exist with an explicit root.
+		const entries: (
+			| { mode: "development"; url: string }
+			| { mode: "built-file" | "packaged-asar"; file: string }
+		)[] = [
+			{ mode: "development", url: `${origin}/harness/user-theme/` },
+			{
+				mode: "built-file",
+				file: join(appRoot, "dist/harness/user-theme/index.html"),
+			},
+		];
+		if (packageRoot !== undefined) {
+			const resources =
+				process.platform === "darwin"
+					? join(packageRoot, "holtburger-3d.app/Contents/Resources")
+					: join(packageRoot, "resources");
+			entries.push({
+				mode: "packaged-asar",
+				file: join(resources, "app.asar/dist/harness/user-theme/index.html"),
+			});
+		}
+		for (const entry of entries) {
+			const { mode } = entry;
 			await cp(join(fixture, "probe-500.ttf"), join(theme, "font.ttf"));
 			await cp(join(fixture, "panel.svg"), join(theme, "panel.svg"));
 			await cp(
 				join(fixture, "styles/controls.css"),
 				join(theme, "styles/controls.css"),
 			);
-			if (mode === "development")
-				await target.loadURL(`${origin}/harness/user-theme/`);
-			else
-				await target.loadFile(
-					join(appRoot, "dist/harness/user-theme/index.html"),
-				);
+			if (entry.mode === "development") await target.loadURL(entry.url);
+			else await target.loadFile(entry.file);
 			await target.webContents
 				.executeJavaScript(`new Promise((resolve, reject) => {
 			const deadline = setTimeout(() => reject(new Error("Theme probe did not mount")), 10000);
@@ -200,6 +229,84 @@ app.whenReady().then(async () => {
 			assert.match(String(missingFont), /Could not load combat font/);
 			assert.match(String(corruptFont), /Could not load combat font/);
 			await mountSettings();
+
+			// Bundled assets and preferences use the same renderer owner and real disk-backed settings.
+			const bundledId = TRAVELERS_KIT_THEME_ID;
+			if (mode === "development") {
+				// First document uses a fresh profile; later modes intentionally restore saved Base.
+				assert.equal(
+					await read(`${settingsApi}.read().ui.themeId`),
+					CLIENT_DEFAULT_THEME_ID,
+				);
+				assert.equal(
+					await read(`${settingsApi}.read().state.selection.activeId`),
+					CLIENT_DEFAULT_THEME_ID,
+				);
+			}
+			assert.ok(
+				await read(
+					`${settingsApi}.read().state.catalog.ids.includes(${JSON.stringify(bundledId)})`,
+				),
+			);
+			await select(bundledId);
+			await wait(
+				`${settingsApi}.read().state.selection.activeId === ${JSON.stringify(bundledId)}`,
+			);
+			const bundledAssets = async () =>
+				read(`(async () => {
+    const sheet = [...document.styleSheets].find(sheet => sheet.href?.includes('travelers-kit'));
+    if (!sheet) throw new Error('Bundled stylesheet is missing');
+    const specimen = document.createElement('div');
+    specimen.className = 'ui-theme';
+    specimen.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none';
+    specimen.innerHTML = '<div class="ui-panel"><div class="ui-frame"></div><input type="checkbox" checked><div class="minimap-frame"></div></div>';
+    document.body.append(specimen);
+    try {
+     const panel = specimen.querySelector('.ui-panel');
+     const sources = [getComputedStyle(panel).borderImageSource,
+      ...[...specimen.querySelectorAll('.ui-frame,input,.minimap-frame')].map(node => getComputedStyle(node).backgroundImage)].join(',');
+     const urls = [...sources.matchAll(/url\\("([^"]+)"\\)/g)].map(match => match[1]);
+     const unique = [...new Set(urls)];
+     for (const url of unique) { const image = new Image(); image.src = url; try { await image.decode(); } catch (error) { throw new Error("Could not decode bundled image: " + url + "; " + String(error)); } }
+     return { href: sheet.href, decoded: unique.length };
+    } finally { specimen.remove(); }
+   })()`);
+			const assets = z
+				.object({ href: z.string(), decoded: z.number() })
+				.parse(await bundledAssets());
+			assert.equal(assets.decoded, 4);
+			if (mode === "packaged-asar") assert.ok(assets.href.includes("app.asar"));
+			await read(`${settingsApi}.flush()`);
+			await reload();
+			await mountSettings();
+			assert.equal(
+				await read(`${settingsApi}.read().state.selection.activeId`),
+				bundledId,
+			);
+			await click("Reload theme");
+			await wait(`${settingsApi}.read().state.selection.kind === 'ready'`);
+			assert.equal(
+				z.object({ decoded: z.number() }).parse(await bundledAssets()).decoded,
+				4,
+			);
+			failCatalog = true;
+			await click("Refresh list");
+			await wait(`${settingsApi}.read().state.catalog.kind === 'failed'`);
+			assert.equal(
+				await read(
+					`${settingsApi}.read().state.catalog.ids.includes(${JSON.stringify(bundledId)})`,
+				),
+				true,
+			);
+			failCatalog = false;
+			const collision = join(directory, "themes", bundledId);
+			await cp(fixture, collision, { recursive: true });
+			await click("Refresh list");
+			await wait(`document.body.textContent.includes('Rename that folder')`);
+			await rm(collision, { recursive: true });
+			await click("Refresh list");
+			await wait(`${settingsApi}.read().state.catalog.kind === 'ready'`);
+
 			// Exercise the real pregame settings controls and persisted user section.
 			await select(id);
 			await wait(
@@ -241,7 +348,9 @@ app.whenReady().then(async () => {
 			);
 			await rm(join(theme, "theme.css"));
 			await click("Refresh list");
-			await wait(`${settingsApi}.read().state.catalog.ids.length === 0`);
+			await wait(
+				`!${settingsApi}.read().state.catalog.ids.includes(${JSON.stringify(id)})`,
+			);
 			await click("Reload theme");
 			await wait(`${settingsApi}.read().state.selection.kind === 'failed'`);
 			assert.equal(
@@ -277,6 +386,7 @@ app.whenReady().then(async () => {
 				JSON.stringify({
 					mode,
 					baseFonts,
+					bundled: assets,
 					first,
 					second,
 					cancelled,

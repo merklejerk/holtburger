@@ -79,7 +79,7 @@
 <button
 	bind:this={trigger}
 	type="button"
-	class="inventory-currency ui-hud-button"
+	class="inventory-currency ui-hud-control"
 	aria-label={label}
 	aria-describedby={id}
 	onpointerenter={open}

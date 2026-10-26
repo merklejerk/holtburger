@@ -19,8 +19,6 @@ export const PARTY_HUD_MAXIMUM_COLUMNS = 4;
 export interface PartyHudGeometry {
 	/** Cell dimensions resolved by the browser, including rem/em/calc theme values. */
 	readonly cellSize: { readonly width: number; readonly height: number };
-	/** Reserved native scrollbar space, included in the minimum editable width. */
-	readonly scrollbarAllowance: number;
 }
 
 /** Read actual CSS dimensions from the isolated probe; never parse raw custom properties. */
@@ -28,7 +26,6 @@ export function readPartyHudGeometry(node: HTMLElement): PartyHudGeometry {
 	const style = getComputedStyle(node);
 	const width = Number.parseFloat(style.width);
 	const height = Number.parseFloat(style.height);
-	const scrollbarAllowance = Number.parseFloat(style.paddingRight);
 	if (!Number.isFinite(width) || width <= 0)
 		throw new Error(
 			"Party theme cell width must resolve to a positive CSS length",
@@ -37,11 +34,7 @@ export function readPartyHudGeometry(node: HTMLElement): PartyHudGeometry {
 		throw new Error(
 			"Party theme cell height must resolve to a positive CSS length",
 		);
-	if (!Number.isFinite(scrollbarAllowance))
-		throw new Error(
-			"Party theme scrollbar allowance must resolve to a CSS length",
-		);
-	return { cellSize: { width, height }, scrollbarAllowance };
+	return { cellSize: { width, height } };
 }
 
 /** Sampled by the app with the session's current player identity, before the component renders. */

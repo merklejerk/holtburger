@@ -1,5 +1,18 @@
 <script lang="ts">
+	import type { ClientUserSettings } from "../../client/client-settings-contract";
 	import { createFixtureThemeSettings } from "./ui-showcase-themes";
+	import UiShowcaseWorkbench from "./UiShowcaseWorkbench.svelte";
+	import {
+		SHOWCASE_CHARACTER_SHEET,
+		SHOWCASE_WAYPOINT,
+		SHOWCASE_ITEM_GUID_BASE,
+		SHOWCASE_ENCHANTMENTS,
+		SHOWCASE_VITAL_KINDS,
+		showcaseActionBars,
+		type ShowcasePanel,
+		type UiShowcaseSession,
+	} from "./ui-showcase-fixture";
+	import { provideItemCooldowns } from "../../app/item-cooldowns.svelte";
 	import { createSalvageFixture } from "./client-salvage-fixture";
 	import { ClientSalvageState } from "../../client/client-salvage-state";
 	import "../../client/client-canvas.css";
@@ -180,6 +193,7 @@
 	import type { ClientAppPhase } from "../../client/client-app-lifecycle";
 	import { ClientInventoryState } from "../../client/client-inventory-state";
 	import { browserUiIconRepository } from "../../app/ui-icon-repository";
+	import { createClientShortcuts } from "../../client/ClientShortcutDock.svelte";
 	import ClientGameplayView from "../../client/ClientGameplayView.svelte";
 	import { createWorldMapFixture } from "./world-map-fixture";
 	import type {
@@ -198,6 +212,7 @@
 		probeClientWaypoint,
 		type WaypointProbeControls,
 	} from "./client-waypoint-probe";
+	import type { MapWaypointTarget } from "../../lib/game/map/map-waypoint";
 	import { ClientNavigationWaypointOwner } from "../../client/client-navigation-waypoint";
 	import type { MinimapFrame } from "../../app/minimap-frame";
 	import type { MapEntity } from "../../lib/game/map/map-blips";
@@ -220,6 +235,22 @@
 		createDefaultClientCharacterSettings,
 		createDefaultClientUserSettings,
 	} from "../../client/client-settings-defaults";
+	interface Props {
+		/** Render the interactive showcase around the same client fixture used by probes. */
+		readonly showcase?: boolean;
+	}
+	const { showcase = false }: Props = $props();
+	/** Ready commands are installed only after the real fixture session starts. */
+	let showcaseStartupError = $state<string | null>(null);
+	let showcaseActions = $state<Omit<
+		UiShowcaseSession,
+		| "vitals"
+		| "warningsEnabled"
+		| "editable"
+		| "jumpExtent"
+		| "jumpActive"
+		| "waypointEnabled"
+	> | null>(null);
 	const fixtureTheme = createFixtureThemeSettings((id) => {
 		userSettings = { ...userSettings, ui: { ...userSettings.ui, themeId: id } };
 	});
@@ -246,12 +277,15 @@
 	const environmentPresets = clientWeatherPresets(environmentRegion);
 	/** Binding is imperative; only its cold mismatch message enters markup. */
 	let environmentIssue = $state<string | null>(null);
-	let userSettings = $state.raw(
-		createDefaultClientUserSettings(
-			{ width: window.innerWidth, height: window.innerHeight },
-			9,
-		),
+	const initialUserSettings = createDefaultClientUserSettings(
+		{ width: window.innerWidth, height: window.innerHeight },
+		9,
 	);
+	// Fixtures mount Base; the interactive showcase selects the client default during startup.
+	let userSettings = $state.raw<ClientUserSettings>({
+		...initialUserSettings,
+		ui: { ...initialUserSettings.ui, themeId: null },
+	});
 	const clientInput = provideClientInput(
 		new AppInput(clientInputConfiguration(untrack(() => userSettings.input))),
 	);
@@ -370,6 +404,19 @@
 	let releaseSpellReferenceGate: (() => void) | null = null;
 	let closeSpellModal: (() => void) | null = null;
 	let savedCaster: ClientEntityFacts | null = null;
+	function seedSpellBar(): void {
+		spellBar = initialSpellBar();
+		hudMode = "runtime";
+		spellCombatMode = "magic";
+		emitInteractionEvent("client-lifecycle-changed", { kind: "in-world" });
+		emitInteractionEvent("client-local-player-established", {
+			playerGuid: 1,
+		});
+		emitInteractionEvent("client-combat-mode-updated", { mode: "magic" });
+		emitInteractionEvent("client-player-spells-updated", {
+			spellIds: [1, 2, 3],
+		});
+	}
 	const spellBarProbe = {
 		caster: (spell: number | null, wielded: boolean) => {
 			const read = interactionLifecycle.entities.read();
@@ -430,17 +477,7 @@
 			savedCaster = null;
 		},
 		begin: () => {
-			spellBar = initialSpellBar();
-			hudMode = "runtime";
-			spellCombatMode = "magic";
-			emitInteractionEvent("client-lifecycle-changed", { kind: "in-world" });
-			emitInteractionEvent("client-local-player-established", {
-				playerGuid: 1,
-			});
-			emitInteractionEvent("client-combat-mode-updated", { mode: "magic" });
-			emitInteractionEvent("client-player-spells-updated", {
-				spellIds: [1, 2, 3],
-			});
+			seedSpellBar();
 			releaseSpellKeys = keyboard.bindGame({
 				keydown: (event) => {
 					handleSpellBarKeydown(
@@ -1351,6 +1388,17 @@
 	}
 	let spells = $state<ClientSpellServices | null>(null);
 	let enchantments = $state.raw<ClientTimedEnchantments | null>(null);
+	const itemCooldowns = provideItemCooldowns();
+	$effect(() => {
+		itemCooldowns.replace(
+			enchantments === null
+				? null
+				: {
+						cooldowns: enchantments.resolved.cooldowns,
+						receivedAtMs: enchantments.receivedAtMs,
+					},
+		);
+	});
 	let salvage = $state<ClientSalvageState | null>(null);
 	let inventory = $state<ClientInventoryState | null>(null);
 	let vendor = $state<ClientVendorState | null>(null);
@@ -2845,9 +2893,7 @@
 					horizontal: { alignment: "start", offset: 400 },
 					vertical: { alignment: "start", offset: 32 },
 					preferredWidth:
-						columns * geometry.cellSize.width +
-						(columns - 1) * geometry.gap +
-						geometry.scrollbarAllowance,
+						columns * geometry.cellSize.width + (columns - 1) * geometry.gap,
 					preferredHeight:
 						rows * geometry.cellSize.height + (rows - 1) * geometry.gap,
 				},
@@ -2868,15 +2914,10 @@
 			getComputedStyle(grid).gridTemplateColumns.split(" ").length !== columns
 		)
 			throw new Error("Party screenshot has the wrong column count");
-		const scroll = grid.parentElement;
-		if (scroll === null)
-			throw new Error("Party screenshot scroll area is missing");
-		if (
-			scroll.scrollHeight > scroll.clientHeight ||
-			scroll.scrollWidth > scroll.clientWidth
-		)
-			throw new Error("Party screenshot would clip teammates");
 		const rect = panel.getBoundingClientRect();
+		const content = grid.getBoundingClientRect();
+		if (content.width > rect.width || content.height > rect.height)
+			throw new Error("Party screenshot bounds do not include all teammates");
 		return {
 			x: rect.x,
 			y: rect.y,
@@ -2996,8 +3037,7 @@
 							...start,
 							preferredWidth:
 								columns * geometry.cellSize.width +
-								(columns - 1) * geometry.gap +
-								geometry.scrollbarAllowance,
+								(columns - 1) * geometry.gap,
 							preferredHeight: geometry.cellSize.height * 4 + geometry.gap * 3,
 						},
 					},
@@ -3008,22 +3048,6 @@
 				if (actualColumns !== Math.min(columns, PARTY_HUD_MAXIMUM_COLUMNS))
 					throw new Error(
 						`Party HUD column mismatch: ${actualColumns} at ${columns}`,
-					);
-				const scroll = grid().parentElement;
-				if (scroll === null) throw new Error("Missing party scroll area");
-				const rowCount = Math.ceil(rows().length / actualColumns);
-				const contentHeight =
-					rowCount * geometry.cellSize.height + (rowCount - 1) * geometry.gap;
-				if (
-					contentHeight <= scroll.clientHeight &&
-					scroll.scrollHeight > scroll.clientHeight
-				)
-					throw new Error(
-						"Fitting party cells introduced a vertical scrollbar",
-					);
-				if (scroll.scrollWidth > scroll.clientWidth)
-					throw new Error(
-						"Fitting party cells introduced a horizontal scrollbar",
 					);
 				if (
 					[...rows()].some(
@@ -3045,9 +3069,25 @@
 				},
 			};
 			await settle();
-			const scroll = panel().querySelector<HTMLElement>(".party-hud-scroll");
-			if (scroll === null || scroll.scrollHeight <= scroll.clientHeight)
-				throw new Error("Short party HUD did not allow scrolling");
+			const roster = grid();
+			const members = [...rows()];
+			const lastMember = members.at(-1);
+			if (
+				getComputedStyle(roster).overflowX !== "visible" ||
+				getComputedStyle(roster).overflowY !== "visible"
+			)
+				throw new Error("Party roster must paint overflow in both axes");
+			if (
+				lastMember === undefined ||
+				lastMember.getBoundingClientRect().bottom <=
+					panel().getBoundingClientRect().bottom
+			)
+				throw new Error(
+					"Short party HUD did not expose overflowing roster rows",
+				);
+			roster.scrollTop = geometry.cellSize.height;
+			if (roster.scrollTop !== 0)
+				throw new Error("Party roster captured scrolling");
 			if (
 				interactionCommands
 					.slice(commandStart)
@@ -3148,7 +3188,6 @@
 				"--ui-party-mana-height": "6px",
 				"--ui-party-stamina-height": "10px",
 				"--ui-party-grid-gap": "0.5rem",
-				"--ui-party-scrollbar-allowance": "200px",
 				"--ui-party-name-font-size": "13px",
 				"--ui-party-leader-icon-size": "14px",
 			} as const;
@@ -3191,9 +3230,7 @@
 					getComputedStyle(grid()).gridTemplateColumns.split(" ").length >
 					PARTY_HUD_MAXIMUM_COLUMNS
 				)
-					throw new Error(
-						"Themed scrollbar allowance exceeded the party column cap",
-					);
+					throw new Error("Themed party grid exceeded the column cap");
 				userSettings = {
 					...userSettings,
 					hudLayout: {
@@ -3204,7 +3241,7 @@
 				await settle();
 				const rect = panel().getBoundingClientRect();
 				if (
-					rect.width !== themed.cellSize.width + themed.scrollbarAllowance ||
+					rect.width !== themed.cellSize.width ||
 					rect.height !== themed.cellSize.height
 				)
 					throw new Error(
@@ -3848,6 +3885,16 @@
 	const waypointOwner = new ClientNavigationWaypointOwner(
 		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
 	);
+	/** Cold showcase control mirrors explicit destination edits, never map-frame updates. */
+	let showcaseWaypointEnabled = $state(false);
+	function setWaypoint(target: MapWaypointTarget): void {
+		waypointOwner.set(target, notifyWaypoint);
+		showcaseWaypointEnabled = true;
+	}
+	function clearWaypoint(): void {
+		waypointOwner.clear();
+		showcaseWaypointEnabled = false;
+	}
 	let waypointProbeEnabled = false;
 	let waypointContentProbeEnabled = false;
 	let waypointAvailable = true;
@@ -3870,6 +3917,7 @@
 			)
 		)
 			waypointServerMessages.push(message);
+		showcaseWaypointEnabled = readMinimapFrame().waypoint !== null;
 	}
 	function readMinimapFrame(): MinimapFrame {
 		const frame: MinimapFrame = {
@@ -4453,8 +4501,24 @@
 		viewportHoverPoints.length = 0;
 	}
 
+	const showcaseSession = $derived(
+		showcaseActions === null
+			? null
+			: {
+					...showcaseActions,
+					vitals: warningVitals,
+					warningsEnabled: vitalWarningsEnabled,
+					editable: hudMode === "layout",
+					jumpExtent,
+					jumpActive: jumpChargeActive,
+					waypointEnabled: showcaseWaypointEnabled,
+				},
+	);
+
 	onMount(() => {
 		const retireKeyboard = keyboard.mount(document);
+		let releaseShowcaseKeys: (() => void) | null = null;
+		let mounted = true;
 		const unsubscribeChat = interactionLifecycle.subscribe((event) => {
 			if (event.type === "chat") {
 				chatComposer.accept(event.message);
@@ -4677,7 +4741,8 @@
 			icons,
 		);
 		spells = spellState;
-		probeBrowserInput(keyboard, inputGate);
+		// Synthetic focus/key assertions belong to the diagnostic entry, not interactive startup.
+		if (!showcase) probeBrowserInput(keyboard, inputGate);
 		const unsubscribePanelAuthority = interactionLifecycle.subscribe(
 			(event) => {
 				if (event.type === "party-presence") partyHudPresent = event.hudPresent;
@@ -4696,7 +4761,7 @@
 					canTeleportFromMap = event.state.canTeleportFromMap;
 			},
 		);
-		void interactionLifecycle.start();
+		const sessionStarted = interactionLifecycle.start();
 		const overlayObservation = observeMinimapOverlayArcCalls();
 		readMinimapOverlayArcCalls = overlayObservation.read;
 		const harnessGlobal = globalThis as typeof globalThis & {
@@ -5280,7 +5345,291 @@
 			teleportMinimapSubject,
 			toggleMode,
 		};
+		function seedShowcaseInventory(): void {
+			const read = interactionLifecycle.entities.read();
+			if (read.kind !== "current")
+				throw new Error("Showcase inventory needs a current baseline");
+			const player = read.level.entities.get(1);
+			if (player === undefined) throw new Error("Showcase player is missing");
+			const contents = Array.from(
+				{ length: 24 },
+				(_, index): ClientEntityFacts => {
+					const item = entityFacts(SHOWCASE_ITEM_GUID_BASE + index, {
+						ownedByPlayer: true,
+						location:
+							index === 0
+								? {
+										kind: "equipped",
+										wearerGuid: 1,
+										mask: EQUIPMENT_SLOTS[0].mask,
+									}
+								: {
+										kind: "contained",
+										parentGuid: 1,
+										slot: { kind: "item", index: index - 1 },
+									},
+					});
+					if (item.description.kind !== "known")
+						throw new Error("Showcase item description is missing");
+					return {
+						...item,
+						description: {
+							...item.description,
+							name:
+								index === 0 ? "Traveler’s equipment" : `Travel supply ${index}`,
+							stackCount:
+								index === 1 || index === 2 || index % 3 === 0 ? 12 : null,
+							cooldown:
+								index === 2 ? { groupId: 1, durationSeconds: 12 } : null,
+							equipLocations: index === 0 ? EQUIPMENT_SLOTS[0].mask : null,
+							icon: {
+								...item.description.icon,
+								base: 0x06001000 + index,
+							},
+						},
+					};
+				},
+			);
+			emitInteractionEvent("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				removed: [],
+				upserts: [
+					{
+						...player,
+						storage: {
+							kind: "container",
+							roster: "announced",
+							itemCapacity: 48,
+							packCapacity: 7,
+						},
+					},
+					...contents,
+				],
+			});
+		}
+		function seedShowcaseHud(): void {
+			seedShowcaseInventory();
+			interactionLifecycle.characterSheet.replace(SHOWCASE_CHARACTER_SHEET);
+			emitInteractionEvent("client-party-updated", {
+				party: {
+					name: "Travelers",
+					leader: PARTY_HUD_PREVIEW.leader,
+					shareXp: true,
+					evenShare: true,
+					open: false,
+					locked: false,
+					capabilities: {
+						isLeader: true,
+						canRecruit: true,
+						canChangeOpenness: true,
+					},
+					members: [
+						{
+							guid: 1,
+							name: "Wayfarer",
+							level: 10,
+							canManage: true,
+							vitals: [100, 100, 100, 100, 100, 100],
+						},
+						...PARTY_HUD_PREVIEW.members.map((member) => ({
+							...member,
+							level: 10,
+							canManage: false,
+						})),
+					],
+				},
+			});
+			emitInteractionEvent("client-entity-health-updated", {
+				guid: 7,
+				healthFraction: 0.68,
+			});
+		}
+		async function openShowcasePanel(panel: ShowcasePanel): Promise<void> {
+			const api = harnessGlobal.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__;
+			if (api === undefined || gameplayView === null)
+				throw new Error("Showcase client fixture did not mount");
+			if (panel === "inventory") {
+				gameplayView.showInventory();
+			} else if (panel === "vendor") {
+				api.vendorProbe.begin();
+				await api.vendorProbe.settle();
+				api.vendorProbe.reply({
+					buys: [],
+					sells: [],
+					currencies: api.vendorProbe.currencies,
+					affordable: true,
+				});
+			} else if (panel === "trade") {
+				api.tradeProbe.begin();
+				api.tradeProbe.register();
+				api.tradeProbe.acknowledge();
+			} else if (panel === "inspection") {
+				await objectInspectionOwner.examine(7);
+				emitInteractionEvent(
+					"client-object-inspection-result",
+					inspectionResult("item", 7),
+				);
+			} else if (panel === "book") {
+				emitInteractionEvent("client-book-opened", {
+					name: "A Traveler’s Journal",
+					book: {
+						guid: 6000,
+						authorName: "A traveler",
+						inscription: "For those who follow the road.",
+						pages: [
+							{
+								index: 0,
+								authorName: "",
+								text: "The road to Holtburg winds between old stone walls.\n\nMeet your fellowship at 42.1N, 33.6E before setting out.",
+							},
+							{
+								index: 1,
+								authorName: "",
+								text: "Keep a little room in your pack for what you find along the way.",
+							},
+						],
+					},
+				});
+			} else if (panel === "spells") {
+				seedSpellBar();
+				spellBarProbe.bind(0, 1);
+				spellBarProbe.bind(1, 2);
+				spellBarProbe.bind(2, 3);
+				spellBarProbe.bind(spellBar.tabs[spellBar.selected].length - 1, 1);
+			} else if (panel === "combat") {
+				combatBarProbe.active("melee");
+				emitInteractionEvent("client-combat-mode-updated", { mode: "melee" });
+			} else if (panel === "salvage") {
+				api.salvageProbe.begin();
+				api.salvageProbe.activateBound();
+				// Opening the tool requires the same authority estimate as live use.
+				api.salvageProbe.reply();
+				salvageOwner.add(9201);
+				api.salvageProbe.reply();
+			}
+			seedShowcaseHud();
+			await tick();
+		}
+		if (showcase) {
+			void sessionStarted
+				.then(async () => {
+					if (!mounted) return;
+					await fixtureTheme.applyPreview(
+						initialUserSettings.ui.themeId,
+						false,
+					);
+					if (!mounted) return;
+					seedShowcaseHud();
+					nearbyMapFixture = true;
+					waypointCameraHeading = Math.PI / 6;
+					selection.select(7);
+					warningVitals = SHOWCASE_VITAL_KINDS.map((kind) => ({
+						kind,
+						current: 100,
+						maximum: 100,
+					}));
+					jumpExtent = 0.65;
+					jumpChargeActive = true;
+					const resetLayout = () => {
+						const rect = gameplayCanvas?.getBoundingClientRect();
+						if (rect === undefined)
+							throw new Error("Showcase canvas did not mount");
+						const defaults = createDefaultClientUserSettings(
+							{ width: rect.width, height: rect.height },
+							createClientShortcuts(true).length,
+						);
+						userSettings = { ...userSettings, hudLayout: defaults.hudLayout };
+						if (characterSettings === null)
+							throw new Error("Showcase character settings are missing");
+						characterSettings = {
+							...characterSettings,
+							actionBars: showcaseActionBars(),
+						};
+					};
+					const restartCooldown = () => {
+						enchantments = {
+							receivedAtMs: performance.now(),
+							resolved: SHOWCASE_ENCHANTMENTS,
+						};
+					};
+					resetLayout();
+					restartCooldown();
+					releaseShowcaseKeys = keyboard.bindGame({
+						keydown: (event) => {
+							if (gameplayView?.handleSystemPanelKeydown(event)) return;
+							if (
+								handleSpellBarKeydown(
+									clientInput,
+									event,
+									spellBarEnabled,
+									selectSpellTab,
+									activateSpellCell,
+									activateCasterSpell,
+								)
+							)
+								return;
+							handleCombatBarKeydown(
+								clientInput,
+								event,
+								hudMode === "runtime" &&
+									(spellCombatMode === "melee" ||
+										spellCombatMode === "missile"),
+								selectCombatBreakpoint,
+								selectCombatHeight,
+							);
+						},
+						keyup: () => {},
+						cancel: () => {},
+					});
+					showcaseActions = {
+						openPanel: openShowcasePanel,
+						setVital: (kind, percent) => {
+							warningVitals = warningVitals.map((vital) =>
+								vital.kind === kind
+									? { ...vital, current: percent, maximum: 100 }
+									: vital,
+							);
+						},
+						setWarningsEnabled: (enabled) => (vitalWarningsEnabled = enabled),
+						setEditable: (editable) =>
+							(hudMode = editable ? "layout" : "runtime"),
+						setJump: (extent, active) => {
+							jumpExtent = extent;
+							jumpChargeActive = active;
+						},
+						setWaypointEnabled: (enabled) => {
+							if (enabled) {
+								waypointControls.enable();
+								setWaypoint(SHOWCASE_WAYPOINT);
+							} else clearWaypoint();
+						},
+						resetLayout,
+						restartCooldown,
+						notify: (message) => {
+							toast = { id: performance.now(), message, tone: "status" };
+						},
+					};
+					appendChat({
+						kind: "system",
+						message:
+							"Welcome to the UI showcase. All windows share this client stage.",
+					});
+					await tick();
+				})
+				.catch((error: unknown) => {
+					if (!mounted) return;
+					console.error(error);
+					showcaseStartupError =
+						error instanceof Error ? error.message : String(error);
+				});
+		}
+
 		return () => {
+			mounted = false;
+			showcaseActions = null;
+			releaseShowcaseKeys?.();
 			retireKeyboard();
 			unsubscribeChat();
 			objectInspectionProbe.end();
@@ -5332,336 +5681,361 @@
 	});
 </script>
 
-<!-- Match the app's non-null dialog lifetime across nested snippet teardown. -->
-<div
-	bind:this={interactionRoot}
-	class="harness-appearance ui-theme"
-	style:--ui-text-scale={userSettings.ui.textScale}
-	style:--ui-icon-scale={userSettings.ui.iconScale}
->
-	{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
-		<ClientMessageDialog
-			{presentation}
-			onDismiss={(id) => dialogOwner?.dismissPopup(id)}
-			onRespond={(id, accepted, suppress) => {
-				void dialogOwner?.respond(id, accepted, suppress);
-			}}
-		/>
-	{/each}
-
-	{#if !previewCharacters}
-		<canvas
-			bind:this={gameplayCanvas}
-			class="client-canvas gameplay"
-			data-game-viewport
-			tabindex="-1"
-			aria-label="Game world"
-		></canvas>
-		{#if gameplayCanvas !== null && interactionRoot !== null}
-			<ClientGameplayView
-				theme={fixtureTheme}
-				canReturnToMenu={true}
-				canDisconnect={true}
-				onReturnToMainMenu={() => void interactionLifecycle.logout()}
-				onDisconnect={() => void interactionLifecycle.disconnect()}
-				bind:this={gameplayView}
-				{emotesEnabled}
-				nearby={nearbyOwner}
-				onSelectNearbyEntity={(guid) => selection.selectKnownEntity(guid)}
-				onClearWaypoint={() => waypointOwner.clear()}
-				onSetWaypoint={(target) => waypointOwner.set(target, notifyWaypoint)}
-				{partyHudPresent}
-				readPartyHudDisplay={() =>
-					presentPartyHud(
-						interactionLifecycle.partySnapshot(),
-						interactionLifecycle.state().playerGuid,
-					)}
-				onPartyHudDemand={(enabled) =>
-					interactionLifecycle.setPartyUpdateDemand("hud", enabled)}
-				party={socialParty}
-				friends={interactionLifecycle.friends}
-				contracts={interactionLifecycle.contracts}
-				squelch={interactionLifecycle.squelch}
-				allegiance={interactionLifecycle.allegiance}
-				characterGuid={housingCharacterGuid}
-				{houseCrystal}
-				{housing}
-				{housingManagement}
-				onSearchHousing={async (houseType) => {
-					housingSearches.push(houseType);
-					housing = {
-						...housing,
-						search: { ...housing.search, pendingType: houseType },
-					};
+{#snippet client()}
+	<!-- Match the app's non-null dialog lifetime across nested snippet teardown. -->
+	<div
+		bind:this={interactionRoot}
+		class="harness-appearance ui-theme"
+		style:--ui-text-scale={userSettings.ui.textScale}
+		style:--ui-icon-scale={userSettings.ui.iconScale}
+	>
+		{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
+			<ClientMessageDialog
+				{presentation}
+				onDismiss={(id) => dialogOwner?.dismissPopup(id)}
+				onRespond={(id, accepted, suppress) => {
+					void dialogOwner?.respond(id, accepted, suppress);
 				}}
-				onRefreshHousing={async () => {
-					housingRefreshes += 1;
-				}}
-				readConnection={() => interactionLifecycle.connectionSample()}
-				characterSheet={interactionLifecycle.characterSheet}
-				{appearanceOptions}
-				onAppearanceOptionChange={async (option, enabled) => {
-					appearanceOptions = {
-						...appearanceOptions,
-						[option === "helmet" ? "showHelmet" : "showCloak"]: enabled,
-					};
-				}}
-				inspectionPreviewHeight={userSettings.inspection.previewHeight}
-				audio={userSettings.audio}
-				onAudioChange={(audio) => (userSettings = { ...userSettings, audio })}
-				graphics={userSettings.graphics}
-				ui={userSettings.ui}
-				clockFormat={userSettings.clockFormat}
-				environmentOverrides={userSettings.environmentOverrides}
-				weatherPresets={environmentPresets}
-				{environmentIssue}
-				readServerEnvironment={() => environmentServer.readout()}
-				onClockFormatChange={(clockFormat) =>
-					(userSettings = { ...userSettings, clockFormat })}
-				onEnvironmentOverridesChange={changeEnvironmentOverrides}
-				input={userSettings.input}
-				textureFilteringCapabilities={{ maximumAnisotropy: 8 }}
-				onGraphicsChange={(graphics) =>
-					(userSettings = { ...userSettings, graphics })}
-				onUiChange={(ui) => (userSettings = { ...userSettings, ui })}
-				onInputChange={changeInput}
-				onInspectionPreviewHeightChange={(previewHeight) =>
-					(userSettings = {
-						...userSettings,
-						inspection: { previewHeight },
-					})}
-				objectPreviewService={{
-					open: () => ({
-						dispose: async () => undefined,
-						diagnostics: () => null,
-						ready: Promise.resolve(),
-						replaceSource: async () => ({ kind: "installed" }),
-						withdrawSource: async () => undefined,
-						setViewport: () => undefined,
-					}),
-				}}
-				itemSession={interactionLifecycle}
-				hudLayout={userSettings.hudLayout}
-				onHudPlacementChange={(surface, placement) =>
-					(userSettings = {
-						...userSettings,
-						hudLayout: { ...userSettings.hudLayout, [surface]: placement },
-					})}
-				onHudReset={(hudLayout) =>
-					(userSettings = { ...userSettings, hudLayout })}
-				spellBarShape={userSettings.spellBarShape}
-				onSpellBarShapeChange={(spellBarShape) =>
-					(userSettings = { ...userSettings, spellBarShape })}
-				minimapViewDiameters={userSettings.minimapViewDiameters}
-				onMinimapViewDiametersChange={(minimapViewDiameters) =>
-					(userSettings = { ...userSettings, minimapViewDiameters })}
-				chatFilters={userSettings.chatFilters}
-				onChatFiltersChange={(chatFilters) =>
-					(userSettings = { ...userSettings, chatFilters })}
-				actionBars={characterSettings?.actionBars ?? null}
-				onActionBarsChange={(actionBars) => {
-					if (characterSettings !== null)
-						characterSettings = { ...characterSettings, actionBars };
-				}}
-				{hudMode}
-				onHudModeChange={(mode) => (hudMode = mode)}
-				{spellBar}
-				onSpellBarChange={(state) => (spellBar = state)}
-				{spellBarEnabled}
-				onSelectSpellTab={selectSpellTab}
-				onActivateSpellCell={activateSpellCell}
-				onActivateCasterSpell={activateCasterSpell}
-				combatMode={spellCombatMode}
-				{combatStatus}
-				{combatProfileSelectionRevision}
-				combatControls={characterSettings?.combatControls ?? {
-					melee: { height: "medium", power: 0.5 },
-					missile: { height: "medium", accuracy: 0.5 },
-				}}
-				onCombatProfileSelect={selectCombatProfile}
-				combatEnabled={true}
-				onToggleCombat={() => {}}
-				onCastSpell={(id) => void castSpell(id)}
-				{itemInteractions}
-				entityMetadata={{
-					status: "available",
-					path: "fixture.hwc",
-					recordCount: 1,
-				}}
-				entityCollisionDisabled={false}
-				onEntityCollisionDisabledChange={() => {}}
-				cameraController={cameraEnabled ? cameraController : null}
-				mouseMovement={mouseFixture.movement}
-				{preciseJumpActive}
-				onPreciseJumpAim={() => {
-					preciseJumpAimCount += 1;
-				}}
-				onPreciseJumpPowerSet={(power) => {
-					jumpExtent = Math.max(MINIMUM_JUMP_POWER, Math.min(1, power));
-				}}
-				onPreciseJumpPowerAdjust={(steps) => preciseJumpPowerSteps.push(steps)}
-				onPreciseJumpActivate={() => {
-					preciseJumpActivationCount += 1;
-				}}
-				readCanSetCorpsePermission={() => true}
-				onCorpsePermission={(name, granted) => {
-					toast = {
-						id: 1,
-						message: `corpse-permission:${name}:${granted}`,
-						tone: "status",
-					};
-				}}
-				onSocialNotice={(message) => {
-					toast = { id: 1, message, tone: "warning" };
-				}}
-				onInventoryNotice={(message) => {
-					toast = { id: 1, message, tone: "status" };
-				}}
-				onCoordinatesCopied={() => {
-					toast = {
-						id: 2,
-						message: "Coordinates copied to clipboard.",
-						tone: "status",
-					};
-				}}
-				onPickInventoryTarget={(_x, _y, destination) => {
-					if (inventoryWorldResult === null)
-						pendingInventoryWorldPick = destination;
-					else if (destination.isCurrent())
-						destination.commit(inventoryWorldResult);
-				}}
-				onViewportSelect={(x, y) => {
-					viewportSelectionPoints.push({ x, y });
-					selectEntity(7);
-				}}
-				onViewportExamine={(x, y) => {
-					viewportSelectionPoints.push({ x, y });
-					selectEntity(7);
-					void objectInspectionOwner.examine(7);
-				}}
-				onViewportHover={(x, y) => {
-					viewportHoverPoints.push({ x, y });
-					// The item-use fixture supplies explicit hit-test results through hoverWorld.
-					if (activeItemUseProbe === null)
-						hoveredGuid = hoverHitEnabled ? 7 : null;
-				}}
-				onViewportHoverClear={() => (hoveredGuid = null)}
-				onMaintainEntitySelection={() => {
-					selectionMaintenanceCount += 1;
-				}}
-				onSelectPartyMember={(guid) => selection.selectKnownEntity(guid)}
-				onSelectEntity={selectEntity}
-				debugEnabled={true}
-				{unrestrictedUse}
-				onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
-				{readMinimapFrame}
-				worldMapSource={worldMapFixture.source}
-				{canTeleportFromMap}
-				recallDestinations={[]}
-				onRecall={async () => {}}
-				onTeleportToMapPosition={(position) =>
-					interactionLifecycle.teleportToMapPosition(position)}
-				{readDiagnostics}
-				{readSelectedEntity}
-				{readFrameRates}
-				readTargetIndicatorFrame={() => targetIndicatorFrame}
-				readSelectedEntityDisplay={() => interactions.display(unrestrictedUse)}
-				{spells}
-				{enchantments}
-				{inventory}
-				{worldContainer}
-				{vendor}
-				{salvage}
-				{trade}
-				onSelectContentsItem={(guid, mode) =>
-					selection.selectContentsItem(guid, mode)}
-				onInteractEntity={() =>
-					itemInteractions.interactSelected(unrestrictedUse)}
-				{objectInspection}
-				{bookReader}
-				onCloseBook={() => bookReaderOwner.close()}
-				onRetryBook={() => bookReaderOwner.retry()}
-				onExamineEntity={examineHarnessSelection}
-				onExamineItem={examineHarnessItem}
-				onCloseInspection={() => objectInspectionOwner.close()}
-				selectedEntityGuid={selectedGuid}
-				hoveredEntityGuid={hoveredGuid}
-				showRetailHiddenGeometry={false}
-				onShowRetailHiddenGeometryChange={() => undefined}
-				playerName="Alice"
-				worldName="ACE Emulator"
-				{vitalWarningsEnabled}
-				vitals={warningVitals}
-				{jumpChargeActive}
-				jumpPowerKeys={["W", "S"]}
-				readJumpExtent={() => jumpExtent}
-				{toast}
-				chatMessages={messages}
-				{chatComposer}
-				{sentChatHistory}
-				onSendChat={async (message, resolution) => {
-					sentChatHistory = recordSentChat(
-						sentChatHistory,
-						message,
-						chatHistoryLimit,
-					);
-					if (resolution.kind === "error") throw new Error(resolution.message);
-					if (resolution.kind === "send" || resolution.kind === "sequence") {
-						await chatComposer.sendAll(
-							resolution.kind === "send"
-								? [resolution.request]
-								: resolution.requests,
-							async (request) => {
-								await interactionLifecycle.sendChat(request);
-								chatRequests.push(request);
-							},
-						);
-					} else if (runClientHelpCommand(message, appendChat)) {
-						return;
-					} else if (waypointProbeEnabled) submitWaypointChat(message);
-					else if (message.startsWith("/"))
-						throw new Error(
-							"Unknown command. Use /help for supported commands.",
-						);
-					else await interactionLifecycle.sendChat({ kind: "speech", message });
-				}}
-				onSendChatError={(message) => {
-					appendChat({ kind: "error", message });
-				}}
-				canvasElement={gameplayCanvas}
-				{interactionRoot}
 			/>
+		{/each}
+
+		{#if !previewCharacters}
+			<canvas
+				bind:this={gameplayCanvas}
+				class="client-canvas gameplay"
+				data-game-viewport
+				tabindex="-1"
+				aria-label="Game world"
+			></canvas>
+			{#if gameplayCanvas !== null && interactionRoot !== null}
+				<ClientGameplayView
+					theme={fixtureTheme}
+					canReturnToMenu={true}
+					canDisconnect={true}
+					onReturnToMainMenu={() => void interactionLifecycle.logout()}
+					onDisconnect={() => void interactionLifecycle.disconnect()}
+					bind:this={gameplayView}
+					{emotesEnabled}
+					nearby={nearbyOwner}
+					onSelectNearbyEntity={(guid) => selection.selectKnownEntity(guid)}
+					onClearWaypoint={clearWaypoint}
+					onSetWaypoint={setWaypoint}
+					{partyHudPresent}
+					readPartyHudDisplay={() =>
+						presentPartyHud(
+							interactionLifecycle.partySnapshot(),
+							interactionLifecycle.state().playerGuid,
+						)}
+					onPartyHudDemand={(enabled) =>
+						interactionLifecycle.setPartyUpdateDemand("hud", enabled)}
+					party={socialParty}
+					friends={interactionLifecycle.friends}
+					contracts={interactionLifecycle.contracts}
+					squelch={interactionLifecycle.squelch}
+					allegiance={interactionLifecycle.allegiance}
+					characterGuid={housingCharacterGuid}
+					{houseCrystal}
+					{housing}
+					{housingManagement}
+					onSearchHousing={async (houseType) => {
+						housingSearches.push(houseType);
+						housing = {
+							...housing,
+							search: { ...housing.search, pendingType: houseType },
+						};
+					}}
+					onRefreshHousing={async () => {
+						housingRefreshes += 1;
+					}}
+					readConnection={() => interactionLifecycle.connectionSample()}
+					characterSheet={interactionLifecycle.characterSheet}
+					{appearanceOptions}
+					onAppearanceOptionChange={async (option, enabled) => {
+						appearanceOptions = {
+							...appearanceOptions,
+							[option === "helmet" ? "showHelmet" : "showCloak"]: enabled,
+						};
+					}}
+					inspectionPreviewHeight={userSettings.inspection.previewHeight}
+					audio={userSettings.audio}
+					onAudioChange={(audio) => (userSettings = { ...userSettings, audio })}
+					graphics={userSettings.graphics}
+					ui={userSettings.ui}
+					clockFormat={userSettings.clockFormat}
+					environmentOverrides={userSettings.environmentOverrides}
+					weatherPresets={environmentPresets}
+					{environmentIssue}
+					readServerEnvironment={() => environmentServer.readout()}
+					onClockFormatChange={(clockFormat) =>
+						(userSettings = { ...userSettings, clockFormat })}
+					onEnvironmentOverridesChange={changeEnvironmentOverrides}
+					input={userSettings.input}
+					textureFilteringCapabilities={{ maximumAnisotropy: 8 }}
+					onGraphicsChange={(graphics) =>
+						(userSettings = { ...userSettings, graphics })}
+					onUiChange={(ui) => (userSettings = { ...userSettings, ui })}
+					onInputChange={changeInput}
+					onInspectionPreviewHeightChange={(previewHeight) =>
+						(userSettings = {
+							...userSettings,
+							inspection: { previewHeight },
+						})}
+					objectPreviewService={{
+						open: () => ({
+							dispose: async () => undefined,
+							diagnostics: () => null,
+							ready: Promise.resolve(),
+							replaceSource: async () => ({ kind: "installed" }),
+							withdrawSource: async () => undefined,
+							setViewport: () => undefined,
+						}),
+					}}
+					itemSession={interactionLifecycle}
+					hudLayout={userSettings.hudLayout}
+					onHudPlacementChange={(surface, placement) =>
+						(userSettings = {
+							...userSettings,
+							hudLayout: { ...userSettings.hudLayout, [surface]: placement },
+						})}
+					onHudReset={(hudLayout) =>
+						(userSettings = { ...userSettings, hudLayout })}
+					spellBarShape={userSettings.spellBarShape}
+					onSpellBarShapeChange={(spellBarShape) =>
+						(userSettings = { ...userSettings, spellBarShape })}
+					minimapViewDiameters={userSettings.minimapViewDiameters}
+					onMinimapViewDiametersChange={(minimapViewDiameters) =>
+						(userSettings = { ...userSettings, minimapViewDiameters })}
+					chatFilters={userSettings.chatFilters}
+					onChatFiltersChange={(chatFilters) =>
+						(userSettings = { ...userSettings, chatFilters })}
+					actionBars={characterSettings?.actionBars ?? null}
+					onActionBarsChange={(actionBars) => {
+						if (characterSettings !== null)
+							characterSettings = { ...characterSettings, actionBars };
+					}}
+					{hudMode}
+					onHudModeChange={(mode) => (hudMode = mode)}
+					{spellBar}
+					onSpellBarChange={(state) => (spellBar = state)}
+					{spellBarEnabled}
+					onSelectSpellTab={selectSpellTab}
+					onActivateSpellCell={activateSpellCell}
+					onActivateCasterSpell={activateCasterSpell}
+					combatMode={spellCombatMode}
+					{combatStatus}
+					{combatProfileSelectionRevision}
+					combatControls={characterSettings?.combatControls ?? {
+						melee: { height: "medium", power: 0.5 },
+						missile: { height: "medium", accuracy: 0.5 },
+					}}
+					onCombatProfileSelect={selectCombatProfile}
+					combatEnabled={true}
+					onToggleCombat={() => {
+						if (!showcase) return;
+						spellCombatMode = spellCombatMode === "peace" ? "melee" : "peace";
+						emitInteractionEvent("client-combat-mode-updated", {
+							mode: spellCombatMode,
+						});
+					}}
+					onCastSpell={(id) => void castSpell(id)}
+					{itemInteractions}
+					entityMetadata={{
+						status: "available",
+						path: "fixture.hwc",
+						recordCount: 1,
+					}}
+					entityCollisionDisabled={false}
+					onEntityCollisionDisabledChange={() => {}}
+					cameraController={cameraEnabled ? cameraController : null}
+					mouseMovement={mouseFixture.movement}
+					{preciseJumpActive}
+					onPreciseJumpAim={() => {
+						preciseJumpAimCount += 1;
+					}}
+					onPreciseJumpPowerSet={(power) => {
+						jumpExtent = Math.max(MINIMUM_JUMP_POWER, Math.min(1, power));
+					}}
+					onPreciseJumpPowerAdjust={(steps) =>
+						preciseJumpPowerSteps.push(steps)}
+					onPreciseJumpActivate={() => {
+						preciseJumpActivationCount += 1;
+					}}
+					readCanSetCorpsePermission={() => true}
+					onCorpsePermission={(name, granted) => {
+						toast = {
+							id: 1,
+							message: `corpse-permission:${name}:${granted}`,
+							tone: "status",
+						};
+					}}
+					onSocialNotice={(message) => {
+						toast = { id: 1, message, tone: "warning" };
+					}}
+					onInventoryNotice={(message) => {
+						toast = { id: 1, message, tone: "status" };
+					}}
+					onCoordinatesCopied={() => {
+						toast = {
+							id: 2,
+							message: "Coordinates copied to clipboard.",
+							tone: "status",
+						};
+					}}
+					onPickInventoryTarget={(_x, _y, destination) => {
+						if (inventoryWorldResult === null)
+							pendingInventoryWorldPick = destination;
+						else if (destination.isCurrent())
+							destination.commit(inventoryWorldResult);
+					}}
+					onViewportSelect={(x, y) => {
+						viewportSelectionPoints.push({ x, y });
+						selectEntity(7);
+					}}
+					onViewportExamine={(x, y) => {
+						viewportSelectionPoints.push({ x, y });
+						selectEntity(7);
+						void objectInspectionOwner.examine(7);
+					}}
+					onViewportHover={(x, y) => {
+						viewportHoverPoints.push({ x, y });
+						// The item-use fixture supplies explicit hit-test results through hoverWorld.
+						if (activeItemUseProbe === null)
+							hoveredGuid = hoverHitEnabled ? 7 : null;
+					}}
+					onViewportHoverClear={() => (hoveredGuid = null)}
+					onMaintainEntitySelection={() => {
+						selectionMaintenanceCount += 1;
+					}}
+					onSelectPartyMember={(guid) => selection.selectKnownEntity(guid)}
+					onSelectEntity={selectEntity}
+					debugEnabled={true}
+					{unrestrictedUse}
+					onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
+					{readMinimapFrame}
+					worldMapSource={worldMapFixture.source}
+					{canTeleportFromMap}
+					recallDestinations={[]}
+					onRecall={async () => {}}
+					onTeleportToMapPosition={(position) =>
+						interactionLifecycle.teleportToMapPosition(position)}
+					{readDiagnostics}
+					{readSelectedEntity}
+					{readFrameRates}
+					readTargetIndicatorFrame={() => targetIndicatorFrame}
+					readSelectedEntityDisplay={() =>
+						interactions.display(unrestrictedUse)}
+					{spells}
+					{enchantments}
+					{inventory}
+					{worldContainer}
+					{vendor}
+					{salvage}
+					{trade}
+					onSelectContentsItem={(guid, mode) =>
+						selection.selectContentsItem(guid, mode)}
+					onInteractEntity={() =>
+						itemInteractions.interactSelected(unrestrictedUse)}
+					{objectInspection}
+					{bookReader}
+					onCloseBook={() => bookReaderOwner.close()}
+					onRetryBook={() => bookReaderOwner.retry()}
+					onExamineEntity={examineHarnessSelection}
+					onExamineItem={examineHarnessItem}
+					onCloseInspection={() => objectInspectionOwner.close()}
+					selectedEntityGuid={selectedGuid}
+					hoveredEntityGuid={hoveredGuid}
+					showRetailHiddenGeometry={false}
+					onShowRetailHiddenGeometryChange={() => undefined}
+					playerName={showcase ? "Wayfarer" : "Alice"}
+					worldName={showcase ? "Dereth" : "ACE Emulator"}
+					{vitalWarningsEnabled}
+					vitals={warningVitals}
+					{jumpChargeActive}
+					jumpPowerKeys={["W", "S"]}
+					readJumpExtent={() => jumpExtent}
+					{toast}
+					chatMessages={messages}
+					{chatComposer}
+					{sentChatHistory}
+					onSendChat={async (message, resolution) => {
+						sentChatHistory = recordSentChat(
+							sentChatHistory,
+							message,
+							chatHistoryLimit,
+						);
+						if (resolution.kind === "error")
+							throw new Error(resolution.message);
+						if (resolution.kind === "send" || resolution.kind === "sequence") {
+							await chatComposer.sendAll(
+								resolution.kind === "send"
+									? [resolution.request]
+									: resolution.requests,
+								async (request) => {
+									await interactionLifecycle.sendChat(request);
+									chatRequests.push(request);
+								},
+							);
+						} else if (runClientHelpCommand(message, appendChat)) {
+							return;
+						} else if (waypointProbeEnabled) submitWaypointChat(message);
+						else if (message.startsWith("/"))
+							throw new Error(
+								"Unknown command. Use /help for supported commands.",
+							);
+						else
+							await interactionLifecycle.sendChat({ kind: "speech", message });
+					}}
+					onSendChatError={(message) => {
+						appendChat({ kind: "error", message });
+					}}
+					canvasElement={gameplayCanvas}
+					{interactionRoot}
+				/>
+			{/if}
 		{/if}
-	{/if}
-	{#if previewCharacters}
-		<div
-			class="character-preview ui-theme"
-			use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
-		>
-			<section class="ui-panel">
-				<header class="ui-frame">Asheron’s Call</header>
-				<div class="ui-body">
-					<ClientCharacterSelect
-						visualCache={null}
-						management={{ kind: "idle" }}
-						creation={null}
-						scene={null}
-						state={characterState}
-						{entryPending}
-						onChoose={(guid) =>
-							(characterState = { ...characterState, selectedGuid: guid })}
-						onEnter={() => {
-							entryPending = true;
-						}}
-						onDisconnect={() => {
-							previewCharacters = false;
-						}}
-					/>
-				</div>
-			</section>
-		</div>
-	{/if}
-</div>
+		{#if previewCharacters}
+			<div
+				class="character-preview ui-theme"
+				use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
+			>
+				<section class="ui-panel">
+					<header class="ui-frame">Asheron’s Call</header>
+					<div class="ui-body">
+						<ClientCharacterSelect
+							visualCache={null}
+							management={{ kind: "idle" }}
+							creation={null}
+							scene={null}
+							state={characterState}
+							{entryPending}
+							onChoose={(guid) =>
+								(characterState = { ...characterState, selectedGuid: guid })}
+							onEnter={() => {
+								entryPending = true;
+							}}
+							onDisconnect={() => {
+								previewCharacters = false;
+							}}
+						/>
+					</div>
+				</section>
+			</div>
+		{/if}
+	</div>
+{/snippet}
+{#if showcase}
+	<UiShowcaseWorkbench
+		session={showcaseSession}
+		startupError={showcaseStartupError}
+		themeSettings={fixtureTheme}
+		preferences={userSettings}
+		onSettingsChange={(settings) => (userSettings = settings)}
+	>
+		{@render client()}
+	</UiShowcaseWorkbench>
+{:else}
+	{@render client()}
+{/if}
 
 <style>
 	@layer components {

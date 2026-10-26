@@ -245,7 +245,7 @@
 			>
 				<button
 					type="button"
-					class="inventory-tool ui-hud-button"
+					class="inventory-tool ui-hud-button ui-icon-button"
 					aria-label="Toggle helmet visibility"
 					aria-pressed={appearanceOptions?.showHelmet ?? false}
 					disabled={appearanceOptions === null || appearanceOptionPending}
@@ -258,7 +258,7 @@
 				</button>
 				<button
 					type="button"
-					class="inventory-tool ui-hud-button"
+					class="inventory-tool ui-hud-button ui-icon-button"
 					aria-label="Toggle cloak visibility"
 					aria-pressed={appearanceOptions?.showCloak ?? false}
 					disabled={appearanceOptions === null || appearanceOptionPending}
@@ -271,7 +271,7 @@
 				</button>
 				<button
 					type="button"
-					class="inventory-tool ui-hud-button"
+					class="inventory-tool ui-hud-button ui-icon-button"
 					aria-label="Create loadout"
 					title="Create loadout"
 					disabled={pending || view?.equipment.pending !== false}

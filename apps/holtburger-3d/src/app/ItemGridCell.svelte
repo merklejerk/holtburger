@@ -100,7 +100,7 @@
 
 <button
 	type="button"
-	class="item-grid-cell ui-item-cell ui-item-selection ui-hud-button"
+	class="item-grid-cell ui-item-cell ui-item-selection ui-hud-control"
 	data-empty={empty}
 	data-template-wcid={templateWcid}
 	data-dimmed={dimmed}

@@ -28,7 +28,7 @@
 	<button
 		{...button}
 		type="button"
-		class="item-queue-cell ui-item-cell ui-item-selection ui-hud-button {className}"
+		class="item-queue-cell ui-item-cell ui-item-selection ui-hud-control {className}"
 	>
 		{@render children()}
 	</button>

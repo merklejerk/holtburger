@@ -175,6 +175,7 @@
 		readonly onFooterExtentChange?: (extent: MinimapFooterExtent) => void;
 	}
 
+	const minimapId = $props.id();
 	const {
 		readFrame,
 		onClearWaypoint,
@@ -925,6 +926,7 @@
 <section
 	bind:this={minimapElement}
 	class="minimap ui-theme"
+	style:--minimap-north-face={`url(#${minimapId}-north-gold)`}
 	class:ui-layout-editable={editable}
 	style:left={`${viewState.left}px`}
 	style:top={`${viewState.top}px`}
@@ -961,6 +963,18 @@
 		<svg class="minimap-compass" viewBox="-100 -100 200 200" aria-hidden="true">
 			<!-- The camera's own cone, attached to the subject even when the viewed centre is panned. -->
 			<defs>
+				<!-- Optional metal face; per-instance IDs keep separate minimaps independent. -->
+				<linearGradient
+					id={`${minimapId}-north-gold`}
+					x1="0"
+					y1="0"
+					x2="0"
+					y2="1"
+				>
+					<stop class="minimap-north-gold-light" offset="0" />
+					<stop class="minimap-north-gold-mid" offset="0.45" />
+					<stop class="minimap-north-gold-dark" offset="1" />
+				</linearGradient>
 				<clipPath id="minimap-disc-clip">
 					<circle cx="0" cy="0" r={DISC_RADIUS} />
 				</clipPath>
@@ -970,6 +984,23 @@
 				<path bind:this={coneElement} class="minimap-cone" />
 			</g>
 			<g bind:this={northGroup}>
+				<!-- Optional north fittings share the compass rotation; themes own their paint. -->
+				<g
+					class="minimap-north-ornament"
+					transform={`translate(0 ${-CARDINAL_RADIUS})`}
+				>
+					<path
+						class="minimap-north-tip"
+						d="M 0 -23 L 3 -17 L 0 -11 L -3 -17 Z"
+					/>
+					{#each [-1, 1] as side}
+						<path
+							class="minimap-north-scroll"
+							transform={`scale(${side} 1)`}
+							d="M 11 5 Q 14 0 21 0 Q 25 0 23 -4 Q 22 -6 19 -4 M 12 7 H 19"
+						/>
+					{/each}
+				</g>
 				{#each [["N", 0], ["E", 90], ["S", 180], ["W", 270]] as const as [label, degrees]}
 					<text
 						class="minimap-cardinal"
@@ -1042,7 +1073,7 @@
 			<button
 				bind:this={coordinatesElement}
 				type="button"
-				class="minimap-coordinates ui-hud-button ui-readout"
+				class="minimap-coordinates ui-hud-control ui-readout"
 				disabled
 				aria-label="Copy minimap coordinates"
 				title="Copy coordinates"
@@ -1061,7 +1092,7 @@
 		<button
 			bind:this={waypointRow}
 			type="button"
-			class="minimap-waypoint-row ui-readout ui-hud-button"
+			class="minimap-waypoint-row ui-readout ui-hud-control"
 			aria-label="Clear waypoint"
 			onclick={clearWaypoint}
 			hidden
@@ -1144,6 +1175,12 @@
 			stroke: rgb(0 0 0 / 0.85);
 			stroke-width: 2.2px;
 			filter: drop-shadow(0 1px 0 rgb(0 0 0 / 0.9));
+		}
+
+		.minimap-north-ornament {
+			/* Base retains its simple cardinal letters. */
+			display: none;
+			pointer-events: none;
 		}
 
 		.minimap-cardinal-north {

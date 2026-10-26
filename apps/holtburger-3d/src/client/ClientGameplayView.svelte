@@ -1067,7 +1067,7 @@
 		/>
 		<button
 			type="button"
-			class="client-ui-lock ui-hud-button"
+			class="client-ui-lock ui-hud-button ui-icon-button"
 			aria-label={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}
 			aria-pressed={hudMode === "layout"}
 			title={hudMode === "runtime" ? "Unlock UI layout" : "Lock UI layout"}

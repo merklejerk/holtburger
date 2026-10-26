@@ -27,6 +27,7 @@
 		COMBAT_HEIGHTS,
 	} from "./client-combat-bar-state";
 
+	const gaugeId = $props.id();
 	const ARC_LENGTH = 100;
 	const POWER_STEP = 0.01;
 	/** Independent visual inputs; every other combat-gauge dimension is derived below. */
@@ -78,6 +79,22 @@
 			heightRowHeight * COMBAT_HEIGHTS.length +
 			GAUGE_TUNING.heightRowGap * (COMBAT_HEIGHTS.length - 1),
 	} as const;
+	/** Insets keep decorative strokes inside each existing, ellipse-clipped button. */
+	const heightFaces = COMBAT_HEIGHTS.map((_, index) => {
+		const inset = 0.75;
+		const offset = index * (heightRowHeight + GAUGE_TUNING.heightRowGap);
+		const radiusX = heightLayout.width / 2 - inset;
+		const radiusY = heightLayout.height - inset;
+		const leftAt = (y: number) =>
+			heightLayout.width / 2 -
+			radiusX * Math.sqrt(1 - ((radiusY - y) / radiusY) ** 2);
+		const top = leftAt(offset + inset);
+		const bottom = leftAt(offset + heightRowHeight - inset);
+		const rightTop = heightLayout.width - top;
+		const rightBottom = heightLayout.width - bottom;
+		const lowerY = heightRowHeight - inset;
+		return `M ${top} ${inset} H ${rightTop} A ${radiusX} ${radiusY} 0 0 1 ${rightBottom} ${lowerY} H ${bottom} A ${radiusX} ${radiusY} 0 0 1 ${top} ${inset} Z`;
+	});
 	const backdropLayout = {
 		left: arcLeft - GAUGE_TUNING.backdropBleedX,
 		bottom:
@@ -99,6 +116,21 @@
 		};
 	}
 
+	/** Small radial marks share the slider's arc geometry and never catch input. */
+	const engravings = COMBAT_BREAKPOINTS.slice(1, -1).map((value) => {
+		const point = pointOnArc(value);
+		const dx = point.x - arcCenterX;
+		const dy = point.y - GAUGE_TUNING.arcBaselineY;
+		const length = Math.hypot(dx, dy);
+		const outer = GAUGE_TUNING.arcStrokeWidth / 2 - 0.5;
+		const inner = outer - 3;
+		return {
+			x1: point.x + (dx / length) * inner,
+			y1: point.y + (dy / length) * inner,
+			x2: point.x + (dx / length) * outer,
+			y2: point.y + (dy / length) * outer,
+		};
+	});
 	const breakpointMarkers = COMBAT_BREAKPOINTS.map((value, index) => {
 		const point = pointOnArc(value);
 		const radialX = point.x - arcCenterX;
@@ -365,6 +397,7 @@
 	<div
 		bind:this={combatBar}
 		class="combat-bar"
+		style:--combat-metal={`url(#${gaugeId}-metal)`}
 		class:profile-emphasized={profileEmphasized}
 		data-combat-mode={profile.kind}
 	>
@@ -384,6 +417,32 @@
 			style:width={`${GAUGE_TUNING.viewBoxWidth}px`}
 			style:height={`${GAUGE_TUNING.viewBoxHeight}px`}
 		>
+			<defs>
+				<linearGradient
+					id={`${gaugeId}-metal`}
+					x1="0"
+					y1="0"
+					x2="0"
+					y2="1"
+					gradientUnits="objectBoundingBox"
+				>
+					<stop class="gauge-metal-light" offset="0" />
+					<stop class="gauge-metal-mid" offset="0.45" />
+					<stop class="gauge-metal-dark" offset="1" />
+				</linearGradient>
+			</defs>
+			<g class="gauge-decoration" aria-hidden="true">
+				<path
+					class="gauge-bezel-outline"
+					d={arcPath}
+					stroke-width={GAUGE_TUNING.arcStrokeWidth + 4}
+				/>
+				<path
+					class="gauge-bezel"
+					d={arcPath}
+					stroke-width={GAUGE_TUNING.arcStrokeWidth + 2}
+				/>
+			</g>
 			<path
 				class="gauge-track"
 				d={arcPath}
@@ -397,6 +456,20 @@
 				stroke-width={GAUGE_TUNING.arcStrokeWidth}
 				style:stroke-dasharray={`${chargeLevel * ARC_LENGTH} ${ARC_LENGTH}`}
 			/>
+			<g class="gauge-decoration" aria-hidden="true">
+				{#each engravings as mark}<line
+						class="gauge-engraving"
+						{...mark}
+					/>{/each}
+				{#each [0, 1] as endpoint}
+					{@const point = pointOnArc(endpoint)}
+					<circle class="gauge-fastener" cx={point.x} cy={point.y} r="4.5" />
+					<path
+						class="gauge-fastener-slot"
+						d={`M ${point.x - 1.5} ${point.y + 1.5} l 3 -3`}
+					/>
+				{/each}
+			</g>
 			<g
 				bind:this={powerControl}
 				class="power-control"
@@ -456,7 +529,12 @@
 					title={`${height[0].toUpperCase()}${height.slice(1)} attack — ${binding.description}`}
 					aria-pressed={profile.height === height}
 					onclick={() => onProfileSelect({ ...profile, height })}
-				></button>
+					><svg
+						class="height-face"
+						viewBox={`0 0 ${heightLayout.width} ${heightRowHeight}`}
+						aria-hidden="true"><path d={heightFaces[index]} /></svg
+					></button
+				>
 			{/each}
 		</div>
 
@@ -554,6 +632,21 @@
 			z-index: 2;
 			display: block;
 			overflow: visible;
+		}
+		/* Optional paint layers: themes reveal them without changing the interaction geometry. */
+		.gauge-decoration,
+		.height-face {
+			display: none;
+			pointer-events: none;
+		}
+		.gauge-decoration {
+			fill: none;
+		}
+		.height-face {
+			position: absolute;
+			inset: 0;
+			width: 100%;
+			height: 100%;
 		}
 		.gauge-track,
 		.gauge-fill,

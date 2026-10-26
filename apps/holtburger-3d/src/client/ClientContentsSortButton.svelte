@@ -23,7 +23,7 @@
 
 <button
 	type="button"
-	class="ui-hud-button contents-sort"
+	class="ui-hud-control contents-sort"
 	aria-label={`Sort ${label}: ${sortLabels[mode]}`}
 	title={`Sort: ${sortLabels[mode]}. Click for ${sortLabels[nextContentsSortMode(mode)]}.`}
 	{onclick}

@@ -173,8 +173,9 @@ function adaptLocalModelVisual(
 		placement,
 		playback: { kind: "resolved", pose: visual.pose },
 		initialPresentationState: {
-			noDraw: true,
-			hidden: false,
+			noDraw: false,
+			// Staged local models suppress meshes and particles until their handle is visible.
+			hidden: true,
 			cloaked: false,
 			lighting: true,
 			translucency: visual.translucency,

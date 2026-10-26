@@ -568,6 +568,8 @@
 			readonly lightsDisabled: boolean;
 			readonly lightsRestored: boolean;
 			readonly createdEmitters: number;
+			/** Particles submitted for the impacted projectile while its mesh remains NoDraw. */
+			readonly submittedExplosionParticles: number;
 		}>;
 		/** Open, close, and reopen one catalog visual through the production preview renderer. */
 		readonly probeObjectPreviewLifecycle: (
@@ -1795,6 +1797,19 @@
 		const activeRuntime = runtime;
 		const activeRenderer = renderer;
 		const drawFrame = activeRenderer.drawFrame;
+		const submitParticles = activeRenderer.particles.submit;
+		const submittedParticleCounts = new Map<string, number>();
+		activeRenderer.particles.submit = (ranges, records) => {
+			submittedParticleCounts.clear();
+			for (const range of ranges) {
+				const owner = String(range.renderOwner);
+				submittedParticleCounts.set(
+					owner,
+					(submittedParticleCounts.get(owner) ?? 0) + range.count,
+				);
+			}
+			submitParticles(ranges, records);
+		};
 		let lightCount = 0;
 		activeRenderer.drawFrame = (input) => {
 			lightCount = input.dynamicLights.length;
@@ -1900,6 +1915,19 @@
 					.createdEmitterTotal - before;
 			if (createdEmitters <= 0)
 				throw new Error("Server explosion produced no emitter activation.");
+			const collisionTarget = collisionHooks[0]?.targetId;
+			if (collisionTarget === undefined)
+				throw new Error("Collision script has no projectile target.");
+			let submittedExplosionParticles = 0;
+			while (submittedExplosionParticles === 0) {
+				submittedExplosionParticles =
+					submittedParticleCounts.get(String(collisionTarget)) ?? 0;
+				if (performance.now() >= deadline)
+					throw new Error(
+						"NoDraw projectile's explosion particles never reached the renderer.",
+					);
+				await nextAnimationFrame();
+			}
 			await activeRuntime.upsertDynamicEntity(lit);
 			await waitForTwoAnimationFrames();
 			const geometryRestored =
@@ -1919,6 +1947,7 @@
 					(observation) => observation.outcome,
 				),
 				createdEmitters,
+				submittedExplosionParticles,
 				geometryHidden,
 				geometryRestored,
 				lightsDisabled,
@@ -1926,6 +1955,7 @@
 			};
 		} finally {
 			activeRenderer.drawFrame = drawFrame;
+			activeRenderer.particles.submit = submitParticles;
 			await despawnExplorerEntityFleet();
 		}
 	}

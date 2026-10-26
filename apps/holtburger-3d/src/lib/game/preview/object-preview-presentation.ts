@@ -11,7 +11,7 @@ import {
 	type ObjectPreviewFrame,
 } from "./object-preview-model-presentation";
 import { ObjectPreviewParticleFrame } from "./object-preview-particle-frame";
-import type { ObjectPreviewSequence } from "./object-preview-sequence";
+import type { AnimationSequence } from "../animation/animation-sequence";
 
 export type { ObjectPreviewFrame } from "./object-preview-model-presentation";
 
@@ -56,7 +56,7 @@ export class ObjectPreviewPresentation {
 	readonly #partRenderStates: PartRenderState[] = [];
 	readonly #particles = new ObjectPreviewParticleFrame();
 	/** A rebased cursor owns only the new model's dependencies, never the retired runtime. */
-	readonly #initialBodySequence: ObjectPreviewSequence | null;
+	readonly #initialBodySequence: AnimationSequence | null;
 	#state: PresentationState = { kind: "uninitialized" };
 
 	constructor(

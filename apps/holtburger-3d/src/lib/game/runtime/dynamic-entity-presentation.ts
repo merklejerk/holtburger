@@ -54,6 +54,7 @@ export function adaptDynamicEntityPresentation(
 	}
 	return {
 		placement,
+		playback: { kind: "source-owned" },
 		initialPresentationState: {
 			cloaked: entity.physics.cloaked,
 			hidden: entity.physics.hidden,

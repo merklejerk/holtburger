@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { choosePregameLocation } from "./client-pregame-tuning";
 	import { provideItemCooldowns } from "../app/item-cooldowns.svelte";
 	import "./client-canvas.css";
 	import { persistPlayerVisualCapture } from "./client-visual-capture";
@@ -497,12 +498,21 @@
 	let presentationRoot =
 		$state.raw<ClientPresentationRoot<GamePresentationOwner> | null>(null);
 	const page = $derived(
-		clientAppPage(appState, { worldName, playerName }, retryBackdrop),
+		clientAppPage(appState, { worldName, playerName }, retryPregameScene),
 	);
 	const pregameSelection = $derived(
 		page.kind === "selection" ? page.selection : null,
 	);
-	function retryBackdrop(): void {
+	const pregameScene = $derived(
+		presentationRoot === null || canvasElement === null
+			? null
+			: {
+					canvas: canvasElement,
+					characters: presentationRoot.pregameCharacters,
+				},
+	);
+
+	function retryPregameScene(): void {
 		appLifecycle.acceptScene({ kind: "loading" }, false);
 		void presentationRoot?.retry();
 	}
@@ -774,6 +784,7 @@
 	});
 
 	// Controls replace this cold policy snapshot; frame-hot consumers must receive plain objects.
+	const pregameLocation = choosePregameLocation();
 	let frameSettings = $state.raw<FrameSettings>(
 		frameSettingsWithGraphics(
 			CLIENT_TUNING.frameSettings,
@@ -1608,6 +1619,7 @@
 		};
 		const root = new ClientPresentationRoot({
 			canvas,
+			pregameLocation,
 			build: async (signal) =>
 				GamePresentationOwner.build({
 					canvas,
@@ -2506,7 +2518,7 @@
 						await session.restoreCharacter(guid);
 					},
 				}}
-				previewService={objectPreviewService}
+				scene={pregameScene}
 				visualCache={startupVisualCacheTransport}
 				onChoose={chooseCharacter}
 				onEnter={enterWorld}

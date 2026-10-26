@@ -8,6 +8,7 @@ export function adaptAuthoredDynamicPresentation(
 	authored: AuthoredDynamicSource,
 ): PlacedDynamicPresentationSource {
 	return {
+		playback: { kind: "source-owned" },
 		initialPresentationState: {
 			cloaked: false,
 			hidden: false,

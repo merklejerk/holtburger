@@ -9,7 +9,7 @@ import {
 } from "./object-preview-camera";
 import { resolveObjectPreviewViewport } from "../preview/object-preview-viewport";
 import type { RenderExtent } from "./render-extent";
-import type { ObjectPreviewFit } from "../preview/object-preview-fit";
+import type { ModelFit } from "../geometry/model-fit";
 
 const BOUNDS = new AABB3(new Vec3(-1, 0, -2), new Vec3(3, 6, 2));
 
@@ -144,6 +144,34 @@ describe("object preview yaw camera", () => {
 		},
 	);
 
+	it.each([
+		{ width: 520, height: 180 },
+		{ width: 180, height: 520 },
+	])(
+		"keeps orbit distance and pivot fixed throughout a turn in %j",
+		(extent) => {
+			const baseline = resolveObjectPreviewViewTransform(
+				fit(BOUNDS),
+				0,
+				extent,
+			);
+			for (let step = 0; step <= 72; step++) {
+				const yaw = (step * Math.PI) / 36;
+				const view = resolveObjectPreviewViewTransform(
+					fit(BOUNDS),
+					yaw,
+					extent,
+				);
+				expect(length(view.cameraPosition)).toBeCloseTo(
+					length(baseline.cameraPosition),
+					10,
+				);
+				expect(view.objectRoot).toEqual(baseline.objectRoot);
+				expectModelFits(BOUNDS, yaw, extent);
+			}
+		},
+	);
+
 	it("moves back when a resized panel narrows the horizontal projection", () => {
 		const wide = resolveObjectPreviewViewTransform(fit(BOUNDS), Math.PI / 2, {
 			height: 240,
@@ -196,7 +224,7 @@ function expectModelFits(
 			}
 }
 
-function fit(bounds: AABB3): ObjectPreviewFit {
+function fit(bounds: AABB3): ModelFit {
 	const supportPoints: number[] = [];
 	for (const x of [bounds.min.x, bounds.max.x])
 		for (const y of [bounds.min.y, bounds.max.y])

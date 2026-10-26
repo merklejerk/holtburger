@@ -555,7 +555,7 @@
 								visualCache={null}
 								management={{ kind: "idle" }}
 								creation={null}
-								previewService={null}
+								scene={null}
 								state={characters}
 								entryPending={false}
 								onChoose={(guid) =>

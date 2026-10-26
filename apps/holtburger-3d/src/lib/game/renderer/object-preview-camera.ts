@@ -5,7 +5,11 @@ import {
 } from "../math/camera-orientation";
 import { createTranslationMat4, transformPoint3 } from "../math/matrices";
 import { type Mat4, type Quat, Vec3 } from "../math/types";
-import type { ObjectPreviewFit } from "../preview/object-preview-fit";
+import {
+	createYawSweep,
+	yawSweepSupport,
+	type ModelFit,
+} from "../geometry/model-fit";
 import type { ResolvedObjectPreviewViewport } from "../preview/object-preview-viewport";
 import type { RenderExtent } from "./render-extent";
 
@@ -32,7 +36,7 @@ export interface ObjectPreviewViewTransform {
  * The fixed camera elevation keeps the presentation readable while yaw remains the only user axis.
  */
 export function resolveObjectPreviewViewTransform(
-	fit: ObjectPreviewFit,
+	fit: ModelFit,
 	yawRadians: number,
 	extent: RenderExtent,
 ): ObjectPreviewViewTransform {
@@ -64,35 +68,27 @@ export function resolveObjectPreviewViewTransform(
 		Math.tan((OBJECT_PREVIEW_VERTICAL_FOV_DEGREES * Math.PI) / 360) *
 		OBJECT_PREVIEW_FRAME_FILL;
 	const horizontalTangent = verticalTangent * (extent.width / extent.height);
-	let distance = OBJECT_PREVIEW_NEAR_CLEARANCE;
-	let minimumForwardOffset = Number.POSITIVE_INFINITY;
-	let maximumForwardOffset = Number.NEGATIVE_INFINITY;
-	const points = fit.supportPoints;
-	for (let offset = 0; offset < points.length; offset += 3) {
-		const x = points[offset];
-		const y = points[offset + 1];
-		const z = points[offset + 2];
-		if (x === undefined || y === undefined || z === undefined)
-			throw new Error(
-				"Object preview fit support is not composed of XYZ triples.",
-			);
-		const centeredX = x - center.x;
-		const centeredY = y - center.y;
-		const centeredZ = z - center.z;
-		const forwardOffset =
-			centeredX * forward.x + centeredY * forward.y + centeredZ * forward.z;
-		const rightOffset =
-			centeredX * right.x + centeredY * right.y + centeredZ * right.z;
-		const upOffset = centeredX * up.x + centeredY * up.y + centeredZ * up.z;
-		minimumForwardOffset = Math.min(minimumForwardOffset, forwardOffset);
-		maximumForwardOffset = Math.max(maximumForwardOffset, forwardOffset);
-		distance = Math.max(
-			distance,
-			Math.abs(rightOffset) / horizontalTangent - forwardOffset,
-			Math.abs(upOffset) / verticalTangent - forwardOffset,
-			OBJECT_PREVIEW_NEAR_CLEARANCE - forwardOffset,
+	// Upright sweep support is invariant under camera yaw, so orbiting never changes distance.
+	const sweep = createYawSweep(fit.supportPoints, center);
+	const support = (x: number, y: number, z: number): number =>
+		yawSweepSupport(
+			sweep,
+			new Vec3(
+				x * right.x + y * up.x + z * forward.x,
+				x * right.y + y * up.y + z * forward.y,
+				x * right.z + y * up.z + z * forward.z,
+			),
 		);
-	}
+	const distance = Math.max(
+		OBJECT_PREVIEW_NEAR_CLEARANCE,
+		support(1 / horizontalTangent, 0, -1),
+		support(-1 / horizontalTangent, 0, -1),
+		support(0, 1 / verticalTangent, -1),
+		support(0, -1 / verticalTangent, -1),
+		OBJECT_PREVIEW_NEAR_CLEARANCE + support(0, 0, -1),
+	);
+	const minimumForwardOffset = -support(0, 0, -1);
+	const maximumForwardOffset = support(0, 0, 1);
 	const depthSpan = maximumForwardOffset - minimumForwardOffset;
 	const planePadding = Math.max(
 		OBJECT_PREVIEW_NEAR_CLEARANCE,
@@ -115,8 +111,8 @@ export function resolveObjectPreviewViewTransform(
 
 /** Fit the subject independently from its optional backdrop, which only extends depth coverage. */
 export function resolveObjectPreviewCompositionView(
-	subject: ObjectPreviewFit,
-	background: ObjectPreviewFit | null,
+	subject: ModelFit,
+	background: ModelFit | null,
 	viewport: Pick<
 		ResolvedObjectPreviewViewport,
 		"extent" | "cameraYawRadians" | "subjectTransform" | "framing"
@@ -166,10 +162,7 @@ export function resolveObjectPreviewCompositionView(
 	return { ...camera, nearPlane, farPlane };
 }
 
-function transformFit(
-	fit: ObjectPreviewFit,
-	transform: Mat4,
-): ObjectPreviewFit {
+function transformFit(fit: ModelFit, transform: Mat4): ModelFit {
 	const supportPoints = new Float32Array(fit.supportPoints.length);
 	for (let index = 0; index < fit.supportPoints.length; index += 3) {
 		const x = fit.supportPoints[index],
@@ -183,7 +176,7 @@ function transformFit(
 	return { center: transformPoint3(transform, fit.center), supportPoints };
 }
 
-function faceFit(center: Vec3, height: number): ObjectPreviewFit {
+function faceFit(center: Vec3, height: number): ModelFit {
 	const half = height / 2;
 	return {
 		center,

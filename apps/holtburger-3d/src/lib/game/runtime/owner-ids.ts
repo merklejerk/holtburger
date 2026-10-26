@@ -10,8 +10,12 @@ export type OwnerId =
 /** Stable frontend lifetime identity for one producer-owned live dynamic entity. */
 export type DynamicEntityOwnerId = `dynamic-entity:${number}`;
 
+/** Runtime-local visual composition identity, unrelated to server GUIDs or scene-node identity. */
+export type LocalSceneModelOwnerId = `local-model:${number}`;
+
 /** Every owner admitted by the shared dynamic presentation systems. */
-export type DynamicOwnerId = OwnerId | DynamicEntityOwnerId;
+export type DynamicOwnerId =
+	OwnerId | DynamicEntityOwnerId | LocalSceneModelOwnerId;
 
 /** Runtime lifetime identity for resource leases owned exclusively by one terrain source. */
 export type TerrainResourceOwnerId = `terrain-resource:${LandblockOwnerId}`;
@@ -46,11 +50,24 @@ export type ResourceOwnerId =
 	| TerrainResourceOwnerId
 	| ActiveRegionResourceOwnerId
 	| DynamicEntityOwnerId
+	| LocalSceneModelOwnerId
 	| StaticRevisionResourceOwnerId
 	| EnvCellRevisionResourceOwnerId
 	| DynamicGenerationResourceOwnerId
 	| PortalTransitionResourceOwnerId
 	| ObjectVisualTemplateResourceOwnerId;
+
+/** Allocate the typed lifetime identity at the runtime's local-model admission boundary. */
+export function localSceneModelOwnerId(serial: number): LocalSceneModelOwnerId {
+	return `local-model:${serial}`;
+}
+
+/** Local compositions intentionally suppress behavior audio while retaining ordinary visual hooks. */
+export function isLocalSceneModelOwnerId(
+	owner: DynamicOwnerId,
+): owner is LocalSceneModelOwnerId {
+	return owner.startsWith("local-model:");
+}
 
 /** Return the runtime owner responsible for one static landblock layer. */
 export function landblockLayerToOwnerId(

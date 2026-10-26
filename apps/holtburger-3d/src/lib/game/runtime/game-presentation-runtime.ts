@@ -1,3 +1,5 @@
+import type { RuntimeLight } from "../environment/runtime-lights";
+import { completePresentationOperations } from "./presentation-teardown";
 import { placementKey } from "./attachment-contract";
 import {
 	CombatEffectsSystem,
@@ -82,7 +84,25 @@ import { MapGeometryStore } from "../map/map-geometry-store";
 import type { InstalledTerrain } from "../terrain/terrain-system";
 import { TerrainSystem } from "../terrain/terrain-system";
 import { StaticObjectSystem } from "../systems/static-object-system";
-import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
+import {
+	DynamicEntitySystem,
+	type DynamicModelAttachment,
+	type PreparedDynamicEntity,
+} from "../systems/dynamic-entity-system";
+import {
+	LocalSceneModelHandle,
+	type LocalSceneModelSource,
+} from "./local-scene-model";
+import {
+	prepareLocalModelPresentation,
+	canReplaceLocalModelAppearance,
+	type LocalModelPresentation,
+} from "./local-model-presentation";
+import {
+	localSceneModelOwnerId,
+	isLocalSceneModelOwnerId,
+	type LocalSceneModelOwnerId,
+} from "./owner-ids";
 import {
 	selectionSphereFromBounds,
 	usesSelectionSphereProxy,
@@ -97,6 +117,7 @@ import { EnvCellSystem } from "../systems/env-cell-system";
 import {
 	AnimationSystem,
 	type AnimationLayerUpdate,
+	type AnimationInstallation,
 } from "../systems/animation-system";
 import type { PhysicsScriptTableSource } from "../../assets/physics-script-table-source";
 import { selectPhysicsScript } from "../../assets/decode-physics-script-table-record";
@@ -161,6 +182,7 @@ import type {
 import { sceneNodeIdOf } from "../scene/utils";
 import { SkyScriptSystem } from "../systems/sky-script-system";
 import { SKY_OWNER_ID, type SkyOwnerId } from "./owner-ids";
+import { withSilentLocalModelAudio } from "./local-model-audio";
 import { AudioControlCadence } from "./audio-control-cadence";
 import { SKY_OBJECT_ONLY_PART_INDEX } from "../environment/sky-behavior-targets";
 import type { SkyBehaviorTarget } from "../environment/sky-behavior-targets";
@@ -786,11 +808,21 @@ export class GamePresentationRuntime {
 	readonly #particleMeshes: ParticleMeshCache;
 	/** Sound table installed by each behaviour target's setup, for `SoundTable` key resolution. */
 	readonly #targetSoundTables = new Map<BehaviorTargetId, DecodedSoundTable>();
-	/** Exact behavior targets installed by each shared dynamic owner. */
-	readonly #dynamicPresentationTargets = new Map<
+	/** Exact model roots installed by each shared dynamic owner. */
+	readonly #dynamicPresentationNodes = new Map<
 		DynamicOwnerId,
-		ReadonlySet<BehaviorTargetId>
+		ReadonlySet<SceneNodeId>
 	>();
+	/** Local roots retain their typed audio-policy owner during both staging and installation. */
+	readonly #localModelNodeOwners = new Map<
+		SceneNodeId,
+		LocalSceneModelOwnerId
+	>();
+	/** Local visual handles are joined before their shared runtime repositories retire. */
+	readonly #localSceneModels = new Set<LocalSceneModelHandle>();
+	#nextLocalModelSerial = 1;
+	/** Additional lights borrowed from the active frontend scene driver. */
+	#presentationLights: readonly RuntimeLight[] = [];
 	/** High-level cues waiting for their exact entity generation to be visually realized. */
 	readonly #pendingDynamicEntityCues = new Map<number, DynamicEntityCue[]>();
 	/** Discontinuities invalidate asynchronous cue preparation and cold sound replay. */
@@ -916,7 +948,7 @@ export class GamePresentationRuntime {
 
 	/** Shared audio sink for both script domains; scale ownership is their only distinction. */
 	#createBehaviorAudioCommands(): BehaviorConsumers["audio"] {
-		return {
+		const audio: BehaviorConsumers["audio"] = {
 			playSound: (target, sound) => {
 				if (!this.#audioListenerEnabled) return "suppressed";
 				// Retail samples the emitting node once. The voice follows the listener from that
@@ -943,6 +975,13 @@ export class GamePresentationRuntime {
 			playSoundTableKey: (target, soundType) =>
 				this.#playSoundTableKey(target, soundType, null),
 		};
+		return withSilentLocalModelAudio(audio, (target) => {
+			const nodeId = sceneNodeIdOf(target.targetId);
+			const root = nodeId === null ? null : this.#dynamics.modelRootOf(nodeId);
+			return root === null
+				? null
+				: (this.#localModelNodeOwners.get(root) ?? null);
+		});
 	}
 
 	/** Resolve authored choice/probability once; packet sounds supply their own gain source. */
@@ -1074,8 +1113,11 @@ export class GamePresentationRuntime {
 			return SKY_PARTICLE_RENDER_OWNER;
 		}
 		const nodeId = sceneNodeIdOf(target.targetId);
-		return nodeId !== null && this.#selectedDynamicNodeIds.has(nodeId)
-			? nodeId
+		const root = nodeId === null ? null : this.#dynamics.modelRootOf(nodeId);
+		return root !== null &&
+			this.#dynamics.isVisible(root) &&
+			this.#selectedDynamicNodeIds.has(root)
+			? root
 			: null;
 	}
 
@@ -1531,10 +1573,9 @@ export class GamePresentationRuntime {
 			SHARED_FRONTEND_TUNING.diagnostics.maximumRecentEffectObservations,
 		);
 		this.#animation = new AnimationSystem(this.#effects, this.#behaviorRouter);
-		this.#physicsScriptSystem = new PhysicsScriptSystem<OwnerId | SkyOwnerId>(
-			this.#behaviorRouter,
-			Math.random,
-		);
+		this.#physicsScriptSystem = new PhysicsScriptSystem<
+			DynamicOwnerId | SkyOwnerId
+		>(this.#behaviorRouter, Math.random);
 		scriptWiring.system = this.#physicsScriptSystem;
 		this.#worldOwnedPhysicsScriptSystem =
 			new PhysicsScriptSystem<DynamicOwnerId>(
@@ -2736,6 +2777,7 @@ export class GamePresentationRuntime {
 			ownerId,
 			[source],
 			"world",
+			() => [],
 		);
 		if (!this.#isDynamicRealizationEligible(record)) {
 			activation.release();
@@ -3238,6 +3280,13 @@ export class GamePresentationRuntime {
 			cssHeight,
 			this.#frameSettings.quality.renderScale,
 		);
+	}
+
+	/** Replace mode-owned point lights; the driver clears them before handing the world over. */
+	setPresentationLights(lights: readonly RuntimeLight[]): void {
+		if (this.#destroyed)
+			throw new Error("Cannot set lights after runtime shutdown.");
+		this.#presentationLights = lights;
 	}
 
 	/** Replace the authoritative primary camera and its exact drawing extent atomically. */
@@ -4133,7 +4182,10 @@ export class GamePresentationRuntime {
 		const anchorLandblockId = this.#camera.placement.landblockId;
 		const feedback = renderer.drawFrame({
 			anchorLandblockId,
-			dynamicLights: this.#dynamics.getRuntimeLights(),
+			dynamicLights:
+				this.#presentationLights.length === 0
+					? this.#dynamics.getRuntimeLights()
+					: [...this.#dynamics.getRuntimeLights(), ...this.#presentationLights],
 			environment: {
 				...this.#environment,
 				distanceFog: resolveTerrainCoverageFog(
@@ -4202,6 +4254,15 @@ export class GamePresentationRuntime {
 		this.#spawnedNameplateDecoration.clear();
 		this.#pendingDynamicEntityCues.clear();
 		this.#destroyed = true;
+		this.#presentationLights = [];
+		const localRetirement = await Promise.allSettled(
+			[...this.#localSceneModels].map((handle) => handle.destroy()),
+		);
+		this.#localSceneModels.clear();
+		for (const result of localRetirement) {
+			if (result.status === "rejected")
+				this.#presentationFailures.push(result.reason);
+		}
 		this.#sceneInterestCoordinator.destroy();
 		this.#commitArtifacts.length = 0;
 		await Promise.all([
@@ -4517,11 +4578,167 @@ export class GamePresentationRuntime {
 		);
 	}
 
+	/** Admit one presentation-only body/equipment lifetime into the existing world scene. */
+	createLocalSceneModel(
+		placement: SceneSpatialPlacement,
+	): LocalSceneModelHandle {
+		if (this.#destroyed)
+			throw new Error("Cannot create a local model after runtime shutdown.");
+		const owner = localSceneModelOwnerId(this.#nextLocalModelSerial++);
+		let installed: {
+			readonly input: LocalSceneModelSource;
+			readonly presentation: LocalModelPresentation;
+			readonly models: readonly PreparedDynamicEntity[];
+		} | null = null;
+		const setPlacement = (next: SceneSpatialPlacement) => {
+			const body = installed?.models[0];
+			if (body !== undefined) this.#dynamics.updatePlacement(body.nodeId, next);
+		};
+		const setVisible = (visible: boolean) => {
+			if (installed === null) return;
+			for (const [index, model] of installed.models.entries()) {
+				const source = installed.presentation.sources[index];
+				if (source === undefined)
+					throw new Error("Installed local model has no presentation source.");
+				this.#dynamics.updatePresentationState(model.nodeId, {
+					...source.initialPresentationState,
+					noDraw: !visible,
+				});
+			}
+		};
+		const handle = new LocalSceneModelHandle(
+			{
+				prepare: async (input, initialPlacement) => {
+					const presentation = await prepareLocalModelPresentation(
+						this.#presentationAssets.setupVisuals,
+						owner,
+						input,
+						initialPlacement,
+					);
+					const prepareFull = () =>
+						this.#prepareDynamicOwner(
+							owner,
+							presentation.sources,
+							"browser",
+							presentation.attachments,
+						);
+					type CompositionInstallation = Pick<
+						Awaited<ReturnType<typeof prepareFull>>,
+						"prepared" | "commit" | "release"
+					>;
+					let activation: CompositionInstallation | null = null;
+					try {
+						const previous = installed;
+						if (
+							previous !== null &&
+							canReplaceLocalModelAppearance(
+								previous.input,
+								input,
+								previous.presentation,
+								presentation,
+							)
+						) {
+							const oldBody = previous.models[0];
+							const nextBody = presentation.sources[0];
+							if (oldBody === undefined)
+								throw new Error("Local composition requires a prepared body.");
+							const replacement = await this.#dynamics.stageVisualReplacement(
+								owner,
+								oldBody.nodeId,
+								nextBody.source,
+							);
+							if (replacement.kind === "staged")
+								activation = {
+									prepared: [
+										{
+											...oldBody,
+											source: nextBody.source,
+											animation: replacement.animation,
+										},
+										...previous.models.slice(1),
+									],
+									commit: () => {
+										if (installed !== previous)
+											throw new Error(
+												"Cannot publish an appearance for a withdrawn local composition.",
+											);
+										replacement.commit();
+									},
+									release: () => replacement.release(),
+								};
+						}
+						activation ??= await prepareFull();
+						const prepared = activation;
+						const body = prepared.prepared[0];
+						if (body === undefined || body.animation.kind !== "sequence")
+							throw new Error(
+								"Local model body requires explicit resolved playback.",
+							);
+						// Frame the body independently of held equipment, including for fill-light focus.
+						const fit = body.animation.fit;
+						let transferred = false;
+						return {
+							fit,
+							commit: (latest: SceneSpatialPlacement, visible: boolean) => {
+								const previous = installed;
+								prepared.commit();
+								installed = {
+									input,
+									presentation,
+									models: prepared.prepared,
+								};
+								transferred = true;
+								completePresentationOperations([
+									() => setPlacement(latest),
+									() => setVisible(visible),
+									() => previous?.presentation.release(),
+								]);
+							},
+							release: () => {
+								if (!transferred)
+									completePresentationOperations([
+										() => prepared.release(),
+										() => presentation.release(),
+									]);
+							},
+						};
+					} catch (cause) {
+						completePresentationOperations([
+							() => activation?.release(),
+							() => presentation.release(),
+							() => {
+								throw cause;
+							},
+						]);
+						throw cause;
+					}
+				},
+				setPlacement,
+				setVisible,
+				withdraw: () => {
+					const previous = installed;
+					installed = null;
+					completePresentationOperations([
+						() => this.#retireDynamicOwner(owner),
+						() => previous?.presentation.release(),
+					]);
+				},
+			},
+			placement,
+			() => this.#localSceneModels.delete(handle),
+		);
+		this.#localSceneModels.add(handle);
+		return handle;
+	}
+
 	/** Stage every visual and behavior dependency before one dynamic owner can publish. */
 	async #prepareDynamicOwner(
 		ownerId: DynamicOwnerId,
 		sources: readonly PlacedDynamicPresentationSource[],
 		objectStateAuthority: "browser" | "world",
+		resolveAttachments: (
+			nodeIds: readonly SceneNodeId[],
+		) => readonly DynamicModelAttachment[],
 	) {
 		if (this.#destroyed)
 			throw new Error("Cannot prepare dynamics after runtime shutdown.");
@@ -4530,30 +4747,53 @@ export class GamePresentationRuntime {
 		if (outcome === "superseded")
 			throw new Error(`Dynamic owner ${ownerId} preparation was superseded.`);
 		const prepared = installation.getPreparedEntities();
+		if (isLocalSceneModelOwnerId(ownerId)) {
+			for (const { nodeId } of prepared)
+				this.#localModelNodeOwners.set(nodeId, ownerId);
+		}
+		const releaseOwnership = () => {
+			for (const { nodeId } of prepared)
+				this.#localModelNodeOwners.delete(nodeId);
+		};
 		let animationStage: ReturnType<
 			AnimationSystem<ResourceOwnerId>["stageOwner"]
 		>;
 		try {
 			animationStage = this.#animation.stageOwner(
 				ownerId,
-				prepared.flatMap(
-					({ animation, initialPartToObjectTransforms, nodeId, source }) =>
-						animation.kind === "activatable"
-							? [
-									{
-										animation: animation.animation,
-										initialPartToObjectTransforms,
-										residentIdentity: source.identity,
-										target: {
-											generation: installation.generation,
-											targetId: behaviorTargetId(nodeId),
-										},
-									},
-								]
-							: [],
+				prepared.flatMap<AnimationInstallation>(
+					({ animation, initialPartToObjectTransforms, nodeId, source }) => {
+						const base = {
+							initialPartToObjectTransforms,
+							target: {
+								generation: installation.generation,
+								targetId: behaviorTargetId(nodeId),
+							},
+						};
+						if (animation.kind === "sequence")
+							return [
+								{
+									...base,
+									kind: "sequence",
+									clips: animation.clips,
+									firstCyclicClip: animation.firstCyclicClip,
+								},
+							];
+						if (animation.kind === "activatable")
+							return [
+								{
+									...base,
+									kind: "default-animation",
+									animation: animation.animation,
+									residentIdentity: source.identity,
+								},
+							];
+						return [];
+					},
 				),
 			);
 		} catch (cause) {
+			releaseOwnership();
 			installation.release();
 			throw cause;
 		}
@@ -4586,19 +4826,21 @@ export class GamePresentationRuntime {
 			await this.#stageParticleMeshes(
 				prepared.flatMap((entity) => entity.emitters),
 			);
-			installation.prepareCommit(animationStage.samples);
+			installation.prepareCommit(
+				animationStage.samples,
+				resolveAttachments(installation.nodeIds),
+			);
 		} catch (cause) {
 			animationStage.release();
 			scriptStage?.release();
+			releaseOwnership();
 			installation.release();
 			throw cause;
 		}
 		if (scriptStage === null)
 			throw new Error("Dynamic script staging completed without a stage.");
 		const committedScriptStage = scriptStage;
-		const nextTargets = new Set(
-			prepared.map(({ nodeId }) => behaviorTargetId(nodeId)),
-		);
+		const nextTargets = new Set(prepared.map(({ nodeId }) => nodeId));
 		let state: "prepared" | "committed" | "released" = "prepared";
 		return {
 			prepared,
@@ -4607,14 +4849,16 @@ export class GamePresentationRuntime {
 			commit: () => {
 				if (state !== "prepared")
 					throw new Error(`Cannot commit dynamic owner in state ${state}.`);
-				const previousTargets = this.#dynamicPresentationTargets.get(ownerId);
+				const previousTargets = this.#dynamicPresentationNodes.get(ownerId);
 				// No script or animation can advance between these synchronous commits. Publishing
 				// the entity last makes the complete replacement observable as one runtime action.
 				animationStage.commit();
 				committedScriptStage.commit();
 				installation.commit();
 				this.#releaseDynamicCueAssets(ownerId);
-				for (const targetId of previousTargets ?? []) {
+				for (const nodeId of previousTargets ?? []) {
+					const targetId = behaviorTargetId(nodeId);
+					this.#localModelNodeOwners.delete(nodeId);
 					this.#particles.destroy({ generation: 0, targetId }, 0);
 					this.#targetSoundTables.delete(targetId);
 				}
@@ -4625,13 +4869,14 @@ export class GamePresentationRuntime {
 							entity.soundTable,
 						);
 				}
-				this.#dynamicPresentationTargets.set(ownerId, nextTargets);
+				this.#dynamicPresentationNodes.set(ownerId, nextTargets);
 				state = "committed";
 			},
 			release: () => {
 				if (state !== "prepared") return;
 				animationStage.release();
 				committedScriptStage.release();
+				releaseOwnership();
 				installation.release();
 				state = "released";
 			},
@@ -4659,6 +4904,7 @@ export class GamePresentationRuntime {
 			ownerId,
 			sources.map(adaptAuthoredDynamicPresentation),
 			"browser",
+			() => [],
 		);
 		const diagnostics = activation.prepared.map(
 			({ animation, source }): AuthoredDynamicResidentDiagnostic => ({
@@ -4727,17 +4973,25 @@ export class GamePresentationRuntime {
 
 	/** Retire every presentation and behavior resource for one exact dynamic owner immediately. */
 	#retireDynamicOwner(ownerId: DynamicOwnerId): void {
-		for (const targetId of this.#dynamicPresentationTargets.get(ownerId) ??
-			[]) {
-			this.#particles.destroy({ generation: 0, targetId }, 0);
-			this.#targetSoundTables.delete(targetId);
+		const roots = this.#dynamicPresentationNodes.get(ownerId) ?? [];
+		this.#dynamicPresentationNodes.delete(ownerId);
+		for (const [nodeId, owner] of this.#localModelNodeOwners) {
+			if (owner === ownerId) this.#localModelNodeOwners.delete(nodeId);
 		}
-		this.#dynamicPresentationTargets.delete(ownerId);
-		this.#releaseDynamicCueAssets(ownerId);
-		this.#animation.removeOwner(ownerId);
-		this.#physicsScriptSystem.removeOwner(ownerId);
-		this.#worldOwnedPhysicsScriptSystem.removeOwner(ownerId);
-		this.#dynamics.removeOwner(ownerId);
+		const steps: (() => void)[] = [];
+		for (const nodeId of roots) {
+			const targetId = behaviorTargetId(nodeId);
+			this.#targetSoundTables.delete(targetId);
+			steps.push(() => this.#particles.destroy({ generation: 0, targetId }, 0));
+		}
+		completePresentationOperations([
+			...steps,
+			() => this.#releaseDynamicCueAssets(ownerId),
+			() => this.#animation.removeOwner(ownerId),
+			() => this.#physicsScriptSystem.removeOwner(ownerId),
+			() => this.#worldOwnedPhysicsScriptSystem.removeOwner(ownerId),
+			() => this.#dynamics.removeOwner(ownerId),
+		]);
 	}
 
 	/** Cue asset leases belong to the retired behavior owner, not its successor's incarnation ID. */

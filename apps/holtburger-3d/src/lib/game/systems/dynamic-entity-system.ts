@@ -8,10 +8,12 @@ import type {
 } from "../behavior/particle-emitter-repository";
 import type { PreparedAssetHandle } from "../behavior/prepared-asset-repository";
 import type { EffectSystem } from "./effect-system";
+import { completePresentationOperations } from "../runtime/presentation-teardown";
 import type { SoundTableRepository } from "../behavior/sound-table-repository";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
 import type {
 	DynamicEntityPresentationState,
+	DynamicPlaybackPolicy,
 	DynamicPresentationSource,
 	NameplateContent,
 	PlacedDynamicPresentationSource,
@@ -24,6 +26,7 @@ import type { SceneChildTransform, SceneGraph, SceneNodeId } from "../scene";
 import type { SceneSpatialPlacement } from "../scene";
 import {
 	type ParentLocation,
+	type ResolvedAttachPoint,
 	type SetupSidewaysSpan,
 	resolveObjectPresentationBounds,
 	type ResolvedObjectPresentation,
@@ -57,6 +60,7 @@ import type { DatAssetId } from "../game-types";
 import { expandBounds } from "../math/geometry-utils";
 import {
 	prepareDynamicAnimation,
+	prepareDynamicSequence,
 	type PreparedDynamicAnimation,
 } from "../animation/prepared-dynamic-animation";
 import {
@@ -71,6 +75,8 @@ import type {
 	DynamicEntityAdvance,
 	DynamicEntityTickBatch,
 } from "../runtime/dynamic-entity-feed";
+import { playingClip } from "../animation/animation-playback";
+import { datAssetId } from "../runtime/dynamic-entity-presentation";
 import type { SelectionGeometryMorphology } from "../selection/entity-interaction-shape";
 
 /** A requested authored part frame retained until its entity is destroyed. */
@@ -98,7 +104,10 @@ interface DynamicEntityRecord {
 	/** Sparse attachment nodes and owned rigid matrices published with the visual root atomically. */
 	attachmentFrames: DynamicAttachmentFrame[];
 	articulatedPose: ArticulatedPose;
-	animationHandle: PreparedAnimationHandle | null;
+	/** Exclusive playback policy chosen at admission, independent of setup behavior provenance. */
+	readonly playback: DynamicPlaybackPolicy;
+	/** Every directly selected clip retained for this model; motion-table closures are separate. */
+	animationHandles: ReadonlyMap<DatAssetId, PreparedAnimationHandle>;
 	/**
 	 * Staged script closure for a resident whose setup owns a default script.
 	 *
@@ -106,6 +115,8 @@ interface DynamicEntityRecord {
 	 * every other per-entity resource, and so a superseded generation cannot leak one.
 	 */
 	scriptClosure: PreparedPhysicsScriptClosure | null;
+	/** Script closures reached directly by selected animation hooks. */
+	animationScriptClosures: readonly PreparedPhysicsScriptClosure[];
 	/** Every animation this entity's motion table reaches, staged before activation. */
 	motionClosure: PreparedMotionClosure | null;
 	/**
@@ -175,6 +186,8 @@ export type DynamicVisualReplacement =
 	| { readonly kind: "requires-owner-replacement" }
 	| {
 			readonly kind: "staged";
+			/** Stable support/playback prepared from these exact appearance resources at source scale. */
+			readonly animation: PreparedDynamicAnimation;
 			/** Publish against the still-current owner without resetting behavior or part targets. */
 			commit(): void;
 			/** Withdraw uncommitted resources; safe after cancellation or commit. */
@@ -195,11 +208,38 @@ export interface DynamicOwnerInstallation {
 	/** Read complete staged animation facts after `ready` resolves successfully. */
 	getPreparedEntities(): readonly PreparedDynamicEntity[];
 	/** Validate and apply initial samples while staged nodes remain unpublished. */
-	prepareCommit(initialSamples: readonly DynamicPresentationSample[]): void;
+	prepareCommit(
+		initialSamples: readonly DynamicPresentationSample[],
+		attachments: readonly DynamicModelAttachment[],
+	): void;
 	/** Publish the already validated generation and retire its predecessor. */
 	commit(): void;
 	/** Release a successfully prepared generation that will not be committed. */
 	release(): void;
+}
+
+/** Direct staged model link; node IDs address this installation, never persistent item identity. */
+export interface DynamicModelAttachment {
+	/** Staged child whose source already owns its placement pose. */
+	readonly childNodeId: SceneNodeId;
+	/** Staged parent carrying the named holding location. */
+	readonly parentNodeId: SceneNodeId;
+	/** Setup-authored holding location to resolve before publication. */
+	readonly location: ParentLocation;
+}
+
+/** Fully validated link shared by staged groups and live entity attachment. */
+interface PreparedDynamicAttachment {
+	/** Child visual and independently scaled part state. */
+	readonly child: DynamicEntityRecord;
+	/** Parent visual retaining the rigid holding frame. */
+	readonly parent: DynamicEntityRecord;
+	/** Exact parent part carrying this holding location. */
+	readonly parentPart: ActiveDynamicPart;
+	/** Resolved rigid offset, independent of geometry scale. */
+	readonly attachPoint: ResolvedAttachPoint;
+	/** Complete child pose validated against its rendered parts. */
+	readonly pose: ArticulatedPose;
 }
 
 /** Independently authored sound table and optional script/emitter assets staged before commit. */
@@ -207,9 +247,12 @@ interface StagedBehaviorAssets {
 	readonly closure: PreparedPhysicsScriptClosure | null;
 	readonly emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[];
 	readonly soundTableHandle: PreparedAssetHandle<DecodedSoundTable> | null;
+	/** Animation-reachable script roots retained beside the default activation closure. */
+	readonly animationScriptClosures: readonly PreparedPhysicsScriptClosure[];
 }
 
-interface PreparedDynamicEntity {
+/** Immutable preparation facts shared with behavior installation and composition framing. */
+export interface PreparedDynamicEntity {
 	/** Complete emitter definitions retained until this resident is released. */
 	readonly emitters: readonly PreparedParticleEmitter[];
 	readonly animation: PreparedDynamicAnimation;
@@ -230,6 +273,8 @@ export class DynamicEntitySystem<
 	TTemplateOwnerId extends string = TOwnerId,
 > {
 	readonly #scene: SceneGraph;
+	/** Model ownership of roots, visual roots, and requested part frames, including staged nodes. */
+	readonly #modelRoots = new Map<SceneNodeId, SceneNodeId>();
 	readonly #placements: DynamicEntityPlacementSystem;
 	/** World-owned GPU templates are borrowed; this system retires only its resident handles. */
 	readonly #templates: ObjectVisualTemplateRepositoryPort<TTemplateOwnerId>;
@@ -319,7 +364,7 @@ export class DynamicEntitySystem<
 			for (const source of placedSources)
 				entities.push(this.#createEntity(source));
 		} catch (cause) {
-			for (const entity of entities) this.#destroyEntityTree(entity);
+			this.#destroyEntityTrees(entities);
 			throw cause;
 		}
 		let templatePreparation: StagedObjectVisualTemplateOwner<TTemplateOwnerId>;
@@ -328,7 +373,7 @@ export class DynamicEntitySystem<
 				placedSources.map(({ source }) => source),
 			);
 		} catch (cause) {
-			for (const entity of entities) this.#destroyEntityTree(entity);
+			this.#destroyEntityTrees(entities);
 			throw cause;
 		}
 		const generation = (this.#ownerGenerations.get(ownerId) ?? 0) + 1;
@@ -344,11 +389,12 @@ export class DynamicEntitySystem<
 			| "committed"
 			| "released" = "preparing";
 		const animationPreparations = entities.map((entity) =>
-			entity.source.behavior.animationId === null
-				? Promise.resolve(null)
-				: this.#animations.acquire(entity.source.behavior.animationId),
+			this.#animations.acquireAll(
+				animationIdsFor(entity.source, entity.playback),
+			),
 		);
 		const motionPreparations = entities.map((entity) =>
+			entity.playback.kind === "resolved" ||
 			entity.source.behavior.motionTableId === null
 				? Promise.resolve(null)
 				: this.#animations.acquireMotionClosure(
@@ -361,7 +407,7 @@ export class DynamicEntitySystem<
 				motionPreparations[index],
 			]).then(([animation, motion]) =>
 				this.#stageBehaviorAssets(entity, [
-					...(animation ? [animation.asset] : []),
+					...[...animation.values()].map((handle) => handle.asset),
 					...(motion?.animations.values() ?? []),
 				]),
 			),
@@ -392,15 +438,23 @@ export class DynamicEntitySystem<
 			commit: () => {
 				if (state !== "prepared-to-commit")
 					throw new Error(`Cannot commit a dynamic owner in state ${state}.`);
-				this.#publishPreparedOwner(
+				const previous = this.#publishPreparedOwner(
 					ownerId,
 					generation,
 					entities,
 					templateOwnerId,
 				);
 				state = "committed";
+				if (previous !== undefined)
+					completePresentationOperations(
+						[
+							() => this.#destroyEntityTrees(previous.entities),
+							() => this.#templates.dropOwner(previous.templateOwnerId),
+						],
+						"Previous dynamic owner could not release every resource.",
+					);
 			},
-			prepareCommit: (initialSamples) => {
+			prepareCommit: (initialSamples, attachments) => {
 				if (state !== "ready")
 					throw new Error(
 						`Cannot prepare a dynamic owner commit in state ${state}.`,
@@ -412,6 +466,8 @@ export class DynamicEntitySystem<
 						entities,
 						initialSamples,
 					);
+					const links = this.#prepareStagedAttachments(entities, attachments);
+					for (const link of links) this.#applyAttachment(link);
 					state = "prepared-to-commit";
 				} catch (cause) {
 					state = "released";
@@ -471,7 +527,9 @@ export class DynamicEntitySystem<
 		const rigidPresentationBounds = staticPresentationBounds(source);
 		const record: DynamicEntityRecord = {
 			setupBounds: rigidPresentationBounds.clone(),
-			animationHandle: null,
+			playback: resident.playback,
+			animationHandles: new Map(),
+			animationScriptClosures: [],
 			emitterHandles: [],
 			motionClosure: null,
 			motionPlayback: null,
@@ -494,6 +552,8 @@ export class DynamicEntitySystem<
 			visualRootTransform: Mat4.identity(),
 			selectionGeometryMorphology: null,
 		};
+		this.#modelRoots.set(rootNodeId, rootNodeId);
+		this.#modelRoots.set(visualRootNodeId, rootNodeId);
 		return record;
 	}
 
@@ -564,8 +624,24 @@ export class DynamicEntitySystem<
 				`Replacement template for ${source.identity} was not prepared.`,
 			);
 		}
+		const preparedScale = entity.rootScale.clone();
+		let preparedVisual: ReturnType<typeof prepareEntityVisualState>;
+		try {
+			preparedVisual = prepareEntityVisualState(
+				source,
+				preparedScale,
+				template,
+				entity.animationHandles,
+				entity.playback,
+				entity.motionClosure,
+			);
+		} catch (cause) {
+			release();
+			throw cause;
+		}
 		return {
 			kind: "staged",
+			animation: preparedVisual.animation,
 			release,
 			commit: () => {
 				if (
@@ -579,17 +655,24 @@ export class DynamicEntitySystem<
 					);
 				// Preparation can span many animation ticks. Derive bounds and transforms from the
 				// current pose/scale now, before publishing any replacement resource or scene state.
-				const visual = prepareEntityVisualState(
-					source,
-					entity.rootScale,
-					template,
-					entity.animationHandle?.asset ?? null,
-					entity.motionClosure,
-				);
+				const visual =
+					entity.rootScale.x === preparedScale.x &&
+					entity.rootScale.y === preparedScale.y &&
+					entity.rootScale.z === preparedScale.z
+						? preparedVisual
+						: prepareEntityVisualState(
+								source,
+								entity.rootScale,
+								template,
+								entity.animationHandles,
+								entity.playback,
+								entity.motionClosure,
+							);
 				// Placement changes update unanimated parts without restarting scripts or playback.
 				const replacementPose =
 					source.placementFrame !== entity.source.placementFrame &&
-					entity.animationHandle === null &&
+					entity.animationHandles.size === 0 &&
+					entity.playback.kind === "source-owned" &&
 					entity.motionPlayback === null
 						? defaultPose(source)
 						: entity.articulatedPose;
@@ -684,6 +767,17 @@ export class DynamicEntitySystem<
 		return part ? this.#attachmentFrame(entity, part).nodeId : null;
 	}
 
+	/** Resolve behavior/particle targets to their model without walking or copying scene ancestry. */
+	modelRootOf(nodeId: SceneNodeId): SceneNodeId | null {
+		return this.#modelRoots.get(nodeId) ?? null;
+	}
+
+	/** Ordinary presentation visibility also gates particles, including the frame before selection updates. */
+	isVisible(nodeId: SceneNodeId): boolean {
+		const entity = this.#entities.get(nodeId);
+		return entity !== undefined && dynamicModelIsVisible(entity);
+	}
+
 	/** Cold attachment lookup; ordinary mesh parts need no scene node or per-frame scene copy. */
 	#attachmentFrame(
 		entity: DynamicEntityRecord,
@@ -713,6 +807,7 @@ export class DynamicEntitySystem<
 			transform,
 		};
 		entity.attachmentFrames.push(frame);
+		this.#modelRoots.set(frame.nodeId, entity.rootNodeId);
 		return frame;
 	}
 
@@ -771,11 +866,29 @@ export class DynamicEntitySystem<
 		const parent = this.#entities.get(parentRootNodeId);
 		if (!parent)
 			throw new Error(`Dynamic parent ${parentRootNodeId} does not exist.`);
+		this.#applyAttachment(
+			this.#prepareAttachment(
+				child,
+				parent,
+				location,
+				poseFor(child.source.presentation, placementKey),
+			),
+		);
+	}
+
+	#prepareAttachment(
+		child: DynamicEntityRecord,
+		parent: DynamicEntityRecord,
+		location: ParentLocation,
+		pose: ArticulatedPose,
+	): PreparedDynamicAttachment {
+		const childRootNodeId = child.rootNodeId;
+		const parentRootNodeId = parent.rootNodeId;
 		const attachPoint =
 			parent.source.presentation.holdingLocations.get(location);
 		if (!attachPoint) {
 			// RETAIL DIVERGENCE: `CPhysicsObj::add_child` silently refuses a missing holding
-			// location (`acclient.c:305203`). The Explorer throws because silence would hide broken
+			// location (`acclient.c:305203`). Presentation throws because silence would hide broken
 			// mounted data; an archive/ACE census found 8 missing pairs among 2,288, all on three
 			// arrow templates carrying degenerate wield lists and none on genuine creatures.
 			throw new Error(
@@ -790,15 +903,24 @@ export class DynamicEntitySystem<
 				`Dynamic parent ${parentRootNodeId} holding location ${location} names missing part ${attachPoint.partIndex}.`,
 			);
 		}
-		const pose = poseFor(child.source.presentation, placementKey);
 		for (const part of child.renderable.parts) {
 			const transform = pose.partToObjectTransforms[part.partIndex];
 			if (!transform) {
 				throw new Error(
-					`Dynamic child ${childRootNodeId} placement ${placementKey} has no frame for part ${part.partIndex}.`,
+					`Dynamic child ${childRootNodeId} attachment pose has no frame for part ${part.partIndex}.`,
 				);
 			}
 		}
+		return { child, parent, parentPart, attachPoint, pose };
+	}
+
+	#applyAttachment({
+		child,
+		parent,
+		parentPart,
+		attachPoint,
+		pose,
+	}: PreparedDynamicAttachment): void {
 		for (const part of child.renderable.parts) {
 			const transform = pose.partToObjectTransforms[part.partIndex];
 			if (!transform)
@@ -812,7 +934,10 @@ export class DynamicEntitySystem<
 		}
 		this.#publishAttachmentFrames(child, child.visualRootTransform, pose);
 		child.articulatedPose = pose;
-		const placedBounds = presentationBoundsForPose(child.source, pose);
+		const placedBounds = this.#presentationBoundsForSample(
+			child.renderable.parts,
+			child.visualRootTransform,
+		);
 		child.rigidPresentationBounds = placedBounds;
 		child.publishedPresentationBounds = expandBounds(
 			placedBounds,
@@ -830,6 +955,41 @@ export class DynamicEntitySystem<
 		);
 	}
 
+	/** Resolve every link before mutating the staged graph; local compositions are direct forests. */
+	#prepareStagedAttachments(
+		entities: readonly DynamicEntityRecord[],
+		attachments: readonly DynamicModelAttachment[],
+	): readonly PreparedDynamicAttachment[] {
+		const models = new Map(
+			entities.map((entity) => [entity.rootNodeId, entity]),
+		);
+		const children = new Set(attachments.map((link) => link.childNodeId));
+		if (children.size !== attachments.length)
+			throw new Error("Staged attachments contain a duplicate child.");
+		return attachments.map((link) => {
+			const child = models.get(link.childNodeId);
+			if (!child)
+				throw new Error(
+					`Staged child ${link.childNodeId} does not belong to this installation.`,
+				);
+			const parent = models.get(link.parentNodeId);
+			if (!parent)
+				throw new Error(
+					`Staged parent ${link.parentNodeId} does not belong to this installation.`,
+				);
+			if (children.has(link.parentNodeId))
+				throw new Error(
+					"Staged attachments must link direct children to independent parents.",
+				);
+			return this.#prepareAttachment(
+				child,
+				parent,
+				link.location,
+				child.articulatedPose,
+			);
+		});
+	}
+
 	getRenderable(nodeId: SceneNodeId): DynamicEntityRenderable | null {
 		return this.#entities.get(nodeId)?.renderable ?? null;
 	}
@@ -839,13 +999,7 @@ export class DynamicEntitySystem<
 		nodeId: SceneNodeId,
 	): VisibleDynamicPresentation | null {
 		const entity = this.#entities.get(nodeId);
-		if (
-			entity === undefined ||
-			entity.renderable.kind === "preparing" ||
-			entity.presentationState.noDraw ||
-			entity.presentationState.hidden
-		)
-			return null;
+		if (entity === undefined || !dynamicModelIsVisible(entity)) return null;
 		const resolved = this.#scene.readResolvedState(entity.visualRootNodeId);
 		if (resolved === undefined)
 			throw new Error(
@@ -1228,7 +1382,11 @@ export class DynamicEntitySystem<
 		for (const [nodeId, entity] of this.#entities) {
 			// An entity animation covers is either in this frame's samples or was deliberately
 			// skipped by the presentation cadence; publishing it here would override that choice.
-			if (entity.animationHandle !== null) continue;
+			if (
+				entity.animationHandles.size > 0 ||
+				entity.playback.kind === "resolved"
+			)
+				continue;
 			if (publishedNodeIds.has(nodeId)) continue;
 			// An idle resident resolves to the same presentation every frame; republishing it is
 			// the per-frame streaming this split was meant to remove, not add. Its particle
@@ -1320,13 +1478,25 @@ export class DynamicEntitySystem<
 		const closure =
 			scriptId === null ? null : await this.#scripts.acquireClosure(scriptId);
 		const emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[] = [];
+		const animationScriptClosures: PreparedPhysicsScriptClosure[] = [];
 		let soundTableHandle: PreparedAssetHandle<DecodedSoundTable> | null = null;
 		try {
+			const scriptRoots = new Set(
+				animations.flatMap((animation) =>
+					animation.hooks.flatMap((hook) =>
+						hook.kind === "call-pes" ? [hook.scriptId] : [],
+					),
+				),
+			);
+			if (scriptId !== null) scriptRoots.delete(scriptId);
+			for (const root of scriptRoots)
+				animationScriptClosures.push(await this.#scripts.acquireClosure(root));
+			const scripts = [closure, ...animationScriptClosures].flatMap((item) =>
+				item === null ? [] : [...item.scripts.values()],
+			);
 			const emitterIds = new Set([
 				...animations.flatMap((animation) => animation.emitterInfoIds),
-				...[...(closure?.scripts.values() ?? [])].flatMap(
-					(script) => script.dependencies.emitterInfoIds,
-				),
+				...scripts.flatMap((script) => script.dependencies.emitterInfoIds),
 			]);
 			emitterHandles.push(
 				...(await this.#emitters.acquireAll(emitterIds)).values(),
@@ -1342,9 +1512,15 @@ export class DynamicEntitySystem<
 			soundTableHandle?.release();
 			for (const handle of emitterHandles) handle.release();
 			closure?.release();
+			for (const script of animationScriptClosures) script.release();
 			throw cause;
 		}
-		return { closure, emitterHandles, soundTableHandle };
+		return {
+			closure,
+			emitterHandles,
+			soundTableHandle,
+			animationScriptClosures,
+		};
 	}
 
 	async #prepareOwner(
@@ -1353,7 +1529,9 @@ export class DynamicEntitySystem<
 		entities: readonly DynamicEntityRecord[],
 		preparation: StagedObjectVisualTemplateOwner<TTemplateOwnerId>,
 		templateOwnerId: TTemplateOwnerId,
-		animationPreparations: readonly Promise<PreparedAnimationHandle | null>[],
+		animationPreparations: readonly Promise<
+			ReadonlyMap<DatAssetId, PreparedAnimationHandle>
+		>[],
 		behaviorPreparations: readonly Promise<StagedBehaviorAssets>[],
 		motionPreparations: readonly Promise<PreparedMotionClosure | null>[],
 	): Promise<"ready" | "superseded"> {
@@ -1377,9 +1555,7 @@ export class DynamicEntitySystem<
 		// Everything acquired must be releasable on any failure path, including a closure whose
 		// sibling animation rejected.
 		const acquiredHandles = animationResults.flatMap((result) =>
-			result.status === "fulfilled" && result.value !== null
-				? [result.value]
-				: [],
+			result.status === "fulfilled" ? [...result.value.values()] : [],
 		);
 		const acquiredBehaviorAssets = behaviorResults.flatMap((result) =>
 			result.status === "fulfilled" ? [result.value] : [],
@@ -1392,6 +1568,7 @@ export class DynamicEntitySystem<
 		const releaseBehaviorAssets = () => {
 			for (const staged of acquiredBehaviorAssets) {
 				staged.closure?.release();
+				for (const closure of staged.animationScriptClosures) closure.release();
 				staged.soundTableHandle?.release();
 				for (const handle of staged.emitterHandles) handle.release();
 			}
@@ -1403,7 +1580,7 @@ export class DynamicEntitySystem<
 			for (const handle of acquiredHandles) handle.release();
 			releaseBehaviorAssets();
 			preparation.release();
-			for (const entity of entities) this.#destroyEntityTree(entity);
+			this.#destroyEntityTrees(entities);
 			return "superseded";
 		}
 		const failure = settled.find((result) => result.status === "rejected");
@@ -1411,7 +1588,7 @@ export class DynamicEntitySystem<
 			for (const handle of acquiredHandles) handle.release();
 			releaseBehaviorAssets();
 			preparation.release();
-			for (const entity of entities) this.#destroyEntityTree(entity);
+			this.#destroyEntityTrees(entities);
 			throw failure.reason;
 		}
 		if (templateResult.status !== "fulfilled") {
@@ -1448,14 +1625,16 @@ export class DynamicEntitySystem<
 				}
 
 				return {
+					entity,
 					...prepareEntityVisualState(
 						entity.source,
 						entity.rootScale,
 						template,
-						animationResult.value?.asset ?? null,
+						animationResult.value,
+						entity.playback,
 						motionResult.value,
 					),
-					handle: animationResult.value,
+					handles: animationResult.value,
 					renderable: prepareRenderable(
 						mergePreparedParts(entity.renderable.parts, template.parts),
 						template,
@@ -1465,13 +1644,13 @@ export class DynamicEntitySystem<
 					emitterHandles: behaviorResult.value.emitterHandles,
 					soundTableHandle: behaviorResult.value.soundTableHandle,
 					scriptClosure: behaviorResult.value.closure,
+					animationScriptClosures: behaviorResult.value.animationScriptClosures,
 					motionClosure: motionResult.value,
 				};
 			});
 			preparation.commit(templateOwnerId);
-			for (let index = 0; index < entities.length; index += 1) {
-				const entity = entities[index]!;
-				const result = prepared[index]!;
+			for (const result of prepared) {
+				const { entity } = result;
 				// Effect state is installed here, before any producer can dispatch into it, and is
 				// owned by the entity rather than by animation: a script-only resident has effect
 				// state and no playback at all.
@@ -1485,7 +1664,13 @@ export class DynamicEntitySystem<
 						? 0
 						: entity.presentationState.translucency,
 				);
-				entity.animationHandle = result.handle;
+			}
+			// Transfer leases only after every fallible installation succeeds. Rollback still owns
+			// all acquired handles until this point, so no partially assigned entity can release twice.
+			for (const result of prepared) {
+				const { entity } = result;
+				entity.animationHandles = result.handles;
+				entity.animationScriptClosures = result.animationScriptClosures;
 				entity.scriptClosure = result.scriptClosure;
 				entity.motionClosure = result.motionClosure;
 				entity.motionPlayback = result.motionPlayback;
@@ -1499,7 +1684,8 @@ export class DynamicEntitySystem<
 			for (const handle of acquiredHandles) handle.release();
 			releaseBehaviorAssets();
 			preparation.release();
-			for (const entity of entities) this.#destroyEntityTree(entity);
+			this.#templates.dropOwner(templateOwnerId);
+			this.#destroyEntityTrees(entities);
 			throw cause;
 		}
 		return "ready";
@@ -1525,11 +1711,18 @@ export class DynamicEntitySystem<
 			if (!animation)
 				throw new Error(`Dynamic entity ${entity.rootNodeId} is not prepared.`);
 			const sample = samples.get(entity.rootNodeId);
-			if (animation.kind === "activatable" && !sample)
+			if (
+				(animation.kind === "activatable" || animation.kind === "sequence") &&
+				!sample
+			)
 				throw new Error(
 					`Animated entity ${entity.rootNodeId} has no initial pose sample.`,
 				);
-			if (animation.kind !== "activatable" && sample)
+			if (
+				animation.kind !== "activatable" &&
+				animation.kind !== "sequence" &&
+				sample
+			)
 				throw new Error(
 					`Static-fallback entity ${entity.rootNodeId} received an animated pose.`,
 				);
@@ -1553,7 +1746,7 @@ export class DynamicEntitySystem<
 		generation: number,
 		entities: readonly DynamicEntityRecord[],
 		templateOwnerId: TTemplateOwnerId,
-	): void {
+	): DynamicOwnerRecord<TTemplateOwnerId> | undefined {
 		if (this.#destroyed || this.#ownerGenerations.get(ownerId) !== generation)
 			throw new Error("Cannot publish a superseded dynamic owner generation.");
 		const previous = this.#owners.get(ownerId);
@@ -1565,12 +1758,10 @@ export class DynamicEntitySystem<
 		)
 			this.#nameplatePopulationRevision += 1;
 		this.#owners.set(ownerId, { entities, generation, templateOwnerId });
-		if (!previous) return;
-		for (const entity of previous.entities) {
-			this.#entities.delete(entity.rootNodeId);
-			this.#destroyEntityTree(entity);
-		}
-		this.#templates.dropOwner(previous.templateOwnerId);
+		if (previous !== undefined)
+			for (const entity of previous.entities)
+				this.#entities.delete(entity.rootNodeId);
+		return previous;
 	}
 
 	#applySample(
@@ -1689,47 +1880,115 @@ export class DynamicEntitySystem<
 		return target;
 	}
 
+	/** Read ancestry once before teardown so every owned descendant retires before its parent. */
+	#destroyEntityTrees(entities: readonly DynamicEntityRecord[]): void {
+		const ordered = entities
+			.map((entity) => {
+				let nodeId: SceneNodeId | null = entity.rootNodeId;
+				let depth = 0;
+				while (nodeId !== null) {
+					const node = this.#scene.getNode(nodeId);
+					if (!node)
+						throw new Error(`Dynamic retirement cannot find node ${nodeId}.`);
+					nodeId = node.parentId;
+					depth++;
+				}
+				return { entity, depth };
+			})
+			.sort((a, b) => b.depth - a.depth);
+		completePresentationOperations(
+			ordered.map(
+				({ entity }) =>
+					() =>
+						this.#destroyEntityTree(entity),
+			),
+			"Dynamic group could not retire every model.",
+		);
+	}
+
 	#releaseStagedOwner(
 		entities: readonly DynamicEntityRecord[],
 		templateOwnerId: TTemplateOwnerId,
 	): void {
-		this.#templates.dropOwner(templateOwnerId);
-		for (const entity of entities) this.#destroyEntityTree(entity);
+		completePresentationOperations(
+			[
+				() => this.#destroyEntityTrees(entities),
+				() => this.#templates.dropOwner(templateOwnerId),
+			],
+			"Staged dynamic owner could not release every resource.",
+		);
 	}
 
 	#removeOwnerEntities(ownerId: TOwnerId): void {
 		const owner = this.#owners.get(ownerId);
-		if (owner) {
-			if (owner.entities.some((entity) => entity.nameplateContent !== null))
-				this.#nameplatePopulationRevision += 1;
-			for (const entity of owner.entities) {
-				this.#destroyEntityTree(entity);
-				this.#entities.delete(entity.rootNodeId);
-			}
-			this.#owners.delete(ownerId);
-			this.#templates.dropOwner(owner.templateOwnerId);
-		}
+		if (!owner) return;
+		if (owner.entities.some((entity) => entity.nameplateContent !== null))
+			this.#nameplatePopulationRevision++;
+		this.#owners.delete(ownerId);
+		for (const entity of owner.entities)
+			this.#entities.delete(entity.rootNodeId);
+		this.#releaseStagedOwner(owner.entities, owner.templateOwnerId);
 	}
 
 	#destroyEntityTree(entity: DynamicEntityRecord): void {
-		entity.animationHandle?.release();
-		entity.animationHandle = null;
-		entity.scriptClosure?.release();
+		this.#modelRoots.delete(entity.rootNodeId);
+		this.#modelRoots.delete(entity.visualRootNodeId);
+		for (const frame of entity.attachmentFrames)
+			this.#modelRoots.delete(frame.nodeId);
+		const steps: (() => void)[] = [
+			...[...entity.animationHandles.values()].map(
+				(handle) => () => handle.release(),
+			),
+			...entity.animationScriptClosures.map(
+				(closure) => () => closure.release(),
+			),
+			...entity.emitterHandles.map((handle) => () => handle.release()),
+		];
+		if (entity.scriptClosure !== null) {
+			const closure = entity.scriptClosure;
+			steps.push(() => closure.release());
+		}
+		if (entity.motionClosure !== null) {
+			const closure = entity.motionClosure;
+			steps.push(() => closure.release());
+		}
+		if (entity.soundTableHandle !== null) {
+			const handle = entity.soundTableHandle;
+			steps.push(() => handle.release());
+		}
+		entity.animationHandles = new Map();
+		entity.animationScriptClosures = [];
 		entity.scriptClosure = null;
-		entity.motionClosure?.release();
 		entity.motionClosure = null;
 		entity.motionPlayback = null;
-		for (const handle of entity.emitterHandles) handle.release();
 		entity.emitterHandles = [];
-		entity.soundTableHandle?.release();
 		entity.soundTableHandle = null;
-		this.#effects.remove(entity.rootNodeId);
-		for (const frame of entity.attachmentFrames) {
-			this.#scene.destroyNode(frame.nodeId);
-		}
-		this.#scene.destroyNode(entity.visualRootNodeId);
-		this.#placements.destroyRoot(entity.rootNodeId);
+		steps.push(
+			() => this.#effects.remove(entity.rootNodeId),
+			...entity.attachmentFrames.map(
+				(frame) => () => this.#scene.destroyNode(frame.nodeId),
+			),
+			() => this.#scene.destroyNode(entity.visualRootNodeId),
+			() => this.#placements.destroyRoot(entity.rootNodeId),
+		);
+		completePresentationOperations(
+			steps,
+			`Dynamic model ${entity.rootNodeId} could not release every resource.`,
+		);
 	}
+}
+
+/** Shared draw/particle admission reads the model's complete presentation state at its owning layer. */
+function dynamicModelIsVisible(
+	entity: DynamicEntityRecord,
+): entity is DynamicEntityRecord & {
+	renderable: Extract<DynamicEntityRenderable, { kind: "ready" }>;
+} {
+	return (
+		entity.renderable.kind !== "preparing" &&
+		!entity.presentationState.noDraw &&
+		!entity.presentationState.hidden
+	);
 }
 
 /** Compare small immutable compositor rows without making object identity semantic. */
@@ -1747,18 +2006,70 @@ function orderedIndicatorsEqual(
 	);
 }
 
-/** Rebuild geometry-dependent envelopes from retained animation assets, without starting playback. */
+/** Resolve acquisition identities once from the exclusive admission policy. */
+function animationIdsFor(
+	source: DynamicPresentationSource,
+	playback: DynamicPlaybackPolicy,
+): readonly DatAssetId[] {
+	if (playback.kind === "resolved")
+		return playback.pose.kind === "setup-pose"
+			? []
+			: playback.pose.clips.map((clip) => datAssetId(clip.animationId));
+	return source.behavior.animationId === null
+		? []
+		: [source.behavior.animationId];
+}
+
+/** Rebuild geometry-dependent envelopes from retained assets without starting playback. */
 function prepareEntityVisualState(
 	source: DynamicPresentationSource,
 	scale: Vec3,
 	template: ObjectVisualTemplate,
-	animationAsset: PreparedAnimation | null,
+	animationAssets: ReadonlyMap<DatAssetId, PreparedAnimationHandle>,
+	playback: DynamicPlaybackPolicy,
 	motionClosure: PreparedMotionClosure | null,
 ): {
 	readonly animation: PreparedDynamicAnimation;
 	readonly motionPlayback: PreparedMotionPlayback | null;
 } {
-	const staticBounds = staticPresentationBounds({ ...source, scale });
+	const posedSource = { ...source, scale };
+	const setupPose = defaultPose(posedSource);
+	const staticBounds = presentationBoundsForPose(posedSource, setupPose);
+	if (playback.kind === "resolved") {
+		const pose = playback.pose;
+		const clips =
+			pose.kind === "setup-pose"
+				? []
+				: pose.clips.map((clip, index) => {
+						const id = datAssetId(clip.animationId);
+						const handle = animationAssets.get(id);
+						if (!handle)
+							throw new Error(`Resolved animation ${id} was not retained.`);
+						return playingClip(
+							handle.asset,
+							clip.lowFrame,
+							clip.highFrame,
+							clip.framerate,
+							index < pose.firstCyclicClip ? "hold" : "loop",
+						);
+					});
+		return {
+			animation: prepareDynamicSequence(
+				clips,
+				pose.kind === "setup-pose" ? null : pose.firstCyclicClip,
+				template,
+				setupPose.partToObjectTransforms,
+				scale,
+				staticBounds,
+			),
+			motionPlayback: null,
+		};
+	}
+	const animationId = source.behavior.animationId;
+	const animationAsset =
+		animationId === null ? null : animationAssets.get(animationId)?.asset;
+	if (animationAsset === undefined)
+		throw new Error(`Default animation ${animationId} was not retained.`);
 	const motionPlayback =
 		motionClosure === null
 			? null

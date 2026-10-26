@@ -41,3 +41,24 @@ export class PresentationTeardownStack {
 		);
 	}
 }
+
+/** Attempt every synchronous operation; a context message groups even a single failure. */
+export function completePresentationOperations(
+	steps: readonly (() => void)[],
+	message?: string,
+): void {
+	const failures: unknown[] = [];
+	for (const step of steps) {
+		try {
+			step();
+		} catch (cause) {
+			failures.push(cause);
+		}
+	}
+	if (failures.length === 1 && message === undefined) throw failures[0];
+	if (failures.length > 0)
+		throw new AggregateError(
+			failures,
+			message ?? "Presentation resource operations failed.",
+		);
+}

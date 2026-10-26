@@ -6,7 +6,7 @@ import type {
 import type { PresentationAssetService } from "../../lib/game/runtime/presentation-asset-service";
 import { acquireObjectPreviewAssets } from "../../lib/game/preview/object-preview-composition";
 import { ObjectPreviewPresentation } from "../../lib/game/preview/object-preview-presentation";
-import { ObjectPreviewSequence } from "../../lib/game/preview/object-preview-sequence";
+import { AnimationSequence } from "../../lib/game/animation/animation-sequence";
 import { resolveObjectPreviewViewport } from "../../lib/game/preview/object-preview-viewport";
 import {
 	composeObjectPartFrame,
@@ -14,6 +14,7 @@ import {
 } from "../../lib/game/resolution/object-part-transform";
 import { resolvePlacementPose } from "../../lib/game/resolution/presentation";
 import { mat4ToFloat32Array, multiplyMat4 } from "../../lib/game/math/matrices";
+import { resolveObjectPreviewCompositionView } from "../../lib/game/renderer/object-preview-camera";
 import { Mat4 } from "../../lib/game/math/types";
 
 // Read-only catalog census: Short Sword WCID 352 and Round Shield WCID 93. Their source facts
@@ -77,12 +78,40 @@ export async function probePregameEquipmentFrames(
 		readonly partFramesChecked: number;
 	}[];
 	readonly subjectRotationPreservedBackdrop: boolean;
+	readonly inspectionOrbitStable: boolean;
 }> {
 	const lease = await acquireObjectPreviewAssets(assets, source);
 	const playback = new ObjectPreviewPresentation(lease.assets, null);
 	try {
+		let orbitRadius: number | null = null;
+		let orbitRoot: Mat4 | null = null;
+		for (let step = 0; step <= 72; step++) {
+			const camera = resolveObjectPreviewCompositionView(
+				lease.assets.fit,
+				null,
+				resolveObjectPreviewViewport({
+					extent: { width: 320, height: 480 },
+					minimumFrameIntervalSeconds: 1 / 30,
+					rotation: { kind: "orbit", yawRadians: (step * Math.PI) / 36 },
+					framing: { kind: "body" },
+				}),
+			);
+			const radius = Math.hypot(
+				camera.cameraPosition.x,
+				camera.cameraPosition.y,
+				camera.cameraPosition.z,
+			);
+			if (
+				orbitRadius !== null &&
+				(Math.abs(radius - orbitRadius) > 1e-8 ||
+					(orbitRoot !== null && !sameMatrix(camera.objectRoot, orbitRoot)))
+			)
+				throw new Error("Inspection orbit changed its radius or pivot.");
+			orbitRadius = radius;
+			orbitRoot = camera.objectRoot;
+		}
 		const body = lease.assets.body.visual;
-		const sequence = new ObjectPreviewSequence(
+		const sequence = new AnimationSequence(
 			body.clips,
 			body.firstCyclicClip,
 			body.setupPose,
@@ -208,7 +237,11 @@ export async function probePregameEquipmentFrames(
 		} finally {
 			replacement.dispose();
 		}
-		return { attachmentPlacements, subjectRotationPreservedBackdrop: true };
+		return {
+			attachmentPlacements,
+			subjectRotationPreservedBackdrop: true,
+			inspectionOrbitStable: true,
+		};
 	} finally {
 		playback.dispose();
 		lease.release();

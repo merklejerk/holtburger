@@ -34,13 +34,14 @@ idle pose; the submitted outfit is unchanged.
 
 `ClientPresentationRoot` starts world presentation during pre-game and retains one canvas,
 WebGL2 device/runtime, worker composition and audio context through gameplay. Its pre-game
-backdrop controller uses a fixed DAT camera and a local environmental clock. Scene reveal uses
+`ClientPregameScene` uses a fixed DAT staging cell, camera framing from the active page rectangle,
+and a local environmental clock. Scene reveal uses
 existing static activation readiness; later weather and audio preparation follows normal runtime
 policy. Scene-content failures offer retry; failed resource construction or driver retirement
 requires restarting presentation rather than reusing uncertain mutable state.
 
 `ClientApp` keeps the dedicated `ClientLoadingPage` visible until the authority supplies a
-character roster and the existing backdrop status is ready. Connection and scene preparation
+character roster and the world-scene status is ready. Connection and scene preparation
 run concurrently behind this opaque page; the persistent canvas continues loading and drawing.
 The app reveals selection and its background together, clears previous readiness before returning
 from gameplay, and keeps scene retry and disconnect available while loading. The page only displays
@@ -52,23 +53,53 @@ transitions. Mode handoffs detach authority, invalidate pending work and withdra
 state before the next controller is admitted. `ClientGameplayView` supplies the HUD and input over
 the app-owned canvas; the common interaction boundary includes both for drag/drop hit testing.
 
-Selection characters are transparent screen overlays, independent of backdrop depth, lighting and
-world placement. Creation retains its existing retail room and portrait preview; its opaque screen
-pauses backdrop drawing and silences its listener without evicting the scene. Returning resumes
-the backdrop, with local calendar timing reset and historical script sounds suppressed on the first
-resumed frame. Existing bounded script/particle catch-up remains runtime policy.
+`CLIENT_PREGAME_SCENE_TUNING.locations` holds authored pregame compositions. Each app launch picks
+one uniformly and retains it across selection/creation pages, renderer retries, and gameplay returns.
+Character positions stay in landblock-local AC format; camera poses use canonical scene
+coordinates. Characters face the fitted camera position, including off-center UI layouts. Pregame
+`initialYawRadians` defaults to zero and user drag rotates from that facing; isolated inspection
+retains its own initial-yaw preset. Character and camera have separate authored cell IDs. Framing preserves the selected camera
+orientation while translating it for the UI rectangle; a unique containing-cell query updates camera
+visibility membership when that movement crosses an interior portal. Authors supply safe locations; no room-clearance
+boxes are required. FOV, framing offsets, fill light, and calendar policy are shared across locations.
+
+Selection and creation place the character and held equipment directly in that world scene. They
+use ordinary dynamic rendering, scene depth, animation, effects, particles, and spatial membership,
+without fabricating host entities. The camera moves to frame the page's reserved rectangle; source
+scale stays unchanged. Body framing covers the animated body alone; held equipment can extend outside the framing area. Face framing
+uses the heritage-specific focus volume. Both keep their focus on the staging axis and fit a full
+turn, so dragging the character does not move the camera. Inspection previews retain their bounds-center
+orbit pivot and fit a full orbit at a constant distance. Authored locations are responsible for sufficient space around the character and camera.
+Layouts too small for the framing margin show a local limitation and recover when resized; the
+environment continues drawing.
+
+`ClientPregameCharacter` owns a transparent interaction surface, layout observation, and drag input.
+The root's `ClientPregameCharacterService` retains page intent during construction/retry and revokes
+outgoing surfaces before another page can publish. Revocation releases pointer capture and layout
+observers. `LocalSceneModelHandle` coalesces source preparation and installs complete linked groups.
+Compatible appearance edits preserve scene nodes and playback; failed same-character edits retain
+the last complete visual. Switching character identity withdraws the previous subject immediately.
+Equipment uses captured holding locations, placement poses, and independent source scales.
+
+Pregame vertical FOV (`fovDegrees`) and independent body/face camera height/distance
+preferences are adjustable in `CLIENT_PREGAME_CAMERA_TUNING` in `client-pregame-tuning.ts`. `heightOffsetFraction` shifts the focus by a fraction of the body or face-focus height;
+`distanceOffsetFraction` changes the calculated full-turn fit distance: `0.1` retreats another 10%,
+while `-0.5` moves 50% closer and can crop the frame. Only a small positive camera distance is enforced
+to keep the eye in front of its focus. Authored offsets may move geometry outside the world renderer’s
+clipping planes; normal rendering handles that clipping.
+
+Pregame supplies an ordinary point light through the scene driver's scoped light input. It shares
+renderer light budgeting and remains independent of the viewer headlamp preference. The local body,
+equipment, and part targets suppress authored sound hooks at the behavior/audio seam. All pregame
+world audio is silenced by withdrawing the runtime listener. Gameplay restores its own listener on entry. Leaving pregame withdraws local models and lights before gameplay starts,
+including when source preparation is still pending.
 
 `HostPresentationAssets` owns shared lazy CPU/content capabilities. World presentation and isolated
-model previews borrow them, with **separate WebGL contexts and GPU resources**. A persistent world
-device preserves renderer infrastructure, not permanent scene residency; ordinary resource eviction
-still applies. App shutdown drains both borrowers before destroying shared assets.
-
-Creator, picker, and inspector share `ClientModelPreview` and the single-active
-`StandardClientObjectPreviewService`. Source changes retain the canvas device, coalesce pending
-preparation, and atomically replace body/equipment material bundles. Failed edits retain the
-previous complete visual; selecting a different character first withdraws the previous subject.
-Held equipment follows captured holding locations and placements. An optional creation backdrop
-stays independent of subject rotation and does not participate in character framing.
+inspection borrow them; inspection keeps its separate WebGL context and GPU resources through
+`ClientModelPreview` and `StandardClientObjectPreviewService`. Both paths share resolved sequence
+traversal and model-fit calculations. A persistent world device preserves renderer infrastructure,
+not permanent scene residency; ordinary resource eviction still applies. App shutdown drains both
+borrowers before destroying shared assets.
 
 The server roster contains no appearance. During gameplay core publishes a complete
 `PlayerVisualCapture` after containment and equipment readiness, retaining it in application
@@ -90,15 +121,17 @@ even if the renderer closes before debounce fires. It cannot guarantee packets s
 captures lost to an unclean process exit. Failed writes report a warning, preserve the previous
 successful file, and leave the latest capture pending for retry.
 
-`npm run harness:browser -- --pregame-preview --brief` exercises production content, creator and
-picker controls with synthetic server/cache results, equipment transforms, replacement races,
-and world/preview resource lifetimes. It does not create a real server character. Visual
-acceptance remains a user check.
+`npm run harness:browser -- --pregame-preview --pregame-location 0 --brief` exercises production content, creator and
+picker controls with synthetic server/cache results, mounted scene surfaces, equipment transforms,
+replacement races, camera limitations/recovery, reproducible fill-light readbacks, and world/inspection
+resource lifetimes. It does not create a real server character. Visual
+acceptance remains a user check. Use `--pregame-location 1` to run the second configured scene;
+standalone review URLs accept `&pregame-location=1`.
 
 `npm run harness:browser -- --client-presentation --brief` verifies the production app flow.
 The browser harness route `?client-presentation=1&contentHost=<local-content-host-url>` mounts the
 production `ClientApp` with controlled authority and local settings/cache fixtures. It supports
-selection, retail-room creation, a portal reveal and return to selection without a real server.
+selection, scene-based creation, a portal reveal and return to selection without a real server.
 `__HOLTBURGER_CLIENT_PRESENTATION__` is diagnostic-only: its `read()` reports world canvas/context
 requests and portal reveals, and `returnSelection()` supplies the fixture authority edge. The
 canonical pre-game suite also exercises two real gameplay-adapter handoffs on one renderer, an
@@ -117,7 +150,7 @@ Each mounted frontend owns its action context. `provideAppInputPolicy()` provide
 router and one `ViewportInputGate`; descendants access them with `useAppInputPolicy()`.
 `ClientApp` and `ExplorerApp` mount keyboard routing at their app lifetimes. Gameplay action
 contexts and viewport gestures are admitted only in their appropriate authority phase; the
-pre-game backdrop accepts no movement or picking. Pre-game foreground declares native keyboard controls so roster arrows and Tab retain browser behavior.
+pre-game scene accepts character rotation through its foreground surface, without gameplay movement or picking. Pre-game foreground declares native keyboard controls so roster arrows and Tab retain browser behavior.
 
 Keyboard ownership defaults to the game. Ordinary HUD buttons, toggles, inventory controls, and
 panel gestures do not acquire it. Text/number editors, editable content, and native selects acquire

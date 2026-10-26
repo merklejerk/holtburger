@@ -16,7 +16,7 @@
 	import CreateCharacterIcon from "../assets/icons/hud-invite.svg?component";
 	import DisconnectIcon from "../assets/icons/pregame-disconnect.svg?component";
 	import WarningIcon from "../assets/icons/pregame-warning.svg?component";
-	import ClientModelPreview from "./ClientModelPreview.svelte";
+	import ClientPregameCharacter from "./ClientPregameCharacter.svelte";
 	import {
 		ClientCharacterPreview,
 		type CharacterPreviewState,
@@ -26,7 +26,7 @@
 	import ClientCharacterCreator from "./ClientCharacterCreator.svelte";
 	import { type CharacterCreationServices } from "./client-character-creation";
 	import type { CharacterManagementState } from "./client-host-contract";
-	import type { ClientObjectPreviewService } from "./client-object-preview-service";
+	import type { PregameCharacterPresentation } from "./client-pregame-character";
 
 	/** The authority-owned character roster and current frontend selection. */
 	type CharacterSelectionState = Extract<
@@ -45,7 +45,7 @@
 		readonly characterActions?: CharacterSelectionActions | null;
 		/** Null only on diagnostic surfaces that do not provide creation capabilities. */
 		readonly creation: CharacterCreationServices | null;
-		readonly previewService: ClientObjectPreviewService | null;
+		readonly scene: PregameCharacterPresentation | null;
 		/** Optional only on roster-only diagnostic surfaces. */
 		readonly visualCache: ClientVisualCacheTransport | null;
 		/** Publish selection without entering the world. */
@@ -62,7 +62,7 @@
 		management,
 		characterActions = null,
 		creation,
-		previewService,
+		scene,
 		visualCache,
 		onChoose,
 		onEnter,
@@ -109,15 +109,6 @@
 		previewState.kind === "ready" && previewState.guid === previewGuid
 			? previewState.source
 			: null,
-	);
-	const previewMessage = $derived(
-		previewState.kind === "unavailable" && previewState.guid === previewGuid
-			? "Saved appearance unavailable"
-			: previewState.kind === "missing" && previewState.guid === previewGuid
-				? "Enter this character to save an appearance preview."
-				: previewGuid === null
-					? "Select a character to preview."
-					: "Loading saved appearance…",
 	);
 	onMount(() => {
 		if (visualCache === null) return;
@@ -245,10 +236,10 @@
 	});
 </script>
 
-{#if creating && creation !== null && previewService !== null}
+{#if creating && creation !== null && scene !== null}
 	<ClientCharacterCreator
 		services={creation}
-		{previewService}
+		{scene}
 		{management}
 		onBack={() => (creating = false)}
 	/>
@@ -353,7 +344,7 @@
 						disabled={blocked ||
 							selection.characters.length >= selection.maxSlots ||
 							creation === null ||
-							previewService === null}
+							scene === null}
 						onclick={() => {
 							creationBaseline = management;
 							creating = true;
@@ -382,15 +373,17 @@
 						{management.message}
 					</p>{/if}
 			</form>
-			{#if visualCache !== null && previewService !== null}
+			{#if visualCache !== null && scene !== null}
 				<div class="character-preview-column">
 					<div class="character-preview-viewport">
-						<ClientModelPreview
-							source={previewSource}
-							emptyMessage={previewMessage}
-							service={previewService}
-							rotation="subject"
-							keyboardNavigation={false}
+						<ClientPregameCharacter
+							source={previewSource === null || previewGuid === null
+								? null
+								: {
+										subjectId: `character:${previewGuid}`,
+										visual: previewSource,
+									}}
+							{scene}
 							framing={{ kind: "body" }}
 						/>
 					</div>

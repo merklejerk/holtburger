@@ -985,6 +985,294 @@ async function settleSoundCues(): Promise<void> {
 	await new Promise<void>((resolve) => setTimeout(resolve, 0));
 }
 
+describe("GamePresentationRuntime local scene models", () => {
+	it("keeps scene-driver lights independent from the viewer headlamp and clears their input", async () => {
+		const frames: FrameInput[] = [];
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			testRenderer({
+				drawFrame: (frame) => {
+					frames.push(frame);
+					return EMPTY_RENDERER_FRAME_FEEDBACK;
+				},
+			}),
+		);
+		onTestFinished(() => runtime.destroy());
+		const fill = {
+			position: sceneVec3(new Vec3(10, 3, -20)),
+			color: { red: 1, green: 0.9, blue: 0.8 },
+			range: 5,
+			intensity: 0.8,
+		};
+		runtime.setFrameSettings({
+			...SHARED_FRAME_SETTINGS,
+			viewerLightEnabled: false,
+		});
+		runtime.setPresentationLights([fill]);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		runtime.frame(0);
+		expect(frames.at(-1)?.dynamicLights).toEqual([fill]);
+		expect(frames.at(-1)?.frameSettings.viewerLightEnabled).toBe(false);
+		runtime.setPresentationLights([]);
+		runtime.frame(0.1);
+		expect(frames.at(-1)?.dynamicLights).toEqual([]);
+	});
+
+	it("joins a local setup load before destroying shared runtime resources", async () => {
+		const loading = controlledPromise<DecodedStaticPresentation>();
+		const requested = controlledPromise<void>();
+		const runtime = await buildSpawnRuntime({
+			load: () => {
+				requested.resolve();
+				return loading.promise;
+			},
+		});
+		const handle = runtime.createLocalSceneModel({
+			landblockId: "0x0001ffff",
+			envCellId: null,
+			localTransform: Mat4.identity(),
+			spatialMembership: { scopes: [{ kind: "outdoor" }] },
+		});
+		const pending = handle.replace("late", {
+			body: {
+				setupDid: 0x02000001,
+				appearance: {
+					paletteDid: null,
+					subPalettes: [],
+					textureChanges: [],
+					partChanges: [],
+				},
+				scale: 1,
+				translucency: 0,
+				pose: { kind: "setup-pose" },
+			},
+			attachments: [],
+		});
+		await requested.promise;
+		let retired = false;
+		const retirement = runtime.destroy().then(() => {
+			retired = true;
+		});
+		expect(await pending).toEqual({ kind: "superseded" });
+		expect(retired).toBe(false);
+		loading.resolve(spawnedVisual());
+		await retirement;
+		expect(retired).toBe(true);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(0);
+		await handle.destroy();
+	});
+
+	it("silences both local sound routes for body/equipment while visual hooks execute and world sounds play", async () => {
+		const soundId: DatAssetId = "0x0a000001";
+		const tableId: DatAssetId = "0x20000001";
+		const scriptId: DatAssetId = "0x33000001";
+		const playOneShot = vi.fn<
+			GamePresentationRuntimeDependencies["audioDevice"]["playOneShot"]
+		>(() => ({ stop() {}, setPlacement() {}, finished: false }));
+		const visual = spawnedVisual();
+		const emitterId: DatAssetId = "0x32000001";
+		const meshId: DatAssetId = "0x01000001";
+		let particleRangeCount = 0;
+		const runtime = await buildGamePresentationRuntimeForTest(
+			{
+				resources: TEST_RESOURCES,
+				buildRenderer: async (world) =>
+					testRenderer({
+						drawFrame: (frame) => ({
+							...EMPTY_RENDERER_FRAME_FEEDBACK,
+							selectedDynamicNodeIds: world
+								.queryFlatScene(
+									{ cameraPosition: Vec3.zero(), planes: [] },
+									frame.anchorLandblockId,
+									(group) => group === "dynamic",
+								)
+								.entries.filter(
+									(node) => world.getVisibleDynamicPresentation(node) !== null,
+								),
+						}),
+						particles: {
+							install: async () => {},
+							submit: (ranges) => {
+								particleRangeCount = ranges.length;
+							},
+							clear() {
+								particleRangeCount = 0;
+							},
+						},
+					}),
+			},
+			{
+				prepareLandblockLayers: async (layers) =>
+					[...layers].map(({ id }) => terrainArtifact(id)),
+			},
+			new EchoTexturePixelSource(),
+			ANIMATION_SOURCE,
+			{
+				destroy() {},
+				loadPhysicsScript: async () => ({
+					id: scriptId,
+					lengthSeconds: 0.1,
+					records: [
+						{
+							kind: "sound-tweaked",
+							soundId,
+							probability: 1,
+							volume: 1,
+							startTime: 0.1,
+							authoredOrder: 0,
+						},
+						{
+							kind: "sound-table",
+							soundType: 0x94,
+							startTime: 0.1,
+							authoredOrder: 1,
+						},
+						{
+							kind: "texture-velocity",
+							uSpeed: 0.5,
+							vSpeed: 0,
+							startTime: 0.1,
+							authoredOrder: 2,
+						},
+						{
+							kind: "create-particle",
+							emitterInfoId: emitterId,
+							emitterId: 1,
+							partIndex: 0,
+							offsetOrigin: acVector3([0, 0, 0]),
+							startTime: 0.1,
+							authoredOrder: 3,
+						},
+					],
+				}),
+			},
+			{ playOneShot, prepare: async () => {} },
+			{
+				destroy() {},
+				loadParticleEmitter: async () => particleEmitterInfo(emitterId, meshId),
+			},
+			{
+				destroy() {},
+				loadSoundTable: async () => ({
+					id: tableId,
+					entries: new Map([[0x94, [{ soundId, probability: 1, volume: 1 }]]]),
+				}),
+			},
+			{
+				destroy() {},
+				loadParticleMeshes: async () => ({
+					presentations: new Map([
+						[
+							meshId,
+							{ orientation: "authored" as const, presentation: visual },
+						],
+					]),
+					textureDependencies: [],
+				}),
+			},
+			{
+				load: async () => ({
+					...visual,
+					behavior: {
+						animationId: "0x03000001",
+						motionTableId: null,
+						physicsScriptTableId: null,
+						kind: "animation-and-script",
+						physicsScriptId: scriptId,
+						soundTableId: tableId,
+					},
+					presentation: {
+						...visual.presentation,
+						holdingLocations: new Map([
+							[
+								"right-hand",
+								{
+									location: "right-hand",
+									partIndex: 0,
+									offsetTransform: Mat4.identity(),
+								},
+							],
+						]),
+					},
+				}),
+			},
+		);
+		onTestFinished(() => runtime.destroy());
+		await activateSpawnScene(runtime, "0x0001ffff", 1);
+		const block = createLandblockWorldOrigin("0x0001ffff");
+		runtime.setAudioListener({
+			envCellId: null,
+			position: sceneVector3([block.x, block.y, block.z]),
+			rotation: Quat.identity(),
+		});
+		const placement = {
+			landblockId: "0x0001ffff",
+			envCellId: null,
+			localTransform: Mat4.identity(),
+			spatialMembership: { scopes: [{ kind: "outdoor" as const }] },
+		};
+		const model = {
+			setupDid: 0x02000001,
+			appearance: {
+				paletteDid: null,
+				subPalettes: [],
+				textureChanges: [],
+				partChanges: [],
+			},
+			scale: 1,
+			translucency: 0,
+			pose: { kind: "setup-pose" as const },
+		};
+		const handle = runtime.createLocalSceneModel(placement);
+		expect(
+			await handle.replace("character", {
+				body: model,
+				attachments: [
+					{ visual: model, placement: 0, parentLocation: "right-hand" },
+				],
+			}),
+		).toEqual({ kind: "installed" });
+		handle.setVisible(true);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		runtime.frame(0);
+		runtime.frame(0.2);
+		expect(playOneShot).not.toHaveBeenCalled();
+		const local =
+			runtime.getAuthoredDynamicRuntimeDiagnostics().behavior.observations;
+		expect(
+			local.filter(
+				(event) =>
+					event.command.startsWith("sound") && event.outcome === "executed",
+			),
+		).toHaveLength(4);
+		expect(
+			local.filter(
+				(event) =>
+					event.command === "texture-velocity" && event.outcome === "executed",
+			),
+		).toHaveLength(2);
+		expect(particleRangeCount).toBeGreaterThan(0);
+		handle.setVisible(false);
+		runtime.frame(0.21);
+		expect(particleRangeCount).toBe(0);
+		handle.setVisible(true);
+		runtime.frame(0.22);
+		runtime.frame(0.23);
+		expect(particleRangeCount).toBeGreaterThan(0);
+		await runtime.upsertDynamicEntity(spawnedEntity(7, 3));
+		runtime.frame(0.4);
+		await settleSoundCues();
+		expect(playOneShot).toHaveBeenCalledTimes(2);
+		await handle.destroy();
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(1);
+	});
+});
+
 describe("GamePresentationRuntime server sounds", () => {
 	it("uses packet gain, authored probability, positional playback, and effects muting", async () => {
 		const playOneShot = vi.fn<

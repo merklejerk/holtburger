@@ -23,10 +23,7 @@ import type { ObjectPreviewVisual } from "../runtime/object-preview-source";
 import type { PresentationAssetService } from "../runtime/presentation-asset-service";
 import type { DynamicPresentationSource } from "../systems/dynamic-presentation-source";
 import type { ObjectVisualTemplate } from "../systems/object-visual-template-repository";
-import {
-	createObjectPreviewFit,
-	type ObjectPreviewFit,
-} from "./object-preview-fit";
+import { createModelFit, type ModelFit } from "../geometry/model-fit";
 
 /** Complete immutable preparation result borrowed by preview presentation and renderer. */
 export interface PreparedObjectPreviewVisualAssets {
@@ -41,7 +38,7 @@ export interface PreparedObjectPreviewVisualAssets {
 	readonly scripts: ReadonlyMap<DatAssetId, PreparedPhysicsScript>;
 	readonly emitters: ReadonlyMap<DatAssetId, PreparedParticleEmitter>;
 	readonly particleMeshIds: readonly DatAssetId[];
-	readonly fit: ObjectPreviewFit;
+	readonly fit: ModelFit;
 	/** Authored root rotation requires a heading-invariant support envelope. */
 	readonly rotatesVisualRoot: boolean;
 }
@@ -161,7 +158,7 @@ export async function acquireObjectPreviewVisual(
 		const rotatesVisualRoot = [...animationHandles.values()].some((handle) =>
 			turnsVisualRoot(handle.asset),
 		);
-		const fit = createObjectPreviewFit(
+		const fit = createModelFit(
 			templateHandle.asset.parts,
 			setupPose,
 			scale,

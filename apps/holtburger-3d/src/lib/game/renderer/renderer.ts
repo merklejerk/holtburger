@@ -172,7 +172,7 @@ export interface FrameInput {
 	 * landblocks it actually draws, and the index memoizes across frames.
 	 */
 	readonly outdoorLights: OutdoorLightLookup;
-	/** Current entity-owned point lights already composed into canonical scene space. */
+	/** Entity and scene-driver point lights already composed into canonical scene space. */
 	readonly dynamicLights: readonly RuntimeLight[];
 	/**
 	 * Where the viewer light hangs this frame, in canonical scene space.

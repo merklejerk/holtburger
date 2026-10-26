@@ -4,6 +4,7 @@ import type { ResolvedObjectBehavior } from "../resolution/landblock-layer";
 import type { ResolvedObjectPresentation } from "../resolution/presentation";
 import type { SceneSpatialPlacement } from "../scene";
 import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
+import type { ResolvedModelPose } from "../animation/resolved-model-pose";
 
 declare const nameplateIconIdBrand: unique symbol;
 
@@ -73,4 +74,11 @@ export interface PlacedDynamicPresentationSource {
 	readonly placement: SceneSpatialPlacement;
 	/** Complete initial state installed before setup behavior is replayed. */
 	readonly initialPresentationState: DynamicEntityPresentationState;
+	/** Setup/host behavior or an exclusive producer-resolved visual sequence. */
+	readonly playback: DynamicPlaybackPolicy;
 }
+
+/** Presentation admission selects playback without changing the setup's authored provenance. */
+export type DynamicPlaybackPolicy =
+	| { readonly kind: "source-owned" }
+	| { readonly kind: "resolved"; readonly pose: ResolvedModelPose };

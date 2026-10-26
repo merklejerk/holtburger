@@ -8,7 +8,7 @@
 		readonly rejectedDraftRetained: boolean;
 		readonly confirmedGuidSelected: number;
 		readonly automaticEntries: number;
-		readonly remainingGpuResources: number;
+		readonly remainingLocalSurfaces: number;
 		readonly cachedPickerEquipment: number;
 		readonly stalePickerReadIgnored: boolean;
 		readonly explicitEntryRequests: number;
@@ -17,13 +17,14 @@
 </script>
 
 <script lang="ts">
-	import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
 	import { onMount, tick, untrack } from "svelte";
 	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
 	import {
-		StandardClientObjectPreviewService,
-		type ClientObjectPreviewService,
-	} from "../../client/client-object-preview-service";
+		ClientPregameCharacterService,
+		type PregameCharacterPresentation,
+		type PregameCharacterSource,
+		type PregameCharacterStatus,
+	} from "../../client/client-pregame-character";
 	import {
 		loadCharacterCreationCatalog,
 		resolveCharacterCreationAppearance,
@@ -32,10 +33,7 @@
 	import type { CharacterCreationServices } from "../../client/client-character-creation";
 	import type { CharacterManagementState } from "../../client/client-host-contract";
 	import type { ClientAppPhase } from "../../client/client-app-lifecycle";
-	import type {
-		ObjectPreviewResources,
-		ObjectPreviewHandle,
-	} from "../../lib/game/preview/object-preview-controller";
+
 	import {
 		playerVisualCaptureSchema,
 		type ObjectPreviewSource as CapturedSource,
@@ -43,24 +41,16 @@
 	import type { ClientVisualCacheTransport } from "../../client/client-visual-cache-transport";
 	import type { CharacterVisualRead } from "../../client/client-visual-cache-contract";
 	import type { HostTransport } from "../../lib/host/host-transport";
-	import { observePreviewDevice } from "./preview-device-probe";
 
 	interface Props {
 		readonly transport: HostTransport;
 		readonly contentUrl: string;
-		readonly resources: ObjectPreviewResources;
 		readonly savedVisual: CapturedSource;
 		readonly onComplete: (proof: CreatorWorkflowProof) => void;
 		readonly onFailure: (error: unknown) => void;
 	}
-	const {
-		transport,
-		contentUrl,
-		resources,
-		savedVisual,
-		onComplete,
-		onFailure,
-	}: Props = $props();
+	const { transport, contentUrl, savedVisual, onComplete, onFailure }: Props =
+		$props();
 	let root: HTMLDivElement;
 	let selection = $state.raw<
 		Extract<ClientAppPhase, { kind: "character-selection" }>
@@ -121,20 +111,45 @@
 	let confirmCreation: () => void = () => {
 		throw new Error("No creation is awaiting confirmation.");
 	};
-	let currentHandle: ObjectPreviewHandle | null = null;
-	const devices: ReturnType<typeof observePreviewDevice>[] = [];
-	const previewOwner = new StandardClientObjectPreviewService({
-		startFrameLoop: startPresentationFrameLoop,
-		resolveResources: async () => resources,
+	// This workflow proves UI/cache authority; world/GPU behavior is verified by the scene probes.
+	let currentSource: PregameCharacterSource | null = null;
+	let localSurfaces = 0;
+	let surfaceOpenCount = 0;
+	const surfaceCount = () => localSurfaces;
+	let publishStatus: ((status: PregameCharacterStatus) => void) | null = null;
+	const characters = new ClientPregameCharacterService();
+	characters.connect({
+		setSource: (source) => {
+			currentSource = source;
+			publishStatus?.(
+				source === null
+					? { kind: "empty" }
+					: { kind: "ready", replacement: { kind: "settled" } },
+			);
+		},
+		setView: () => {},
+		subscribe: (listener) => {
+			publishStatus = listener;
+			listener({ kind: "empty" });
+			return () => {
+				publishStatus = null;
+			};
+		},
 	});
-	const previewService: ClientObjectPreviewService = {
-		open: (request) => {
-			devices.push(observePreviewDevice(request.canvas));
-			const handle = previewOwner.open(request);
-			currentHandle = handle;
-			return handle;
+	const scene: PregameCharacterPresentation = {
+		canvas: document.createElement("canvas"),
+		characters: {
+			open: (publish, revoke) => {
+				localSurfaces++;
+				surfaceOpenCount++;
+				return characters.open(publish, () => {
+					localSurfaces--;
+					revoke();
+				});
+			},
 		},
 	};
+	const hasSource = (): boolean => currentSource !== null;
 	const services: CharacterCreationServices = {
 		loadCatalog: async () => loadCharacterCreationCatalog(transport),
 		resolveAppearance: async (request) => {
@@ -215,6 +230,23 @@
 		button(text).click();
 		await tick();
 	}
+	/** Exercise the current palette UI, including its top-layer menu, rather than a retired slider. */
+	async function changeSkinColor(): Promise<void> {
+		const trigger = root.querySelector('button[aria-label^="Skin color:"]');
+		if (!(trigger instanceof HTMLButtonElement))
+			throw new Error("Creator probe cannot find Skin color palette.");
+		trigger.click();
+		await tick();
+		const choice = [
+			...document.querySelectorAll(
+				'[role="menu"][aria-label="Skin color"] button',
+			),
+		].find((entry) => !entry.textContent?.includes("(selected)"));
+		if (!(choice instanceof HTMLButtonElement))
+			throw new Error("Creator probe requires an alternative skin color.");
+		choice.click();
+		await tick();
+	}
 	async function until(
 		predicate: () => boolean,
 		description: string,
@@ -233,16 +265,16 @@
 	async function run(): Promise<CreatorWorkflowProof> {
 		await click("Create character");
 		await until(() => appearanceRequests === 1, "initial appearance query");
-		await change("Skin shade", 0.1);
-		await change("Skin shade", 0.3);
-		await change("Skin shade", 0.9);
+		await click("Appearance");
+		await changeSkinColor();
+		await changeSkinColor();
+		await changeSkinColor();
 		if (appearanceRequests !== 1)
-			throw new Error("Slider burst dispatched concurrent appearance queries.");
+			throw new Error(
+				"Palette burst dispatched concurrent appearance queries.",
+			);
 		releaseInitial();
-		await until(
-			() => (currentHandle?.diagnostics()?.frameCount ?? 0) > 0,
-			"latest appearance draw",
-		);
+		await until(() => hasSource(), "latest appearance draw");
 		if (
 			appearanceCount() !== 2 ||
 			root.textContent?.includes("Synthetic obsolete resolution")
@@ -269,7 +301,7 @@
 		] as const)
 			await change(name, value);
 		await click("Review");
-		await change("Name", "Pregame Probe");
+		await change("Character name", "Pregame Probe");
 		if (appearanceRequests !== beforeBuild)
 			throw new Error("Name/stat edits rebuilt appearance.");
 		await click("Create character");
@@ -294,9 +326,9 @@
 			message: "Synthetic name unavailable.",
 		};
 		await tick();
-		if (control("Name").value !== "Pregame Probe")
+		if (control("Character name").value !== "Pregame Probe")
 			throw new Error("Rejection discarded the draft.");
-		await change("Name", "Pregame Retry");
+		await change("Character name", "Pregame Retry");
 		await click("Create character");
 		await until(() => management.kind === "creating", "retry admission");
 		confirmCreation();
@@ -313,13 +345,6 @@
 		const confirmedGuidSelected = selection.selectedGuid;
 		if (submittedName() !== "Pregame Retry")
 			throw new Error("Retry did not preserve the edited draft.");
-		await until(
-			() =>
-				root.textContent?.includes(
-					"Enter this character to save an appearance",
-				) === true,
-			"new character placeholder",
-		);
 		selection = {
 			...selection,
 			characters: [
@@ -344,12 +369,8 @@
 		}
 		await tick();
 		await choose(cachedGuid);
-		await until(
-			() => (currentHandle?.diagnostics()?.frameCount ?? 0) > 0,
-			"cached equipment draw",
-		);
-		const pickerDevice = devices.at(-1);
-		if (pickerDevice === undefined) throw new Error("Picker device missing");
+		await until(() => hasSource(), "cached equipment draw");
+		const pickerSurfaceCount = surfaceOpenCount;
 		const cachedPickerEquipment = savedVisual.attachments.length;
 		if (cachedPickerEquipment !== 2)
 			throw new Error("Picker probe requires captured sword and shield");
@@ -365,7 +386,7 @@
 		)
 			throw new Error("Roster refresh reread/reselected the cached character");
 		await choose(slowGuid);
-		if (currentHandle?.diagnostics() !== null)
+		if (hasSource())
 			throw new Error(
 				"Previous character remained drawable during a different subject read",
 			);
@@ -380,20 +401,16 @@
 			capture: { ...cachedCapture, guid: slowGuid },
 		});
 		await tick();
-		if (currentHandle?.diagnostics() !== null)
+		if (hasSource())
 			throw new Error("Stale cache completion restored an obsolete subject");
 		if (button("Enter World").disabled)
 			throw new Error("Unavailable capture prevented entry");
 		await choose(cachedGuid);
-		await until(
-			() => (currentHandle?.diagnostics()?.frameCount ?? 0) > 0,
-			"cached subject restored",
-		);
-		if (
-			pickerDevice.read().contextRequests !== 1 ||
-			pickerDevice.read().programs.created !== 1
-		)
-			throw new Error("Picker selection rebuilt its preview device");
+		await until(() => hasSource(), "cached subject restored");
+		if (surfaceOpenCount !== pickerSurfaceCount || surfaceCount() !== 1)
+			throw new Error(
+				"Picker selection rebuilt or duplicated its scene surface.",
+			);
 		const originalRoster = selection.characters;
 		selection = {
 			...selection,
@@ -402,13 +419,10 @@
 			),
 		};
 		await tick();
-		if (currentHandle?.diagnostics() !== null)
+		if (hasSource())
 			throw new Error("Removed roster character kept its cached model");
 		selection = { ...selection, characters: originalRoster };
-		await until(
-			() => (currentHandle?.diagnostics()?.frameCount ?? 0) > 0,
-			"restored roster character",
-		);
+		await until(() => hasSource(), "restored roster character");
 		await click("Create character");
 		await until(
 			() => root.querySelector('input[type="range"]') !== null,
@@ -420,13 +434,10 @@
 			null
 		)
 			throw new Error("Returning to the roster lost selection.");
-		await until(
-			() => (currentHandle?.diagnostics()?.frameCount ?? 0) > 0,
-			"picker returned from creator",
-		);
+		await until(() => hasSource(), "picker returned from creator");
 		const automaticEntriesBeforeExplicit = automaticEntries;
 		await click("Enter World");
-		if (!button("Entering…").disabled || currentHandle?.diagnostics() !== null)
+		if (!button("Entering…").disabled || hasSource())
 			throw new Error(
 				"Pending entry retained the preview or admitted a repeated entry",
 			);
@@ -434,13 +445,12 @@
 		await tick();
 		await click("Create character");
 		await until(
-			() =>
-				(currentHandle?.diagnostics()?.frameCount ?? 0) > 0 &&
-				root.querySelector('input[type="range"]') !== null,
+			() => hasSource() && root.querySelector('input[type="range"]') !== null,
 			"creator before disconnect",
 		);
 		holdNextResolution = true;
-		await change("Skin shade", 0.17);
+		await click("Appearance");
+		await changeSkinColor();
 		await until(
 			() => rejectHeldResolution !== null,
 			"held preparation before disconnect",
@@ -461,19 +471,10 @@
 		};
 		rejectRetired();
 		await tick();
-		await previewOwner.destroy();
-		const remainingGpuResources = devices.reduce((sum, device) => {
-			const current = device.read();
-			return (
-				sum +
-				current.programs.live +
-				current.textures.live +
-				current.buffers.live +
-				current.vertexArrays.live
-			);
-		}, 0);
-		if (remainingGpuResources !== 0)
-			throw new Error("Creator navigation retained GPU resources.");
+		characters.destroy();
+		const remainingLocalSurfaces = surfaceCount();
+		if (remainingLocalSurfaces !== 0)
+			throw new Error("Creator navigation retained a scene surface.");
 		return {
 			submissions,
 			appearanceRequests,
@@ -486,7 +487,7 @@
 			stalePickerReadIgnored: true,
 			explicitEntryRequests: automaticEntries - automaticEntriesBeforeExplicit,
 			disconnectRetiredPendingCreator: true,
-			remainingGpuResources,
+			remainingLocalSurfaces,
 		};
 	}
 	onMount(() => {
@@ -501,7 +502,7 @@
 		);
 		return () => {
 			current = false;
-			void previewOwner.destroy().catch(console.error);
+			characters.destroy();
 		};
 	});
 </script>
@@ -518,7 +519,7 @@
 			{entryPending}
 			{management}
 			creation={services}
-			{previewService}
+			{scene}
 			onChoose={(guid) => (selection = { ...selection, selectedGuid: guid })}
 			onEnter={() => {
 				automaticEntries++;

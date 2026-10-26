@@ -11,7 +11,7 @@ export interface ClientObjectPreviewOpenRequest {
 	readonly source: ObjectPreviewSource | null;
 }
 
-/** Single-active-preview policy shared by inspector, creator and picker surfaces. */
+/** Single-active-preview policy for isolated inspection surfaces. */
 export interface ClientObjectPreviewService {
 	open(request: ClientObjectPreviewOpenRequest): ObjectPreviewHandle;
 }

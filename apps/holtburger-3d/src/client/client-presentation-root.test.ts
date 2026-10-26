@@ -1,3 +1,9 @@
+import { CLIENT_PREGAME_SCENE_TUNING } from "./client-pregame-tuning";
+import {
+	PREGAME_TEST_SOURCE,
+	PREGAME_TEST_VIEW,
+	pregameModelFixture,
+} from "./client-pregame-model.test-support";
 import { CLIENT_AUDIO_DEFAULTS } from "./client-settings-defaults";
 import { CLIENT_TUNING } from "./client-tuning";
 import { describe, expect, it, vi } from "vitest";
@@ -24,13 +30,19 @@ function fixture() {
 		revision: 1 as SceneActivationReceipt["revision"],
 		requiredLayers: new Map(),
 	};
+	const model = pregameModelFixture();
 	const runtime = {
-		activateScene: vi.fn(async () => receipt),
+		createLocalSceneModel: model.create,
+		setPresentationLights: vi.fn(),
+		activateScene: vi.fn<
+			ClientPresentationRootOwner["runtime"]["activateScene"]
+		>(async () => receipt),
 		sceneActivationStatus: vi.fn(() => ({ kind: "ready" as const, receipt })),
 		pollPortalTransitionLoading: vi.fn(),
 		setAudioListener: vi.fn(),
 		setSceneEnvironment: vi.fn(),
 		setPrimaryView: vi.fn(),
+		queryWorldPointResidencyCandidates: vi.fn(() => null),
 		resolveViewportExtent: vi.fn((width: number, height: number) => ({
 			width,
 			height,
@@ -61,6 +73,7 @@ function fixture() {
 		destroy: vi.fn(async () => {}),
 	};
 	const dependencies = {
+		pregameLocation: CLIENT_PREGAME_SCENE_TUNING.locations[0],
 		canvas: { clientWidth: 800, clientHeight: 600 } as HTMLCanvasElement,
 		build: vi.fn(async (signal: AbortSignal) => {
 			signal.throwIfAborted();
@@ -71,11 +84,108 @@ function fixture() {
 		onReady: vi.fn(),
 		onError: vi.fn(),
 	};
-	return { owner, runtime, gameplay, dependencies };
+	return { owner, runtime, gameplay, dependencies, model };
 }
 
 describe("ClientPresentationRoot", () => {
-	it("retains one owner across backdrop/gameplay/backdrop and destroys it only on root retirement", async () => {
+	it("retires shared resources after a surface reports a model withdrawal failure", async () => {
+		const { dependencies, owner, model } = fixture();
+		const root = new ClientPresentationRoot(dependencies);
+		await root.setMode("pregame");
+		const revoke = vi.fn();
+		root.pregameCharacters.open(vi.fn(), revoke);
+		const failure = new Error("Synthetic model withdrawal failure");
+		model.port.withdraw.mockImplementationOnce(() => {
+			throw failure;
+		});
+		const retirement = root.destroy();
+		expect(root.destroy()).toBe(retirement);
+		await expect(retirement).rejects.toThrow(
+			expect.objectContaining({ errors: [failure] }),
+		);
+		expect(revoke).toHaveBeenCalledOnce();
+		expect(owner.destroy).toHaveBeenCalledOnce();
+	});
+
+	it.each(CLIENT_PREGAME_SCENE_TUNING.locations)(
+		"retains the selected location across handoff and retry in $landblockId",
+		async (location) => {
+			const { dependencies, runtime } = fixture();
+			const root = new ClientPresentationRoot({
+				...dependencies,
+				pregameLocation: location,
+			});
+			await root.setMode("pregame");
+			await root.setMode("gameplay");
+			await root.setMode("pregame");
+			await root.retry();
+			expect(runtime.activateScene).toHaveBeenCalledTimes(3);
+			for (const [request] of runtime.activateScene.mock.calls)
+				expect(request.target.target.requested).toEqual({
+					kind: "env-cell",
+					landblockId: location.landblockId,
+					envCellId: location.camera.envCellId,
+				});
+			await root.destroy();
+		},
+	);
+
+	it("retains a page's initial character during construction and joins pending model work before gameplay", async () => {
+		const { dependencies, owner, runtime, gameplay, model } = fixture();
+		dependencies.canvas = {
+			clientWidth: 1440,
+			clientHeight: 900,
+		} as HTMLCanvasElement;
+		const building = deferred<typeof owner>();
+		dependencies.build.mockReturnValueOnce(building.promise);
+		const root = new ClientPresentationRoot(dependencies);
+		const status = vi.fn();
+		const surface = root.pregameCharacters.open(status, () => {});
+		surface.setSource(PREGAME_TEST_SOURCE);
+		surface.setView(PREGAME_TEST_VIEW);
+		const admission = root.setMode("pregame");
+		expect(status).toHaveBeenLastCalledWith({ kind: "loading" });
+		expect(model.create).not.toHaveBeenCalled();
+		building.resolve(owner);
+		await admission;
+		await vi.waitFor(() =>
+			expect(model.create.mock.results[0]?.value.status().kind).toBe("ready"),
+		);
+		root.frame(1000);
+		expect(status).toHaveBeenLastCalledWith({
+			kind: "ready",
+			replacement: { kind: "settled" },
+		});
+		expect(runtime.setPresentationLights.mock.lastCall?.[0]).toHaveLength(1);
+		const preparing =
+			deferred<Awaited<ReturnType<typeof model.port.prepare>>>();
+		model.port.prepare.mockImplementationOnce(() => preparing.promise);
+		surface.setSource({
+			...PREGAME_TEST_SOURCE,
+			visual: {
+				...PREGAME_TEST_SOURCE.visual,
+				body: { ...PREGAME_TEST_SOURCE.visual.body, scale: 1.1 },
+			},
+		});
+		const changing = root.setMode("gameplay");
+		await vi.waitFor(() => expect(model.port.withdraw).toHaveBeenCalled());
+		expect(runtime.setPresentationLights).toHaveBeenLastCalledWith([]);
+		expect(gameplay.start).not.toHaveBeenCalled();
+		const lateRelease = vi.fn();
+		const lateCommit = vi.fn();
+		preparing.resolve({
+			fit: model.fit,
+			commit: lateCommit,
+			release: lateRelease,
+		});
+		await changing;
+		expect(lateCommit).not.toHaveBeenCalled();
+		expect(lateRelease).toHaveBeenCalledOnce();
+		expect(gameplay.start).toHaveBeenCalledOnce();
+		await root.destroy();
+	});
+
+	it("retains one owner across pregame/gameplay/pregame and destroys it only on root retirement", async () => {
 		const { dependencies, owner, gameplay, runtime } = fixture();
 		const root = new ClientPresentationRoot(dependencies);
 		await root.setMode("pregame");
@@ -122,7 +232,7 @@ describe("ClientPresentationRoot", () => {
 		await root.destroy();
 	});
 
-	it("waits for gameplay retirement before admitting the next backdrop", async () => {
+	it("waits for gameplay retirement before admitting the next pregame scene", async () => {
 		const { dependencies, gameplay, runtime } = fixture();
 		const root = new ClientPresentationRoot(dependencies);
 		await root.setMode("gameplay");
@@ -167,7 +277,7 @@ describe("ClientPresentationRoot", () => {
 		await root.destroy();
 	});
 
-	it("retries a failed backdrop installation with fresh demand", async () => {
+	it("retries a failed pregame installation with fresh demand", async () => {
 		const { dependencies, runtime } = fixture();
 		runtime.activateScene.mockRejectedValueOnce(
 			new Error("content temporarily unavailable"),
@@ -229,7 +339,7 @@ describe("ClientPresentationRoot", () => {
 		);
 	});
 
-	it("withdraws scene inputs on exit without starting another backdrop", async () => {
+	it("withdraws scene inputs on exit without starting another pregame scene", async () => {
 		const { dependencies, runtime, gameplay } = fixture();
 		const root = new ClientPresentationRoot(dependencies);
 		await root.setMode("gameplay");

@@ -30,7 +30,7 @@ import { EffectSystem } from "../systems/effect-system";
 import { ParticleSystem } from "../systems/particle-system";
 import { PhysicsScriptSystem } from "../systems/physics-script-system";
 import type { PreparedObjectPreviewVisualAssets } from "./object-preview-assets";
-import { ObjectPreviewSequence } from "./object-preview-sequence";
+import { AnimationSequence } from "../animation/animation-sequence";
 
 const PREVIEW_OWNER = "object-preview-presentation";
 const PREVIEW_GENERATION = 1;
@@ -69,7 +69,7 @@ export interface ObjectPreviewFrame {
 export class ObjectPreviewModelPresentation {
 	readonly #assets: ObjectPreviewModelPresentationAssets;
 	readonly #effects = new EffectSystem();
-	readonly #sequence: ObjectPreviewSequence;
+	readonly #sequence: AnimationSequence;
 	readonly #target: BehaviorTarget;
 	readonly #partTargets = new Map<number, BehaviorTarget>();
 	readonly #frames = new Map<BehaviorTargetId, Mat4>();
@@ -88,7 +88,7 @@ export class ObjectPreviewModelPresentation {
 	constructor(
 		assets: ObjectPreviewModelPresentationAssets,
 		root: Mat4,
-		sequence: ObjectPreviewSequence | null,
+		sequence: AnimationSequence | null,
 		roll: () => number = Math.random,
 	) {
 		this.#assets = assets;
@@ -105,7 +105,7 @@ export class ObjectPreviewModelPresentation {
 		}
 		this.#sequence =
 			sequence ??
-			new ObjectPreviewSequence(
+			new AnimationSequence(
 				assets.clips,
 				assets.firstCyclicClip,
 				assets.setupPose,
@@ -198,7 +198,7 @@ export class ObjectPreviewModelPresentation {
 	/** Transfer only the body's animation cursor; effects and the new setup pose retain their own lifetime. */
 	replacementSequence(
 		assets: ObjectPreviewModelPresentationAssets,
-	): ObjectPreviewSequence {
+	): AnimationSequence {
 		return this.#sequence.replacement(
 			assets.clips,
 			assets.firstCyclicClip,

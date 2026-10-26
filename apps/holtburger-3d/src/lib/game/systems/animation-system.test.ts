@@ -49,7 +49,7 @@ function buildAnimationSystemOver(effects: EffectSystem) {
 			installEffectState(
 				effects,
 				installation.target.targetId,
-				installation.animation.partCount,
+				installation.initialPartToObjectTransforms.length,
 			);
 		}
 		return stageOwner(ownerId, installations);
@@ -71,6 +71,7 @@ function install(
 		ownerId,
 		installations.map((installation) => ({
 			...installation,
+			kind: "default-animation",
 			initialPartToObjectTransforms: initialPose(
 				installation.animation.partCount,
 			),
@@ -86,6 +87,90 @@ const observations = (): readonly BehaviorObservation[] =>
 	lastRouter.getObservations().filter((entry) => entry.command !== "no-op");
 
 describe("AnimationSystem", () => {
+	it("samples explicit sequences through the normal clock and dispatches only semantic crossings", () => {
+		const effects = new EffectSystem();
+		const system = buildAnimationSystemOver(effects);
+		const animation = testAnimation(Vec3.zero());
+		const target = testTarget("scene-node:1");
+		const fallback = Mat4.identity();
+		fallback.m41 = 7;
+		const stage = system.stageOwner("local", [
+			{
+				kind: "sequence",
+				target,
+				clips: [
+					playingClip(animation, 0, 1, 30, "hold"),
+					playingClip(animation, 2, 3, 30, "loop"),
+				],
+				firstCyclicClip: 1,
+				initialPartToObjectTransforms: [Mat4.identity(), fallback],
+			},
+		]);
+		expect(
+			requiredAt(stage.samples, 0).articulatedPose.partToObjectTransforms[0]
+				?.m41,
+		).toBe(0);
+		stage.commit();
+		advanceAndSample(system, 0);
+		const interpolated = requiredAt(advanceAndSample(system, 1 / 60), 0);
+		expect(
+			interpolated.articulatedPose.partToObjectTransforms[0]?.m41,
+		).toBeCloseTo(0.5);
+		expect(interpolated.articulatedPose.partToObjectTransforms[1]?.m41).toBe(7);
+		expect(observations()).toEqual([]);
+		advanceAndSample(system, 1 / 30);
+		expect(
+			observations().filter((entry) => entry.command === "set-omega"),
+		).toHaveLength(1);
+		expect(
+			requiredAt(advanceAndSample(system, 2 / 30), 0).articulatedPose
+				.partToObjectTransforms[0]?.m41,
+		).toBe(2);
+		advanceAndSample(system, 4 / 30);
+		expect(
+			requiredAt(advanceAndSample(system, 5 / 30), 0).articulatedPose
+				.partToObjectTransforms[0]?.m41,
+		).toBe(3);
+		expect(
+			observations().filter((entry) => entry.command === "set-omega"),
+		).toHaveLength(1);
+	});
+
+	it("installs explicit setup pose and retires it through ordinary owner teardown", () => {
+		const system = buildAnimationSystem();
+		const pose = Mat4.identity();
+		pose.m41 = 8;
+		const stage = system.stageOwner("local", [
+			{
+				kind: "sequence",
+				clips: [],
+				firstCyclicClip: null,
+				target: testTarget("scene-node:1"),
+				initialPartToObjectTransforms: [pose],
+			},
+		]);
+		stage.commit();
+		advanceAndSample(system, 0);
+		expect(
+			requiredAt(advanceAndSample(system, 0.5), 0).articulatedPose
+				.partToObjectTransforms[0]?.m41,
+		).toBe(8);
+		expect(() =>
+			system.applyMotion(
+				"local",
+				testTarget("scene-node:1"),
+				"explicit",
+				{ kind: "unchanged" },
+				{ kind: "remove" },
+				[pose],
+				{ kind: "ordinary" },
+			),
+		).toThrow(
+			"Host motion updates cannot mutate a resolved presentation sequence",
+		);
+		system.removeOwner("local");
+		expect(advanceAndSample(system, 1)).toEqual([]);
+	});
 	it("uses reproducible independent phases and smooth render-cadence sampling", () => {
 		const firstEffects = new EffectSystem();
 		const first = buildAnimationSystemOver(firstEffects);
@@ -203,6 +288,7 @@ describe("AnimationSystem", () => {
 		]);
 		const staged = system.stageOwner("owner", [
 			{
+				kind: "default-animation",
 				animation: testAnimation(),
 				initialPartToObjectTransforms: initialPose(),
 				target: testTarget("scene-node:11"),
@@ -231,6 +317,7 @@ describe("AnimationSystem", () => {
 		]);
 		const staged = system.stageOwner("owner", [
 			{
+				kind: "default-animation",
 				animation: testAnimation(),
 				initialPartToObjectTransforms: initialPose(),
 				target: testTarget("scene-node:11"),

@@ -5,7 +5,7 @@ import {
 	type CharacterCreationDraft,
 	type CharacterCreationPreview,
 } from "./client-character-creation-contract";
-import type { ObjectPreviewSource } from "../lib/game/runtime/object-preview-source";
+import type { LocalSceneModelSource } from "../lib/game/runtime/local-scene-model";
 import type { ObjectPreviewFraming } from "../lib/game/preview/object-preview-viewport";
 import { OBJECT_PREVIEW_VERTICAL_FOV_DEGREES } from "../lib/game/renderer/object-preview-camera";
 import { Vec3 } from "../lib/game/math/types";
@@ -89,8 +89,8 @@ export function creationFaceFraming(
 /** Composite the editable body over the shared pregame scene, independent of preview framing. */
 export function creationPreviewSource(
 	preview: CharacterCreationPreview,
-): ObjectPreviewSource {
-	return { body: preview.body, attachments: [], background: null };
+): LocalSceneModelSource {
+	return { body: preview.body, attachments: [] };
 }
 
 /** Hide headgear only in the face-preview request; retain the actual outfit for submission. */

@@ -22,8 +22,8 @@
 	import { characterManagementPending } from "./client-character-selection";
 	import { creationNameSchema } from "./client-character-creation-name";
 	import ClientPregameScreen from "./ClientPregameScreen.svelte";
-	import ClientModelPreview from "./ClientModelPreview.svelte";
-	import type { ClientObjectPreviewService } from "./client-object-preview-service";
+	import ClientPregameCharacter from "./ClientPregameCharacter.svelte";
+	import type { PregameCharacterPresentation } from "./client-pregame-character";
 	import type { CharacterManagementState } from "./client-host-contract";
 	import {
 		characterCreationDraftSchema,
@@ -58,12 +58,12 @@
 
 	interface Props {
 		readonly services: CharacterCreationServices;
-		readonly previewService: ClientObjectPreviewService;
+		readonly scene: PregameCharacterPresentation;
 		readonly management: CharacterManagementState;
 		/** Return to the character roster without submitting the draft. */
 		readonly onBack: () => void;
 	}
-	const { services, previewService, management, onBack }: Props = $props();
+	const { services, scene, management, onBack }: Props = $props();
 	type Editor = {
 		readonly catalog: CharacterCreationCatalog;
 		readonly draft: CharacterCreationDraft;
@@ -372,7 +372,7 @@
 <ClientPregameScreen branding="corner" showPortalLogo={true} backdrop={true}>
 	{#snippet footer()}
 		<button
-			class="pregame-action pregame-quiet ui-button"
+			class="creation-back pregame-action pregame-quiet ui-button"
 			type="button"
 			disabled={busy}
 			onclick={onBack}
@@ -439,13 +439,12 @@
 				</span>
 			</label>
 			<div class="creation-viewport">
-				<ClientModelPreview
-					{source}
+				<ClientPregameCharacter
+					source={source === null
+						? null
+						: { subjectId: "creation", visual: source }}
 					{framing}
-					rotation="subject"
-					keyboardNavigation={false}
-					service={previewService}
-					emptyMessage="Preparing character…"
+					{scene}
 				/>
 			</div>
 			<div class="creation-focus">
@@ -1226,6 +1225,14 @@
 		}
 		.creation-next {
 			transform: rotate(180deg);
+		}
+		@media (min-width: 851px) and (max-height: 900px) {
+			/* Keep scaled text controls readable while reserving room for the world character. */
+			.creation-rotate,
+			.creation-focus .pregame-icon,
+			.creation-back .pregame-icon {
+				display: none;
+			}
 		}
 		@media (max-width: 850px) {
 			.creation-layout {

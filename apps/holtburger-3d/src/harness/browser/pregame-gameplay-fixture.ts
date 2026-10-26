@@ -21,7 +21,7 @@ import {
 } from "../../lib/game/runtime/dynamic-entity-feed";
 import { emptyHousing } from "../../client/client-housing-contract";
 import { playerEntitySnapshot } from "../../client/client-entity-mirror.test-support";
-import { CLIENT_PREGAME_BACKDROP_TUNING } from "../../client/client-pregame-backdrop";
+import { CLIENT_PREGAME_SCENE_TUNING } from "../../client/client-pregame-tuning";
 import { createLandblockWorldOrigin } from "../../lib/game/landblocks";
 
 type ClientEventName = HostEventName;
@@ -29,14 +29,14 @@ type ClientEventName = HostEventName;
 /** Controlled authority only: production lifecycle/camera/portal consumers still validate each event. */
 export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 	const guid = 0x50000043;
-	const tuning = CLIENT_PREGAME_BACKDROP_TUNING;
+	const tuning = CLIENT_PREGAME_SCENE_TUNING.locations[0];
 	const origin = createLandblockWorldOrigin(tuning.landblockId);
 	const point = {
-		landblockId: Number(tuning.envCellId),
+		landblockId: Number(tuning.camera.envCellId),
 		coords: {
-			x: tuning.position.x - origin.x,
-			y: origin.z - tuning.position.z,
-			z: tuning.position.y,
+			x: tuning.camera.position.x - origin.x,
+			y: origin.z - tuning.camera.position.z,
+			z: tuning.camera.position.y,
 		},
 	};
 	const player: DynamicEntityView = {

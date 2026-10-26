@@ -684,6 +684,8 @@ pub struct ClientCurrentState {
     pub enchantments: Option<holtburger_world::enchantments::ResolvedEnchantments>,
     /// Narrow server-backed appearance preferences consumed by client HUD controls.
     pub appearance_options: Option<ClientAppearanceOptions>,
+    /// Server-saved gameplay choices, absent before character description or after retirement.
+    pub gameplay_preferences: Option<crate::client_gameplay::ClientGameplayPreferences>,
     /// Server-confirmed stance for the combat shortcut.
     pub combat_mode: ClientCombatMode,
     /// Desired targeted combat and shared repeat lifecycle.
@@ -1411,6 +1413,7 @@ pub enum ClientHostEvent {
     PlayerEnchantmentsUpdated(holtburger_world::enchantments::ResolvedEnchantments),
     CharacterPreferencesUpdated {
         appearance: ClientAppearanceOptions,
+        gameplay: crate::client_gameplay::ClientGameplayPreferences,
         party: crate::client_party::ClientPartyPreferences,
         friends: crate::client_friends::ClientFriendsPreferences,
         allegiance: crate::client_allegiance::ClientAllegiancePreferences,
@@ -1643,6 +1646,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
                 .as_ref()
                 .map(|effects| effects.resolved.clone()),
             appearance_options: snapshot.character_options.map(Into::into),
+            gameplay_preferences: snapshot.character_options.map(Into::into),
             combat_mode: snapshot.combat_mode.into(),
             combat: snapshot.combat.into(),
             lifecycle: (&snapshot.lifecycle).into(),
@@ -1847,6 +1851,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::PlayerOptionsUpdated { options } => {
             Some(ClientHostEvent::CharacterPreferencesUpdated {
                 appearance: options.into(),
+                gameplay: options.into(),
                 party: options.into(),
                 friends: options.into(),
                 allegiance: options.into(),

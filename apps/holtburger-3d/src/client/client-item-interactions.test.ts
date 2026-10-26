@@ -72,6 +72,7 @@ async function fixture() {
 		knownSpells: null,
 		enchantments: null,
 		appearanceOptions: null,
+		gameplayPreferences: null,
 		party: null,
 		partyPreferences: null,
 		friends: null,

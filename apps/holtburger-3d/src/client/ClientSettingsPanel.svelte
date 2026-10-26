@@ -1,4 +1,9 @@
 <script lang="ts">
+	import ClientGameplaySettingsControls from "./ClientGameplaySettingsControls.svelte";
+	import type {
+		ClientGameplayOption,
+		ClientGameplayPreferences,
+	} from "./client-gameplay-options-contract";
 	import UiRange from "../app/UiRange.svelte";
 	import type { UiThemeSettings } from "../app/ui-theme-selection";
 	import {
@@ -11,6 +16,7 @@
 	import ClientAppearanceSettingsControls from "./ClientAppearanceSettingsControls.svelte";
 	import "./client-settings-controls.css";
 	import UiTabs from "../app/UiTabs.svelte";
+	import UiTabPanel from "../app/UiTabPanel.svelte";
 	import ClientEnvironmentSettings from "./ClientEnvironmentSettings.svelte";
 	import type {
 		ClientClockFormat,
@@ -55,8 +61,15 @@
 		type InputDisplayPlatform,
 	} from "../lib/input/input-presentation";
 
-	export type SettingsTab = "graphics" | "audio" | "ui" | "input";
+	export type SettingsTab = "graphics" | "audio" | "ui" | "input" | "gameplay";
 	interface Props {
+		/** Server-saved gameplay choices and current character admission. */
+		readonly gameplayPreferences: ClientGameplayPreferences | null;
+		readonly gameplayEnabled: boolean;
+		readonly onGameplayOptionChange: (
+			option: ClientGameplayOption,
+			enabled: boolean,
+		) => Promise<void>;
 		/** User-scoped audio mix and mute preferences. */
 		readonly audio: ClientAudioSettings;
 		readonly onAudioChange: (audio: ClientAudioSettings) => void;
@@ -85,6 +98,9 @@
 		readonly onResetHudPlacements: () => void;
 	}
 	let {
+		gameplayPreferences,
+		gameplayEnabled,
+		onGameplayOptionChange,
 		audio,
 		onAudioChange,
 		graphics,
@@ -297,6 +313,7 @@
 			{ value: "audio", label: "Audio" },
 			{ value: "ui", label: "UI" },
 			{ value: "input", label: "Input" },
+			{ value: "gameplay", label: "Gameplay" },
 		] as const
 	).map((tab) => ({
 		...tab,
@@ -320,6 +337,18 @@
 			selected={selectedTab}
 			onSelect={onSelectTab}
 		/>
+		<UiTabPanel
+			id="settings-section-gameplay"
+			labelledBy="settings-tab-gameplay"
+			active={selectedTab === "gameplay"}
+			scroll={false}
+		>
+			<ClientGameplaySettingsControls
+				preferences={gameplayPreferences}
+				enabled={gameplayEnabled}
+				onChange={onGameplayOptionChange}
+			/>
+		</UiTabPanel>
 		{#if selectedTab === "graphics"}
 			<div
 				role="tabpanel"
@@ -423,7 +452,7 @@
 					</div>
 				</details>
 			</div>
-		{:else}
+		{:else if selectedTab === "input"}
 			<div
 				role="tabpanel"
 				id="settings-section-input"

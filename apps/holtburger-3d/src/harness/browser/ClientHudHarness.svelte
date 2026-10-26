@@ -1,4 +1,5 @@
 <script lang="ts">
+	import gameplayPreferencesFixture from "./fixtures/gameplay-preferences.json";
 	import type { ClientUserSettings } from "../../client/client-settings-contract";
 	import { createFixtureThemeSettings } from "./ui-showcase-themes";
 	import UiShowcaseWorkbench from "./UiShowcaseWorkbench.svelte";
@@ -834,6 +835,9 @@
 
 	/** Cold character-selection fixture exercises production controls without a live server. */
 	let previewCharacters = $state(false);
+	let gameplayPreferences = $state({ ...gameplayPreferencesFixture });
+	let deferGameplayUpdate = false;
+	let pendingGameplayUpdate: (() => void) | null = null;
 	let appearanceOptions = $state({ showHelmet: true, showCloak: true });
 	/** Session-local diagnostic use policy exercised through the production panel. */
 	let unrestrictedUse = $state(false);
@@ -1173,6 +1177,10 @@
 		readonly finishHousingManagement: (result: unknown) => void;
 		/** Remount production controls with the same session owner during a refresh. */
 		readonly probeHousingManagementRemount: () => Promise<boolean>;
+		/** Hold option mirroring independently of accepted transport delivery. */
+		readonly deferNextGameplayUpdate: () => void;
+		/** Deliver the held option update through the production control's props. */
+		readonly flushGameplayUpdate: () => void;
 		/** Exercise settings controls and real browser audio independently of inventory fixtures. */
 		readonly probeAudio: () => ReturnType<typeof probeAudioControls>;
 		readonly setMapTeleportPermission: (allowed: boolean) => void;
@@ -1446,6 +1454,7 @@
 			knownSpells: null,
 			enchantments: null,
 			appearanceOptions,
+			gameplayPreferences,
 			party: null,
 			partyPreferences: null,
 			friends: null,
@@ -5079,6 +5088,15 @@
 					"client-housing-management-finished",
 					housingManagementResultSchema.parse(result),
 				),
+			deferNextGameplayUpdate: () => {
+				deferGameplayUpdate = true;
+			},
+			flushGameplayUpdate: () => {
+				if (pendingGameplayUpdate === null)
+					throw new Error("No gameplay update is waiting.");
+				pendingGameplayUpdate();
+				pendingGameplayUpdate = null;
+			},
 			probeAudio: probeAudioControls,
 			setMapTeleportPermission: (allowed) =>
 				emitInteractionEvent("client-map-teleport-capability-changed", allowed),
@@ -5711,6 +5729,20 @@
 			></canvas>
 			{#if gameplayCanvas !== null && interactionRoot !== null}
 				<ClientGameplayView
+					{gameplayPreferences}
+					gameplayEnabled={true}
+					onGameplayOptionChange={async (option, enabled) => {
+						const apply = () => {
+							gameplayPreferences = {
+								...gameplayPreferences,
+								[option]: enabled,
+							};
+						};
+						if (deferGameplayUpdate) {
+							deferGameplayUpdate = false;
+							pendingGameplayUpdate = apply;
+						} else apply();
+					}}
 					{logopolisLaunchRevision}
 					theme={fixtureTheme}
 					canReturnToMenu={true}

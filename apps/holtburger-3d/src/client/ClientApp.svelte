@@ -1,5 +1,9 @@
 <script lang="ts">
 	import type {
+		ClientGameplayOption,
+		ClientGameplayPreferences,
+	} from "./client-gameplay-options-contract";
+	import type {
 		UiThemeSelection,
 		UiThemeSettings,
 	} from "../app/ui-theme-selection";
@@ -480,6 +484,15 @@
 	function reportCommandFailure(error: unknown): void {
 		appLifecycle.fail("command", diagnostic(error));
 	}
+	async function setGameplayOption(
+		option: ClientGameplayOption,
+		enabled: boolean,
+	): Promise<void> {
+		if (session === null)
+			throw new Error("Gameplay settings require an active session.");
+		await session.setGameplayOption(option, enabled);
+	}
+	let gameplayPreferences = $state<ClientGameplayPreferences | null>(null);
 	async function setAppearanceOption(
 		option: ClientAppearanceOption,
 		enabled: boolean,
@@ -1057,6 +1070,9 @@
 			case "combat":
 				acceptCombatStatus(event.status);
 				return;
+			case "gameplay-preferences":
+				gameplayPreferences = event.preferences;
+				return;
 			case "appearance-options":
 				appearanceOptions = event.options;
 				return;
@@ -1078,6 +1094,7 @@
 				combatMode = event.state.combatMode;
 				acceptCombatStatus(event.state.combat);
 				appearanceOptions = event.state.appearanceOptions;
+				gameplayPreferences = event.state.gameplayPreferences;
 				entityCollisionDisabled = event.state.entityCollisionDisabled;
 				if (event.state.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
@@ -1106,6 +1123,7 @@
 				recallDestinations = [];
 				enchantments = null;
 				appearanceOptions = null;
+				gameplayPreferences = null;
 				return;
 			case "lifecycle":
 				if (
@@ -1121,6 +1139,7 @@
 				}
 				enchantments = session?.state().enchantments ?? null;
 				appearanceOptions = session?.state().appearanceOptions ?? null;
+				gameplayPreferences = session?.state().gameplayPreferences ?? null;
 				if (event.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
 					inputGate.cancel();
@@ -2441,6 +2460,9 @@
 			vitalWarningsEnabled={lifecycle.kind === "in-world"}
 			readConnection={() => session?.connectionSample() ?? null}
 			{appearanceOptions}
+			{gameplayPreferences}
+			gameplayEnabled={lifecycle.kind === "in-world"}
+			onGameplayOptionChange={setGameplayOption}
 			onAppearanceOptionChange={setAppearanceOption}
 			jumpChargeActive={activeJumpBeginSequence !== null}
 			{jumpPowerKeys}

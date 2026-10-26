@@ -261,6 +261,17 @@ fn push_item_info(
     }
 
     push_item_status(lines, item);
+    if let Some(lockpicking) = item.lockpicking {
+        let value = [
+            lockpicking.difficulty.map(|value| value.to_string()),
+            lockpicking.success_percent.map(|value| format!("{value}%")),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" / ");
+        push_labeled(lines, "Lockpick difficulty", value, Color::Cyan);
+    }
 
     if let Some(stack) = item.stack {
         push_labeled(
@@ -845,6 +856,35 @@ mod tests {
     }
 
     #[test]
+    fn assess_output_shows_disclosed_lockpicking_values_including_zero() {
+        use holtburger_world::inspection::{InspectionSupplement, LockpickingInfo};
+
+        for (difficulty, success_percent, expected) in [
+            (Some(250), Some(73), "250 / 73%"),
+            (Some(0), Some(0), "0 / 0%"),
+            (None, Some(100), "100%"),
+            (Some(250), None, "250"),
+        ] {
+            let mut entity =
+                Entity::new(Guid(0x6000_0002), "Door".into(), WorldPosition::default());
+            entity.set_bool_prop(PropertyBool::Locked, true);
+            entity.inspection_supplement = Some(InspectionSupplement {
+                lockpicking: Some(LockpickingInfo {
+                    difficulty,
+                    success_percent,
+                }),
+                ..Default::default()
+            });
+            let text = get_assess_info(&inspect_entity(&entity), None, None)
+                .into_iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains(&format!("Lockpick difficulty:  {expected}")));
+        }
+    }
+
+    #[test]
     fn assess_output_shows_open_and_locked_status() {
         let mut entity = Entity::new(
             Guid(0x60000002),
@@ -926,6 +966,7 @@ mod tests {
             enchantable: true,
         };
         entity.inspection_supplement = Some(InspectionSupplement {
+            lockpicking: None,
             equipment_unenchantable: None,
             armor_coverage: Some(ArmorCoverage {
                 head: ArmorCoverageValue {

@@ -1895,6 +1895,7 @@
 	}
 
 	type InspectionResponseKind =
+		| "locked"
 		| "item"
 		| "item-maximum"
 		| "item-zero"
@@ -1950,6 +1951,34 @@
 		kind: InspectionResponseKind,
 		guid: number,
 	): ObjectInspectionResult {
+		if (kind === "locked") {
+			const result = inspectionResult("item-plain", guid);
+			if (
+				result.outcome.kind !== "ready" ||
+				result.outcome.inspection.details.kind !== "item"
+			)
+				throw new Error("Expected an item inspection fixture");
+			const inspection = result.outcome.inspection;
+			const item = result.outcome.inspection.details.details;
+			return {
+				...result,
+				outcome: {
+					kind: "ready",
+					inspection: {
+						...inspection,
+						name: "Harness Locked Chest",
+						details: {
+							kind: "item",
+							details: {
+								...item,
+								status: { ...item.status, isLocked: true },
+								lockpicking: { difficulty: 250, successPercent: 0 },
+							},
+						},
+					},
+				},
+			};
+		}
 		if (
 			kind === "consumable" ||
 			kind === "consumable-depletion" ||
@@ -2184,6 +2213,7 @@
 								max: 10000,
 								secondsLeft: 3723,
 							},
+							lockpicking: null,
 							status: {
 								bonded: "bonded",
 								attuned: "Attuned",

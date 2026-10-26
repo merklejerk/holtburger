@@ -145,8 +145,8 @@ export function resolvePortalJunctions(
 		}
 		const conflict = overlappingExitTriangle(members, overlaps);
 		if (conflict !== null) {
-			console.warn(
-				`Portal junction declined: three same-domain exits overlap: ${conflict.map((index) => candidates[index]!.crossing.id).join(", ")}`,
+			console.debug(
+				`Portal junction declined: three same-domain exits overlap pairwise: ${conflict.map((index) => candidates[index]!.crossing.id).join(", ")}`,
 			);
 			continue;
 		}

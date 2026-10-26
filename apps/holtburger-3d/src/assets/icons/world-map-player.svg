@@ -8,14 +8,12 @@
 	aria-hidden="true"
 	style="overflow: visible"
 >
-	<!-- A dark halo keeps the bright target distinct on pale and dark terrain. -->
-	<g fill="none" stroke="#141414" stroke-width="4.5">
-		<circle r="8" />
-		<path d="M-13 0h7M6 0h7M0-13v7M0 6v7" />
-	</g>
-	<g fill="none" stroke="#ffdf5c" stroke-width="2">
-		<circle r="8" />
-		<path d="M-13 0h7M6 0h7M0-13v7M0 6v7" />
-	</g>
-	<circle r="2.5" fill="white" stroke="#141414" stroke-width="1" />
+	<!-- North-facing arrow; the dark outline keeps it distinct across terrain colors. -->
+	<path
+		d="M0-13 9 10 0 6-9 10Z"
+		fill="#ffdf5c"
+		stroke="#141414"
+		stroke-width="2.5"
+		stroke-linejoin="round"
+	/>
 </svg>

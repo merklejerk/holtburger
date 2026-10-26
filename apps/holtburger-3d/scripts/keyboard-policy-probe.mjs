@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { probeClientLogopolis } from "./client-logopolis-probe.mjs";
 import { probeClientEmotes } from "./client-emote-probe.mjs";
 import { probeClientChat } from "./client-chat-probe.mjs";
 
@@ -41,7 +42,16 @@ function keyboardProbeDriver(client, evaluateExpression) {
 		await key("keyDown", value, code, virtualKey, extra);
 		await key("keyUp", value, code, virtualKey);
 	};
-	return { api, evaluate, invoke, capture, click, key, press };
+	return {
+		api,
+		evaluate,
+		invoke,
+		capture,
+		click,
+		key,
+		press,
+		insertText: (text) => client.send("Input.insertText", { text }),
+	};
 }
 
 /** Drive actual browser defaults; DOM-dispatched keys cannot prove native focus behavior. */
@@ -858,6 +868,7 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		return {
 			chatComposer: await probeClientChat(client, evaluateExpression),
 			soulEmotes: await probeClientEmotes(client, evaluateExpression),
+			logopolis: await probeClientLogopolis(driver),
 			contextualEscape: true,
 			nativeControls: true,
 			pointerControlsPreserveGame: true,

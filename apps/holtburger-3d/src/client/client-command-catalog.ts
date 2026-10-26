@@ -140,6 +140,11 @@ export const HELP_COMMAND: ClientCommandDefinition = {
 };
 
 export const LOCAL_COMMANDS = {
+	logopolis: {
+		...invocation(["logopolis"], ""),
+		description: "???",
+		details: [],
+	},
 	assets: {
 		...invocation(["assets"], ""),
 		description: "Print the active asset location.",

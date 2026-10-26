@@ -1,3 +1,4 @@
+import { gameplayPreferencesSchema } from "./client-gameplay-options-contract";
 import { playerVisualCaptureSchema } from "./client-object-preview-contract";
 import { contractsSnapshotSchema } from "./client-contracts-contract";
 import {
@@ -482,6 +483,7 @@ export type ClientAppearanceOption = "helmet" | "cloak";
 const characterPreferencesSchema = z
 	.object({
 		appearance: clientAppearanceOptionsSchema,
+		gameplay: gameplayPreferencesSchema,
 		party: partyPreferencesSchema,
 		friends: friendsPreferencesSchema,
 		allegiance: allegiancePreferencesSchema,
@@ -549,6 +551,7 @@ const currentStateSchema = z
 		knownSpells: knownSpellIdsSchema.nullable(),
 		enchantments: resolvedEnchantmentsSchema.nullable(),
 		appearanceOptions: clientAppearanceOptionsSchema.nullable(),
+		gameplayPreferences: gameplayPreferencesSchema.nullable(),
 		party: partySnapshotSchema.nullable(),
 		partyPreferences: partyPreferencesSchema.nullable(),
 		friends: friendsSnapshotSchema.nullable(),

@@ -31,6 +31,20 @@ import {
 const viewport = { width: 1440, height: 900 };
 
 describe("current client settings values", () => {
+	it("loads older UI profiles with FPS hidden and preserves explicit visibility", () => {
+		const ui = createDefaultClientUserSettings(viewport, 0).ui;
+		const { showFps, ...older } = ui;
+		expect(clientUiSettingsSchema.parse(older)).toEqual({ ...older, showFps });
+		for (const enabled of [true, false]) {
+			expect(
+				clientUiSettingsSchema.parse({ ...older, showFps: enabled }).showFps,
+			).toBe(enabled);
+		}
+		expect(
+			clientUiSettingsSchema.safeParse({ ...older, showFps: "true" }).success,
+		).toBe(false);
+	});
+
 	it("adds panel defaults to old profiles and preserves remapped and unbound panels", () => {
 		const olderClient = Object.fromEntries(
 			Object.entries(CLIENT_KEYBOARD_DEFAULTS.client).filter(
@@ -85,6 +99,7 @@ describe("current client settings values", () => {
 		).toBeNull();
 		expect(clientUiSettingsSchema.parse({ fonts })).toEqual({
 			themeId: CLIENT_DEFAULT_THEME_ID,
+			showFps: false,
 			fonts,
 			textScale: CLIENT_TEXT_SCALE.initial,
 			iconScale: CLIENT_ICON_SCALE.initial,
@@ -98,6 +113,7 @@ describe("current client settings values", () => {
 		};
 		expect(clientUiSettingsSchema.parse(older)).toEqual({
 			themeId: CLIENT_DEFAULT_THEME_ID,
+			showFps: false,
 			...older,
 			textScale: CLIENT_TEXT_SCALE.initial,
 			iconScale: CLIENT_ICON_SCALE.initial,
@@ -109,6 +125,7 @@ describe("current client settings values", () => {
 		]) {
 			expect(clientUiSettingsSchema.parse({ ...older, textScale })).toEqual({
 				themeId: CLIENT_DEFAULT_THEME_ID,
+				showFps: false,
 				...older,
 				textScale,
 				iconScale: CLIENT_ICON_SCALE.initial,

@@ -185,6 +185,7 @@ pub enum HostEvent {
     ClientPlayerEnchantmentsUpdated(holtburger_world::enchantments::ResolvedEnchantments),
     ClientCharacterPreferencesUpdated {
         appearance: crate::client_projection::ClientAppearanceOptions,
+        gameplay: crate::client_gameplay::ClientGameplayPreferences,
         party: crate::client_party::ClientPartyPreferences,
         friends: crate::client_friends::ClientFriendsPreferences,
         allegiance: crate::client_allegiance::ClientAllegiancePreferences,
@@ -629,11 +630,13 @@ impl ClientEventSink for StdioEventSink {
             }
             crate::client_projection::ClientHostEvent::CharacterPreferencesUpdated {
                 appearance,
+                gameplay,
                 party,
                 friends,
                 allegiance,
             } => HostEvent::ClientCharacterPreferencesUpdated {
                 appearance,
+                gameplay,
                 party,
                 friends,
                 allegiance,

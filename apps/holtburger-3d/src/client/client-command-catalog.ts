@@ -140,6 +140,13 @@ export const HELP_COMMAND: ClientCommandDefinition = {
 };
 
 export const LOCAL_COMMANDS = {
+	fps: {
+		...invocation(["fps"], ""),
+		description: "Toggle the FPS HUD.",
+		details: [
+			"Saves the same preference as Show FPS in settings. Hidden by default.",
+		],
+	},
 	logopolis: {
 		...invocation(["logopolis"], ""),
 		description: "???",

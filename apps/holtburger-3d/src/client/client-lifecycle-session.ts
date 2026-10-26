@@ -1,3 +1,7 @@
+import type {
+	ClientGameplayOption,
+	ClientGameplayPreferences,
+} from "./client-gameplay-options-contract";
 import { characterManagementPending } from "./client-character-selection";
 import {
 	abortError,
@@ -292,6 +296,7 @@ type ClientCommandName = Extract<
 	| "recall_client"
 	| "toggle_client_combat_mode"
 	| "set_client_appearance_option"
+	| "set_client_gameplay_option"
 	| "cast_client_spell"
 	| "begin_client_combat_engagement"
 	| "update_client_combat_profile"
@@ -446,6 +451,8 @@ export interface ClientLifecycleSessionState {
 	readonly enchantments: ClientTimedEnchantments | null;
 	/** Server-backed appearance preferences, null until PlayerDescription is available. */
 	readonly appearanceOptions: ClientAppearanceOptions | null;
+	/** Mirrored server-saved Gameplay choices for the active character. */
+	readonly gameplayPreferences: ClientGameplayPreferences | null;
 	/** Latest server stance, consumed by the combat shortcut. */
 	readonly combatMode: ClientCombatMode;
 	readonly combat: ClientCombatStatus;
@@ -502,6 +509,10 @@ export type ClientLifecycleSessionEvent =
 	| {
 			readonly type: "appearance-options";
 			readonly options: ClientAppearanceOptions;
+	  }
+	| {
+			readonly type: "gameplay-preferences";
+			readonly preferences: ClientGameplayPreferences;
 	  }
 	| { readonly type: "spells"; readonly spellIds: readonly number[] }
 	| {
@@ -841,6 +852,7 @@ export class ClientLifecycleSession {
 			knownSpells: null,
 			enchantments: null,
 			appearanceOptions: null,
+			gameplayPreferences: null,
 		};
 		this.characterSheet.reset(null);
 		this.#connection = null;
@@ -938,6 +950,23 @@ export class ClientLifecycleSession {
 			this.#entryRequestGuid = null;
 			throw error;
 		}
+	}
+
+	/** Queue an option update only while current character gameplay is available. */
+	async setGameplayOption(
+		option: ClientGameplayOption,
+		enabled: boolean,
+	): Promise<void> {
+		if (
+			this.#state.lifecycle?.kind !== "in-world" ||
+			this.#state.gameplayPreferences === null
+		) {
+			throw new Error("Gameplay settings require an active character.");
+		}
+		await this.#transport.invoke("set_client_gameplay_option", {
+			option,
+			enabled,
+		});
 	}
 
 	/** Change one appearance preference persisted by the active-character authority. */
@@ -1457,6 +1486,7 @@ export class ClientLifecycleSession {
 						knownSpells: null,
 						enchantments: null,
 						appearanceOptions: null,
+						gameplayPreferences: null,
 					};
 					this.entities.awaitSnapshot();
 					this.mirror.awaitSnapshot();
@@ -1540,7 +1570,15 @@ export class ClientLifecycleSession {
 					this.#partyPreferences = preferences.party;
 					this.friends.updatePreferences(preferences.friends);
 					this.allegiance.updatePreferences(preferences.allegiance);
-					this.#state = { ...this.#state, appearanceOptions: options };
+					this.#state = {
+						...this.#state,
+						appearanceOptions: options,
+						gameplayPreferences: preferences.gameplay,
+					};
+					this.#emit({
+						type: "gameplay-preferences",
+						preferences: preferences.gameplay,
+					});
 					this.#emit({ type: "appearance-options", options });
 				}),
 			);
@@ -1960,6 +1998,7 @@ export class ClientLifecycleSession {
 							receivedAtMs: performance.now(),
 						},
 			appearanceOptions: state.appearanceOptions,
+			gameplayPreferences: state.gameplayPreferences,
 			combatMode: state.combatMode,
 			combat: state.combat,
 			vitals: state.vitals,
@@ -2008,6 +2047,9 @@ export class ClientLifecycleSession {
 			enchantments: retiresCharacterDescription
 				? null
 				: this.#state.enchantments,
+			gameplayPreferences: retiresCharacterDescription
+				? null
+				: this.#state.gameplayPreferences,
 			appearanceOptions: retiresCharacterDescription
 				? null
 				: this.#state.appearanceOptions,
@@ -2228,6 +2270,7 @@ function emptyState(): ClientLifecycleSessionState {
 		knownSpells: null,
 		enchantments: null,
 		appearanceOptions: null,
+		gameplayPreferences: null,
 		combatMode: "unknown",
 		combat: { desired: null, state: "idle", refill: null },
 		vitals: [],

@@ -1,3 +1,10 @@
+import { pregameHarnessLocation } from "./pregame-world-harness";
+import { probePregameSurface } from "./pregame-surface-probe";
+import {
+	probePregameSceneComposition,
+	type CreationSceneSample,
+} from "./pregame-scene-composition-probe";
+import { probeLocalSceneModel } from "./local-scene-model-probe";
 import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
 import { probePregameOutdoorEnvironment } from "./pregame-outdoor-probe";
 import { ClientPresentationRoot } from "../../client/client-presentation-root";
@@ -10,7 +17,10 @@ import type {
 	HostTransport,
 	HostCommandName,
 } from "../../lib/host/host-transport";
-import type { ObjectPreviewSource } from "../../lib/game/runtime/object-preview-source";
+import type {
+	ObjectPreviewSource,
+	ObjectPreviewVisual,
+} from "../../lib/game/runtime/object-preview-source";
 import { StandardClientObjectPreviewService } from "../../client/client-object-preview-service";
 import { observePreviewDevice } from "./preview-device-probe";
 
@@ -19,6 +29,8 @@ export async function probePregameWorldLifetime(
 	assets: HostPresentationAssets,
 	staticTransport: HostTransport,
 	source: ObjectPreviewSource,
+	creationSamples: readonly CreationSceneSample[],
+	appearanceEdits: readonly ObjectPreviewVisual[],
 ) {
 	const resources = await assets.resources();
 	const commands: HostCommandName[] = [];
@@ -53,8 +65,10 @@ export async function probePregameWorldLifetime(
 	let worldBuilds = 0;
 	let gameplayAdapters = 0;
 	const errors: unknown[] = [];
+	const pregameLocation = pregameHarnessLocation();
 	const root = new ClientPresentationRoot({
 		canvas,
+		pregameLocation,
 		build: async () => {
 			worldBuilds++;
 			return world;
@@ -104,7 +118,12 @@ export async function probePregameWorldLifetime(
 			);
 		}
 	};
-	let backdropFrames = 0;
+	let localModel: Awaited<ReturnType<typeof probeLocalSceneModel>>;
+	let mountedSurface: Awaited<ReturnType<typeof probePregameSurface>>;
+	let sceneComposition: Awaited<
+		ReturnType<typeof probePregameSceneComposition>
+	>;
+	let sceneFrames = 0;
 	let firstCyclePrograms = 0;
 	let candidatePreparationMs: number;
 	let outdoor: Awaited<ReturnType<typeof probePregameOutdoorEnvironment>>;
@@ -113,11 +132,48 @@ export async function probePregameWorldLifetime(
 		await root.setMode("pregame");
 		await settle("pregame");
 		candidatePreparationMs = performance.now() - preparationStartedAtMs;
-		backdropFrames++;
+		sceneFrames++;
+		localModel = await probeLocalSceneModel(
+			world.runtime,
+			source,
+			pregameLocation,
+			async () => {
+				await new Promise<void>((resolve) =>
+					requestAnimationFrame(() => resolve()),
+				);
+				await settle("pregame");
+			},
+		);
+		mountedSurface = await probePregameSurface(
+			root,
+			world,
+			canvas,
+			source,
+			async () => {
+				await new Promise<void>((resolve) =>
+					requestAnimationFrame(() => resolve()),
+				);
+				await settle("pregame");
+			},
+		);
+		sceneComposition = await probePregameSceneComposition(
+			root,
+			world,
+			source,
+			async () => {
+				await new Promise<void>((resolve) =>
+					requestAnimationFrame(() => resolve()),
+				);
+				await settle("pregame");
+			},
+			() => device.readPixels(),
+			creationSamples,
+			appearanceEdits,
+		);
 		// Creator and selector are foreground-only changes; the installed scene keeps drawing.
 		await root.setMode("pregame");
 		await settle("pregame");
-		backdropFrames++;
+		sceneFrames++;
 		await root.setMode("idle");
 		outdoor = await probePregameOutdoorEnvironment(world);
 		for (let cycle = 0; cycle < 2; cycle++) {
@@ -214,6 +270,10 @@ export async function probePregameWorldLifetime(
 		throw new Error("Post-world preview retained device resources");
 	return {
 		commands,
+		localModel,
+		sceneComposition,
+		pregameLocation,
+		mountedSurface,
 		worldRetired: true,
 		// Diagnostic cold-start spans exclude shared CPU bootstrap and later preview/weather work.
 		startup: {
@@ -223,8 +283,8 @@ export async function probePregameWorldLifetime(
 			height: 512,
 			renderScale: EXPLORER_TUNING.frameSettings.quality.renderScale,
 		},
-		candidateBackdropFrames: backdropFrames,
-		backdropPausedAndResumed: true,
+		candidateSceneFrames: sceneFrames,
+		scenePausedAndResumed: true,
 		persistentWorldBuilds: worldBuilds,
 		outdoor,
 		gameplayAdapters,

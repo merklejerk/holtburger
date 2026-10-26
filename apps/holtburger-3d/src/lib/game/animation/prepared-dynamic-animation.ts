@@ -1,5 +1,6 @@
 import {
 	animationHookBlocksActivation,
+	animationHookCommand,
 	type DecodedAnimationHook,
 } from "../../assets/decode-animation-record";
 import { AABB3, Vec3 } from "../math/types";
@@ -8,10 +9,24 @@ import type {
 	PartVisualTemplate,
 } from "../systems/object-visual-template-repository";
 import type { PreparedAnimation } from "./animation-asset-repository";
-import { turnsVisualRoot } from "./animation-playback";
+import { turnsVisualRoot, type PlayingClip } from "./animation-playback";
+import { createModelFit, type ModelFit } from "../geometry/model-fit";
+import type { Mat4 } from "../math/types";
 
 /** Complete animation preparation outcome consumed by the later atomic activation gate. */
 export type PreparedDynamicAnimation =
+	| {
+			/** Explicit resolved sequence or setup pose, exclusive of source-owned playback. */
+			readonly kind: "sequence";
+			/** All windows are bound to retained animation assets. */
+			readonly clips: readonly PlayingClip[];
+			/** Null means setup pose or a finite noncyclic sequence. */
+			readonly firstCyclicClip: number | null;
+			/** Stable support from the same geometry and clips the scene will render. */
+			readonly fit: ModelFit;
+			/** Conservative continuous-pose bound for ordinary scene culling. */
+			readonly localBounds: AABB3;
+	  }
 	| {
 			/**
 			 * The resident owns no default animation, so its parts keep their authored pose.
@@ -35,6 +50,47 @@ export type PreparedDynamicAnimation =
 			readonly blockingHooks: readonly DecodedAnimationHook[];
 			readonly localBounds: AABB3;
 	  };
+
+/** Prepare explicit windows without changing setup behavior or substituting a whole default clip. */
+export function prepareDynamicSequence(
+	clips: readonly PlayingClip[],
+	firstCyclicClip: number | null,
+	template: Pick<ObjectVisualTemplate, "parts">,
+	setupPose: readonly Mat4[],
+	scale: Vec3,
+	staticBounds: AABB3,
+): Extract<PreparedDynamicAnimation, { kind: "sequence" }> {
+	const localBounds = staticBounds.clone();
+	for (const animation of new Set(clips.map((clip) => clip.animation))) {
+		const prepared = prepareDynamicAnimation(
+			animation,
+			template,
+			scale,
+			staticBounds,
+		);
+		if (prepared.kind === "retain-static-presentation")
+			throw new Error(
+				`Resolved animation ${animation.id} contains unsupported visual hooks: ${prepared.blockingHooks.map(animationHookCommand).join(", ")}.`,
+			);
+		localBounds.union(prepared.localBounds);
+	}
+	const rotatesVisualRoot = clips.some((clip) =>
+		turnsVisualRoot(clip.animation),
+	);
+	return {
+		kind: "sequence",
+		clips,
+		firstCyclicClip,
+		localBounds,
+		fit: createModelFit(
+			template.parts,
+			setupPose,
+			scale,
+			clips,
+			rotatesVisualRoot,
+		),
+	};
+}
 
 /** Validate one clip against its resolved appearance and precompute activation-time bounds. */
 export function prepareDynamicAnimation(

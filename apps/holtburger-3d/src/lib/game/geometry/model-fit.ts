@@ -11,22 +11,64 @@ import {
 } from "../resolution/object-part-transform";
 import type { PartVisualTemplate } from "../systems/object-visual-template-repository";
 
-/** Stable articulated support volume consumed by the analytic preview camera. */
-export interface ObjectPreviewFit {
+/** Stable articulated support volume shared by scene composition and isolated framing. */
+export interface ModelFit {
+	/** Object-local focus at the center of the prepared support envelope. */
 	readonly center: Vec3;
 	/** Packed XYZ triples; immutable after preparation and scanned only when camera policy changes. */
 	readonly supportPoints: Float32Array;
 }
 
+/** Upright cylinder enclosing a complete turn, measured relative to its focus pivot. */
+export interface YawSweep {
+	/** Maximum horizontal distance from the rotation axis. */
+	readonly radius: number;
+	/** Lowest vertical offset from the focus. */
+	readonly minimumY: number;
+	/** Highest vertical offset from the focus. */
+	readonly maximumY: number;
+}
+
+/** Compute one heading-independent framing envelope without changing the source geometry. */
+export function createYawSweep(
+	points: ArrayLike<number>,
+	pivot: Vec3,
+): YawSweep {
+	let radius = 0;
+	let minimumY = Number.POSITIVE_INFINITY;
+	let maximumY = Number.NEGATIVE_INFINITY;
+	for (let index = 0; index < points.length; index += 3) {
+		const x = points[index];
+		const y = points[index + 1];
+		const z = points[index + 2];
+		if (x === undefined || y === undefined || z === undefined)
+			throw new Error("Yaw sweep support must contain complete XYZ triples.");
+		radius = Math.max(radius, Math.hypot(x - pivot.x, z - pivot.z));
+		minimumY = Math.min(minimumY, y - pivot.y);
+		maximumY = Math.max(maximumY, y - pivot.y);
+	}
+	if (points.length === 0)
+		throw new Error("Yaw sweep requires bounded subject geometry.");
+	return { radius, minimumY, maximumY };
+}
+
+/** Maximum dot product over the cylinder; evaluates projection edges without angular sampling. */
+export function yawSweepSupport(sweep: YawSweep, direction: Vec3): number {
+	return (
+		sweep.radius * Math.hypot(direction.x, direction.z) +
+		Math.max(sweep.minimumY * direction.y, sweep.maximumY * direction.y)
+	);
+}
+
 /** Narrow subject facts needed to sweep directly attached equipment through its animation. */
 interface FitSubject {
 	/** Already computed body support. */
-	readonly fit: ObjectPreviewFit;
+	readonly fit: ModelFit;
 	/** Authored body pose used when no clip animates a part. */
 	readonly setupPose: readonly Mat4[];
 	/** Source scale affects rigid part translation independently from geometry scale. */
 	readonly scale: Vec3;
-	/** Ordered authored preview clips. */
+	/** Ordered resolved authored clips. */
 	readonly clips: readonly PlayingClip[];
 	/** Repeatable authored turns require a heading-invariant support envelope. */
 	readonly rotatesVisualRoot: boolean;
@@ -39,23 +81,21 @@ interface FitAttachment {
 	/** Authored rigid holding offset. */
 	readonly offsetTransform: Mat4;
 	/** Child support already includes its own source/default scales and placement. */
-	readonly fit: ObjectPreviewFit;
+	readonly fit: ModelFit;
 }
 
 /** Fit body and held geometry together; callers deliberately exclude background models. */
-export function composeObjectPreviewFit(
+export function composeModelFit(
 	body: FitSubject,
 	attachments: readonly FitAttachment[],
-): ObjectPreviewFit {
+): ModelFit {
 	if (attachments.length === 0) return body.fit;
 	const points = Array.from(body.fit.supportPoints);
 	const visit = (pose: readonly Mat4[], root: Mat4): void => {
 		for (const attachment of attachments) {
 			const part = pose[attachment.parentPartIndex];
 			if (part === undefined)
-				throw new Error(
-					"Preview holding location names an absent subject part.",
-				);
+				throw new Error("Model holding location names an absent subject part.");
 			const rigid = composeObjectPartFrame(part, body.scale, Mat4.identity());
 			const frame = multiplyMat4(
 				root,
@@ -68,7 +108,7 @@ export function composeObjectPreviewFit(
 				const z = support[index + 2];
 				if (x === undefined || y === undefined || z === undefined)
 					throw new Error(
-						"Preview equipment support is not composed of XYZ triples.",
+						"Model equipment support is not composed of XYZ triples.",
 					);
 				const point = transformPoint3(frame, new Vec3(x, y, z));
 				points.push(point.x, point.y, point.z);
@@ -92,16 +132,16 @@ export function composeObjectPreviewFit(
  * Sample each rigid part's own transformed box across the selected idle sequence.
  *
  * Keeping the boxes separate avoids the impossible corners introduced by one union AABB while
- * retaining a stable camera over animation. Quarter-frame sampling matches the preview animation
+ * retaining a stable camera over animation. Quarter-frame sampling matches the resolved model animation
  * envelope policy and includes every authored endpoint.
  */
-export function createObjectPreviewFit(
+export function createModelFit(
 	parts: readonly PartVisualTemplate[],
 	setupPose: readonly Mat4[],
 	scale: Vec3,
 	clips: readonly PlayingClip[],
 	rotationInvariant: boolean,
-): ObjectPreviewFit {
+): ModelFit {
 	const points: number[] = [];
 	appendPoseSupport(points, parts, setupPose, scale);
 	for (const clip of clips) {
@@ -118,7 +158,7 @@ export function createObjectPreviewFit(
 			);
 	}
 	if (points.length === 0)
-		throw new Error("The object preview visual has no bounded geometry.");
+		throw new Error("The model visual has no bounded geometry.");
 	return rotationInvariant
 		? horizontalRotationInvariantFit(points)
 		: fitFromSupportPoints(points);
@@ -135,39 +175,22 @@ function appendPoseSupport(
 		const transform = pose[part.partIndex];
 		if (!transform)
 			throw new Error(
-				`Object preview pose has no frame for setup part ${part.partIndex}.`,
+				`Model pose has no frame for setup part ${part.partIndex}.`,
 			);
-		const partToPreview = composeObjectPartTransform(
+		const partToModel = composeObjectPartTransform(
 			transform,
 			scale,
 			part.defaultScale,
 		);
 		for (const corner of boundsCorners(part.localBounds)) {
-			const point = transformPoint3(partToPreview, corner);
+			const point = transformPoint3(partToModel, corner);
 			output.push(point.x, point.y, point.z);
 		}
 	}
 }
 
-function horizontalRotationInvariantFit(
-	points: readonly number[],
-): ObjectPreviewFit {
-	let radiusSquared = 0;
-	let minimumY = Number.POSITIVE_INFINITY;
-	let maximumY = Number.NEGATIVE_INFINITY;
-	for (let offset = 0; offset < points.length; offset += 3) {
-		const x = points[offset];
-		const y = points[offset + 1];
-		const z = points[offset + 2];
-		if (x === undefined || y === undefined || z === undefined)
-			throw new Error(
-				"Object preview fit support is not composed of XYZ triples.",
-			);
-		radiusSquared = Math.max(radiusSquared, x * x + z * z);
-		minimumY = Math.min(minimumY, y);
-		maximumY = Math.max(maximumY, y);
-	}
-	const radius = Math.sqrt(radiusSquared);
+function horizontalRotationInvariantFit(points: readonly number[]): ModelFit {
+	const { radius, minimumY, maximumY } = createYawSweep(points, Vec3.zero());
 	return fitFromSupportPoints(
 		boundsCorners({
 			min: new Vec3(-radius, minimumY, -radius),
@@ -176,7 +199,7 @@ function horizontalRotationInvariantFit(
 	);
 }
 
-function fitFromSupportPoints(points: readonly number[]): ObjectPreviewFit {
+function fitFromSupportPoints(points: readonly number[]): ModelFit {
 	let minimumX = Number.POSITIVE_INFINITY;
 	let minimumY = Number.POSITIVE_INFINITY;
 	let minimumZ = Number.POSITIVE_INFINITY;
@@ -188,9 +211,7 @@ function fitFromSupportPoints(points: readonly number[]): ObjectPreviewFit {
 		const y = points[offset + 1];
 		const z = points[offset + 2];
 		if (x === undefined || y === undefined || z === undefined)
-			throw new Error(
-				"Object preview fit support is not composed of XYZ triples.",
-			);
+			throw new Error("Model fit support is not composed of XYZ triples.");
 		minimumX = Math.min(minimumX, x);
 		minimumY = Math.min(minimumY, y);
 		minimumZ = Math.min(minimumZ, z);

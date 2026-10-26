@@ -1,3 +1,5 @@
+import type { ClientPregameLocation } from "./client-pregame-tuning";
+import { ClientPregameCharacterService } from "./client-pregame-character";
 import {
 	abortError,
 	isAbortError,
@@ -5,10 +7,10 @@ import {
 } from "../lib/async-lifetime";
 import type { GamePresentationRuntime } from "../lib/game/runtime/game-presentation-runtime";
 import {
-	ClientPregameBackdrop,
-	type ClientPregameBackdropResources,
-	type ClientPregameBackdropStatus,
-} from "./client-pregame-backdrop";
+	ClientPregameScene,
+	type ClientPregameSceneResources,
+	type ClientPregameSceneStatus,
+} from "./client-pregame-scene";
 import type {
 	ClientGameplayPresentation,
 	ClientGameplayPresentationFrame,
@@ -17,7 +19,7 @@ import type { FrameSettings } from "../lib/game/renderer/renderer";
 import type { ClientAudioSettings } from "./client-settings-contract";
 
 /** Browser resources owned by the root and borrowed by exactly one world driver at a time. */
-export type ClientPresentationRootOwner = ClientPregameBackdropResources & {
+export type ClientPresentationRootOwner = ClientPregameSceneResources & {
 	/** Shared settings remain applicable before a gameplay adapter is attached. */
 	readonly runtime: Pick<
 		GamePresentationRuntime,
@@ -37,7 +39,7 @@ type GameplayDriver = Pick<
 >;
 
 type ActiveDriver = (
-	| { readonly kind: "pregame"; readonly driver: ClientPregameBackdrop }
+	| { readonly kind: "pregame"; readonly driver: ClientPregameScene }
 	| { readonly kind: "gameplay"; readonly driver: GameplayDriver }
 ) & {
 	/** Cancels the local startup wait before driver retirement joins it. */ readonly lifetime: AbortController;
@@ -53,7 +55,7 @@ export type ClientPresentationRootFrame =
 	  }
 	| {
 			readonly kind: "pregame";
-			readonly status: ClientPregameBackdropStatus;
+			readonly status: ClientPregameSceneStatus;
 			readonly rendered: boolean;
 	  }
 	| {
@@ -64,6 +66,8 @@ export type ClientPresentationRootFrame =
 interface Dependencies<TOwner extends ClientPresentationRootOwner> {
 	/** Shell owns the DOM node; it stays mounted across mode changes. */
 	readonly canvas: HTMLCanvasElement;
+	/** Launch-selected scene retained across retries and pregame/gameplay handoffs. */
+	readonly pregameLocation: ClientPregameLocation;
 	readonly build: (signal: AbortSignal) => Promise<TOwner>;
 	readonly createGameplay: (resources: TOwner) => GameplayDriver;
 	/** Clears app references to the retired adapter before another one is created. */
@@ -77,6 +81,8 @@ export class ClientPresentationRoot<
 	TOwner extends ClientPresentationRootOwner,
 > {
 	readonly #dependencies: Dependencies<TOwner>;
+	/** Current pregame page survives world construction/retry without owning the renderer. */
+	readonly pregameCharacters = new ClientPregameCharacterService();
 	readonly #abort = new AbortController();
 	readonly #ownerCompletion: Promise<TOwner>;
 	#owner: TOwner | null = null;
@@ -168,7 +174,11 @@ export class ClientPresentationRoot<
 					mode === "pregame"
 						? {
 								kind: "pregame",
-								driver: new ClientPregameBackdrop(owner),
+								driver: new ClientPregameScene(
+									owner,
+									this.pregameCharacters,
+									this.#dependencies.pregameLocation,
+								),
 								lifetime: new AbortController(),
 							}
 						: {
@@ -282,13 +292,22 @@ export class ClientPresentationRoot<
 	}
 
 	async #destroy(): Promise<void> {
+		const failures: unknown[] = [];
+		// Surface withdrawal can report a release failure; still join the driver and renderer.
+		try {
+			this.pregameCharacters.destroy();
+		} catch (error) {
+			failures.push(error);
+		}
 		// Stop the current borrower immediately, including startup, before awaiting the handoff lane.
 		const results = await Promise.allSettled([
 			this.#transition,
 			this.#retireDriver(),
 		]);
-		const failures: unknown[] = results.flatMap((result) =>
-			result.status === "rejected" ? [result.reason] : [],
+		failures.push(
+			...results.flatMap((result) =>
+				result.status === "rejected" ? [result.reason] : [],
+			),
 		);
 		try {
 			await this.#ownerCompletion;

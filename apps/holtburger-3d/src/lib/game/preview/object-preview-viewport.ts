@@ -3,7 +3,7 @@ import { createRotationMat4 } from "../math/matrices";
 import type { RenderExtent } from "../renderer/render-extent";
 import { validateRenderExtent } from "../renderer/render-extent";
 
-/** Rotation policy stays frontend-owned: inspection orbits, while creation turns its subject. */
+/** Independent preview policy stays frontend-owned: orbit the camera or turn the subject. */
 type ObjectPreviewRotation =
 	| { readonly kind: "orbit"; readonly yawRadians: number }
 	| {

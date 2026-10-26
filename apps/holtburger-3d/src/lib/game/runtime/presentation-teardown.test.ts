@@ -1,6 +1,53 @@
 import { describe, expect, it } from "vitest";
 
-import { PresentationTeardownStack } from "./presentation-teardown";
+import {
+	completePresentationOperations,
+	PresentationTeardownStack,
+} from "./presentation-teardown";
+
+describe("completePresentationOperations", () => {
+	it("preserves an individual failure while completing later operations", () => {
+		const failure = new Error("release failed");
+		const completed: string[] = [];
+		expect(() =>
+			completePresentationOperations([
+				() => {
+					throw failure;
+				},
+				() => {
+					completed.push("later");
+				},
+			]),
+		).toThrow(failure);
+		expect(completed).toEqual(["later"]);
+	});
+
+	it("retains every failure in operation order", () => {
+		const failures = [new Error("first failed"), new Error("second failed")];
+		expect(() =>
+			completePresentationOperations(
+				failures.map((failure) => () => {
+					throw failure;
+				}),
+			),
+		).toThrow(expect.objectContaining({ errors: failures }));
+	});
+
+	it("preserves a caller's context for a single failure", () => {
+		const failure = new Error("child release failed");
+		const message = "Model group retirement failed.";
+		expect(() =>
+			completePresentationOperations(
+				[
+					() => {
+						throw failure;
+					},
+				],
+				message,
+			),
+		).toThrow(expect.objectContaining({ message, errors: [failure] }));
+	});
+});
 
 describe("PresentationTeardownStack", () => {
 	it("releases every operation in reverse order and aggregates failures", async () => {

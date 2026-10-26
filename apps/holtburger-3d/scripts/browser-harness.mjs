@@ -625,6 +625,7 @@ function parseArgs(args) {
 	const parsed = {
 		chromePath: process.env.CHROME_PATH ?? DEFAULT_CHROME_PATH,
 		pregamePreview: false,
+		pregameLocation: 0,
 		clientPresentation: false,
 		worldMap: false,
 		clientWorldMap: false,
@@ -803,6 +804,14 @@ function parseArgs(args) {
 				break;
 			case "--client-presentation":
 				parsed.clientPresentation = true;
+				break;
+			case "--pregame-location":
+				parsed.pregameLocation = Number(args[++index]);
+				if (
+					!Number.isInteger(parsed.pregameLocation) ||
+					parsed.pregameLocation < 0
+				)
+					throw new Error("--pregame-location requires a nonnegative integer.");
 				break;
 			case "--pregame-preview":
 				parsed.pregamePreview = true;
@@ -1934,6 +1943,7 @@ Options:
   --nameplate-report-only
                         Print only renderer identity, errors, profiling, and nameplate evidence.
   --client-presentation Verify actual client selection/creator/gameplay/return on one world context.
+  --pregame-location <index> Choose a configured pregame scene for diagnostics (default: 0).
   --pregame-preview    Exercise static asset ownership and direct preview draw before world startup.
   --object-preview-report-only
                         Print only renderer identity, errors, and object-preview evidence.
@@ -5272,7 +5282,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const terrainGlTrace = options.traceTerrainGl ? "&traceTerrainGl=true" : "";
 	const worldMarker =
 		options.worldMarker === null ? "" : `&worldMarker=${options.worldMarker}`;
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}${options.worldMap ? "&world-map=1" : ""}${options.pregamePreview ? "&pregame-preview=1" : ""}${options.clientPresentation ? "&client-presentation=1&presentation-gates=1" : ""}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&pregame-location=${options.pregameLocation}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}${options.worldMap ? "&world-map=1" : ""}${options.pregamePreview ? "&pregame-preview=1" : ""}${options.clientPresentation ? "&client-presentation=1&presentation-gates=1" : ""}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,

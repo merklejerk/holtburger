@@ -19,11 +19,14 @@ export interface PreviewDeviceProbeSnapshot {
 /** Instrument this diagnostic canvas before its first context request, retaining native behavior. */
 export function observePreviewDevice(canvas: HTMLCanvasElement): {
 	read(): PreviewDeviceProbeSnapshot;
+	/** Numeric readback from the existing device, without requesting another context. */
+	readPixels(): Uint8Array;
 	/** Inject one allocation failure after a bounded number of successful staging uploads. */
 	failTextureAllocationAfter(successfulAllocations: number): void;
 } {
 	const getContext = canvas.getContext.bind(canvas);
 	let contextRequests = 0;
+	let capturedContext: WebGL2RenderingContext | null = null;
 	const programs = new Set<WebGLProgram>();
 	const textures = new Set<WebGLTexture>();
 	const buffers = new Set<WebGLBuffer>();
@@ -41,6 +44,7 @@ export function observePreviewDevice(canvas: HTMLCanvasElement): {
 			contextRequests++;
 			if (!(context instanceof WebGL2RenderingContext) || observed.has(context))
 				return context;
+			capturedContext = context;
 			observed.add(context);
 			const createProgram = context.createProgram.bind(context);
 			const deleteProgram = context.deleteProgram.bind(context);
@@ -122,6 +126,32 @@ export function observePreviewDevice(canvas: HTMLCanvasElement): {
 	return {
 		failTextureAllocationAfter: (count) => {
 			failAfterTextures = count;
+		},
+		readPixels: () => {
+			const gl = capturedContext;
+			if (gl === null)
+				throw new Error("Device readback requires an existing WebGL2 context.");
+			const framebuffer = gl.getParameter(
+				gl.READ_FRAMEBUFFER_BINDING,
+			) as WebGLFramebuffer | null;
+			const buffer = gl.getParameter(gl.READ_BUFFER) as number;
+			const pixels = new Uint8Array(
+				gl.drawingBufferWidth * gl.drawingBufferHeight * 4,
+			);
+			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+			gl.readBuffer(gl.BACK);
+			gl.readPixels(
+				0,
+				0,
+				gl.drawingBufferWidth,
+				gl.drawingBufferHeight,
+				gl.RGBA,
+				gl.UNSIGNED_BYTE,
+				pixels,
+			);
+			gl.bindFramebuffer(gl.READ_FRAMEBUFFER, framebuffer);
+			gl.readBuffer(buffer);
+			return pixels;
 		},
 		read: () => ({
 			contextRequests,

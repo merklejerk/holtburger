@@ -1029,8 +1029,10 @@ export async function probeClientPresentation(
 			x: drag.x,
 			y: drag.y,
 		});
+		// CDP must carry the held button through the move to preserve native pointer capture.
 		await client.send("Input.dispatchMouseEvent", {
 			type: "mouseMoved",
+			button: "left",
 			buttons: 1,
 			x: drag.x + 40,
 			y: drag.y,

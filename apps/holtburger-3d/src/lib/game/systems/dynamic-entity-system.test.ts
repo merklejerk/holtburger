@@ -13,6 +13,8 @@ import { EffectSystem } from "./effect-system";
 import { behaviorTargetId } from "../behavior/behavior-event-router";
 import { SoundTableRepository } from "../behavior/sound-table-repository";
 import { AnimationAssetRepository } from "../animation/animation-asset-repository";
+import { buildEffectRouter } from "../behavior/behavior-test-harness";
+import { AnimationSystem } from "./animation-system";
 import {
 	nameplateIconId,
 	type PlacedDynamicPresentationSource,
@@ -31,7 +33,11 @@ import type {
 } from "../resolution/presentation";
 import { INCLUDE_ALL_SCENE_CULLING_GROUPS, SceneGraph } from "../scene";
 import type { DynamicPresentationSample } from "./animation-system";
-import { DynamicEntitySystem } from "./dynamic-entity-system";
+import {
+	DynamicEntitySystem,
+	type DynamicModelAttachment,
+	type DynamicOwnerInstallation,
+} from "./dynamic-entity-system";
 import { DynamicEntityPlacementSystem } from "./dynamic-entity-placement-system";
 import {
 	InlineObjectVisualTemplatePreparer,
@@ -47,6 +53,449 @@ import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 
 describe("DynamicEntitySystem authored ownership", () => {
+	it("retains model ownership for staged roots and requested parts through publication, then forgets retired nodes", async () => {
+		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
+		const installation = system.replaceOwner(
+			"local",
+			linkedSources("ownership"),
+		);
+		await installation.ready;
+		for (const root of installation.nodeIds)
+			expect(system.modelRootOf(root)).toBe(root);
+		installation.prepareCommit([], groupLinks(installation));
+		installation.commit();
+		const parts = installation.nodeIds.map((root) => {
+			const part = system.requestPartNode(root, 0);
+			if (part === null) throw new Error("Fixture part was not prepared.");
+			expect(system.modelRootOf(part)).toBe(root);
+			expect(system.isVisible(root)).toBe(true);
+			return part;
+		});
+		system.removeOwner("local");
+		for (const node of [...installation.nodeIds, ...parts]) {
+			expect(system.modelRootOf(node)).toBeNull();
+			expect(system.isVisible(node)).toBe(false);
+		}
+		await system.destroy();
+	});
+
+	it("keeps a published replacement owned when retiring its predecessor reports failure", async () => {
+		const { system, scene, effects, templates } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const previous = system.replaceOwner("local", linkedSources("previous"));
+		await previous.ready;
+		previous.prepareCommit([], groupLinks(previous));
+		previous.commit();
+		const next = system.replaceOwner("local", linkedSources("next"));
+		await next.ready;
+		next.prepareCommit([], groupLinks(next));
+		const remove = effects.remove.bind(effects);
+		const oldChild = requiredAt(previous.nodeIds, 1);
+		effects.remove = (nodeId) => {
+			remove(nodeId);
+			if (nodeId === oldChild)
+				throw new Error("Synthetic predecessor cleanup failure");
+		};
+		expect(() => next.commit()).toThrow(AggregateError);
+		next.release();
+		for (const nodeId of previous.nodeIds)
+			expect(scene.getNode(nodeId)).toBeUndefined();
+		for (const nodeId of next.nodeIds)
+			expect(system.getVisiblePresentation(nodeId)).not.toBeNull();
+		system.removeOwner("local");
+		expect(templates.getDiagnostics().readyTemplateCount).toBe(0);
+		await system.destroy();
+	});
+	it("finishes sibling and parent retirement after one child release reports failure", async () => {
+		const { system, scene, effects, templates } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const installation = system.replaceOwner(
+			"local",
+			linkedSources("release-failure"),
+		);
+		await installation.ready;
+		installation.prepareCommit([], groupLinks(installation));
+		installation.commit();
+		const child = requiredAt(installation.nodeIds, 1);
+		const remove = effects.remove.bind(effects);
+		effects.remove = (nodeId) => {
+			remove(nodeId);
+			if (nodeId === child) throw new Error("Synthetic child release failure");
+		};
+		expect(() => system.removeOwner("local")).toThrow(AggregateError);
+		for (const nodeId of installation.nodeIds)
+			expect(scene.getNode(nodeId)).toBeUndefined();
+		expect(templates.getDiagnostics().readyTemplateCount).toBe(0);
+		await system.destroy();
+	});
+	it("publishes a fully linked group with independent scales and inherited residency, then retires leaves first", async () => {
+		const { system, scene, templates } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const installation = system.replaceOwner("local", linkedSources("group"));
+		await installation.ready;
+		const links = groupLinks(installation);
+		installation.prepareCommit([], links);
+		for (const nodeId of installation.nodeIds)
+			expect(system.getVisiblePresentation(nodeId)).toBeNull();
+		installation.commit();
+		const child = requiredAt(links, 0).childNodeId;
+		const transform = system.withSelectionGeometry(
+			child,
+			({ parts }) => parts[0]?.sourceToLandblock,
+		);
+		expect(transform?.m41).toBe(17);
+		expect(transform?.m11).toBe(0.5);
+		expect(scene.getResolvedPlacement(child)?.landblockId).toBe("0x0001ffff");
+		system.removeOwner("local");
+		for (const nodeId of installation.nodeIds)
+			expect(scene.getNode(nodeId)).toBeUndefined();
+		expect(templates.getDiagnostics().readyTemplateCount).toBe(0);
+		await system.destroy();
+	});
+
+	it.each(["withdraw", "replacement", "shutdown"] as const)(
+		"retires a linked group during %s",
+		async (operation) => {
+			const { system, scene, templates } = createSystem(
+				new InlineObjectVisualTemplatePreparer(),
+			);
+			const old = system.replaceOwner("local", linkedSources("old"));
+			await old.ready;
+			old.prepareCommit([], groupLinks(old));
+			old.commit();
+			if (operation === "replacement") {
+				const next = system.replaceOwner("local", linkedSources("new"));
+				await next.ready;
+				next.prepareCommit([], groupLinks(next));
+				next.commit();
+				for (const nodeId of next.nodeIds)
+					expect(system.getVisiblePresentation(nodeId)).not.toBeNull();
+			} else if (operation === "withdraw") system.removeOwner("local");
+			else await system.destroy();
+			for (const nodeId of old.nodeIds)
+				expect(scene.getNode(nodeId)).toBeUndefined();
+			await system.destroy();
+			expect(templates.getDiagnostics().readyTemplateCount).toBe(0);
+		},
+	);
+
+	it("rolls back a partially linked staged group without withdrawing the current group", async () => {
+		const { system, scene, templates } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const current = system.replaceOwner("local", linkedSources("current"));
+		await current.ready;
+		current.prepareCommit([], groupLinks(current));
+		current.commit();
+		const retainedTemplates = templates.getDiagnostics().readyTemplateCount;
+		const next = system.replaceOwner("local", linkedSources("next"));
+		await next.ready;
+		const attach = scene.attachToPart.bind(scene);
+		let attachments = 0;
+		scene.attachToPart = (...args) => {
+			if (++attachments === 2)
+				throw new Error("Synthetic second attachment failure");
+			attach(...args);
+		};
+		expect(() => next.prepareCommit([], groupLinks(next))).toThrow(
+			"Synthetic second attachment failure",
+		);
+		for (const nodeId of next.nodeIds)
+			expect(scene.getNode(nodeId)).toBeUndefined();
+		for (const nodeId of current.nodeIds)
+			expect(system.getVisiblePresentation(nodeId)).not.toBeNull();
+		expect(templates.getDiagnostics().readyTemplateCount).toBe(
+			retainedTemplates,
+		);
+		await system.destroy();
+	});
+
+	it.each([
+		"missing-location",
+		"missing-part",
+		"duplicate-child",
+		"nested",
+		"foreign-child",
+		"foreign-parent",
+	] as const)(
+		"rejects %s before publishing any group links",
+		async (invalid) => {
+			const { system, scene } = createSystem(
+				new InlineObjectVisualTemplatePreparer(),
+			);
+			const sources = linkedSources("invalid");
+			if (invalid === "missing-part") {
+				const parent = requiredAt(sources, 0);
+				sources[0] = {
+					...parent,
+					source: {
+						...parent.source,
+						presentation: {
+							...parent.source.presentation,
+							holdingLocations: new Map([
+								[
+									"right-hand",
+									{
+										location: "right-hand",
+										partIndex: 99,
+										offsetTransform: Mat4.identity(),
+									},
+								],
+							]),
+						},
+					},
+				};
+			}
+			const foreign = system.replaceOwner("foreign", [
+				requiredAt(linkedSources("foreign"), 0),
+			]);
+			await foreign.ready;
+			const installation = system.replaceOwner("local", sources);
+			await installation.ready;
+			const links = groupLinks(installation);
+			const first = requiredAt(links, 0);
+			const second = requiredAt(links, 1);
+			const foreignNodeId = requiredAt(foreign.nodeIds, 0);
+			const invalidLinks: readonly DynamicModelAttachment[] =
+				invalid === "missing-location"
+					? [{ ...first, location: "shield" }]
+					: invalid === "duplicate-child"
+						? [first, first]
+						: invalid === "nested"
+							? [first, { ...second, parentNodeId: first.childNodeId }]
+							: invalid === "foreign-child"
+								? [{ ...first, childNodeId: foreignNodeId }]
+								: invalid === "foreign-parent"
+									? [{ ...first, parentNodeId: foreignNodeId }]
+									: links;
+			let mutations = 0;
+			const attach = scene.attachToPart.bind(scene);
+			scene.attachToPart = (...args) => {
+				mutations++;
+				attach(...args);
+			};
+			expect(() => installation.prepareCommit([], invalidLinks)).toThrow();
+			expect(mutations).toBe(0);
+			for (const nodeId of installation.nodeIds)
+				expect(scene.getNode(nodeId)).toBeUndefined();
+			foreign.release();
+			await system.destroy();
+		},
+	);
+	it.each([
+		{ scriptId: "0x330003d8", emitterFailure: false },
+		{ scriptId: "0x33000253", emitterFailure: true },
+	] as const)(
+		"retains animation-reachable script closure $scriptId and rolls back its dependencies",
+		async ({ scriptId, emitterFailure }) => {
+			const fixture = new FixtureAnimationSource();
+			const { system, animations, scripts } = createSystem(
+				new InlineObjectVisualTemplatePreparer(),
+				{
+					loadAnimation: async (id) => ({
+						...(await fixture.loadAnimation(id)),
+						hooks: [
+							{
+								kind: "call-pes",
+								scriptId,
+								pauseSeconds: 0,
+								authoredOrder: 0,
+								frameIndex: 0,
+								direction: "both",
+							},
+						],
+					}),
+					loadMotionTableClosure: () => fixture.loadMotionTableClosure(),
+					destroy: () => {},
+				},
+			);
+			const installation = system.replaceOwner("local", [
+				{
+					...source("scripted-sequence"),
+					playback: {
+						kind: "resolved",
+						pose: {
+							kind: "default-idle",
+							firstCyclicClip: 0,
+							clips: [
+								{
+									animationId: 0x03000001,
+									lowFrame: 0,
+									highFrame: 0,
+									framerate: 30,
+								},
+							],
+						},
+					},
+				},
+			]);
+			if (emitterFailure)
+				await expect(installation.ready).rejects.toThrow("ParticleEmitterInfo");
+			else {
+				expect(await installation.ready).toBe("ready");
+				expect(scripts.getDiagnostics().referenceCount).toBeGreaterThan(0);
+				expect(scripts.getReady(scriptId)).not.toBeNull();
+				expect(scripts.getReady("0x330003cc")).not.toBeNull();
+				expect(
+					requiredAt(installation.getPreparedEntities(), 0).scriptClosure,
+				).toBeNull();
+				installation.release();
+			}
+			expect(scripts.getDiagnostics().referenceCount).toBe(0);
+			expect(animations.getDiagnostics().referenceCount).toBe(0);
+			await system.destroy();
+		},
+	);
+	it("releases each staged lease once when a later model's effect installation fails", async () => {
+		const { system, effects, animations, templates } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+		);
+		const install = effects.install.bind(effects);
+		let installations = 0;
+		effects.install = (...args) => {
+			if (++installations === 2)
+				throw new Error("Synthetic second model failure");
+			install(...args);
+		};
+		const installation = system.replaceOwner("local", [
+			source("body"),
+			source("child"),
+		]);
+		await expect(installation.ready).rejects.toThrow(
+			"Synthetic second model failure",
+		);
+		expect(animations.getDiagnostics().referenceCount).toBe(0);
+		expect(templates.getDiagnostics().readyTemplateCount).toBe(0);
+		await system.destroy();
+	});
+	it.each(["setup-pose", "default-idle"] as const)(
+		"stages resolved %s without acquiring source-owned playback",
+		async (kind) => {
+			const fixture = new FixtureAnimationSource();
+			const { system, animations, effects } = createSystem(
+				new InlineObjectVisualTemplatePreparer(),
+				{
+					loadAnimation: (id) => fixture.loadAnimation(id),
+					loadMotionTableClosure: async () => {
+						throw new Error("Resolved playback requested a motion table");
+					},
+					destroy: () => {},
+				},
+			);
+			const base = source("local-sequence", [0, 1]);
+			const explicitIds = [0x03000003, 0x03000004];
+			const installation = system.replaceOwner("local", [
+				{
+					...base,
+					source: {
+						...base.source,
+						behavior: { ...base.source.behavior, motionTableId: "0x09000001" },
+					},
+					playback: {
+						kind: "resolved",
+						pose:
+							kind === "setup-pose"
+								? { kind }
+								: {
+										kind,
+										firstCyclicClip: 1,
+										clips: explicitIds.map((animationId) => ({
+											animationId,
+											lowFrame: 0,
+											highFrame: 0,
+											framerate: 30,
+										})),
+									},
+					},
+				},
+			]);
+			expect(await installation.ready).toBe("ready");
+			const prepared = requiredAt(installation.getPreparedEntities(), 0);
+			if (prepared.animation.kind !== "sequence")
+				throw new Error("Resolved playback was not prepared as a sequence");
+			expect(prepared.source.behavior.animationId).toBe(
+				base.source.behavior.animationId,
+			);
+			expect(prepared.motionClosure).toBeNull();
+			expect(fixture.loads).toEqual(
+				kind === "setup-pose"
+					? []
+					: explicitIds.map((id) => `0x${id.toString(16).padStart(8, "0")}`),
+			);
+			expect(prepared.animation.fit.supportPoints.length).toBeGreaterThan(0);
+			const { router } = buildEffectRouter(effects);
+			const playback = new AnimationSystem<string>(effects, router);
+			const staged = playback.stageOwner("local", [
+				{
+					kind: "sequence",
+					clips: prepared.animation.clips,
+					firstCyclicClip: prepared.animation.firstCyclicClip,
+					initialPartToObjectTransforms: prepared.initialPartToObjectTransforms,
+					target: {
+						targetId: behaviorTargetId(prepared.nodeId),
+						generation: installation.generation,
+					},
+				},
+			]);
+			installation.prepareCommit(staged.samples, []);
+			staged.commit();
+			installation.commit();
+			playback.advance(0);
+			const frame = playback.advance(1 / 30);
+			const samples = playback.sample(frame, frame.activeNodeIds);
+			expect(
+				requiredAt(samples, 0).articulatedPose.partToObjectTransforms,
+			).toHaveLength(base.source.presentation.parts.length);
+			system.publishPresentation(samples);
+			playback.removeOwner("local");
+			system.removeOwner("local");
+			expect(animations.getDiagnostics().referenceCount).toBe(0);
+			playback.destroy();
+			await system.destroy();
+		},
+	);
+
+	it("rejects unsupported explicit hooks while preserving the current owner and its leases", async () => {
+		const { system, animations } = createSystem(
+			new InlineObjectVisualTemplatePreparer(),
+			new BlockedAnimationSource(),
+		);
+		const base = source("last-good");
+		const current = system.replaceOwner("owner", [base]);
+		await current.ready;
+		commit(current);
+		const nodeId = requiredAt(current.nodeIds, 0);
+		const references = animations.getDiagnostics().referenceCount;
+		const replacement = system.replaceOwner("owner", [
+			{
+				...base,
+				playback: {
+					kind: "resolved",
+					pose: {
+						kind: "default-idle",
+						clips: [
+							{
+								animationId: 0x03000001,
+								lowFrame: 0,
+								highFrame: 0,
+								framerate: 30,
+							},
+						],
+						firstCyclicClip: 0,
+					},
+				},
+			},
+		]);
+		await expect(replacement.ready).rejects.toThrow("unsupported visual hooks");
+		expect(system.getVisiblePresentation(nodeId)).not.toBeNull();
+		expect(animations.getDiagnostics().referenceCount).toBe(references);
+		system.removeOwner("owner");
+		expect(animations.getDiagnostics().referenceCount).toBe(0);
+		await system.destroy();
+	});
 	it("publishes class changes only when a staged visual replacement commits", async () => {
 		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
 		const original = source("classification");
@@ -1249,10 +1698,13 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const secondPrepared = prepared[1];
 		if (!firstPrepared || !secondPrepared)
 			throw new Error("Expected two prepared dynamic entities.");
-		installation.prepareCommit([
-			presentationSample(firstPrepared, 0.25),
-			presentationSample(secondPrepared, 0.5),
-		]);
+		installation.prepareCommit(
+			[
+				presentationSample(firstPrepared, 0.25),
+				presentationSample(secondPrepared, 0.5),
+			],
+			[],
+		);
 		installation.commit();
 
 		const firstNodeId = requiredAt(installation.nodeIds, 0);
@@ -1388,9 +1840,10 @@ describe("DynamicEntitySystem authored ownership", () => {
 		const prepared = requiredAt(installation.getPreparedEntities(), 0);
 		const nodeId = prepared.nodeId;
 		const sample = presentationSample(prepared, 0);
-		installation.prepareCommit([
-			{ ...sample, effects: effects.samplePresentation(nodeId) },
-		]);
+		installation.prepareCommit(
+			[{ ...sample, effects: effects.samplePresentation(nodeId) }],
+			[],
+		);
 		installation.commit();
 
 		const initial = system.getVisiblePresentation(nodeId)?.visual.parts[0];
@@ -1501,7 +1954,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			},
 			effects: { ...sample.effects, rootTransformModifier: rootRotation },
 		};
-		installation.prepareCommit([rotatedSample]);
+		installation.prepareCommit([rotatedSample], []);
 		installation.commit();
 		const nodeId = requiredAt(installation.nodeIds, 0);
 
@@ -1705,6 +2158,97 @@ describe("DynamicEntitySystem authored ownership", () => {
 	});
 });
 
+/** Independent roots are deliberately supplied parent-first to exercise the real leaf invariant. */
+function linkedSources(prefix: string): PlacedDynamicPresentationSource[] {
+	const still = (id: string): PlacedDynamicPresentationSource => {
+		const original = source(id);
+		return {
+			...original,
+			source: {
+				...original.source,
+				behavior: {
+					kind: "none",
+					animationId: null,
+					physicsScriptId: null,
+					physicsScriptTableId: null,
+					motionTableId: null,
+					soundTableId: null,
+				},
+			},
+		};
+	};
+	const parent = still(`${prefix}:body`);
+	const parentPose = Object.assign(Mat4.identity(), { m41: 1 });
+	const body: PlacedDynamicPresentationSource = {
+		...parent,
+		placement: {
+			...parent.placement,
+			localTransform: Object.assign(Mat4.identity(), { m41: 10 }),
+		},
+		source: {
+			...parent.source,
+			scale: new Vec3(3, 3, 3),
+			presentation: {
+				...parent.source.presentation,
+				parts: parent.source.presentation.parts.map((part) => ({
+					...part,
+					defaultScale: new Vec3(2, 4, 5),
+				})),
+				placementPoses: new Map([
+					[0, { placementId: 0, partTransforms: [parentPose] }],
+				]),
+				holdingLocations: new Map([
+					[
+						"right-hand",
+						{
+							location: "right-hand",
+							partIndex: 0,
+							offsetTransform: Object.assign(Mat4.identity(), { m41: 2 }),
+						},
+					],
+				]),
+			},
+		},
+	};
+	const children = ["sword", "shield"].map((name) => {
+		const child = still(`${prefix}:${name}`);
+		return {
+			...child,
+			placement: { ...child.placement, landblockId: "0x0002ffff" as const },
+			source: {
+				...child.source,
+				scale: new Vec3(0.5, 0.5, 0.5),
+				placementFrame: 1,
+				presentation: {
+					...child.source.presentation,
+					placementPoses: new Map([
+						[
+							1,
+							{
+								placementId: 1,
+								partTransforms: [Object.assign(Mat4.identity(), { m41: 4 })],
+							},
+						],
+					]),
+				},
+			},
+		};
+	});
+	return [body, ...children];
+}
+
+/** Ephemeral stage addresses, not retained equipment identities. */
+function groupLinks(
+	installation: DynamicOwnerInstallation,
+): DynamicModelAttachment[] {
+	const parentNodeId = requiredAt(installation.nodeIds, 0);
+	return installation.nodeIds.slice(1).map((childNodeId) => ({
+		childNodeId,
+		parentNodeId,
+		location: "right-hand",
+	}));
+}
+
 function commit(
 	installation: ReturnType<DynamicEntitySystem<string>["replaceOwner"]>,
 ): void {
@@ -1716,6 +2260,7 @@ function commit(
 					? [presentationSample(prepared, 0)]
 					: [],
 			),
+		[],
 	);
 	installation.commit();
 }
@@ -1776,19 +2321,20 @@ function createSystem(
 		() => () => {},
 	);
 	const animations = new AnimationAssetRepository(animationSource);
+	const scripts = new PhysicsScriptRepository({
+		destroy: () => {},
+		loadPhysicsScript: async (scriptId) => {
+			const fixture = AUTHORED_SCRIPT_FIXTURES[scriptId.toLowerCase()];
+			if (!fixture) throw new Error(`No script fixture for ${scriptId}.`);
+			return fixture;
+		},
+	});
 	const system = new DynamicEntitySystem<string>(
 		scene,
 		new DynamicEntityPlacementSystem(scene),
 		templates,
 		animations,
-		new PhysicsScriptRepository({
-			destroy: () => {},
-			loadPhysicsScript: async (scriptId) => {
-				const fixture = AUTHORED_SCRIPT_FIXTURES[scriptId.toLowerCase()];
-				if (!fixture) throw new Error(`No script fixture for ${scriptId}.`);
-				return fixture;
-			},
-		}),
+		scripts,
 		new ParticleEmitterRepository({
 			destroy: () => {},
 			loadParticleEmitter: async (emitterInfoId) => {
@@ -1806,7 +2352,7 @@ function createSystem(
 			`${ownerId}:generation:${generation}`,
 		() => particleEnvelopeRadiusOf(),
 	);
-	return { effects, geometry, scene, system, animations, templates };
+	return { effects, geometry, scene, system, animations, templates, scripts };
 }
 
 function source(
@@ -1842,6 +2388,7 @@ function source(
 		sourceAssetId: `setup-model/${id}`,
 	};
 	return {
+		playback: { kind: "source-owned" },
 		initialPresentationState: {
 			cloaked: false,
 			hidden: false,

@@ -11,10 +11,7 @@ import {
 	type ObjectPreviewVisualLease,
 } from "./object-preview-assets";
 import type { PresentationAssetService } from "../runtime/presentation-asset-service";
-import {
-	composeObjectPreviewFit,
-	type ObjectPreviewFit,
-} from "./object-preview-fit";
+import { composeModelFit, type ModelFit } from "../geometry/model-fit";
 
 /** One model retains local animation indices; the draw bundle uses its explicit part offset. */
 export interface PreparedObjectPreviewModel {
@@ -48,7 +45,7 @@ export interface PreparedObjectPreviewAssets {
 		"layout" | "appearance" | "textureRequirements"
 	>;
 	/** Stable body/equipment support envelope; backgrounds affect clipping only. */
-	readonly fit: ObjectPreviewFit;
+	readonly fit: ModelFit;
 	/** Shared particle mesh closure for every model in this installed bundle. */
 	readonly particleMeshIds: readonly DatAssetId[];
 }
@@ -136,7 +133,7 @@ export async function acquireObjectPreviewAssets(
 			models.length === 1
 				? body.assets.template.layout
 				: compileDynamicLayout(flatParts);
-		const fit = composeObjectPreviewFit(
+		const fit = composeModelFit(
 			body.assets,
 			attachments.map((attachment) => ({
 				parentPartIndex: attachment.parentPartIndex,

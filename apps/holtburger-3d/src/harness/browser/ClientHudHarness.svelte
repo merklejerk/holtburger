@@ -5643,7 +5643,7 @@
 						visualCache={null}
 						management={{ kind: "idle" }}
 						creation={null}
-						previewService={null}
+						scene={null}
 						state={characterState}
 						{entryPending}
 						onChoose={(guid) =>

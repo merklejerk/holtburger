@@ -1,7 +1,9 @@
 <script lang="ts">
+	import { mountPregameWorldHarness } from "./pregame-world-harness";
 	import { probePreviewFrameCadence } from "./preview-frame-cadence-probe";
 	import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
 	import { pregameContentTransport } from "./pregame-content-transport";
+	import type { CreationSceneSample } from "./pregame-scene-composition-probe";
 	import { probePregameWorldLifetime } from "./pregame-world-lifetime-probe";
 	import { onMount, tick, type ComponentProps } from "svelte";
 	import PregameCreatorHarness, {
@@ -66,6 +68,7 @@
 				preparedBodies: number;
 				preparedBackgrounds: number;
 				subjectRotationPreservedBackdrop: boolean;
+				inspectionOrbitStable: boolean;
 				attachmentPlacements: readonly {
 					readonly wcid: number;
 					readonly requested: number;
@@ -77,6 +80,8 @@
 				remainingSetupLeases: number;
 		  };
 	let canvas: HTMLCanvasElement;
+	let worldCanvas = $state<HTMLCanvasElement | null>(null);
+	let reviewError = $state<string | null>(null);
 	let status = $state("loading");
 	// Manual user acceptance uses the production creator and assets without a game-server session.
 	const showcaseMode = new URLSearchParams(location.search).has(
@@ -127,8 +132,25 @@
 			resolveResources: () => assets.resources(),
 		});
 		let disposed = false;
+		let reviewWorld: ReturnType<typeof mountPregameWorldHarness> | null = null;
+		const openReviewWorld = async () => {
+			const resources = await assets.resources();
+			if (worldCanvas === null)
+				throw new Error("Pregame review canvas is not mounted.");
+			const world = mountPregameWorldHarness(
+				worldCanvas,
+				transport,
+				resources,
+				(error) => {
+					reviewError = error instanceof Error ? error.message : String(error);
+				},
+			);
+			reviewWorld = world;
+			return world.scene;
+		};
 		const start = async (): Promise<void> => {
 			if (showcaseMode) {
+				const scene = await openReviewWorld();
 				showcase = {
 					services: {
 						loadCatalog: async () => loadCharacterCreationCatalog(transport),
@@ -138,7 +160,7 @@
 							throw new Error("Preview only: no game server is connected.");
 						},
 					},
-					previewService: service,
+					scene,
 					management: { kind: "idle" },
 					onBack: () => {
 						showcase = null;
@@ -210,6 +232,7 @@
 				}),
 			});
 			if (pickerShowcaseMode) {
+				const scene = await openReviewWorld();
 				const source = captureSource(await resolve(heritage, gender, 0.5));
 				const guid = 0x50000043;
 				pickerShowcase = {
@@ -237,7 +260,7 @@
 							throw new Error("Preview only: no game server is connected.");
 						},
 					},
-					previewService: service,
+					scene,
 					visualCache: {
 						read: async (selected) =>
 							selected === guid
@@ -267,10 +290,16 @@
 				return;
 			}
 			let preparedBodies = 0;
+			const creationSamples: CreationSceneSample[] = [];
 			const backgrounds = new Set<number>();
 			for (const candidate of catalog.heritages) {
 				for (const body of candidate.genders) {
 					const visual = await resolve(candidate, body, 0.5);
+					creationSamples.push({
+						heritage: candidate.id,
+						gender: body.id,
+						body: visual.body,
+					});
 					const lease = await acquireObjectPreviewVisual(
 						resources.assets,
 						visual.body,
@@ -305,11 +334,14 @@
 			const visual = await resolve(heritage, gender, 0.5);
 			const composition = (body: ObjectPreviewVisual): ObjectPreviewSource =>
 				pregameEquipmentComposition(visual, body);
-			const { attachmentPlacements, subjectRotationPreservedBackdrop } =
-				await probePregameEquipmentFrames(
-					resources.assets,
-					composition(visual.body),
-				);
+			const {
+				attachmentPlacements,
+				subjectRotationPreservedBackdrop,
+				inspectionOrbitStable,
+			} = await probePregameEquipmentFrames(
+				resources.assets,
+				composition(visual.body),
+			);
 			const preview = service.open({
 				canvas,
 				source: composition(visual.body),
@@ -347,7 +379,20 @@
 					"Installed preview did not draw within its diagnostic deadline.",
 				);
 			};
+			// Exercise the inspection orbit policy on the installed WebGL preview device.
+			for (let step = 0; step < 12; step++) {
+				const before = preview.diagnostics();
+				if (before === null)
+					throw new Error("Inspection orbit requires an installed preview.");
+				preview.setViewport({
+					...previewViewport,
+					rotation: { kind: "orbit", yawRadians: (step * Math.PI) / 6 },
+				});
+				await nextDrawAfter(before.frameCount);
+			}
+			preview.setViewport(previewViewport);
 			let replacementCount = 0;
+			const sceneAppearanceEdits: ObjectPreviewVisual[] = [];
 			const replacementSamples = 12;
 			for (let sample = 0; sample < replacementSamples; sample++) {
 				const edited = await resolve(
@@ -355,6 +400,7 @@
 					gender,
 					sample / (replacementSamples - 1),
 				);
+				sceneAppearanceEdits.push(edited.body);
 				const result = await preview.replaceSource(composition(edited.body));
 				if (result.kind !== "installed")
 					throw new Error("Sequential preview edit was superseded.");
@@ -578,7 +624,6 @@
 					creatorProbe = {
 						transport,
 						contentUrl: url,
-						resources,
 						savedVisual: captureSource(visual),
 						onComplete: resolve,
 						onFailure: reject,
@@ -591,6 +636,8 @@
 				assets,
 				transport,
 				composition(visual.body),
+				creationSamples,
+				sceneAppearanceEdits,
 			);
 			const retained = await assets.resources();
 			await assets.destroy();
@@ -619,6 +666,7 @@
 				preparedBackgrounds: backgrounds.size,
 				attachmentPlacements,
 				subjectRotationPreservedBackdrop,
+				inspectionOrbitStable,
 				commands,
 				sharedAssetsSurvivedPreviewRetirement:
 					retained.assets === resources.assets,
@@ -642,25 +690,44 @@
 			void service
 				.destroy()
 				.then(() => completion)
+				.then(() => reviewWorld?.destroy())
 				.then(() => assets.destroy())
 				.catch(console.error);
 		};
 	});
 </script>
 
-<p>Pre-game preview probe: {status}</p>
+{#if !showcaseMode && !pickerShowcaseMode}<p>
+		Pre-game preview probe: {status}
+	</p>{/if}
+{#if reviewError !== null}<p
+		class="ui-error"
+		role="alert"
+		style="position: fixed; inset: 12px 12px auto; z-index: 2;"
+	>
+		{reviewError}
+	</p>{/if}
+
+{#if showcaseMode || pickerShowcaseMode}
+	<canvas
+		bind:this={worldCanvas}
+		aria-hidden="true"
+		style="position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 0; pointer-events: none;"
+	></canvas>
+{/if}
+
 {#if showcase !== null}
 	<div
-		class="ui-theme ui-panel"
-		style="max-width: 1080px; margin: 20px auto; padding: 20px;"
+		class="ui-theme"
+		style="position: fixed; inset: 0; z-index: 1; background: transparent;"
 	>
 		<ClientCharacterCreator {...showcase} />
 	</div>
 {/if}
 {#if pickerShowcase !== null}
 	<div
-		class="ui-theme ui-panel"
-		style="position: relative; max-width: 1080px; margin: 20px auto; padding: 20px; background: transparent;"
+		class="ui-theme"
+		style="position: fixed; inset: 0; z-index: 1; background: transparent;"
 	>
 		<ClientCharacterSelect {...pickerShowcase} />
 	</div>

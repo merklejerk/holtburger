@@ -277,6 +277,7 @@ export function createClientHudLayout(
 	const place = (panel: Pick<ClientUiPanel, "anchor" | "offset" | "size">) =>
 		createClientHudPanelPlacement(panel, viewport, shortcutCount);
 	return {
+		logopolis: place(defaults.logopolis),
 		character: place(defaults.character),
 		partyHud: place(defaults.partyHud),
 		statusTray: place(defaults.statusTray),

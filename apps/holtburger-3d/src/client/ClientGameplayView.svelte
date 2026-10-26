@@ -101,6 +101,7 @@
 	} from "./client-inventory-split";
 	import type { ClientInventoryState } from "./client-inventory-state";
 	import ClientDebugPanel from "./ClientDebugPanel.svelte";
+	import ClientLogopolisWindow from "./ClientLogopolisWindow.svelte";
 	import ClientHudWindow from "./ClientHudWindow.svelte";
 	import ClientWorldPanel from "./ClientWorldPanel.svelte";
 	import type { WorldMapSource } from "../lib/game/world-map/types";
@@ -313,6 +314,8 @@
 		readonly vendor: ClientVendorState | null;
 		/** Session-local crystal interaction; effective-home knowledge is separate. */
 		readonly houseCrystal: ClientHouseCrystalState | null;
+		/** Explicit local easter egg launch request. */
+		readonly logopolisLaunchRevision: number;
 		/** Character-owned salvage draft and local confirmation policy. */
 		readonly salvage: ClientSalvageState | null;
 		/** Session-owned P2P gestures and confirmed offer presentation. */
@@ -494,6 +497,7 @@
 		worldContainer,
 		vendor,
 		houseCrystal,
+		logopolisLaunchRevision,
 		salvage,
 		trade,
 		itemInteractions,
@@ -1027,6 +1031,10 @@
 		event.preventDefault();
 		onExamineItem(guid);
 	}
+	let logopolisVisible = $state(false);
+	$effect(() => {
+		if (logopolisLaunchRevision > 0) logopolisVisible = true;
+	});
 </script>
 
 <main
@@ -1525,6 +1533,15 @@
 				/>
 			{/key}
 		{/if}
+		<ClientLogopolisWindow
+			launchRevision={logopolisLaunchRevision}
+			visible={logopolisVisible}
+			placement={hudLayout.logopolis}
+			{viewport}
+			onClose={() => (logopolisVisible = false)}
+			onPlacementChange={(placement) =>
+				changeHudPlacement("logopolis", placement)}
+		/>
 		{#if bookReader.kind !== "idle"}
 			{#key bookReader.revision}
 				<ClientBookWindow

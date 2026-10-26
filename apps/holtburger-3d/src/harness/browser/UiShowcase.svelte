@@ -89,6 +89,7 @@
 		| "houseCrystal"
 		| "trade"
 		| "inspection"
+		| "logopolis"
 		| "book"
 		| "debug"
 		| "settings"

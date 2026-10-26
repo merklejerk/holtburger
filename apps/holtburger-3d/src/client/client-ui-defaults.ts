@@ -9,6 +9,12 @@ import type { ClientUiDefaults } from "./client-ui-contract";
  * Fitting and user edits live in client-hud-layout; visibility stays in Svelte.
  */
 export const CLIENT_UI_DEFAULTS = {
+	logopolis: {
+		anchor: "center",
+		offset: { x: 0, y: 0 },
+		size: { width: 560, height: 460 },
+		minSize: { width: 320, height: 280 },
+	},
 	spellBar: {
 		anchor: "center",
 		offset: { x: 0, y: CLIENT_ACTION_BAR_TUNING.initialCellSize + 96 },

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch only the digest-pinned alpha micro ZIP; draft GitHub assets require GH_TOKEN."""
+"""Fetch only the digest-pinned alpha micro ZIP from its public content prerelease."""
 
 import argparse
 import hashlib

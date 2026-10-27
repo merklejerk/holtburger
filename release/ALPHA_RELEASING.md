@@ -18,9 +18,9 @@ Every workspace Rust package inherits that version. Protocol, archive, and setti
 versions have independent compatibility meanings and are not bumped by this command.
 
 `.github/alpha-content.json` pins the approved micro ZIP by GitHub API asset URL and SHA-256.
-The initial micro input is stored in an unpublished content draft; CI reads it using its
-repository token. Keep that draft available. Do not replace the asset bytes or reuse the
-main nightly's moving micro input.
+The initial micro input is stored in a public, non-latest content-only prerelease. Keep
+that release available: read-only CI tokens cannot fetch draft release assets. Do not
+replace the asset bytes or reuse the main nightly's moving micro input.
 
 To regenerate content, use corrected `dat2hba --profile micro` with local portal and English
 localization DATs, then run the noninteractive `content_bootstrap` harness against the HBA.

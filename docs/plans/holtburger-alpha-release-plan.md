@@ -1,6 +1,40 @@
 # Alpha release from `3d-next`
 
-Status: the complete nine-asset alpha.3 draft at `7ab6645a6` is verified and unpublished, ready for final user native acceptance. Candidate workflow `40542532288` passed in 17m50s, including all three native platforms, both Flatpaks and staging; five actual downloads and all nine remote asset digests were verified. The narrowly scoped apt-mirror selection cleanup affects future provisioning only and does not change this frozen candidate. Publication and public-download verification remain outstanding. The steering section supersedes historical trigger/validation placement below.
+Status: release-pipeline implementation is complete; this plan is closed as implementation work.
+The alpha.3 candidate at `7ab6645a6` remains an unpublished packaging baseline, not the intended
+public release. The user will merge work from another worktree before requesting a fresh candidate.
+Actual publication and public-download verification belong to that release's operation, using
+[the release runbook](../ALPHA_RELEASING.md), rather than additional implementation phases here.
+
+## Closeout decisions (2026-10-27)
+
+- The existing tag-triggered pipeline builds Linux x86-64, Windows x86-64, Apple Silicon, and
+  both Linux Flatpaks, then stages nine assets in a draft. Candidate `40542532288` completed in
+  17m50s; inventory/digests and representative downloads were verified. This proves the pipeline,
+  not acceptance of a future merged source. No new workflow or CI run is needed for closeout.
+- The user reported that the full-suite Flatpak looked and ran well and subsequently reported
+  that the alpha builds looked alright apart from CLI issues. macOS launch initially failed with
+  “damaged and can't be opened”; removing quarantine from the specific app allowed launch. These
+  reports do not establish every platform/gameplay checklist item or future-candidate acceptance.
+- Bundled micro is incomplete: the real character-creation catalog needs omitted clothing tables,
+  and the TUI now uses shared physical simulation requiring omitted world/physics data. The
+  bootstrap probe's 13-heritage result proves main-table parsing, not complete creation or gameplay.
+  The user explicitly accepted leaving TUI broken for this alpha. Data regeneration, topology-only
+  movement and TUI repair are deferred, not release-pipeline blockers.
+- Developer ID signing/notarization is deferred. Quickstart and release notes document the
+  app-specific macOS quarantine workaround. Native CI startup does not reproduce browser-download
+  Gatekeeper acceptance.
+- Notice freshness is advisory in branch and candidate CI. Failed checks emit warnings and
+  packaging continues with the checked-in HTML; suite-only version bumps do not require
+  regeneration. Missing packaged notices and artifact digest mismatches remain errors.
+- Durable operator instructions and shipped known limitations are in `ALPHA_RELEASING.md`,
+  `ALPHA_QUICKSTART.md`, and `ALPHA_RELEASE_NOTES.md`. Merge pending application changes, select a
+  fresh version/source, review notices when dependencies change, then request one new candidate.
+  Publish accepted bytes without rebuilding. Earlier drafts/tags remain unchanged.
+
+The journal and checkboxes below are historical execution evidence. Incomplete publication and
+TUI-acceptance items do not reopen this implementation plan; this closeout supersedes instructions
+to publish alpha.3, require working bundled TUI, or treat micro as fully validated.
 
 ## Steering: shorten feedback and publish existing artifacts
 
@@ -69,7 +103,7 @@ Acceptance: Flatpaks wait only for Linux output, reuse its production binaries, 
 - [x] Keep candidate bytes in the existing draft through manual acceptance. Never substitute latest-branch outputs or silently rebuild missing assets; a replacement candidate requires an explicit request. Do not build a new retention-management mechanism.
 - [x] Retain complete-inventory, no-retail-data, source/version, notices and checksum gates. A failed target may leave inspectable draft artifacts but cannot be represented as a complete publishable candidate. Keep the short installed Flatpak smoke as a candidate gate.
 - [x] Remove obsolete automatic-release triggers and duplicate setup/build/probe paths; align comments, job names, instructions and this plan with the final lifecycle. Preserve the independent main TUI nightly.
-- [x] Review the documented publication steps against the existing draft/manifest without publishing. The current alpha.3 can still be published through its existing accepted path; adopting the restructured workflow must not force a replacement build.
+- [x] Review the documented publication steps against the existing draft/manifest without publishing. Preserve alpha.3 as a historical baseline; publication will use a fresh candidate after the pending development merge.
 
 Acceptance: one intentional end-to-end acceptance run follows targeted checks; further full attempts have a diagnosed reason. Final documentation states how to request and inspect a candidate and publish its existing draft without compilation or provisioning. Existing candidate identity/inventory/checksum checks remain intact. Record timings and remaining bottlenecks honestly; if setup remains too slow, report the limitation before separately scoping new infrastructure. User native acceptance remains at the final handoff. No new cache services, runner platforms, promotion systems, application features or release formats enter scope.
 
@@ -77,7 +111,10 @@ Acceptance: one intentional end-to-end acceptance run follows targeted checks; f
 
 Publish a reproducible alpha suite from one identified `3d-next` commit as GitHub Release assets, containing the TUI, h3d, and the tools and resources needed to use them.
 
-The user authorized implementation and subsequent commits/pushes. Prior drafts/tags remain intact. The current candidate is `alpha-20261027-7ab6645a6` (`0.1.0-alpha.3`), release ID `425740569`; prior source-specific drafts, including `e705767e4`, remain preserved. Final publication waits for user native-bundle acceptance and explicit publication authorization.
+Prior drafts/tags remain intact. The historical candidate is `alpha-20261027-7ab6645a6`
+(`0.1.0-alpha.3`), release ID `425740569`; prior source-specific drafts, including `e705767e4`,
+remain preserved. Future commits, tags, candidate builds and publication require their own
+operator action; this closeout does not initiate them.
 
 ### Accepted scope
 

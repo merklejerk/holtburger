@@ -12,10 +12,25 @@ target, and bundled micro content. The release includes `SHA256SUMS` and a detai
 
 Packages are unsigned. Windows/macOS may require an explicit OS launch decision. Native
 verification varies by platform; see the release notes for what was actually tested.
+On macOS, the downloaded app may report that it is damaged and cannot be opened. For a
+trusted alpha downloaded directly from this repository's GitHub release, run this from the
+extracted suite directory, then retry the launch command below:
+
+```sh
+xattr -dr com.apple.quarantine ./h3d/holtburger-3d.app
+```
+
+This removes quarantine only from this app. The alpha is not Developer ID signed or notarized.
 Linux h3d needs a graphical desktop and Electron's system libraries, including GTK 3, NSS,
 GBM, and ALSA. The release manifest records native linkage from the release runner.
 
 ## Terminal client
+
+**Known broken with bundled micro content:** character creation cannot load its clothing
+choices, and the current shared runtime requires world/physics data absent from micro.
+The TUI is included for experimentation. A user-supplied full HBA supplies the missing data,
+but TUI gameplay with it has not been verified for this alpha. Point
+`--dats /path/to/full-hba-directory` at a directory containing it.
 
 Run from a terminal, replacing the example connection values:
 
@@ -29,8 +44,8 @@ Run from a terminal, replacing the example connection values:
 .\holtburger-cli.exe --host SERVER --port 9000 --account ACCOUNT --password PASSWORD
 ```
 
-The suite's `dats/assets.hba` is micro content for TUI. You can invoke the client by absolute
-path from another directory; it can find the bundled data and scripts alongside its executable.
+The suite's `dats/assets.hba` is incomplete micro content for TUI. You can invoke the client by
+absolute path from another directory; it can find the bundled data and scripts alongside its executable.
 Explicit `--dats` and `HOLTBURGER_DATS` take precedence, followed by an existing working-directory
 `dats`, the bundle's `dats`, and Holtburger's platform data directory.
 

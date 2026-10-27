@@ -3,7 +3,11 @@ import type {
 	LocalConfirmationRequest,
 	LocalDialogSource,
 } from "./client-dialogs";
-import { bindingAction, canInteractEquipment } from "./client-action-item";
+import {
+	bindingAction,
+	canInteractEquipment,
+	canInteractItem,
+} from "./client-action-item";
 import { wieldedCasterSpell } from "./client-inventory-equipment";
 import type { ClientEntitySelection } from "./client-entity-selection";
 import type { ClientEntityFacts } from "./client-entity-mirror";
@@ -152,20 +156,31 @@ export class ClientItemInteractions implements LocalDialogSource {
 			this.target(selected, this.#state.generation);
 		else {
 			const item = this.#item(selected);
-			if (item === null) return;
-			if (item.canTrade) {
-				this.cancel();
-				this.#beginTrade(selected);
-			} else if (item.canPickUp) {
-				this.cancel();
-				void this.#session
-					.submitInventory({
-						item: selected,
-						target: { kind: "pickup", container: null },
-					})
-					.catch((error: unknown) => this.#failure(String(error)));
-			} else this.use(selected, unrestricted);
+			if (item !== null) this.#interact(item, unrestricted);
 		}
+	}
+
+	/** Viewport activation uses the accepted picked identity, independent of selection. */
+	interactIfPossible(source: number, unrestricted: boolean): void {
+		const item = this.#item(source);
+		if (item !== null && canInteractItem(item, unrestricted))
+			this.#interact(item, unrestricted);
+	}
+
+	#interact(item: ClientEntityFacts, unrestricted: boolean): void {
+		const source = item.guid;
+		if (item.canTrade) {
+			this.cancel();
+			this.#beginTrade(source);
+		} else if (item.canPickUp) {
+			this.cancel();
+			void this.#session
+				.submitInventory({
+					item: source,
+					target: { kind: "pickup", container: null },
+				})
+				.catch((error: unknown) => this.#failure(String(error)));
+		} else this.use(source, unrestricted);
 	}
 
 	/** Retail uses the previous selection, then restores it after attempting the give. */

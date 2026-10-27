@@ -57,6 +57,23 @@ export function canInteractEquipment(item: ClientEntityFacts): boolean {
 	);
 }
 
+/** Frontend admission shared by selected actions and viewport activation. */
+export function canInteractItem(
+	item: ClientEntityFacts,
+	unrestricted: boolean,
+): boolean {
+	return (
+		item.description.kind === "known" &&
+		(item.canTrade ||
+			item.canPickUp ||
+			(!unrestricted && canInteractEquipment(item)) ||
+			item.description.useCapability === "salvage-tool" ||
+			item.description.useCapability === "direct" ||
+			item.description.useCapability === "targeted" ||
+			(unrestricted && item.description.useCapability === "unsupported"))
+	);
+}
+
 /** Sampled bound-item presentation, independent of retained binding identity. */
 export interface ActionItemDisplay {
 	/** Bound item's shared reuse definition, resolved independently of remaining uses. */

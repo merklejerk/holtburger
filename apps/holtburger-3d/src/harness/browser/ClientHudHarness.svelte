@@ -748,6 +748,8 @@
 		readonly viewport: { readonly height: number; readonly width: number };
 		/** Completed viewport click locations sent to entity acquisition. */
 		readonly viewportSelectionPoints: readonly {
+			/** Activation requested by the accepted second click. */
+			readonly interact: boolean;
 			readonly x: number;
 			readonly y: number;
 		}[];
@@ -3696,7 +3698,8 @@
 	const orbitDeltas: { x: number; y: number }[] = [];
 	const zoomDeltas: number[] = [];
 	const selectionEvents: (number | null)[] = [];
-	const viewportSelectionPoints: { x: number; y: number }[] = [];
+	const viewportSelectionPoints: { x: number; y: number; interact: boolean }[] =
+		[];
 	const viewportHoverPoints: { x: number; y: number }[] = [];
 	const cameraController = {
 		pitch(deltaY: number): void {
@@ -5986,12 +5989,12 @@
 						else if (destination.isCurrent())
 							destination.commit(inventoryWorldResult);
 					}}
-					onViewportSelect={(x, y) => {
-						viewportSelectionPoints.push({ x, y });
+					onViewportSelect={(x, y, interact) => {
+						viewportSelectionPoints.push({ x, y, interact });
 						selectEntity(7);
 					}}
 					onViewportExamine={(x, y) => {
-						viewportSelectionPoints.push({ x, y });
+						viewportSelectionPoints.push({ x, y, interact: false });
 						selectEntity(7);
 						void objectInspectionOwner.examine(7);
 					}}

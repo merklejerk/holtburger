@@ -779,6 +779,68 @@ describe("shared frontend item interaction flow", () => {
 	});
 });
 
+it.each(["corpse", "pickup", "trade", "unsupported", "targeted"] as const)(
+	"viewport interaction routes %s using the picked identity",
+	async (kind) => {
+		const f = await fixture();
+		const inventory = vi
+			.spyOn(f.lifecycle, "submitInventory")
+			.mockResolvedValue(undefined);
+		const picked = entityFacts(7, {
+			corpse: kind === "corpse" ? "unopened" : null,
+			canPickUp: kind === "pickup",
+			canTrade: kind === "trade",
+		});
+		if (picked.description.kind !== "known")
+			throw new Error("Known fixture required");
+		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
+			salvage: null,
+			worldContainer: null,
+			removed: [],
+			upserts: [
+				{
+					...picked,
+					description: {
+						...picked.description,
+						useCapability:
+							kind === "unsupported" || kind === "targeted" ? kind : "direct",
+					},
+				},
+			],
+		});
+		// A different selected identity must never redirect the picked action.
+		f.select(3);
+		f.interactions.interactIfPossible(7, false);
+		expect(f.selection.selectedGuid()).toBe(3);
+		expect(f.failure).not.toHaveBeenCalled();
+		if (kind === "corpse") {
+			expect(f.request().intent).toEqual({
+				kind: "direct",
+				source: 7,
+				unrestricted: false,
+			});
+		} else {
+			expect(f.submit).not.toHaveBeenCalled();
+		}
+		if (kind === "pickup") {
+			expect(inventory).toHaveBeenCalledExactlyOnceWith({
+				item: 7,
+				target: { kind: "pickup", container: null },
+			});
+		} else expect(inventory).not.toHaveBeenCalled();
+		if (kind === "trade")
+			expect(f.beginTrade).toHaveBeenCalledExactlyOnceWith(7);
+		else expect(f.beginTrade).not.toHaveBeenCalled();
+		if (kind === "targeted")
+			expect(f.interactions.snapshot()).toMatchObject({
+				kind: "acquiring",
+				source: 7,
+			});
+		f.destroy();
+	},
+);
+
 it("player interaction initiates trade through the ordinary Interact flow", async () => {
 	const f = await fixture();
 	f.emit("client-entity-facts-changed", {

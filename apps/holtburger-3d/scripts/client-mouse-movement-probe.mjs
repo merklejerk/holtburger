@@ -33,7 +33,14 @@ export async function probeClientMouseMovement(client, evaluate) {
 		} throw new Error('No exposed viewport point');
 	})()`);
 	let lastHoldAt = -Infinity;
-	const mouse = async (type, button, buttons, x = point.x, y = point.y) => {
+	const mouse = async (
+		type,
+		button,
+		buttons,
+		x = point.x,
+		y = point.y,
+		clickCount = 1,
+	) => {
 		if (type === "mousePressed" && [1, 2, 4].includes(buttons)) {
 			// Chromium rate-limits capture requests; independent gestures must not become an automated burst.
 			const gestureIntervalMs = 300;
@@ -51,7 +58,7 @@ export async function probeClientMouseMovement(client, evaluate) {
 			buttons,
 			x,
 			y,
-			clickCount: 1,
+			clickCount,
 		});
 		if (type === "mouseReleased" && buttons === 0) await settle();
 	};
@@ -155,6 +162,56 @@ export async function probeClientMouseMovement(client, evaluate) {
 				);
 			await read(`${fixture}.reset()`);
 		}
+		// Real Chromium button delivery must retain click counts across capture/unlock.
+		await read(`${fixture}.reset()`);
+		const beforeDouble = await read(
+			`${api}.capture().viewportSelectionPoints.length`,
+		);
+		await mouse("mousePressed", "left", 1);
+		await waitForLock(true);
+		await mouse("mouseReleased", "left", 0);
+		await waitForLock(false);
+		await mouse("mousePressed", "left", 1, point.x, point.y, 2);
+		await waitForLock(true);
+		await mouse("mouseReleased", "left", 0, point.x, point.y, 2);
+		await waitForLock(false);
+		assert.deepEqual(
+			(
+				await read(
+					`${api}.capture().viewportSelectionPoints.slice(${beforeDouble})`,
+				)
+			).map((p) => p.interact),
+			[false, true],
+		);
+		await read(`${fixture}.reset()`);
+		for (const interruption of ["drag-first", "drag-second", "cancel"]) {
+			await read(`${fixture}.reset()`);
+			const before = await read(
+				`${api}.capture().viewportSelectionPoints.length`,
+			);
+			await mouse("mousePressed", "left", 1);
+			await waitForLock(true);
+			if (interruption === "drag-first")
+				await mouse("mouseMoved", "none", 1, point.x + 20);
+			await mouse("mouseReleased", "left", 0);
+			await waitForLock(false);
+			if (interruption === "cancel") await read(`${fixture}.reset()`);
+			await mouse("mousePressed", "left", 1, point.x, point.y, 2);
+			await waitForLock(true);
+			if (interruption === "drag-second")
+				await mouse("mouseMoved", "none", 1, point.x + 20);
+			await mouse("mouseReleased", "left", 0, point.x, point.y, 2);
+			await waitForLock(false);
+			const clicks = await read(
+				`${api}.capture().viewportSelectionPoints.slice(${before})`,
+			);
+			assert.ok(clicks.length > 0);
+			assert.ok(
+				clicks.every((p) => !p.interact),
+				interruption,
+			);
+		}
+		await read(`${fixture}.reset()`);
 		const beforeClicks = await read(
 			`${api}.capture().viewportSelectionPoints.length`,
 		);
@@ -512,6 +569,7 @@ export async function probeClientMouseMovement(client, evaluate) {
 			unlockedCursorJumpExclusion: true,
 			relativeYaw: steeringYaw,
 			clickSuppression: true,
+			doubleClickActivation: true,
 			editorCancellation: true,
 			gameEscapeRouting: true,
 			forwardSurvivesCaptureLoss: true,

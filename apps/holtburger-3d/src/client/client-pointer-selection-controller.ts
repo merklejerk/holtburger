@@ -99,8 +99,12 @@ export class ClientPointerSelectionController {
 		return () => this.#hoverListeners.delete(listener);
 	}
 
-	/** Begin the shared viewport-point path used by real gestures and the browser harness. */
-	acquireViewportPoint(clientX: number, clientY: number): void {
+	/** Commit a current viewport selection before acting on its exact identity; misses only clear selection. */
+	acquireViewportPoint(
+		clientX: number,
+		clientY: number,
+		onSelected?: (guid: number) => void,
+	): void {
 		if (this.#destroyed) return;
 		const intent = this.#selection.beginAcquisition("external");
 		this.#acquirePoint(
@@ -110,23 +114,14 @@ export class ClientPointerSelectionController {
 				isCurrent: () => this.#selection.isCurrentAcquisition(intent),
 				commit: (result) => {
 					if (result.kind === "unavailable") return;
-					this.#selection.commitAcquisition(
-						intent,
-						result.kind === "entity" ? result.guid : null,
-					);
+					const guid = result.kind === "entity" ? result.guid : null;
+					this.#selection.commitAcquisition(intent, guid);
+					if (guid !== null && this.#selection.isCurrentAcquisition(intent))
+						onSelected?.(guid);
 				},
 			},
 			false,
 		);
-	}
-
-	/** Resolve ordinary selection geometry for a caller-owned correlated action. */
-	acquireViewportSelection(
-		clientX: number,
-		clientY: number,
-		destination: ClientViewportTargetDestination,
-	): void {
-		this.#acquirePoint(clientX, clientY, destination, false);
 	}
 
 	/** Resolve an interaction target without mutating ordinary selection. */

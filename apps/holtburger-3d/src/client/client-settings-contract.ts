@@ -108,6 +108,20 @@ const chatFiltersSchema = z
 	)
 	.readonly();
 
+/** Local chat admission preferences; suppressed messages never enter retained history. */
+export const clientChatSuppressionSettingsSchema = z
+	.object({
+		/** Hide successful self defense against physical attacks and hostile spells. */
+		hideSelfEvasionsAndResists: z.boolean().default(true),
+		/** Hide casting words from every speaker, preserving other magic feedback. */
+		hideSpellIncantations: z.boolean().default(true),
+	})
+	.strict()
+	.readonly();
+export type ClientChatSuppressionSettings = z.infer<
+	typeof clientChatSuppressionSettingsSchema
+>;
+
 /** User-scoped graphics preferences; implementation tuning stays in renderer policy. */
 export const clientGraphicsSettingsSchema = z
 	.object({
@@ -221,6 +235,7 @@ export const clientUserSettingsSchema = z
 		/** Stable emote identities shared across characters and servers on this local profile. */
 		recentEmotes: z.array(z.string().min(1)).readonly(),
 		chatFilters: chatFiltersSchema,
+		chatSuppression: clientChatSuppressionSettingsSchema,
 		graphics: clientGraphicsSettingsSchema,
 		audio: clientAudioSettingsSchema,
 		ui: clientUiSettingsSchema,

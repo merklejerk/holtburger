@@ -81,6 +81,11 @@
 {#if ready}
 	{#if gameplay}
 		<ClientSettingsPanel
+			chatSuppression={settings.chatSuppression}
+			onChatSuppressionChange={(chatSuppression) => {
+				settings = { ...settings, chatSuppression };
+				persistence.publish({ sections: { chatSuppression } });
+			}}
 			gameplayPreferences={null}
 			gameplayEnabled={false}
 			onGameplayOptionChange={async () => {

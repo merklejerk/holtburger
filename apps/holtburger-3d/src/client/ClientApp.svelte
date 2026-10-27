@@ -175,7 +175,11 @@
 		ClientDriveRequest,
 		ClientVital,
 	} from "./client-host-contract";
-	import type { ClientChatEntry, ClientChatLine } from "./client-chat-policy";
+	import {
+		clientChatShouldSuppress,
+		type ClientChatEntry,
+		type ClientChatLine,
+	} from "./client-chat-policy";
 	import { ClientChatComposer } from "./client-chat-composer.svelte";
 	import {
 		selectedChatRecipient,
@@ -1235,6 +1239,7 @@
 	}
 
 	function appendChatLine(message: ClientChatEntry): void {
+		if (clientChatShouldSuppress(userSettings.chatSuppression, message)) return;
 		const line: ClientChatLine = {
 			...message,
 			id: nextChatMessageId++,
@@ -2475,6 +2480,9 @@
 			readConnection={() => session?.connectionSample() ?? null}
 			{appearanceOptions}
 			{gameplayPreferences}
+			chatSuppression={userSettings.chatSuppression}
+			onChatSuppressionChange={(settings) =>
+				changeUserSection("chatSuppression", settings)}
 			gameplayEnabled={lifecycle.kind === "in-world"}
 			onGameplayOptionChange={setGameplayOption}
 			onAppearanceOptionChange={setAppearanceOption}

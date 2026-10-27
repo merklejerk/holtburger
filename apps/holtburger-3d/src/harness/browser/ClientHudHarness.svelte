@@ -198,9 +198,10 @@
 	import { createClientShortcuts } from "../../client/ClientShortcutDock.svelte";
 	import ClientGameplayView from "../../client/ClientGameplayView.svelte";
 	import { createWorldMapFixture } from "./world-map-fixture";
-	import type {
-		ClientChatEntry,
-		ClientChatLine,
+	import {
+		clientChatShouldSuppress,
+		type ClientChatEntry,
+		type ClientChatLine,
 	} from "../../client/client-chat-policy";
 	import type {
 		ClientAttackProfile,
@@ -837,6 +838,7 @@
 
 	/** Cold character-selection fixture exercises production controls without a live server. */
 	let previewCharacters = $state(false);
+
 	let gameplayPreferences = $state({ ...gameplayPreferencesFixture });
 	let deferGameplayUpdate = false;
 	let pendingGameplayUpdate: (() => void) | null = null;
@@ -1131,6 +1133,8 @@
 			readonly professorPrompt: () => void;
 			readonly clearPrompt: () => void;
 			readonly read: () => {
+				/** Retained history used to verify suppression happens before storage. */
+				readonly retainedMessages: readonly ClientChatLine[];
 				readonly selectedEntity: number | null;
 				readonly requests: readonly ClientChatRequest[];
 				readonly destination: typeof chatComposer.destination;
@@ -3914,6 +3918,7 @@
 			kind: "combat",
 			message: "You hit a Drudge for 37 slashing damage. Critical hit.",
 			emphasized: true,
+			selfEvasion: false,
 		}),
 	]);
 
@@ -3927,6 +3932,7 @@
 	}
 
 	function appendChat(message: ClientChatEntry): void {
+		if (clientChatShouldSuppress(userSettings.chatSuppression, message)) return;
 		const id =
 			messages.reduce((maximum, entry) => Math.max(maximum, entry.id), 0) + 1;
 		messages = [...messages, line(id, message)];
@@ -4959,6 +4965,7 @@
 						confirmation: null,
 					}),
 				read: () => ({
+					retainedMessages: messages,
 					selectedEntity: selection.selectedGuid(),
 					requests: chatRequests.slice(),
 					destination: chatComposer.destination,
@@ -5830,6 +5837,9 @@
 			></canvas>
 			{#if gameplayCanvas !== null && interactionRoot !== null}
 				<ClientGameplayView
+					chatSuppression={userSettings.chatSuppression}
+					onChatSuppressionChange={(chatSuppression) =>
+						(userSettings = { ...userSettings, chatSuppression })}
 					{gameplayPreferences}
 					gameplayEnabled={true}
 					onGameplayOptionChange={async (option, enabled) => {

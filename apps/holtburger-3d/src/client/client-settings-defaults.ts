@@ -12,6 +12,7 @@ import {
 } from "./client-hud-layout";
 import { initialActionBar } from "./client-action-bar-state";
 import { initialSpellBarBindings } from "./client-spell-bar-state";
+import { clientChatSuppressionSettingsSchema } from "./client-settings-contract";
 import type {
 	ClientAudioSettings,
 	ClientCharacterSettings,
@@ -49,6 +50,7 @@ export function createDefaultClientUserSettings(
 		minimapViewDiameters: { ...MAP_DEFAULT_VIEW_DIAMETERS },
 		recentEmotes: [],
 		chatFilters: [...CLIENT_CHAT_FILTER_TAGS],
+		chatSuppression: clientChatSuppressionSettingsSchema.parse({}),
 		graphics: { ...CLIENT_GRAPHICS_DEFAULTS },
 		audio: { ...CLIENT_AUDIO_DEFAULTS },
 		ui: {

@@ -9,7 +9,7 @@ import {
 	readlink,
 	stat,
 } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
+import { join, normalize, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const scriptPath = fileURLToPath(import.meta.url);
@@ -28,6 +28,8 @@ export async function verifyElectronPackage(packageRoot) {
 				)
 			: join(normalizedPackageRoot, "resources");
 	const archivePath = join(resourcesDirectory, "app.asar");
+	/** @param {string} entry Archive-relative path; ASAR's index uses native separators. */
+	const readArchiveFile = (entry) => extractFile(archivePath, normalize(entry));
 	const licensePath = join(resourcesDirectory, "LICENSE.md");
 	const electronNoticeRoot =
 		process.platform === "darwin" ? resourcesDirectory : normalizedPackageRoot;
@@ -80,15 +82,15 @@ export async function verifyElectronPackage(packageRoot) {
 			throw new Error(`packaged ASAR is missing ${requiredEntry}`);
 		}
 		// ASAR lists absolute-style entries but extracts by archive-relative name.
-		if (extractFile(archivePath, requiredEntry.slice(1)).length === 0) {
+		if (readArchiveFile(requiredEntry.slice(1)).length === 0) {
 			throw new Error(`packaged ASAR contains an empty file: ${requiredEntry}`);
 		}
 	}
 	const packageMetadata = JSON.parse(
-		extractFile(archivePath, "package.json").toString(),
+		readArchiveFile("package.json").toString(),
 	);
 	const buildMetadata = JSON.parse(
-		extractFile(archivePath, "dist/build-info.json").toString(),
+		readArchiveFile("dist/build-info.json").toString(),
 	);
 	if (
 		buildMetadata.version !== packageMetadata.version ||
@@ -123,7 +125,7 @@ export async function verifyElectronPackage(packageRoot) {
 			throw new Error(`packaged ASAR is missing /${archiveEntry}`);
 		}
 		if (
-			!extractFile(archivePath, archiveEntry).equals(await readFile(sourcePath))
+			!readArchiveFile(archiveEntry).equals(await readFile(sourcePath))
 		) {
 			throw new Error(`packaged ASAR differs from source: /${archiveEntry}`);
 		}

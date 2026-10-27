@@ -95,3 +95,12 @@ retail data as part of a bug report.
 Include `build-info.json`, OS/CPU, the command with account/password values removed, and the
 error text. State whether you selected DATs or a full HBA. User settings and generated map
 caches are separate from the bundle; do not attach credentials, private settings, or full data.
+
+## Source and build instructions
+
+Source is available in the [Holtburger repository](https://github.com/merklejerk/holtburger).
+Check out the full `commit` from this suite's `build-info.json` to obtain its exact source.
+That checkout's `.github/workflows/alpha-release.yml` records the native build commands,
+required system packages, pinned Rust/Node versions, and validation steps. Cargo and npm
+builds use the checked-in lockfiles. `docs/ALPHA_RELEASING.md` explains content inputs,
+notices, packaging, and release staging; only approved micro content is downloaded by CI.

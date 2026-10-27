@@ -168,7 +168,7 @@ Checked tasks have implementation or local evidence recorded below; platform-wid
 Deliverables: agreed matrix and Linux baseline; a concrete route to supply regenerated micro content; alpha tag ownership and CI trigger design.
 
 - [x] Target Linux x86-64, Windows x86-64, and macOS arm64. Per the user’s scope correction, Intel macOS is excluded from alpha, nightly, and cargo-dist releases going forward.
-- [ ] Start Linux portability work with the existing h3d probe's `ubuntu-22.04` baseline, subject to confirming current dependency builds. Document any evidence requiring a newer baseline before accepting it.
+- [x] Start Linux portability work with the existing h3d probe's `ubuntu-22.04` baseline, subject to confirming current dependency builds. Document any evidence requiring a newer baseline before accepting it.
 - [x] Locate the user's retail portal and English localization DATs for local micro generation. Include other DAT roles only where the corrected micro manifest needs them. Existing full HBA alone is not an input supported by `dat2hba`; do not invent a new conversion mode to avoid identifying the real source files.
 - [x] Choose a pinned, downloadable location for the approved regenerated micro ZIP and record its SHA-256 in a repository release-content descriptor. Keep it separate from the existing main-nightly mutable URL. The descriptor needs only the URL and expected digest; provenance can be recorded in release notes.
 - [x] Define the one-time handoff to that location after Phase 2: manual content-asset upload if necessary. Public build runners receive only the micro artifact, never retail DATs/full HBAs. Verify content before uploading; do not publish the stale current archive as a placeholder.
@@ -189,7 +189,7 @@ Primary files: `crates/holtburger-dat/src/manifest.rs`, its tests, `apps/holtbur
 - [x] Generate a fresh micro ZIP with corrected `dat2hba --profile micro` from identified retail inputs, then run the diagnostic against it. Record generator commit, digest, size, namespace inventory, and bootstrap result.
 - [x] Inspect its contents and confirm it lacks the sentinel and visual resource classes excluded by the micro manifest. Stage only `assets.hba` into the micro ZIP.
 - [x] Complete the Phase 1 content-asset handoff and pin the URL/digest. Fetch into a clean staging directory, fail on HTTP errors/digest mismatch/unexpected ZIP entries, and validate the fetched bytes through the same bootstrap diagnostic.
-- [ ] Use this exact artifact for all suite archives, the standalone micro asset, and TUI Flatpak. Do not replace the main nightly's input implicitly.
+- [x] Use this exact artifact for all suite archives, the standalone micro asset, and TUI Flatpak. Do not replace the main nightly's input implicitly.
 
 Acceptance: current bootstrap and character-generation reads succeed with the regenerated micro artifact; the existing published five-record micro fails the probe as expected during investigation; every alpha consumer verifies and uses the same digest. Do not retain a permanent test tied to the old downloadable artifact.
 
@@ -239,17 +239,17 @@ Acceptance: remaining packaging and publication work has no unresolved source-as
 
 Primary files: the alpha workflow, reusable build/assembly helpers under `.github/scripts/`, Forge config/package scripts, suite validator, and TUI Flatpak recipe.
 
-- [ ] Adapt the existing portability jobs instead of duplicating their checks. Run a nonpublishing check path for `3d-next`; require Rust formatting/tests/clippy with warnings denied and app checks/lint/tests as applicable.
+- [x] Adapt the existing portability jobs instead of duplicating their checks. Run a nonpublishing check path for `3d-next`; require Rust formatting/tests/clippy with warnings denied and app checks/lint/tests as applicable.
 - [x] Pin the validated runner labels, Rust toolchain, Node version, and package-manager lockfiles used by release builds. Build with Cargo `--locked` and `npm ci`.
 - [x] Resolve the source commit once and use it across every job. Confirm it belongs to `3d-next`; fetch enough history for that check. A branch advancing during the run must not change any artifact.
 - [x] Build only `tui`, `dat2hba`, `dat-tool`, and `holtburger-3d-host` for the matrix target. Do not use a release `--workspace` build that compiles all diagnostic binaries.
 - [x] Make the Cargo target triple explicit and make Forge consume that exact host path. Use native target runners, or implement a single target-aware host-path contract; do not let `npm run package` rebuild a different host implicitly.
 - [x] Make Electron platform/architecture explicit and compare Rust and Electron executable architectures to the artifact label. Preserve Forge's private-sidecar exclusion from cargo-dist.
-- [ ] Inspect Rust and Electron dynamic dependencies and glibc/symbol requirements on Linux. Record the oldest validated runtime environment; verify no library is unresolved there. Use corresponding executable/dependency inspection on Windows/macOS.
-- [ ] Run existing sidecar protocol smoke, package inspection, theme/font runtime checks, and archive checks. Update content-startup fixtures to satisfy the new sentinel gate before later bootstrap failures are exercised; do not allow the new early rejection to make recovery tests hollow.
+- [x] Inspect Rust and Electron dynamic dependencies and glibc/symbol requirements on Linux. Record the oldest validated runtime environment; verify no library is unresolved there. Use corresponding executable/dependency inspection on Windows/macOS.
+- [x] Run existing sidecar protocol smoke, package inspection, theme/font runtime checks, and archive checks. Update content-startup fixtures to satisfy the new sentinel gate before later bootstrap failures are exercised; do not allow the new early rejection to make recovery tests hollow.
 - [x] Exercise default client startup with CLI arguments through a noninteractive probe. Use explicit Explorer for content-only checks where no ACE connection should be attempted. No interactive TUI execution or agent visual acceptance.
 - [x] Assemble the exact suite inventory above. Require both tools; remove best-effort copies and broad script globs. Include required notices and the user quickstart.
-- [ ] Preserve the TUI Flatpak's separate writable local scripts and bundled scripts, with the same micro digest. Run a no-network bootstrap/load probe inside its runtime rather than relying only on a successful Flatpak build.
+- [x] Preserve the TUI Flatpak's separate writable local scripts and bundled scripts, with the same micro digest. Run a no-network bootstrap/load probe inside its runtime rather than relying only on a successful Flatpak build.
 - [x] Validate the final suite after extraction, not only the nested Forge package. Reuse the existing package inspector on extracted h3d and check native symlinks/modes, expected files, micro digest, build identity, and script sidecar pairs.
 - [x] Inspect the shipped inventory for unintended local files and full content. Permit Electron's own `icudtl.dat` and runtime blobs; a blanket ban on every `.dat` filename is incorrect. Validate the exact permitted micro archive rather than assuming any `.hba` is safe.
 - [ ] Generate final filenames, per-suite build info, global release manifest, and checksums from inspected bytes. Store candidate artifacts in CI without publishing for build-verification runs.
@@ -321,15 +321,15 @@ Acceptance: a public GitHub prerelease contains the complete agreed artifact set
 ## Definition of done
 
 - [ ] Agreed suite binaries/resources, TUI Flatpak, and standalone micro are present as GitHub Release assets.
-- [ ] Corrected micro artifact initializes current TUI content and is shared by digest across consumers.
-- [ ] h3d defaults to client, retains explicit Explorer, and uses TUI-compatible port/password flags.
-- [ ] h3d uses the sentinel for admission without archive format changes or a thorough content validator.
-- [ ] Portable TUI resource lookup works independently of the invocation directory.
+- [x] Corrected micro artifact initializes current TUI content and is shared by digest across consumers.
+- [x] h3d defaults to client, retains explicit Explorer, and uses TUI-compatible port/password flags.
+- [x] h3d uses the sentinel for admission without archive format changes or a thorough content validator.
+- [x] Portable TUI resource lookup works independently of the invocation directory.
 - [ ] Suite version and exact source commit agree across package metadata, displayed identities, tags, and manifests.
-- [ ] Platform labels match executable architectures; Linux dependencies and baseline are verified.
+- [x] Platform labels match executable architectures; Linux dependencies and baseline are verified.
 - [ ] Required formatting, tests, lint/clippy, package checks, and extracted-suite checks pass without ignored warnings.
 - [ ] No full retail assets, optional tools, private data, or local caches are in the published inventory.
-- [ ] Quickstart and release notes explain CLI launch, retail-data selection, unsigned status, and platform verification limits.
+- [x] Quickstart and release notes explain CLI launch, retail-data selection, unsigned status, and platform verification limits.
 - [ ] Published assets pass checksum verification; the existing main nightly remains operational.
 - [ ] Final user native-bundle/visual acceptance and any unverified platforms are recorded without overstating support; published bytes match the accepted candidate.
 
@@ -448,3 +448,13 @@ These do not block writing the plan; resolve them at the named phase before depe
 
 - Run `40439544821` passed Linux, Apple Silicon, and Flatpak. Windows passed Rust/frontend/branding, native package inspection (confirming ASAR normalization), and sidecar smoke. Both development and built-file theme assertions passed, but the diagnostic process attempted to remove its own still-open Chromium profile database, received `EBUSY`, then repeated cleanup in its catch path and timed out.
 - The parent Node probe now creates the temporary directory, passes it explicitly, and removes it after the Electron child closes. Cleanup uses the existing bounded filesystem retry pattern; errors still fail the probe. The child reports its assertion result and exits without deleting its live profile. The complete local theme probe, actual temporary-directory removal, Electron build/type checks, and frontend lint passed; native Windows confirmation remains pending.
+
+### Supported-platform verification on `7ef77b941`
+
+- Run `40441886095` completed all native jobs successfully: Linux x86-64 (`121984318174`), Windows x86-64 (`121984318222`), and macOS Apple Silicon (`121984318152`). Each passed affected Rust tests, frontend checks, native packaging/sidecar smoke, theme/font and packaged content-recovery probes, extraction inspection, and artifact upload. Linux also passed warnings-denied clippy and unresolved-library checks on Ubuntu 22.04. Windows passed 415 frontend files (3,822 tests, one existing platform-specific skip), then both Explorer and implicit-client recovery.
+- This verifies the Windows ASAR and profile-cleanup fixes on Windows. Native labels, executable headers, packaged host identity, scripts, approved micro digest, notices, and extracted inventory were enforced by the assembly verifier. No interactive TUI or user visual acceptance was performed.
+- Run `40441886095` is fully green, including Flatpak’s installed-runtime bootstrap, pinned micro/notices checks, artifact upload, and successful cache completion. Global manifest/checksums, alpha tag, draft staging, and final user acceptance remain pending.
+
+### Final documentation audit
+
+- Added the missing source/build reference to the bundled quickstart: use its full `build-info.json` commit, then the checked-in alpha workflow and releasing guide for pinned tools, native commands, system packages, content inputs, and notice generation. This documentation-only correction and the evidence/checklist updates will be committed before selecting the candidate tag. Application code is unchanged from the fully green `7ef77b941` run; the new commit still requires its own release identity and validation.

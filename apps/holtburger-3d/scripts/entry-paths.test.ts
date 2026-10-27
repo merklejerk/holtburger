@@ -12,7 +12,7 @@ import {
 } from "./entry-paths.mjs";
 import { parseVitePort, resolveVitePort } from "./dev-port.mjs";
 import { clientDebugEnabled } from "../src/client/client-debug";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 describe("desktop entry selection", () => {
 	it.each([[], ["--account=ash"], ["-a", "ash", "-p", "9000", "-P", "secret"]])(
@@ -267,25 +267,27 @@ describe("development launcher arguments", () => {
 	});
 
 	it("keeps the settings-file path out of the renderer URL", () => {
+		const settingsPath = resolve("settings.json");
 		expect(
 			partitionClientLaunchArguments([
 				"--account=ash",
 				"--settings-file",
-				"/tmp/settings.json",
+				settingsPath,
 				"--debug",
 			]),
 		).toEqual({
 			launchArguments: [
 				"--account=ash",
 				"--settings-file",
-				"/tmp/settings.json",
+				settingsPath,
 			],
 			rendererArguments: ["--debug"],
 		});
 	});
 
 	it("resolves separated and inline settings paths from the invoking directory", () => {
-		const invokingDirectory = "/workspace/apps/holtburger-3d";
+		const root = resolve("workspace");
+		const invokingDirectory = join(root, "apps", "holtburger-3d");
 		for (const settingsFlag of [
 			["--settings-file", "../../.holtburger-local/settings.json"],
 			["--settings-file=../../.holtburger-local/settings.json"],
@@ -299,7 +301,7 @@ describe("development launcher arguments", () => {
 				launchArguments: [
 					"--account=ash",
 					"--settings-file",
-					"/workspace/.holtburger-local/settings.json",
+					join(root, ".holtburger-local", "settings.json"),
 				],
 				rendererArguments: ["--debug"],
 			});

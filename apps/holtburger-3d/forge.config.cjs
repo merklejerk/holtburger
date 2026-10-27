@@ -1,4 +1,5 @@
-const { relative, resolve, sep } = require("node:path");
+const { rename } = require("node:fs/promises");
+const { join, relative, resolve, sep } = require("node:path");
 
 const hostBinary =
 	process.platform === "win32"
@@ -42,6 +43,15 @@ function ignoreApplicationSource(path) {
 }
 
 module.exports = {
+	hooks: {
+		async packageAfterExtract(_config, buildPath, _version, platform) {
+			if (platform !== "darwin") return;
+			// The macOS ZIP maker retains only the .app. Keep original notices inside it.
+			const resources = join(buildPath, "Electron.app/Contents/Resources");
+			for (const notice of ["LICENSE", "LICENSES.chromium.html"])
+				await rename(join(buildPath, notice), join(resources, notice));
+		},
+	},
 	packagerConfig: {
 		asar: true,
 		icon: resolve(__dirname, "../../assets/branding/icon"),
@@ -50,16 +60,6 @@ module.exports = {
 			hostPath,
 			resolve(__dirname, "../../LICENSE.md"),
 			resolve(__dirname, "../../assets/branding/icon.png"),
-			// Electron's macOS distribution keeps these outside the .app Forge retains.
-			...(process.platform === "darwin"
-				? [
-						resolve(__dirname, "node_modules/electron/dist/LICENSE"),
-						resolve(
-							__dirname,
-							"node_modules/electron/dist/LICENSES.chromium.html",
-						),
-					]
-				: []),
 		],
 		ignore: ignoreApplicationSource,
 	},

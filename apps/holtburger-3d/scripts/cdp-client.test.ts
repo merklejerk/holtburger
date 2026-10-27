@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { createCdpClient } from "./cdp-client.mjs";
+import { CdpConnectionError, createCdpClient } from "./cdp-client.mjs";
 
 /** Test-owned socket exercises transport lifecycle without a browser or network listener. */
 class Socket extends EventTarget {
@@ -45,7 +45,7 @@ it("rejects every pending request and subsequent sends on closure", async () => 
 	const client = await connected;
 	const pending = [client.send("Page.enable"), client.send("Runtime.enable")];
 	const rejected = pending.map((request) =>
-		expect(request).rejects.toThrow("CDP connection closed"),
+		expect(request).rejects.toBeInstanceOf(CdpConnectionError),
 	);
 	client.close();
 	await Promise.all(rejected);
@@ -72,5 +72,10 @@ it("settles replies and removes event subscriptions", async () => {
 	const { id } = JSON.parse(socket.send.mock.calls[0][0]);
 	emit({ id, result: { enabled: true } });
 	await expect(request).resolves.toEqual({ enabled: true });
+	const denied = client.send("Runtime.enable");
+	const commandError = expect(denied).rejects.not.toBeInstanceOf(CdpConnectionError);
+	const { id: deniedId } = JSON.parse(socket.send.mock.calls[1][0]);
+	emit({ id: deniedId, error: { message: "Diagnostic command rejection" } });
+	await commandError;
 	client.close();
 });

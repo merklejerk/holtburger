@@ -1,6 +1,6 @@
 # Alpha release from `3d-next`
 
-Status: the original nine-asset alpha.3 draft at `e705767e4` remains verified and unpublished. CI simplification, local checked-in notices and the inspector dependency correction are committed/pushed through `252810c3f`; its Linux branch validation passed. Corrected candidate run `40538303609` passed all native jobs, shared validation and full-suite Flatpak installed verification, then failed composing the TUI SVG icon. A one-package provisioning fix is proven locally and remains uncommitted; no additional candidate has been started. Hosted acceptance, final user native checks and publication remain outstanding. The steering section supersedes historical trigger/validation placement below.
+Status: the complete nine-asset alpha.3 draft at `7ab6645a6` is verified and unpublished, ready for final user native acceptance. Candidate workflow `40542532288` passed in 17m50s, including all three native platforms, both Flatpaks and staging; five actual downloads and all nine remote asset digests were verified. The narrowly scoped apt-mirror selection cleanup affects future provisioning only and does not change this frozen candidate. Publication and public-download verification remain outstanding. The steering section supersedes historical trigger/validation placement below.
 
 ## Steering: shorten feedback and publish existing artifacts
 
@@ -59,9 +59,9 @@ Acceptance: Flatpaks wait only for Linux output, reuse its production binaries, 
 
 ### Phase S3: Validate, simplify publication, and clean up
 
-- [ ] Review GitHub's existing step timings and record a short before/after comparison of the longest dependency chain. Distinguish cold setup from warm runs where evidence is available; do not add a latency-reporting system or launch extra runs just to fill a benchmark table.
-- [ ] If setup exceeds 5 minutes or a candidate approaches 20 minutes, identify the responsible step and reassess before another expensive attempt. Do not cancel a progressing job merely to retrieve logs; do not keep polling without a decision to make.
-- [ ] Make at most one intentional end-to-end candidate acceptance run after targeted checks pass. An infrastructure-only retry should reuse successful artifacts/jobs wherever possible. Further full attempts require a concrete diagnosed failure and stated reason.
+- [x] Review GitHub's existing step timings and record a short before/after comparison of the longest dependency chain. Distinguish cold setup from warm runs where evidence is available; do not add a latency-reporting system or launch extra runs just to fill a benchmark table.
+- [x] If setup exceeds 5 minutes or a candidate approaches 20 minutes, identify the responsible step and reassess before another expensive attempt. Do not cancel a progressing job merely to retrieve logs; do not keep polling without a decision to make.
+- [x] Make at most one intentional end-to-end candidate acceptance run after targeted checks pass. An infrastructure-only retry should reuse successful artifacts/jobs wherever possible. Further full attempts require a concrete diagnosed failure and stated reason.
 - [x] Review the discovered tag-cache limitation with the user before selecting another candidate. The user approved one corrected candidate on the existing tag path, accepting cold caches and deferring trigger changes: unique alpha tags cannot restore caches from `3d-next` or previous tags. Only the current ref and default-branch caches are eligible. This run missed both npm and Rust caches, so a repeatably warm candidate path is not established. Prefer deciding whether to enable candidate execution on the existing branch over adding runner/cache infrastructure; do not silently change default-branch workflows or move existing tags. See [GitHub cache restrictions](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache).
 
 - [x] Restructure the existing release workflow's triggers, dependencies and duplicate work; reuse `.github/scripts/alpha_release.py` draft assembly/upload and identity/checksum validation. Reuse does not mean preserving the current slow job graph.
@@ -77,7 +77,7 @@ Acceptance: one intentional end-to-end acceptance run follows targeted checks; f
 
 Publish a reproducible alpha suite from one identified `3d-next` commit as GitHub Release assets, containing the TUI, h3d, and the tools and resources needed to use them.
 
-The user authorized implementation and subsequent commits/pushes. Prior drafts/tags remain intact. The current supported-runtime candidate is `alpha-20261027-e705767e4` (`0.1.0-alpha.3`); the later CI-only policy commits preserve its exact bytes and source identity. Final publication waits for user native-bundle acceptance and explicit publication authorization.
+The user authorized implementation and subsequent commits/pushes. Prior drafts/tags remain intact. The current candidate is `alpha-20261027-7ab6645a6` (`0.1.0-alpha.3`), release ID `425740569`; prior source-specific drafts, including `e705767e4`, remain preserved. Final publication waits for user native-bundle acceptance and explicit publication authorization.
 
 ### Accepted scope
 
@@ -692,3 +692,31 @@ These do not block writing the plan; resolve them at the named phase before depe
 - Narrow fix adds `librsvg2-common` explicitly to the existing apt install, retaining `--no-install-recommends` and all metadata checks. Actionlint and diff whitespace checks pass. Evidence: `.holtburger-local/tui-appstream-svg-reproduction.log` and `.holtburger-local/ci-corrected-252810c3f-flatpak.log`. The SVG decoder omission was an implementation mistake; another full release cycle has not been started. Commit/push of this new fix requires the repository's explicit authorization; existing verified alpha.3 assets remain untouched.
 
 - The user explicitly approved committing and pushing the SVG-loader provisioning fix. This authorization leaves all release tags unchanged and does not start another candidate.
+
+### Verified candidate and final native handoff (2026-10-27)
+
+- Candidate source: `7ab6645a685a94b1b53280e1090bbfb51c34cc08`; version `0.1.0-alpha.3`; tag `alpha-20261027-7ab6645a6`. Successful workflow: https://github.com/merklejerk/holtburger/actions/runs/40542532288 . Branch-only validation `40542295876` also passed. No further candidate build is needed for acceptance or publication of these bytes.
+- Verified draft: https://github.com/merklejerk/holtburger/releases/tag/untagged-67e75dfc7f63cb9a7d53 (release ID `425740569`). It remains an unpublished prerelease with nine assets: Linux x86-64, Windows x86-64 and Apple Silicon native suites, both x86-64 Flatpaks, standalone approved micro ZIP, notices HTML, manifest and SHA256SUMS.
+- All nine remote asset digests match the manifest/checksum inventory. Downloaded both actual Flatpaks plus manifest, checksum file and notices; all five match their remote digests. Native/Flatpak records agree on source, version, micro ZIP/HBA and notices. Both runtime receipts identify `org.freedesktop.Platform/x86_64/26.08`. The notices match the committed HTML; micro matches the approved descriptor. Original verified alpha.3 draft `425534183` retains its exact source and nine asset digests.
+- Full-suite installed verification passed bootstrap with 13 heritage groups, both tool help commands, private-host protocol, synthetic conversion/export through read-only document-portal and explicit output grants, client/Explorer recovery, eight fonts/four images and custom-theme/font reload. TUI AppStream composition and installed production bootstrap passed with the explicit SVG loader. Agent performed no interactive TUI, gameplay or visual acceptance.
+- Full-suite Flatpak SHA-256: `6663f4827400f7ab13d1111b8a2fd65cb06a2282144e0226bd61df6ac462df75`. TUI Flatpak: `f3b50b7fce9d567b29b58d2a1b6827969cd4350715e5f5f212884b947031d356`. SHA256SUMS file: `f6211d2e84d006598edf0d54f8d9c39db389e78b924f5c40fd6d1e63647de140`.
+- Draft notes record the exact source, automated evidence, checksum and final native checklist. User-owned checks remain: native extraction/launch, terminal TUI including another working directory, default h3d client with retail data, explicit Explorer, gameplay/input/audio/window behavior, and full Flatpak retail selection across restarts/tool grants. Record available tested platforms and keep others experimental. Publish only after acceptance and explicit authorization; use the same assets without rebuilding.
+
+Measured times from the successful run (parallel job durations are not additive):
+
+| Work | Elapsed |
+| --- | --- |
+| Complete candidate through draft staging | 17m50s |
+| Planning/notices upload | 29s |
+| Shared Linux validation | 9m35s |
+| Linux native job | 7m05s |
+| Windows native job | 9m21s |
+| Apple Silicon native job | 7m37s |
+| Combined Flatpak job | 9m16s |
+| Flatpak tooling/runtime installation within that job | 3m44s |
+| Draft staging | 51s |
+
+- Linux native npm and Rust cache misses are recorded in `.holtburger-local/ci-final-7ab6645a6-linux.log`; this met the under-20-minute candidate target despite cold native caches. It is one observed result, not a repeatable warm-build guarantee. The last apt download still took 2m37s for 7.9 MB, versus the earlier 33-minute/95.4 MB download. Local notices generation removes the earlier 1m56s tool compilation plus approximately 50s collection; CI freshness checks take approximately 50–65 ms.
+- Mirror follow-up: GitHub runner sources point at `mirror+file:/etc/apt/apt-mirrors.txt`. The earlier `.list`/`.sources` URL substitution did not change the selected Azure preference. Official runner setup and prior CI logs prove the actual file layout. The local follow-up replaces the ineffective loop with removal of only Azure's entry from that mirror file, retaining official archive/security entries and logging them. A fixture using the official three entries passed, as did actionlint and whitespace checks. This changes future provisioning only; it must not move/rebuild the accepted candidate.
+- [x] Explicit user approval received to commit and push the small mirror-selection follow-up and these final working notes, without rebuilding or changing release assets. Cleanup scope is limited to `.github/workflows/alpha-release.yml`, `docs/ALPHA_RELEASING.md` and this plan; unrelated ACE/ACViewer submodule dirt remains untouched.
+- Evidence is under `.holtburger-local/corrected-7ab6645a6-draft/` (downloaded files, release snapshots, verification JSON and notes), `.holtburger-local/ci-final-7ab6645a6-run.json`, and `.holtburger-local/ci-final-7ab6645a6-flatpak.log`. No active CI job or local verification process remains from the acceptance run.

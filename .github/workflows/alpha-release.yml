@@ -42,16 +42,12 @@ jobs:
         run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
       - name: Check Rust formatting
         run: cargo fmt --all --check
-      - uses: Swatinem/rust-cache@v2
-      - name: Generate notices for all native targets
-        run: |
-          VERSION=$(python .github/scripts/generate_notices.py tool-version)
-          cargo install --locked --features cli --version "$VERSION" cargo-about
-          python .github/scripts/generate_notices.py generate --output .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html
+      - name: Check committed dependency notices
+        run: python .github/scripts/generate_notices.py check
       - uses: actions/upload-artifact@v4
         with:
           name: alpha-notices
-          path: .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html
+          path: .github/licenses/THIRD_PARTY_NOTICES.html
           if-no-files-found: error
 
   validation:

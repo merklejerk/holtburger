@@ -7,7 +7,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from generate_notices import render
+from generate_notices import INPUT_RECORD_PATH, NOTICE_PATH, check, input_digest, render
 
 
 class NoticeTests(unittest.TestCase):
@@ -68,6 +68,66 @@ class NoticeTests(unittest.TestCase):
         (self.root / "LICENSE").write_text("altered")
         with self.assertRaisesRegex(ValueError, "Native notice digest/contents mismatch"):
             render(self.report("Original license"), self.manifest)
+
+
+class CommittedNoticeTests(unittest.TestCase):
+    """A source change or altered output must invalidate the locally generated notices."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        files = {
+            "Cargo.toml": '[workspace]\nmembers = ["member"]\n',
+            "member/Cargo.toml": '[package]\nname = "member"\nversion = "1.0.0"\n',
+            "Cargo.lock": "locked dependency graph",
+            "LICENSE.md": "project license",
+            ".github/about.toml": "notice policy",
+            ".github/scripts/generate_notices.py": "generator",
+            ".github/licenses/native/example": "original native notice",
+            ".github/native-notices.json": json.dumps({
+                "files": [{"path": "licenses/native/example"}],
+            }),
+            NOTICE_PATH.as_posix(): "generated notices",
+        }
+        for name, text in files.items():
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        (self.root / INPUT_RECORD_PATH).write_text(json.dumps({
+            "inputsSha256": input_digest(self.root),
+            "noticesSha256": hashlib.sha256((self.root / NOTICE_PATH).read_bytes()).hexdigest(),
+        }))
+
+    def test_committed_output_checks_without_the_generator_or_network(self):
+        check(self.root)
+
+    def test_notice_sources_and_graph_changes_require_regeneration(self):
+        for name in (
+            "Cargo.lock", "Cargo.toml", "member/Cargo.toml", "LICENSE.md",
+            ".github/about.toml", ".github/native-notices.json",
+            ".github/scripts/generate_notices.py", ".github/licenses/native/example",
+        ):
+            with self.subTest(path=name):
+                path = self.root / name
+                original = path.read_text()
+                # Whitespace is valid for TOML/JSON and changes the recorded input bytes.
+                path.write_text(original + "\n")
+                with self.assertRaisesRegex(ValueError, "Notice inputs changed"):
+                    check(self.root)
+                path.write_text(original)
+
+    def test_application_source_does_not_invalidate_unchanged_notices(self):
+        (self.root / "member/lib.rs").write_text("fn changed_behavior() {}")
+        check(self.root)
+
+    def test_altered_output_and_missing_record_fail(self):
+        (self.root / NOTICE_PATH).write_text("altered license text")
+        with self.assertRaisesRegex(ValueError, "output differs"):
+            check(self.root)
+        (self.root / INPUT_RECORD_PATH).unlink()
+        with self.assertRaisesRegex(ValueError, "Missing committed notices file"):
+            check(self.root)
 
 
 if __name__ == "__main__":

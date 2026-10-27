@@ -58,7 +58,7 @@ export const CLIENT_UI_DEFAULTS = {
 	chat: {
 		anchor: "bottom-left",
 		offset: { x: 16, y: 16 },
-		size: { width: 400, height: { viewportMinus: 188, min: 260, max: 450 } },
+		size: { width: 450, height: { viewportMinus: 188, min: 260, max: 450 } },
 		minSize: { width: 280, height: 240 },
 		resizable: true,
 	},
@@ -195,7 +195,7 @@ export const CLIENT_UI_DEFAULTS = {
 	},
 	toast: {
 		anchor: "bottom-center",
-		offset: { x: 0, y: 48 },
+		offset: { x: 0, y: 64 },
 		size: { width: 420, height: 64 },
 		minSize: { width: 200, height: 64 },
 		resizable: false,

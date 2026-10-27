@@ -18,4 +18,4 @@ flatpak run --user --command=sh io.github.merklejerk.holtburger-alpha -c \
 HOLTBURGER_HOST_BIN="$repo_root/.github/flatpak/probe-host" \
   node "$repo_root/apps/holtburger-3d/scripts/sidecar-smoke.mjs"
 python3 "$repo_root/.github/scripts/probe_flatpak_io.py"
-node "$repo_root/apps/holtburger-3d/scripts/content-startup-probe.mjs" --flatpak
+node "$repo_root/apps/holtburger-3d/scripts/content-startup-probe.mjs" --flatpak --theme-check full

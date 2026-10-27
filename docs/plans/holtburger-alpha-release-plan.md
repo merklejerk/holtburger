@@ -1,6 +1,6 @@
 # Alpha release from `3d-next`
 
-Status: the user approved upgrading both alpha Flatpaks to 26.08. The prior nine-asset `0.1.0-alpha.2` draft remains intact. Local 26.08 build/runtime compatibility passed; a new `0.1.0-alpha.3` candidate and hosted validation are pending. User native acceptance and publication remain outstanding.
+Status: the supported-runtime alpha.3 draft is staged at `e705767e4` with nine verified artifacts. Both Flatpaks identify 26.08; downloaded receipt/copy/bootstrap checks passed. The user-approved narrower CI suites are implemented and locally verified; native confirmation is pending. User native acceptance and publication remain outstanding.
 
 ## Goal and boundaries
 
@@ -564,3 +564,19 @@ These do not block writing the plan; resolve them at the named phase before depe
 
 - Exported the actual 26.08 diagnostic bundle and passed the production installed-copy verifier: every native input file/link, wrapper/tool entry, original helper notice, architecture, runtime, and bundle receipt matched. This preflight uses the prior clean Linux input and local packaging edits; it is not the new publishable candidate.
 - Bumped the centrally managed suite version to `0.1.0-alpha.3`; Cargo/npm manifests and both lockfiles agree, with only workspace package versions changed. All 23 release/notices tests, actionlint, version consistency, and whitespace checks passed. The next authoritative tag run must produce the complete nine-asset replacement draft before user native checks.
+
+### Approved test-scope split
+
+- User requested shared tests once and fewer native test packages/targets. Linux now runs the six affected library targets, TUI CLI unit tests, and the converter library/CLI tests. Windows/macOS use four explicitly selected library targets instead of six packages with `--all-targets`; they do not build DAT/core unit-test targets or diagnostic-binary tests. Runtime dependencies still compile as required by Cargo.
+- Added a CI-owned selector runner for content mounting, catalog I/O, TUI script-file lookup/persistence, and host catalog/map caches. Each selector must match at least one test. The same runner selects nine frontend filesystem/path/launch/settings/theme files and refuses missing files. Full frontend tests, type checks, and lint run once on Linux; all targets keep branding generation.
+- Moved cheap frontend checks before Rust compilation. All targets retain native builds, bootstrap, architecture/inventory inspection, private-host smoke, and packaged client/Explorer recovery. Packaged asset smoke defaults to eight base fonts/four bundled images. Full custom-theme/font reload is explicit on Linux and inside Flatpak, whose profile access is a separate sandbox contract.
+- Local verification: all 40 selected Rust tests (10 content, 3 catalog, 9 CLI, 18 host), all 128 frontend OS tests across nine files, six converter library tests, and four converter CLI tests passed. Both packaged asset/full modes passed against the actual alpha.3 Linux suite. Frontend lint/formatting, 23 release/notices tests, workflow actionlint, and whitespace checks passed. The refactored full-mode probe also passed inside the installed 26.08 sandbox; hosted Windows/macOS confirmation is pending.
+- Keep the already-running alpha.3 candidate at `e705767e4`: its completed native checks are a superset of the new policy. Test-policy changes apply to subsequent workflow runs; no tag or candidate bytes are rewritten, and no application version bump is needed solely for CI selection changes.
+
+### Alpha.3 draft round-trip evidence
+
+- Draft: https://github.com/merklejerk/holtburger/releases/tag/untagged-03ab7b235a53b942ba1d (ID `425534183`), unpublished prerelease. Version `0.1.0-alpha.3`, source `e705767e4ade1939cefeea25d39c9213a6caf766`, tag `alpha-20261027-e705767e4`; workflow run `40507606518`. It contains the complete nine-asset inventory. Native targets and the TUI Flatpak passed; the full-suite build/probes advanced into staging. The final overall workflow status is being observed.
+- Verified all nine remote digests against the manifest/checksums, both 26.08 runtime receipts, exact source/version and supported architectures, shared approved micro and notices, and the Linux archive's match with its inspected CI input. Downloaded both actual Flatpaks, manifest, checksum file, and notices and verified all five hashes.
+- Installed the actual full-suite draft and compared every file/link with the native input. Imported the TUI bundle into an isolated OSTree inspection tree without installing/shadowing the user's TUI app. Both production receipt verifiers equal their release-manifest records on 26.08. Exact candidate bootstrap loaded all 13 heritage groups from installed micro; no interactive TUI or visual/gameplay acceptance was performed.
+- Full-suite Flatpak SHA-256: `90b27faf1a1d7766bf6cec8b203f4338ed42e9aaf16b96c62b2f947ad42f0bfb`. TUI Flatpak: `4f2c506ecb8c749731184f215932a79377b1ab10643cf52f3f97ab31ecf87e84`. SHA256SUMS file: `745431e5c355b21d9b4c71df4835a0f389b36a039e92ea2030786b5c390a5604`. Notices: `105e866c112b91ef0d016a5c8a8fc7a190a59a21a43b670e32e2427f448d824c`.
+- Preserve this candidate while validating the subsequent CI-only test-policy commit. Its prior checks are a superset, so no application-version bump, retagging, or replacement of already verified bytes is required for the test selection change. Final user native checks and explicit publication authorization remain the last gates.

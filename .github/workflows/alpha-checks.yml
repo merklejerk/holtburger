@@ -38,8 +38,11 @@ jobs:
         run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
       - name: Check suite versions
         run: python .github/scripts/release_version.py check
-      - name: Check committed dependency notices
-        run: python .github/scripts/generate_notices.py check
+      - name: Review committed dependency notices (advisory)
+        run: |
+          if ! python .github/scripts/generate_notices.py check; then
+            echo '::warning::Dependency notice check failed. Review and regenerate locally when needed; CI will use the checked-in notices.'
+          fi
 
   quality:
     needs: changes

@@ -74,7 +74,8 @@ receipts; aggregation rejects missing assets, wrong source/content/notices, or c
 
 Shared correctness runs once on Linux: the six affected library test targets, TUI CLI tests,
 the converter's library/CLI tests, full frontend tests, type checks, and lint. Unit-test
-selection excludes unshipped diagnostic binaries. Release builds still explicitly name only
+selection excludes unshipped diagnostic binaries. Content parity uses self-contained synthetic
+DAT/HBA fixtures. Release builds still explicitly name only
 the shipped executables and the private bootstrap probe.
 
 Windows and Apple Silicon use `.github/scripts/alpha_os_tests.py`: four Rust library targets

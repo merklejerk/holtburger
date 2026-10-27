@@ -37,8 +37,8 @@ interface ClientViewportMouseOptions {
 	readonly yawRadiansPerPixel: number;
 	/** App-owned semantic movement and dispatch cancellation. */
 	readonly movement: ClientMouseMovementInput;
-	/** Existing viewport click destinations. */
-	readonly onSelect: (x: number, y: number) => void;
+	/** The second accepted click requests interaction using the browser click sequence. */
+	readonly onSelect: (x: number, y: number, interact: boolean) => void;
 	readonly onExamine: (x: number, y: number) => void;
 	readonly onJump: () => void;
 	/** Maintain unlocked cursor/precise aim without publishing hot Svelte state. */
@@ -62,8 +62,11 @@ export class ClientViewportMouseController {
 	#motion: ClientViewportPointerGesture | null = null;
 	#click: {
 		readonly button: number;
-		readonly kind: "select" | "examine" | "jump";
+		/** One release action; dragging or cancellation discards the entire candidate. */
+		readonly kind: "select" | "interact" | "examine" | "jump";
 	} | null = null;
+	/** Only a completed ordinary selection can begin a double-click activation. */
+	#selectionClickAccepted = false;
 	#lockGeneration = 0;
 	/** Pending acquisition is distinct from held capture so a queued old unlock cannot cancel a new request. */
 	#lockState: "idle" | "pending" | "held" = "idle";
@@ -115,8 +118,11 @@ export class ClientViewportMouseController {
 								? "examine"
 								: this.#options.precise()
 									? "jump"
-									: "select",
+									: event.detail === 2 && this.#selectionClickAccepted
+										? "interact"
+										: "select",
 					};
+		this.#selectionClickAccepted = false;
 		this.#update();
 	};
 
@@ -226,7 +232,14 @@ export class ClientViewportMouseController {
 		if (click.kind === "examine")
 			this.#options.onExamine(event.clientX, event.clientY);
 		else if (click.kind === "jump") this.#options.onJump();
-		else this.#options.onSelect(event.clientX, event.clientY);
+		else {
+			this.#selectionClickAccepted = click.kind === "select";
+			this.#options.onSelect(
+				event.clientX,
+				event.clientY,
+				click.kind === "interact",
+			);
+		}
 	};
 
 	#requestLock(): void {
@@ -285,6 +298,7 @@ export class ClientViewportMouseController {
 
 	/** Cancel physical sources and pending clicks without manufacturing a jump release. */
 	readonly cancel = (): void => {
+		this.#selectionClickAccepted = false;
 		this.#buttons = 0;
 		this.#options.canvas.removeAttribute("data-mouse-active");
 		this.#mode = null;

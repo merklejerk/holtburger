@@ -144,6 +144,66 @@ describe("ClientEntitySelection", () => {
 		selection.destroy();
 	});
 
+	it.each(["hit", "empty", "unavailable", "superseded", "reentrant"] as const)(
+		"viewport action commits selection before acting and handles %s",
+		(outcome) => {
+			const lifecycle = new FakeLifecycle();
+			const presentation = new FakePresentation();
+			const selection = new ClientEntitySelection({
+				lifecycle,
+				presentation: () => presentation,
+			});
+			const pointer = new ClientPointerSelectionController({
+				lifecycle,
+				presentation: () => presentation,
+				selection,
+				onSelectionSubmissionFailed: (error) => {
+					throw error;
+				},
+			});
+			selection.select(77);
+			const actions: { picked: number; selected: number | null }[] = [];
+			if (outcome === "reentrant")
+				selection.subscribe((guid) => {
+					if (guid === 4) selection.select(8);
+				});
+			pointer.acquireViewportPoint(40, 20, (picked) => {
+				actions.push({ picked, selected: selection.selectedGuid() });
+			});
+			const request = lifecycle.requests.at(-1);
+			if (request === undefined)
+				throw new Error("Expected viewport pick request");
+			if (outcome === "superseded") selection.beginAcquisition("external");
+			if (outcome === "unavailable") {
+				lifecycle.emit({
+					type: "entity-selection-query-result",
+					result: {
+						status: "unavailable",
+						sequence: request.sequence,
+						reason: "stale-camera",
+					},
+				});
+			} else
+				lifecycle.emit(
+					available(request.sequence, outcome === "empty" ? [] : [4]),
+				);
+			expect(actions).toEqual(
+				outcome === "hit" ? [{ picked: 4, selected: 4 }] : [],
+			);
+			const expectedSelection =
+				outcome === "hit"
+					? 4
+					: outcome === "empty"
+						? null
+						: outcome === "reentrant"
+							? 8
+							: 77;
+			expect(selection.selectedGuid()).toBe(expectedSelection);
+			pointer.destroy();
+			selection.destroy();
+		},
+	);
+
 	it("resolves interaction targets without changing selection and discards cancelled picks", () => {
 		const lifecycle = new FakeLifecycle();
 		const presentation = new FakePresentation();

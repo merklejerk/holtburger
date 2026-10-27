@@ -386,7 +386,12 @@
 		/** Set an absolute normalized power from the HUD bar. */
 		readonly onPreciseJumpPowerSet: (power: number) => void;
 		readonly onPreciseJumpActivate: () => void;
-		readonly onViewportSelect: (clientX: number, clientY: number) => void;
+		/** Accepted selection click, with activation requested only on the second click. */
+		readonly onViewportSelect: (
+			clientX: number,
+			clientY: number,
+			interact: boolean,
+		) => void;
 		readonly onViewportExamine: (clientX: number, clientY: number) => void;
 		readonly onViewportHover: (clientX: number, clientY: number) => void;
 		/** Clear world hover and invalidate in-flight acquisition on surface exit. */

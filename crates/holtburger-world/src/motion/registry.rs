@@ -265,8 +265,10 @@ pub enum MotionPresentation {
 pub enum OrdinaryMotionActivity {
     /// Standing or travelling playback that can be represented by independent locomotion.
     Locomotion,
-    /// Recognized spell, reach, and missile gesture, including entry and return transitions.
+    /// Recognized spell and missile gesture, including entry and return transitions.
     Gesture,
+    /// Inventory reach, including entry and return; independent of locomotion eligibility.
+    Reach,
     /// Other actions, explicit poses, or noncyclic transitions, including contact/death.
     Explicit,
 }
@@ -601,7 +603,11 @@ impl BodyMotionRuntime {
         if ordinary.is_none() && locomotion.is_none() {
             return None;
         }
-        let activity = if self.pending_gesture.is_some()
+        let activity = if self.pending_gesture.is_some_and(|command| {
+            command.movement_override_gesture() == Some(super::MotionGesture::Reach)
+        }) {
+            OrdinaryMotionActivity::Reach
+        } else if self.pending_gesture.is_some()
             || self
                 .active_action
                 .is_some_and(|action| action.command.movement_override_gesture().is_some())

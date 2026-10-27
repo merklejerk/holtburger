@@ -93,18 +93,20 @@ export type AnimationLayerUpdate =
 	| { readonly kind: "retime"; readonly framesPerSecond: number };
 
 /** Shared semantic activity; visibility priority is applied here in the frontend. */
-export type AnimationMotionActivity = "locomotion" | "gesture" | "explicit";
+export type AnimationMotionActivity =
+	"locomotion" | "gesture" | "reach" | "explicit";
 
 interface OrdinaryPlayback {
+	/** Meaning of the displayed clip, retained while a successor waits. */
+	readonly activity: AnimationMotionActivity;
 	/** Currently traversed ordinary clip, including a naturally retiring gesture. */
 	readonly current: ClipAnimationRecord;
-	/** An accepted successor waits without advancing until the final gesture clip finishes. */
+	/** Only a locomotion successor waits for the final gesture clip; other activities interrupt. */
 	readonly successor: { readonly record: ClipAnimationRecord | null } | null;
 }
 
 /** A node always has at least one playable track. Both tracks share one entity lifetime. */
 type MotionNodeAnimation = {
-	readonly activity: AnimationMotionActivity;
 	/** Resolved frontend pose policy; semantic visibility still owns all animation hooks. */
 	readonly poseComposition: AnimationPoseComposition;
 } & (
@@ -143,7 +145,7 @@ function selectedPlayback(node: NodeAnimation): AnimationRecord {
 	if (node.kind === "sequence") return node.sequence;
 	if (node.kind === "ordinary") return node.ordinary.current;
 	if (node.kind === "locomotion") return node.locomotion;
-	return node.activity !== "locomotion" || node.ordinary.successor !== null
+	return node.ordinary.activity !== "locomotion"
 		? node.ordinary.current
 		: node.locomotion;
 }
@@ -151,7 +153,6 @@ function selectedPlayback(node: NodeAnimation): AnimationRecord {
 function composePlayback(
 	ordinary: OrdinaryPlayback | null,
 	locomotion: ClipAnimationRecord | null,
-	activity: AnimationMotionActivity,
 	poseComposition: AnimationPoseComposition,
 ): MotionNodeAnimation | null {
 	if (ordinary !== null && locomotion !== null)
@@ -159,13 +160,11 @@ function composePlayback(
 			kind: "layered",
 			ordinary,
 			locomotion,
-			activity,
 			poseComposition,
 		};
-	if (ordinary !== null)
-		return { kind: "ordinary", ordinary, activity, poseComposition };
+	if (ordinary !== null) return { kind: "ordinary", ordinary, poseComposition };
 	if (locomotion !== null)
-		return { kind: "locomotion", locomotion, activity, poseComposition };
+		return { kind: "locomotion", locomotion, poseComposition };
 	return null;
 }
 
@@ -280,7 +279,8 @@ export class AnimationSystem<TOwnerId extends string> {
 		const previouslyVisible = existing ? selectedPlayback(existing) : null;
 		const finishing =
 			oldOrdinary !== null &&
-			(existing?.activity === "gesture" || oldOrdinary.successor !== null) &&
+			(oldOrdinary.activity === "gesture" ||
+				oldOrdinary.activity === "reach") &&
 			activity === "locomotion" &&
 			canFinishGesture(oldOrdinary.current);
 		const acceptedOrdinary =
@@ -310,17 +310,13 @@ export class AnimationSystem<TOwnerId extends string> {
 			finishing && oldOrdinary !== null
 				? {
 						current: oldOrdinary.current,
+						activity: oldOrdinary.activity,
 						successor: { record: ordinaryRecord },
 					}
 				: ordinaryRecord === null
 					? null
-					: { current: ordinaryRecord, successor: null };
-		const node = composePlayback(
-			ordinary,
-			locomotion,
-			activity,
-			poseComposition,
-		);
+					: { current: ordinaryRecord, successor: null, activity };
+		const node = composePlayback(ordinary, locomotion, poseComposition);
 		if (node === null) {
 			this.#records.delete(nodeId);
 		} else {
@@ -452,9 +448,14 @@ export class AnimationSystem<TOwnerId extends string> {
 							);
 				if (successor !== null) successor.lastTimeSeconds = timeSeconds;
 				const next = composePlayback(
-					successor === null ? null : { current: successor, successor: null },
+					successor === null
+						? null
+						: {
+								current: successor,
+								successor: null,
+								activity: "locomotion",
+							},
 					locomotion,
-					node.activity,
 					node.poseComposition,
 				);
 				if (next === null) this.#records.delete(nodeId);
@@ -498,11 +499,12 @@ export class AnimationSystem<TOwnerId extends string> {
 				throw new Error(`Animation sample request contains unknown ${nodeId}.`);
 			const selected = selectedPlayback(record);
 			const sample = this.#sample(nodeId, selected);
+			// Inventory reach keeps its authored pelvis and legs, including during local retirement.
 			if (
 				record.kind !== "layered" ||
 				record.poseComposition.kind === "ordinary" ||
 				selected === record.locomotion ||
-				(record.activity !== "gesture" && record.ordinary.successor === null)
+				record.ordinary.activity !== "gesture"
 			)
 				return sample;
 			const locomotionPose = this.#samplePartPose(record.locomotion);
@@ -577,8 +579,11 @@ export class AnimationSystem<TOwnerId extends string> {
 						? { kind: "sequence", sequence: record }
 						: {
 								kind: "ordinary",
-								ordinary: { current: record, successor: null },
-								activity: "explicit",
+								ordinary: {
+									current: record,
+									successor: null,
+									activity: "explicit",
+								},
 								poseComposition: { kind: "ordinary" },
 							},
 				);

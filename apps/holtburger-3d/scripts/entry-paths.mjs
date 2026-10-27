@@ -145,6 +145,13 @@ export function extractElectronLaunchArguments(args) {
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
 		const parsed = parseLongArgument(argument);
+		if (parsed.name === "dev") {
+			// Keep renderer diagnostics on their existing query contract in both launch paths.
+			remainingArgs.push(
+				parsed.value === undefined ? "--debug" : `--debug=${parsed.value}`,
+			);
+			continue;
+		}
 		if (parsed.name === "debug-port") {
 			if (debugPort !== undefined) {
 				throw new Error("Debug port was specified more than once.");

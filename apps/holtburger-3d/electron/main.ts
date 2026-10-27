@@ -21,6 +21,7 @@ import {
 	requireEntry,
 	extractContentArguments,
 	extractEntryArguments,
+	extractElectronLaunchArguments,
 } from "../scripts/entry-paths.mjs";
 import { applicationMenuTemplate } from "./application-menu.js";
 import {
@@ -160,8 +161,15 @@ function entryArguments(): {
 			);
 		}
 	}
+	const launch = extractElectronLaunchArguments(rendererArguments);
+	for (const argument of launch.electronSwitches) {
+		const [name, value] = argument.slice(2).split("=", 2);
+		// Preserve native switches supplied directly or by the development launcher.
+		if (!app.commandLine.hasSwitch(name))
+			app.commandLine.appendSwitch(name, value);
+	}
 	return {
-		path: buildEntryPath(entry.path, rendererArguments),
+		path: buildEntryPath(entry.path, launch.args),
 		title: entry.title + (release ? " (release host)" : ""),
 		mode,
 		clientStartup,
@@ -603,15 +611,18 @@ async function loadEntry(
 	});
 }
 
-app.whenReady().then(async () => {
-	app.dock?.setIcon(applicationIconPath);
+void (async () => {
 	let entry: ReturnType<typeof entryArguments>;
 	try {
+		// Chromium switches must be installed before Electron emits ready.
 		entry = entryArguments();
 	} catch (error) {
+		await app.whenReady();
 		reportFatalError("Holtburger 3D launch arguments are invalid", error);
 		return;
 	}
+	await app.whenReady();
+	app.dock?.setIcon(applicationIconPath);
 	const menuTemplate = applicationMenuTemplate(process.platform);
 	Menu.setApplicationMenu(
 		menuTemplate === null ? null : Menu.buildFromTemplate(menuTemplate),
@@ -777,7 +788,7 @@ app.whenReady().then(async () => {
 	} catch (error) {
 		reportFatalError("Holtburger 3D failed to start", error);
 	}
-});
+})();
 
 app.on("window-all-closed", () => {
 	// The host belongs to the sole product window; retaining a headless macOS app would orphan it.

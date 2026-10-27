@@ -183,7 +183,8 @@ A scope's unhandled keys never fall through to game bindings.
 `ViewportInputGate` handles scene/lifecycle availability and world gesture cancellation. Modal and
 scene blockers are independent; releasing one cannot release another. Editing suspends game keys
 without blocking mouse gestures. Keyboard ownership changes, window blur, visibility loss, and
-world blocking cancel held actions without releasing charged jumps. Repeats and releases from a
+world blocking cancel held actions without releasing charged jumps. Editor handoff, window blur, and
+visibility loss preserve autorun; modal/scene blocking and lifecycle resets retire it. Repeats and releases from a
 cancelled press cannot activate the replacement owner. Precise jump remains a client-owned
 interaction within the viewport. Host movement contracts do not contain browser bindings.
 

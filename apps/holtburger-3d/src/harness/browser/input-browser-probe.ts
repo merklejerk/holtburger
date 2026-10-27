@@ -133,7 +133,7 @@ function probeClientAutorun(keyboard: KeyboardInputPolicy): void {
 		},
 		cancel: (reason) => {
 			input.reset();
-			if (reason === "focus-transfer") arbiter.releaseHeldActions();
+			if (reason === "release-held") arbiter.releaseHeldActions();
 			else arbiter.reset();
 		},
 	});
@@ -154,7 +154,7 @@ function probeClientAutorun(keyboard: KeyboardInputPolicy): void {
 			controller.drive().turn !== null
 		)
 			throw new Error(
-				"Editor handoff lost autorun or retained physical turning.",
+				"Input cancellation lost autorun or retained physical turning.",
 			);
 	};
 	try {
@@ -188,11 +188,53 @@ function probeClientAutorun(keyboard: KeyboardInputPolicy): void {
 			throw new Error(
 				`Editor focus failed to cancel charge before restoring autorun: ${commands}`,
 			);
-		window.dispatchEvent(new Event("blur"));
-		if (autorun || controller.drive().longitudinal !== null)
-			throw new Error("Window blur while editing retained autorun.");
+		const blur = () => window.dispatchEvent(new Event("blur"));
+		const hide = () => {
+			// Exercise the production visibility listener without hiding the harness itself.
+			Object.defineProperty(document, "hidden", {
+				configurable: true,
+				value: true,
+			});
+			try {
+				document.dispatchEvent(new Event("visibilitychange"));
+			} finally {
+				Reflect.deleteProperty(document, "hidden");
+			}
+		};
+		for (const interrupt of [blur, hide]) {
+			interrupt();
+			assertForward();
+			keyboard.returnToGame();
+			key("F7", true);
+			key("F8", true);
+			commands.length = 0;
+			interrupt();
+			assertForward();
+			if (
+				commands.join() !== "reset,acquire:forward" ||
+				controller.chargeExtent() !== null
+			)
+				throw new Error(
+					`Focus loss failed to cancel charge before restoring autorun: ${commands}`,
+				);
+			commands.length = 0;
+			interrupt();
+			key("F7", true, true);
+			key("F8", false);
+			key("F7", false);
+			assertForward();
+			if (commands.join() !== "synchronize:forward")
+				throw new Error(
+					`Repeated focus loss or stale keys changed movement ownership: ${commands}`,
+				);
+			arbiter.enterPrecise();
+			interrupt();
+			assertForward();
+			if (arbiter.preciseActive)
+				throw new Error("Focus loss retained precise targeting.");
+			editor.focus();
+		}
 		keyboard.returnToGame();
-		arbiter.toggleAutoRun();
 		arbiter.enterPrecise();
 		editor.focus();
 		assertForward();
@@ -205,6 +247,11 @@ function probeClientAutorun(keyboard: KeyboardInputPolicy): void {
 		} finally {
 			modal.destroy();
 		}
+		keyboard.returnToGame();
+		arbiter.toggleAutoRun();
+		keyboard.cancel();
+		if (autorun || controller.drive().longitudinal !== null)
+			throw new Error("Lifecycle reset retained autorun.");
 	} finally {
 		detach();
 		editor.remove();

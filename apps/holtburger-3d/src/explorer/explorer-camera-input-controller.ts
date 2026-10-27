@@ -178,7 +178,7 @@ export class ExplorerCameraInputController {
 
 	/** Replace the pose for automatic focus without marking it as user-controlled. */
 	setAutomaticPose(pose: FreeFlyCameraPose): void {
-		this.#inputGate.cancel();
+		this.#inputGate.cancel("reset");
 		this.#look.replace(pose);
 		this.#setState({ ...pose, hasManualControl: false });
 	}
@@ -190,7 +190,7 @@ export class ExplorerCameraInputController {
 
 	/** Seeds frontend free fly from the exact physical pose presented on the prior frame. */
 	adoptPresentedPose(pose: FreeFlyCameraPose): void {
-		this.#inputGate.cancel();
+		this.#inputGate.cancel("reset");
 		this.#look.replace(pose);
 		this.#state = { ...pose, hasManualControl: true };
 	}
@@ -198,7 +198,7 @@ export class ExplorerCameraInputController {
 	/** Atomically clears the outgoing owner before installing a complete input-routing scheme. */
 	setControlScheme(scheme: FrontendControlScheme): void {
 		if (this.#scheme.kind === scheme.kind) return;
-		this.#inputGate.cancel();
+		this.#inputGate.cancel("reset");
 		this.#scheme = scheme;
 	}
 

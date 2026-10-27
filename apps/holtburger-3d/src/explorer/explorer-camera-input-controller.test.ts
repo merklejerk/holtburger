@@ -96,7 +96,7 @@ function controllerHarness(
 			: type === "keyup"
 				? keyboard.keyup
 				: type === "blur"
-					? () => inputGate.cancel()
+					? () => inputGate.cancel("release-held")
 					: listeners.get(type))?.({
 			stopImmediatePropagation: vi.fn(),
 			preventDefault: vi.fn(),

@@ -294,7 +294,7 @@
 	const appLifecycle = new ClientAppLifecycle({
 		session: () => session,
 		stopInput: async () => {
-			inputGate.cancel();
+			inputGate.cancel("reset");
 			await inputDispatch;
 		},
 		retireGameplay: async () => {
@@ -1098,7 +1098,7 @@
 				entityCollisionDisabled = event.state.entityCollisionDisabled;
 				if (event.state.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
-					inputGate.cancel();
+					inputGate.cancel("reset");
 				}
 				playerName = event.state.playerName;
 				if (
@@ -1142,7 +1142,7 @@
 				gameplayPreferences = session?.state().gameplayPreferences ?? null;
 				if (event.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
-					inputGate.cancel();
+					inputGate.cancel("reset");
 				}
 				if (
 					event.lifecycle.kind === "entering-world" ||
@@ -1221,11 +1221,11 @@
 			case "exit-requested":
 				retireChatCharacter();
 				navigationWaypoint.acceptCharacter(null);
-				inputGate.cancel();
+				inputGate.cancel("reset");
 				appLifecycle.acceptExit(event.exit);
 				return;
 			case "presentation-discontinuity":
-				inputGate.cancel();
+				inputGate.cancel("reset");
 				return;
 			default:
 				return;
@@ -1926,7 +1926,7 @@
 				itemInteractions?.cancelTargeting();
 				selectionInput?.cancel();
 				characterInput.reset();
-				if (reason === "focus-transfer") inputArbiter?.releaseHeldActions();
+				if (reason === "release-held") inputArbiter?.releaseHeldActions();
 				else inputArbiter?.reset();
 			},
 		}),

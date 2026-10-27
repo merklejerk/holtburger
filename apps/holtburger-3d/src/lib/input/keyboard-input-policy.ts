@@ -1,7 +1,7 @@
-import type { ViewportInputGate } from "./viewport-input-gate";
-
-/** Focus transfers release held controls; discontinuities also retire persistent game modes. */
-export type KeyboardCancellationReason = "focus-transfer" | "reset";
+import type {
+	InputCancellationMode,
+	ViewportInputGate,
+} from "./viewport-input-gate";
 
 /** One keyboard consumer; native browser behavior survives unless a handler prevents it. */
 export interface KeyboardConsumer {
@@ -10,7 +10,7 @@ export interface KeyboardConsumer {
 	/** Receives releases only for presses delivered to this consumer. */
 	readonly keyup: (event: KeyboardEvent) => void;
 	/** Drop held actions without triggering release actions such as charged jumps. */
-	readonly cancel: (reason: KeyboardCancellationReason) => void;
+	readonly cancel: (reason: InputCancellationMode) => void;
 }
 
 /** An explicitly activatable UI surface, also used by editors nested within it. */
@@ -140,7 +140,7 @@ export class KeyboardInputPolicy {
 
 	constructor(private readonly viewport: ViewportInputGate) {
 		// The gate and policy share the app lifetime, including periods without a game controller.
-		viewport.attach(() => this.cancel());
+		viewport.attach((mode) => this.#cancel(mode));
 	}
 
 	/** Whether keyboard commands can currently enter the world context. */
@@ -166,7 +166,7 @@ export class KeyboardInputPolicy {
 			attributes: true,
 			attributeFilter: ["disabled", "hidden", "inert", "open"],
 		});
-		const blur = () => this.viewport.cancel();
+		const blur = () => this.viewport.cancel("release-held");
 		const visibility = () => {
 			if (document.hidden) blur();
 		};
@@ -372,7 +372,7 @@ export class KeyboardInputPolicy {
 		this.#cancel("reset");
 	}
 
-	#cancel(reason: KeyboardCancellationReason): void {
+	#cancel(reason: InputCancellationMode): void {
 		this.#focusReturnGesture = null;
 		for (const key of this.#presses.keys()) this.#presses.set(key, "cancelled");
 		this.#game?.cancel(reason);
@@ -614,7 +614,7 @@ export class KeyboardInputPolicy {
 			// Modality and viewport blockers retain their hard cancellation boundary.
 			this.#cancel(
 				this.#modals.length === 0 && this.viewport.allowed
-					? "focus-transfer"
+					? "release-held"
 					: "reset",
 			);
 		}

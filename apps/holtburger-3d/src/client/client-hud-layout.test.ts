@@ -4,6 +4,7 @@ import {
 	anchorClientHudPlacement,
 	createClientHudLayout,
 	createClientHudPanelPlacement,
+	moveClientHudRectangle,
 	resizeClientPanelRectangle,
 	resolveClientHudPlacement,
 	resolveClientHudSquarePlacement,
@@ -15,6 +16,26 @@ import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 const PANEL_MINIMUM = { width: 280, height: 240 };
 
 describe("client HUD layout", () => {
+	it("keeps a moved surface reachable when its preferred extent exceeds the viewport", () => {
+		const preferred = { width: 400, height: 300 };
+		const viewport = { width: 200, height: 100 };
+		const moved = moveClientHudRectangle(
+			{ left: 50, top: 20, width: 150, height: 80 },
+			viewport,
+			PANEL_MINIMUM,
+			preferred,
+			{ x: 100, y: -100 },
+		);
+		expect(moved).toEqual({ left: 0, top: 0, width: 200, height: 100 });
+		expect(
+			resolveClientHudPlacement(
+				anchorClientHudPlacement(moved, viewport, preferred),
+				viewport,
+				PANEL_MINIMUM,
+			),
+		).toEqual(moved);
+	});
+
 	it.each(["start", "end"] as const)(
 		"keeps a wide minimap footer reachable at the %s edge without enlarging the disc",
 		(alignment) => {

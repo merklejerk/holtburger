@@ -21,7 +21,10 @@ import {
 } from "./keyboard-policy-probe.mjs";
 import { probeTrade } from "./client-trade-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
-import { probeActionBars } from "./client-action-bar-probe.mjs";
+import {
+	probeActionBars,
+	probeHudSnapping,
+} from "./client-action-bar-probe.mjs";
 import { probeItemUse } from "./client-item-use-probe.mjs";
 import { probeClientBook } from "./client-book-probe.mjs";
 import { probeLoadouts } from "./client-loadout-probe.mjs";
@@ -373,6 +376,7 @@ try {
 	} else if (options.clientHud) {
 		const evidence = {
 			clientHud: result.clientHud,
+			clientHudSnapping: result.clientHudSnapping,
 			connectionBadge: result.connectionBadge,
 			clientInspection: result.clientInspection,
 			clientTargeting: result.clientTargeting,
@@ -418,6 +422,7 @@ try {
 		report = {
 			glRenderer: result.glRenderer,
 			clientHud: result.clientHud,
+			clientHudSnapping: result.clientHudSnapping,
 			clientTargeting: result.clientTargeting,
 			clientPreciseJump: result.clientPreciseJump,
 			buildingRadius: options.buildingRadius,
@@ -647,6 +652,7 @@ function parseArgs(args) {
 		clientWaypoint: false,
 		clientHousing: false,
 		clientHud: false,
+		clientHudSnapping: false,
 		uiShowcase: false,
 		itemCooldowns: false,
 		clientNearby: false,
@@ -878,6 +884,10 @@ function parseArgs(args) {
 			case "--client-nearby":
 				parsed.clientHud = true;
 				parsed.clientNearby = true;
+				break;
+			case "--client-hud-snapping":
+				parsed.clientHud = true;
+				parsed.clientHudSnapping = true;
 				break;
 			case "--client-hud":
 				parsed.clientHud = true;
@@ -2192,6 +2202,7 @@ Options:
   --user-theme-lifecycle Verify real ClientApp theme switches retain the roster/gameplay canvas and runtime.
   --client-text-scaling Verify text/icon scaling, theme composition, native dialogs, and retained UI.
   --client-mouse-movement Verify held mouse movement, steering, and cancellation.
+  --client-hud-snapping Verify action-bar adjacency, alignment, and pointer release.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --client-inventory    Verify inventory gestures, item use, give confirmations, and suppression.
@@ -4735,6 +4746,12 @@ async function runClientHudHarness({ viteUrl }) {
 			};
 		}
 		await waitForClientHudHarnessApi(client);
+		if (options.clientHudSnapping)
+			return {
+				clientHudSnapping: await probeHudSnapping(client, evaluateExpression),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
 		if (options.clientMouseMovement)
 			return {
 				clientMouseMovement: await probeClientMouseMovement(

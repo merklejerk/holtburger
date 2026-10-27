@@ -22,7 +22,7 @@
 	} from "./client-action-bar-contract";
 	import type { ClientActionBar } from "./client-action-bar-state";
 	import {
-		type ActionBarGeometry,
+		actionBarSurfaceId,
 		actionBarGrid,
 		actionCellPosition,
 		navigateActionCell,
@@ -46,8 +46,8 @@
 		viewport: ClientHudViewport;
 		/** Sampled bound-item presentation. */
 		items: ReadonlyMap<number, ActionItemDisplay>;
-		/** Register a cold geometry reader for collection-owned clone placement. */
-		onmount: (read: () => ActionBarGeometry) => () => void;
+		/** Register natural bar extent for collection-owned clone placement. */
+		onmount: (read: () => { width: number; height: number }) => () => void;
 		/** Publish geometry/configuration edits to the collection owner. */
 		onchange: (bar: ClientActionBar) => void;
 		/** Collection operations retain stable identities and contiguous sequence order. */
@@ -183,7 +183,7 @@
 			onchange({ ...bar, slots });
 		} else onmenu(operation);
 	}
-	onMount(() => onmount(() => ({ bounds: resolved, preferred: extent })));
+	onMount(() => onmount(() => extent));
 	const focusBinding = $derived(
 		presentClientBinding(
 			input,
@@ -195,6 +195,7 @@
 
 <ClientHudPanel
 	label={`Action bar ${sequence}`}
+	snapId={actionBarSurfaceId(bar.id)}
 	{editable}
 	{placement}
 	{viewport}

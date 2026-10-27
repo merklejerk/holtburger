@@ -48,6 +48,11 @@ the explicitly targeted Rust host through `HOLTBURGER_PACKAGE_HOST`, avoiding an
 native rebuild. CI validates the final suite after extraction and stages the complete matrix,
 TUI Flatpak, standalone micro ZIP, manifest, and checksums into one draft.
 
+Portable Linux builds use Ubuntu 22.04. The separate Flatpak job uses Ubuntu 24.04's
+builder 1.4, which supports the 24.08 SDK's `appstreamcli`; the older 22.04 builder
+expects `appstream-compose`. Flatpak runtime requirements remain defined by the declared
+24.08 runtime. Its installed production-bootstrap probe verifies binary compatibility.
+
 ## Dependency notices
 
 The plan job installs the version of `cargo-about` named by

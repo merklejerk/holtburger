@@ -172,7 +172,9 @@ jobs:
 
   flatpak:
     needs: plan
-    runs-on: ubuntu-22.04
+    # Builder 1.4 supports the SDK's appstreamcli; 22.04 still expects appstream-compose.
+    # Flatpak targets the 24.08 runtime; portable Linux keeps its 22.04 baseline.
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
       HOLTBURGER_SOURCE_REVISION: ${{ needs.plan.outputs.commit }}

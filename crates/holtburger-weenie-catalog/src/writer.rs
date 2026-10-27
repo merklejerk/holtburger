@@ -1,8 +1,6 @@
+use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-
-#[cfg(unix)]
-use std::fs;
 
 use tempfile::NamedTempFile;
 use thiserror::Error;
@@ -160,12 +158,18 @@ pub fn write_catalog_atomic(
     }
     drop(reopened);
 
-    temporary_path
-        .persist(path)
-        .map_err(|source| CatalogWriteError::Publish {
+    // Keep normal file attributes and cleanup on failure. Unlike tempfile::persist,
+    // std::fs::rename supports replacing a file with open readers on modern Windows.
+    let temporary_path = tempfile::TempPath::from_path(temporary_path.keep().map_err(|error| {
+        CatalogWriteError::Publish {
             path: path.to_path_buf(),
-            source,
-        })?;
+            source: error.error,
+        }
+    })?);
+    fs::rename(&temporary_path, path).map_err(|source| CatalogWriteError::Publish {
+        path: path.to_path_buf(),
+        source,
+    })?;
     sync_parent(parent).map_err(|source| CatalogWriteError::SyncParent {
         parent: parent.to_path_buf(),
         source,
@@ -282,7 +286,7 @@ pub enum CatalogWriteError {
         path: PathBuf,
         /// Underlying persistence failure.
         #[source]
-        source: tempfile::PathPersistError,
+        source: io::Error,
     },
     /// The destination directory could not be synced after publication.
     #[error("could not sync catalog directory {parent}: {source}")]

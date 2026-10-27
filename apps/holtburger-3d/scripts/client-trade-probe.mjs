@@ -300,6 +300,33 @@ export async function probeTrade(client, evaluateExpression) {
 	await wait("document.querySelector('[data-trade-panel]') === null");
 	await read(`${fixture}.register()`);
 	await wait("document.querySelector('[data-trade-panel]') !== null");
+	await read(`${fixture}.largeOffer(181)`);
+	await wait("document.querySelectorAll('[data-trade-item]').length === 181");
+	const offerGeometry = await read(`(async () => {
+		const panel = document.querySelector('[data-trade-panel]');
+		const grid = panel.querySelector('[data-trade-side="partner"] .trade-grid');
+		const { CLIENT_ICON_SCALE } = await import('/src/client/client-settings-values.ts');
+		const measurements = [];
+		try {
+			for (const scale of [CLIENT_ICON_SCALE.minimum, CLIENT_ICON_SCALE.initial, CLIENT_ICON_SCALE.maximum]) {
+				panel.style.setProperty('--ui-icon-scale', String(scale));
+				const cells = Array.from(grid.querySelectorAll('[data-trade-item]'), cell => cell.getBoundingClientRect());
+				const gap = parseFloat(getComputedStyle(grid).rowGap);
+				for (let index = 0; index < cells.length; index++) {
+					const cell = cells[index];
+					if (Math.abs(cell.width - cell.height) > 1)
+						throw new Error('Trade cell is not square: ' + JSON.stringify({scale, width: cell.width, height: cell.height}));
+					const nextRow = cells.slice(index + 1).find(next => next.top > cell.top + 1);
+					if (nextRow && nextRow.top < cell.bottom + gap - 1)
+						throw new Error('Trade rows overlap: ' + JSON.stringify({scale, height: cell.height, rowPitch: nextRow.top - cell.top, gap}));
+				}
+				if (grid.scrollHeight <= grid.clientHeight)
+					throw new Error('Large trade offer does not scroll');
+				measurements.push({scale, width: cells[0].width, height: cells[0].height, scrollHeight: grid.scrollHeight, clientHeight: grid.clientHeight});
+			}
+		} finally { panel.style.removeProperty('--ui-icon-scale'); }
+		return measurements;
+	})()`);
 	await read(`${fixture}.close()`);
 	await wait("document.querySelector('[data-trade-panel]') === null");
 	return {
@@ -312,5 +339,6 @@ export async function probeTrade(client, evaluateExpression) {
 		acceptedButtonTheme,
 		incoming: true,
 		completionRetainsWindow: true,
+		offerGeometry,
 	};
 }

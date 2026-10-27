@@ -165,7 +165,7 @@ Paths below are relative to the repository root. Code takes precedence where exi
 | `apps/holtburger-cli/build.rs`, `apps/holtburger-cli/src/version.rs` | TUI display currently prefers build override/CI hash/Git hash rather than package SemVer. |
 | `apps/holtburger-3d/scripts/app-build.ts`, `apps/holtburger-3d/src/app/app-build.ts` | h3d package version, Git revision, and modified status. Host handshake separately uses `CARGO_PKG_VERSION`. |
 | `apps/holtburger-3d/scripts/verify-electron-package.mjs`, `apps/holtburger-3d/scripts/verify-electron-archive.mjs` | Existing resource, license, executable-permission, and macOS framework-symlink checks. |
-| `apps/holtburger-cli/dist/`, `release-test/` | Existing TUI Flatpak and manual release test environment; the latter does not establish h3d desktop compatibility. |
+| `apps/holtburger-cli/dist/` | Existing TUI Flatpak packaging. |
 
 ### Findings that affect implementation
 

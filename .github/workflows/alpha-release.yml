@@ -96,8 +96,32 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python .github/scripts/fetch_alpha_content.py .holtburger-local/alpha-content
-      - name: Test affected Rust packages
-        run: cargo test --locked -p holtburger-dat -p holtburger-content -p holtburger-core -p holtburger-cli -p holtburger-3d-host -p holtburger-weenie-catalog --all-targets
+      - name: Install frontend dependencies
+        working-directory: apps/holtburger-3d
+        run: npm ci
+      - name: Check shared frontend and Electron logic once
+        if: runner.os == 'Linux'
+        working-directory: apps/holtburger-3d
+        run: |
+          npm run check
+          npm run lint:ts
+          npm run test:ts
+      - name: Test selected frontend OS contracts
+        if: runner.os != 'Linux'
+        run: python .github/scripts/alpha_os_tests.py frontend
+      - name: Check native branding generation
+        working-directory: apps/holtburger-3d
+        run: npm run check:branding
+      - name: Test shared Rust libraries and shipped CLI behavior once
+        if: runner.os == 'Linux'
+        run: |
+          cargo test --locked -p holtburger-dat -p holtburger-content -p holtburger-core -p holtburger-cli -p holtburger-3d-host -p holtburger-weenie-catalog --lib
+          cargo test --locked -p holtburger-cli --bin tui
+          cargo test --locked -p holtburger-tools --lib dat2hba::tests::
+          cargo test --locked -p holtburger-tools --bin dat2hba
+      - name: Test selected native Rust OS contracts
+        if: runner.os != 'Linux'
+        run: python .github/scripts/alpha_os_tests.py rust
       - name: Deny Rust lint warnings
         if: runner.os == 'Linux'
         run: |
@@ -115,16 +139,6 @@ jobs:
           echo "HOLTBURGER_HOST_BIN=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
           echo "HOLTBURGER_PACKAGE_HOST=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
           "target/${{ matrix.triple }}/release/content_bootstrap$SUFFIX" .holtburger-local/alpha-content/assets.hba
-      - name: Install frontend dependencies
-        working-directory: apps/holtburger-3d
-        run: npm ci
-      - name: Check frontend, Electron boundary, and branding
-        working-directory: apps/holtburger-3d
-        run: |
-          npm run check
-          npm run lint:ts
-          npm run test:ts
-          npm run check:branding
       - name: Build application output and package the inspected target host
         working-directory: apps/holtburger-3d
         run: |
@@ -150,9 +164,8 @@ jobs:
           esac
           if [[ "$RUNNER_OS" == 'Linux' ]]; then
             xvfb-run --auto-servernum npm run probe:user-themes:built
-            xvfb-run --auto-servernum node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
+            xvfb-run --auto-servernum node scripts/content-startup-probe.mjs --package "$EXECUTABLE" --theme-check full
           else
-            npm run probe:user-themes:built
             node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
           fi
       - name: Assemble and inspect the extracted suite

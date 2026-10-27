@@ -22,8 +22,14 @@ const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const workspace = resolve(appRoot, "../..");
 const runFile = promisify(execFile);
 const { values } = parseArgs({
-	options: { package: { type: "string" }, flatpak: { type: "boolean" } },
+	options: {
+		package: { type: "string" },
+		flatpak: { type: "boolean" },
+		"theme-check": { type: "string", default: "assets" },
+	},
 });
+if (!["assets", "full"].includes(values["theme-check"]))
+	throw new Error("--theme-check must be assets or full");
 if (values.flatpak === true && values.package !== undefined)
 	throw new Error("Choose --package <executable> or --flatpak");
 const launchTarget =
@@ -437,6 +443,7 @@ try {
 					read: (expression) => evaluate(app.client, expression),
 					waitFor,
 					profileDirectory: join(config, profileName),
+					coverage: values["theme-check"],
 				});
 		} finally {
 			await app.close(0);

@@ -70,6 +70,28 @@ exercise real conversion/export without retail data. Probe executables/launchers
 tooling and are not public release binaries. Both Flatpaks contribute installed identity
 receipts; aggregation rejects missing assets, wrong source/content/notices, or changed bytes.
 
+## Validation scope
+
+Shared correctness runs once on Linux: the six affected library test targets, TUI CLI tests,
+the converter's library/CLI tests, full frontend tests, type checks, and lint. Unit-test
+selection excludes unshipped diagnostic binaries. Release builds still explicitly name only
+the shipped executables and the private bootstrap probe.
+
+Windows and Apple Silicon use `.github/scripts/alpha_os_tests.py`: four Rust library targets
+(content mounting, catalog I/O, TUI script files, and host catalog/map caches) plus nine
+frontend files covering filesystem, native paths, launch arguments, settings, and themes.
+Every Rust selector must match tests and every frontend file must exist. These runners do
+not build the DAT/core unit-test targets; Cargo still builds their dependencies when needed.
+Cheap frontend checks run before Rust compilation for earlier failure feedback.
+
+Every target retains branding, bootstrap, package/architecture/resource inspection, private-host
+smoke, default-client/Explorer content recovery, and actual packaged font/image decoding.
+The exhaustive theme suite and packaged custom-theme reload run on Linux. Native Windows/macOS
+use the content probe's default `--theme-check assets`; Linux explicitly selects `full`.
+Flatpak retains `--theme-check full` because custom-theme filesystem access crosses its sandbox.
+Automated install/startup and exact artifact checks remain release gates; manual native/visual
+acceptance remains the final publication gate.
+
 ## Dependency notices
 
 The plan job installs the version of `cargo-about` named by

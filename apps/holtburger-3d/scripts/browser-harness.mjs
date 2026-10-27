@@ -6628,7 +6628,10 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			process.env.HOLTBURGER_PROBE_PORTAL_TRAVERSAL === "1"
 				? await evaluateExpression(
 						client,
-						`import('/src/harness/browser/portal-traversal-investigation.ts').then(module => module.runPortalTraversalInvestigation())`,
+						process.env.HOLTBURGER_PROBE_PORTAL_GEOMETRY === "1"
+							? `import('/src/harness/browser/static-cell-coverage-probe.ts').then(module =>
+								module.runStaticCellCoverageProbe(globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__))`
+							: `import('/src/harness/browser/portal-traversal-investigation.ts').then(module => module.runPortalTraversalInvestigation())`,
 					)
 				: null;
 		// Recorded so any timing carries proof of which adapter produced it. SwiftShader numbers

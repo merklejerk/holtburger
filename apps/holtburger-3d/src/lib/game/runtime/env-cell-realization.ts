@@ -19,6 +19,7 @@ import { mergeAssetTextureFacts } from "../textures/texture-facts";
 import type { StaticLayerGeometryPreparer } from "./static-layer-realizer";
 import type { OwnerId } from "./owner-ids";
 import { staticRevisionToInstallNamespace } from "./owner-ids";
+import { StaticBatchCellCoverage } from "../commit/static-batch-cell-coverage";
 import type { SceneInterestRevision } from "./scene-availability";
 
 /** Environment and resident artifacts staged together for one EnvCell layer revision. */
@@ -53,6 +54,8 @@ export class EnvCellGeometryPreparer {
 		readonly source: EnvCellMaterializationPlan;
 		readonly textureRequirements: readonly import("../textures/types").AssetTextureFact[];
 	}): Promise<EnvCellRealizationArtifact> {
+		const environment = createEnvCellEnvironmentArtifact(options.source);
+		const coverage = new StaticBatchCellCoverage(environment);
 		const residentArtifacts = await Promise.all(
 			options.source.residentJobs.map((job) =>
 				this.#residentGeometry.prepare({
@@ -66,11 +69,27 @@ export class EnvCellGeometryPreparer {
 			),
 		);
 		return {
-			environment: createEnvCellEnvironmentArtifact(options.source),
+			environment,
 			residents: mergeResidentArtifacts(
 				options.owner,
 				options.revision,
-				residentArtifacts,
+				residentArtifacts.map((artifact) =>
+					artifact === null
+						? null
+						: {
+								...artifact,
+								objects: artifact.objects.map((object) => ({
+									...object,
+									placement: {
+										...object.placement,
+										spatialMembership: coverage.resolve(
+											object.placement,
+											object.localBounds,
+										),
+									},
+								})),
+							},
+				),
 			),
 			residentGeometryDiagnostics: mergeGeometryDiagnostics(residentArtifacts),
 		};

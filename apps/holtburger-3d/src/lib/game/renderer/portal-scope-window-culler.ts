@@ -135,7 +135,7 @@ export interface PortalScopeWindowFrameView {
 	selectedScope(ordinal: number): SceneScope;
 	/** Resolve an existing renderer scope key to its selected ordinal, or null when culled. */
 	selectedScopeOrdinal(renderScopeKey: string): number | null;
-	/** Resolve a selected renderer scope key to its visibility-island render ordinal. */
+	/** Resolve any member of a selected visibility island to its render ordinal. */
 	selectedRenderDomainOrdinal(renderScopeKey: string): number | null;
 	/** Return one selected scope's visibility-island render ordinal. */
 	selectedScopeRenderDomainOrdinal(ordinal: number): number;
@@ -524,14 +524,10 @@ class MutablePortalScopeWindowFrameView implements PortalScopeWindowFrameView {
 				`Portal renderer scope key ${renderScopeKey} is unavailable in this topology.`,
 			);
 		}
-		if (arena.selectedByScopeId[scopeId] === 0) return null;
 		const renderDomainId = this.index!.renderDomainIdByScopeId[scopeId]!;
-		if (arena.selectedByRenderDomainId[renderDomainId] === 0) {
-			throw new Error(
-				`Selected portal scope ${renderScopeKey} lost its render domain.`,
-			);
-		}
-		return arena.selectedOrdinalByRenderDomainId[renderDomainId]!;
+		return arena.selectedByRenderDomainId[renderDomainId] === 0
+			? null
+			: arena.selectedOrdinalByRenderDomainId[renderDomainId]!;
 	}
 
 	selectedScopeRenderDomainOrdinal(ordinal: number): number {

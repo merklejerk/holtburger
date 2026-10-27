@@ -37,6 +37,10 @@
 		/** Set the current local destination without submitting chat. */
 		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		readonly messages: readonly ClientChatLine[];
+		/** Existing selection owner checks current local facts and retention distance. */
+		readonly onSelectEntity: (guid: number) => boolean;
+		/** Unavailable or historical entity references report through the toast owner. */
+		readonly onNotice: (message: string) => void;
 		/** User-selected clock format for all buffered message timestamps. */
 		readonly clockFormat: ClientClockFormat;
 		/** App-owned locally queued input, oldest first. */
@@ -58,6 +62,8 @@
 	const {
 		onSetWaypoint,
 		messages,
+		onSelectEntity,
+		onNotice,
 		clockFormat,
 		sentHistory,
 		onSend,
@@ -478,18 +484,24 @@
 		setBufferHovered(false);
 	}
 
-	function linePrefix(line: ClientChatLine): string {
+	function selectEntity(line: ClientChatLine, guid: number): void {
+		if (line.generation !== composer.generation) {
+			onNotice("This entity link belongs to a previous character or session.");
+			return;
+		}
+		if (!onSelectEntity(guid))
+			onNotice(
+				"This entity is currently outside selection range or unavailable.",
+			);
+	}
+
+	function lineTimestamp(line: ClientChatLine): string {
 		const time = line.receivedAt.toLocaleTimeString([], {
 			hour: "2-digit",
 			minute: "2-digit",
 			hourCycle: clockFormat === "24-hour" ? "h23" : "h12",
 		});
-		const label = clientChatMessageLabel(line);
-		const channel = label === null ? "" : ` [${label}]`;
-		const sender = "sender" in line ? ` ${line.sender}` : "";
-		const separator =
-			line.kind === "emote" || line.kind === "soul-emote" ? "" : ":";
-		return `[${time}]${channel}${sender}${separator}`;
+		return `[${time}]`;
 	}
 </script>
 
@@ -533,6 +545,7 @@
 				<div class="chat-lines">
 					{#each visibleMessages as line (line.id)}
 						{@const tone = clientChatTone(line)}
+						{@const label = clientChatMessageLabel(line)}
 						<p
 							class:chat-tone-tell={tone === "tell"}
 							class:chat-tone-emote={tone === "emote"}
@@ -548,16 +561,33 @@
 							class:chat-emote={line.kind === "emote" ||
 								line.kind === "soul-emote"}
 						>
-							<strong>{linePrefix(line)}</strong>
+							<strong
+								><span class="chat-meta">{lineTimestamp(line)}</span
+								>{#if label !== null}<span
+										class="chat-channel-prefix"
+										data-channel={line.kind === "channel"
+											? line.channel
+											: undefined}
+									>
+										{` [${label}]`}</span
+									>{/if}<span class="chat-meta"
+									>{"sender" in line ? ` ${line.sender}` : ""}{line.kind ===
+										"emote" || line.kind === "soul-emote"
+										? ""
+										: ":"}</span
+								></strong
+							>
 							<span class="chat-message"
 								>{#if line.kind === "formatted-system"}<ClientChatFormattedText
 										rows={line.rows}
+										onSelectEntity={(guid) => selectEntity(line, guid)}
 										interactive={historyInteractive}
 										{onSetWaypoint}
-									/>{:else if historyInteractive}<ClientWaypointText
+									/>{:else}<ClientWaypointText
 										text={line.message}
+										interactive={historyInteractive}
 										{onSetWaypoint}
-									/>{:else}{line.message}{/if}</span
+									/>{/if}</span
 							>
 						</p>
 					{/each}
@@ -892,8 +922,19 @@
 			font-weight: 700;
 		}
 		p strong {
-			color: var(--ui-color-muted);
 			font-weight: 700;
+		}
+		.chat-meta {
+			color: var(--ui-color-muted);
+		}
+		.chat-channel-prefix[data-channel="general"] {
+			color: var(--ui-chat-general-prefix-text);
+		}
+		.chat-channel-prefix[data-channel="lfg"] {
+			color: var(--ui-chat-lfg-prefix-text);
+		}
+		.chat-channel-prefix[data-channel="roleplay"] {
+			color: var(--ui-chat-roleplay-prefix-text);
 		}
 		.chat-tone-system {
 			color: var(--ui-chat-system-text);

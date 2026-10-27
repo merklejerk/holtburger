@@ -462,11 +462,15 @@ describe("portal scope-atlas planning", () => {
 	it("retreats complete frontiers until fixed atlas capacity fits without re-culling", () => {
 		const middle = envCellScope("middle");
 		const leaf = envCellScope("leaf");
+		const middleMember = envCellScope("middle-member");
+		const leafMember = envCellScope("leaf-member");
 		const graph = topology(
 			[
 				topologyScope(OUTDOOR_SCOPE, null),
 				topologyScope(middle, "middle"),
 				topologyScope(leaf, "leaf"),
+				topologyScope(middleMember, "middle"),
+				topologyScope(leafMember, "leaf"),
 			],
 			[
 				crossing("root-middle", OUTDOOR_SCOPE, middle, {
@@ -494,6 +498,12 @@ describe("portal scope-atlas planning", () => {
 		expect(frame.visibility.completedDepth).toBe(1);
 		expect(frame.visibility.declinedDepth).toBe(2);
 		expect(frame.visibility.selectedScopeCount).toBe(2);
+		expect(frame.tileOrdinalForRenderScopeKey(middleMember.envCellId)).toBe(
+			frame.tileOrdinalForRenderScopeKey(middle.envCellId),
+		);
+		expect(() =>
+			frame.tileOrdinalForRenderScopeKey(leafMember.envCellId),
+		).toThrow("has no selected atlas tile");
 		expect(frame.visibility.selectedCrossingCount).toBe(1);
 		expect(frame.visibility.selectedCrossing(0).id).toBe(
 			"portal-crossing:root-middle",

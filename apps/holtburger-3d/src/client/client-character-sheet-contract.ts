@@ -312,6 +312,8 @@ const rejection = z.union([
 	]),
 	z.object({ Unavailable: unavailableWorld }).strict(),
 ]);
+/** Local admission failure for a previously displayed purchase quote. */
+export type ProgressionRejection = z.infer<typeof rejection>;
 export const progressionFeedbackSchema = z.union([
 	z
 		.object({ Submitted: z.object({ target: statTargetSchema }).strict() })

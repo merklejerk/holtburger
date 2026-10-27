@@ -60,6 +60,7 @@
 					<section class="book-page">
 						<p class="book-text">
 							{#if page.text !== null}<ClientWaypointText
+									interactive
 									text={page.text}
 									{onSetWaypoint}
 								/>{/if}
@@ -71,7 +72,11 @@
 				{/if}
 			{/each}
 			{#if reader.book.inscription}<blockquote>
-					<ClientWaypointText text={reader.book.inscription} {onSetWaypoint} />
+					<ClientWaypointText
+						interactive
+						text={reader.book.inscription}
+						{onSetWaypoint}
+					/>
 				</blockquote>{/if}
 			{#if reader.book.authorName}<p class="book-author">
 					— {reader.book.authorName}

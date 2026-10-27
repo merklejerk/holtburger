@@ -389,6 +389,8 @@
 		.trade-grid {
 			flex: 1;
 			align-content: start;
+			/* Dense offers must overflow the scrollport rather than compress their rows. */
+			grid-auto-rows: max-content;
 			overflow: auto;
 			min-height: 0;
 			padding: var(--ui-trade-content-inset);
@@ -400,6 +402,8 @@
 		}
 		.trade-cell {
 			aspect-ratio: 1;
+			/* Resolve square row sizing from the column width before scroll overflow. */
+			width: 100%;
 			min-width: 0;
 			padding: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
 			position: relative;

@@ -905,7 +905,7 @@ describe("independent gesture and locomotion playback", () => {
 		).toBe(true);
 	});
 
-	it.each(["gesture", "explicit"] as const)(
+	it.each(["gesture", "reach", "explicit"] as const)(
 		"composes a complete humanoid pose during %s",
 		(activity) => {
 			const effects = new EffectSystem();
@@ -937,7 +937,7 @@ describe("independent gesture and locomotion playback", () => {
 			expect(
 				sample.articulatedPose.partToObjectTransforms.map((part) => part.m41),
 			).toEqual(
-				activity === "explicit"
+				activity !== "gesture"
 					? gestureTranslations
 					: layout.partSources.map((source, index) =>
 							source === "locomotion" ? 1 + index : 1 + 10 * index,
@@ -1091,6 +1091,99 @@ describe("independent gesture and locomotion playback", () => {
 		).toBe(3);
 		expect(observations()).toHaveLength(0);
 	});
+
+	it.each(["install", "remove"] as const)(
+		"keeps a retiring pickup whole-body with an ordinary successor update of %s",
+		(kind) => {
+			const effects = new EffectSystem();
+			const system = buildAnimationSystemOver(effects);
+			const target = testTarget("scene-node:1");
+			const layout = HUMANOID_BODY_LAYOUT;
+			const translations = layout.partSources.map((_, index) => 10 + index);
+			const pose = initialPose(layout.partSources.length);
+			const composition = {
+				kind: "humanoid-gesture",
+				layout,
+				chestLocomotionWeight: 0.5,
+			} as const;
+			const fixed = fixedPoseAnimation("0x03000020", translations);
+			const reach = {
+				...fixed,
+				frameCount: 4,
+				partFrames: Array.from({ length: 4 }, () => fixed.partFrames).flat(),
+			};
+			const locomotion = fixedPoseAnimation(
+				"0x03000021",
+				layout.partSources.map(() => 1),
+			);
+			installEffectState(effects, target.targetId, layout.partSources.length);
+			system.applyMotion(
+				"owner",
+				target,
+				"reach",
+				{ kind: "install", clip: playingClip(reach, 0, 3, 10, "hold") },
+				{ kind: "remove" },
+				pose,
+				{ kind: "ordinary" },
+			);
+			advanceAndSample(system, 0);
+			// Movement starts after pickup, enabling split-body presentation for combat gestures.
+			system.applyMotion(
+				"owner",
+				target,
+				"reach",
+				{ kind: "unchanged" },
+				{ kind: "install", clip: playingClip(locomotion, 0, 0, 0, "loop") },
+				pose,
+				composition,
+			);
+			expect(
+				requiredAt(
+					advanceAndSample(system, 0.1),
+					0,
+				).articulatedPose.partToObjectTransforms.map((part) => part.m41),
+			).toEqual(translations);
+			system.applyMotion(
+				"owner",
+				target,
+				"locomotion",
+				kind === "install"
+					? { kind, clip: playingClip(locomotion, 0, 0, 0, "loop") }
+					: { kind },
+				{ kind: "unchanged" },
+				pose,
+				composition,
+			);
+			expect(
+				requiredAt(
+					advanceAndSample(system, 0.2),
+					0,
+				).articulatedPose.partToObjectTransforms.map((part) => part.m41),
+			).toEqual(translations);
+			// Repeated host confirmations must preserve the retiring pickup's semantic activity.
+			system.applyMotion(
+				"owner",
+				target,
+				"locomotion",
+				{ kind: "unchanged" },
+				{ kind: "unchanged" },
+				pose,
+				composition,
+			);
+			expect(
+				requiredAt(
+					advanceAndSample(system, 0.25),
+					0,
+				).articulatedPose.partToObjectTransforms.map((part) => part.m41),
+			).toEqual(translations);
+			expect(
+				requiredAt(
+					advanceAndSample(system, 0.4),
+					0,
+				).articulatedPose.partToObjectTransforms.map((part) => part.m41),
+			).toEqual(layout.partSources.map(() => 1));
+		},
+	);
 
 	it("finishes the local gesture after host retirement while locomotion keeps advancing", () => {
 		const effects = new EffectSystem();

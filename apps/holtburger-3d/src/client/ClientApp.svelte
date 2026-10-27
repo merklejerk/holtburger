@@ -294,7 +294,7 @@
 	const appLifecycle = new ClientAppLifecycle({
 		session: () => session,
 		stopInput: async () => {
-			inputGate.cancel();
+			inputGate.cancel("reset");
 			await inputDispatch;
 		},
 		retireGameplay: async () => {
@@ -924,6 +924,8 @@
 	let bookReader = $state<ClientBookReaderState>({ kind: "idle" });
 	/** Session-local diagnostic policy; each use captures the current value. */
 	let unrestrictedUse = $state(false);
+	/** A targeting click consumes its entire native double-click sequence. */
+	let viewportTargetSequenceConsumed = false;
 	let hoveredEntityGuid = $state<number | null>(null);
 	let preciseJumpActive = $state(false);
 	let inputDispatch: Promise<void> = Promise.resolve();
@@ -1098,7 +1100,7 @@
 				entityCollisionDisabled = event.state.entityCollisionDisabled;
 				if (event.state.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
-					inputGate.cancel();
+					inputGate.cancel("reset");
 				}
 				playerName = event.state.playerName;
 				if (
@@ -1142,7 +1144,7 @@
 				gameplayPreferences = session?.state().gameplayPreferences ?? null;
 				if (event.lifecycle.kind !== "in-world") {
 					retireCombatEscapeContext();
-					inputGate.cancel();
+					inputGate.cancel("reset");
 				}
 				if (
 					event.lifecycle.kind === "entering-world" ||
@@ -1221,11 +1223,11 @@
 			case "exit-requested":
 				retireChatCharacter();
 				navigationWaypoint.acceptCharacter(null);
-				inputGate.cancel();
+				inputGate.cancel("reset");
 				appLifecycle.acceptExit(event.exit);
 				return;
 			case "presentation-discontinuity":
-				inputGate.cancel();
+				inputGate.cancel("reset");
 				return;
 			default:
 				return;
@@ -1237,6 +1239,7 @@
 			...message,
 			id: nextChatMessageId++,
 			receivedAt: new Date(),
+			generation: chatComposer.generation,
 		};
 		chatMessages = [...chatMessages, line].slice(-MAXIMUM_CHAT_LINES);
 	}
@@ -1926,7 +1929,7 @@
 				itemInteractions?.cancelTargeting();
 				selectionInput?.cancel();
 				characterInput.reset();
-				if (reason === "focus-transfer") inputArbiter?.releaseHeldActions();
+				if (reason === "release-held") inputArbiter?.releaseHeldActions();
 				else inputArbiter?.reset();
 			},
 		}),
@@ -2073,6 +2076,10 @@
 			presentation: () => gameplayPresentation,
 		});
 		entitySelection = selection;
+		// Focus/modal cancellation must retire pending picks even if input resumes before their reply.
+		const detachSelectionGate = inputGate.attach(() => {
+			selection.beginAcquisition("external");
+		});
 		const pointer = new ClientPointerSelectionController({
 			selection,
 			lifecycle: owner,
@@ -2125,6 +2132,8 @@
 			reportFailure: (message) =>
 				toastCenter.publish({ message, tone: "warning" }),
 			beginAcquisition: () => {
+				// A newer tool-targeting intent supersedes any pending viewport action.
+				selection.beginAcquisition("external");
 				inputArbiter?.cancelPrecise();
 				keyboard.returnToGame();
 			},
@@ -2243,6 +2252,7 @@
 					selectedEntityTracking = null;
 				input.destroy();
 				cycle.destroy();
+				detachSelectionGate();
 				pointer.destroy();
 				if (selectionInput === input) selectionInput = null;
 				if (pointerSelection === pointer) pointerSelection = null;
@@ -2388,7 +2398,7 @@
 			cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 			{debugEnabled}
 			{nearby}
-			onSelectNearbyEntity={(guid) =>
+			onSelectKnownEntity={(guid) =>
 				entitySelection?.selectKnownEntity(guid) === true}
 			{readMinimapFrame}
 			onClearWaypoint={() => navigationWaypoint.clear()}
@@ -2514,9 +2524,12 @@
 					});
 				else pointerSelection.acquireTarget(x, y, destination);
 			}}
-			onViewportSelect={(clientX, clientY) => {
+			onViewportSelect={(clientX, clientY, interact) => {
+				if (!interact) viewportTargetSequenceConsumed = false;
+				else if (viewportTargetSequenceConsumed) return;
 				const state = itemInteractions?.snapshot();
 				if (state?.kind === "acquiring") {
+					viewportTargetSequenceConsumed = true;
 					const current = itemInteractions;
 					pointerSelection?.acquireTarget(clientX, clientY, {
 						isCurrent: () => {
@@ -2536,20 +2549,15 @@
 								);
 						},
 					});
+				} else if (interact) {
+					pointerSelection?.acquireViewportPoint(clientX, clientY, (guid) =>
+						itemInteractions?.interactIfPossible(guid, unrestrictedUse),
+					);
 				} else pointerSelection?.acquireViewportPoint(clientX, clientY);
 			}}
 			onViewportExamine={(clientX, clientY) => {
-				if (entitySelection === null || pointerSelection === null) return;
-				const selection = entitySelection;
-				const intent = selection.beginAcquisition("external");
-				pointerSelection.acquireViewportSelection(clientX, clientY, {
-					isCurrent: () => selection.isCurrentAcquisition(intent),
-					commit: (result) => {
-						if (result.kind === "unavailable") return;
-						const guid = result.kind === "entity" ? result.guid : null;
-						selection.commitAcquisition(intent, guid);
-						if (guid !== null) void objectInspectionOwner?.examine(guid);
-					},
+				pointerSelection?.acquireViewportPoint(clientX, clientY, (guid) => {
+					void objectInspectionOwner?.examine(guid);
 				});
 			}}
 			onViewportHover={(clientX, clientY) =>
@@ -2563,6 +2571,8 @@
 			{sentChatHistory}
 			{logopolisLaunchRevision}
 			onSendChat={sendChat}
+			onChatNotice={(message) =>
+				toastCenter.publish({ message, tone: "warning" })}
 			onSendChatError={appendChatError}
 			{canvasElement}
 			{interactionRoot}

@@ -85,6 +85,29 @@ export function createTradeFixture(options: {
 					: { ...trade, partner_side: { ...trade.partner_side, accepted } };
 			publish();
 		},
+		/** A bot-sized offer exercises scrolling and implicit grid row sizing. */
+		largeOffer(count: number) {
+			if (trade === null) throw new Error("Trade fixture is not registered");
+			const items = Array.from(
+				{ length: count },
+				(_, index) => item + 1 + index,
+			);
+			options.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				upserts: items.map((guid) =>
+					entityFacts(guid, { scenePlacement: "unavailable" }),
+				),
+				removed: [],
+			});
+			trade = {
+				...trade,
+				revision: trade.revision + 1,
+				partner_side: { ...trade.partner_side, items },
+			};
+			publish();
+		},
 		complete() {
 			if (trade === null) throw new Error("Trade fixture is not registered");
 			trade = {

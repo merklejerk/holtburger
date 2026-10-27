@@ -11,7 +11,7 @@ import {
 } from "./client-chat-policy";
 
 function line(message: ClientChatEntry): ClientChatLine {
-	return { ...message, id: 1, receivedAt: new Date(0) };
+	return { ...message, id: 1, receivedAt: new Date(0), generation: 0 };
 }
 
 describe("client chat presentation policy", () => {

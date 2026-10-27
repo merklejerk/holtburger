@@ -80,7 +80,8 @@ export class ClientNearby {
 	#recovering = false;
 	#destroyed = false;
 	#tracked: ReadonlySet<number> = new Set();
-	#queued: { name: string; location: string }[] = [];
+	/** Preserve detection identity alongside historical name and location until batch publication. */
+	#queued: { guid: number; name: string; location: string }[] = [];
 	#batchTimer: ReturnType<typeof setTimeout> | null = null;
 	#expiryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -206,7 +207,7 @@ export class ClientNearby {
 					guid,
 					facts: entity.nearby,
 					corpse: entity.corpse,
-					location: nearbyLocation(pose),
+					location: this.#location(pose),
 					distance:
 						player === null
 							? null
@@ -292,6 +293,16 @@ export class ClientNearby {
 			: encounter.absentAt === null;
 	}
 
+	/** Scene demand already carries the profile-resolved distinction between mixed owners and dungeons. */
+	#location(pose: DynamicEntityWorldPlacement) {
+		return nearbyLocation(
+			pose,
+			this.#sceneMembership?.surfaceMapEligible(
+				dynamicEntityResidency(pose),
+			) === true,
+		);
+	}
+
 	#poses(): Map<number, DynamicEntityWorldPlacement> {
 		const poses = new Map<number, DynamicEntityWorldPlacement>();
 		for (const entity of this.#options.session.mirror.currentEntities()) {
@@ -345,7 +356,7 @@ export class ClientNearby {
 				tracked.add(guid);
 				if (!encounter.detected) {
 					if (notifications === "announce")
-						this.#queue(entity.nearby.name, nearbyLocation(pose).text);
+						this.#queue(guid, entity.nearby.name, this.#location(pose).text);
 					// Silent matches seed the encounter too, so a subsequent world
 					// update cannot announce an entity already covered by the edit.
 					encounter.detected = true;
@@ -382,8 +393,8 @@ export class ClientNearby {
 		this.#scheduleExpiry();
 	}
 
-	#queue(name: string, location: string): void {
-		this.#queued.push({ name, location });
+	#queue(guid: number, name: string, location: string): void {
+		this.#queued.push({ guid, name, location });
 		if (this.#batchTimer !== null) return;
 		this.#batchTimer = setTimeout(() => {
 			this.#batchTimer = null;
@@ -408,7 +419,7 @@ export class ClientNearby {
 					...queued.map((entry) => ({
 						indented: queued.length > 1,
 						spans: [
-							{ kind: "emphasis" as const, text: entry.name },
+							{ kind: "entity" as const, guid: entry.guid, text: entry.name },
 							{
 								kind: "plain" as const,
 								text: `${queued.length === 1 ? " detected" : ""} — ${entry.location}`,

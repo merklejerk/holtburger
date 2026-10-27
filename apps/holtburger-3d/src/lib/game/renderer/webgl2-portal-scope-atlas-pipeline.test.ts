@@ -54,18 +54,28 @@ describe("deferred portal view ownership", () => {
 			landblockId: "0x0001ffff",
 			envCellId: "0x00010100",
 		} as const;
+		const unseenIslandMember = {
+			...indoor,
+			envCellId: "0x00010101",
+		} as const;
+		const otherIsland = {
+			...indoor,
+			envCellId: "0x00010102",
+		} as const;
 		const topology: SceneTopologyView = {
 			revision: 1,
 			crossings: [],
 			outgoing: () => [],
-			scopes: [outdoor, indoor].map((scope) => ({
-				scope,
-				visibilityIslandId:
-					scope.kind === "outdoor"
-						? null
-						: ("env-cell-island:test" as SceneTopologyScope["visibilityIslandId"]),
-				potentiallyVisibleEnvCellIds: new Set<string>(),
-			})),
+			scopes: [outdoor, indoor, unseenIslandMember, otherIsland].map(
+				(scope) => ({
+					scope,
+					visibilityIslandId:
+						scope.kind === "outdoor"
+							? null
+							: (`env-cell-island:${scope === otherIsland ? "other" : "test"}` as SceneTopologyScope["visibilityIslandId"]),
+					potentiallyVisibleEnvCellIds: new Set<string>(),
+				}),
+			),
 		};
 		const anchor = getLandblockCoordinates("0x0001ffff");
 		function prepare(rootScope: SceneScope, width: number) {
@@ -99,6 +109,24 @@ describe("deferred portal view ownership", () => {
 		expect(first).not.toBe(second);
 		expect(first.scopeAt(0)).toEqual(outdoor);
 		expect(second.scopeAt(0)).toEqual(indoor);
+		// Coverage can admit a batch through the root while its owning cell's portal is behind
+		// the camera. Tile routing resolves that owner without expanding cell traversal.
+		expect(first.count).toBe(1);
+		expect(second.count).toBe(1);
+		expect(second.atlas.visibility.selectedScopeCount).toBe(1);
+		expect(
+			second.atlas.visibility.selectedScopeOrdinal(
+				unseenIslandMember.envCellId,
+			),
+		).toBeNull();
+		expect(
+			second.atlas.tileOrdinalForRenderScopeKey(unseenIslandMember.envCellId),
+		).toBe(second.atlas.tileOrdinalForRenderScopeKey(indoor.envCellId));
+		expect(
+			second.atlas.visibility.selectedRenderDomainOrdinal(
+				otherIsland.envCellId,
+			),
+		).toBeNull();
 		expect(first.atlas.tileWidth(0)).toBe(firstTileWidth);
 		expect(second.atlas.tileWidth(0)).not.toBe(firstTileWidth);
 		expect(calls).not.toHaveBeenCalled();
@@ -120,6 +148,11 @@ describe("deferred portal view ownership", () => {
 		expect(() => pipeline.beginOpaqueScene(second, [0, 0, 0, 1])).toThrow(
 			"not prepared",
 		);
-		expect(prepare(outdoor, 200)).toBe(first);
+		expect(prepare(otherIsland, 200)).toBe(first);
+		expect(first.count).toBe(1);
+		expect(first.scopeAt(0)).toEqual(otherIsland);
+		expect(
+			first.atlas.visibility.selectedRenderDomainOrdinal(indoor.envCellId),
+		).toBeNull();
 	});
 });

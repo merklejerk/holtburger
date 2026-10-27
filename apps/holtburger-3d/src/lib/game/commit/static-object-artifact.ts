@@ -10,6 +10,7 @@ import type { StaticInstallResourceNamespace } from "../systems/static-resources
 import type { AssetTextureFact, AssetTextureKey } from "../textures/types";
 import type { RuntimeLight } from "../environment/runtime-lights";
 import { resolveObjectRuntimeLights } from "../environment/object-runtime-lights";
+import { scopeFor } from "../scene/scope";
 
 /**
  * Gather the authored lights an outdoor layer's residents emit, in canonical scene space.
@@ -107,6 +108,18 @@ export function assembleStaticObjectArtifact(options: {
 					options.source.kind === "env-cells" ? options.source.envCellId : null,
 				landblockId: options.source.landblockId,
 				localTransform: Mat4.identity(),
+				// Authored ownership is known here. The EnvCell preparer adds geometric
+				// coverage after the batch and its complete cell topology meet.
+				spatialMembership: {
+					scopes: [
+						scopeFor(
+							options.source.landblockId,
+							options.source.kind === "env-cells"
+								? options.source.envCellId
+								: null,
+						),
+					],
+				},
 			},
 			renderable: {
 				drawUnits: object.drawUnits,

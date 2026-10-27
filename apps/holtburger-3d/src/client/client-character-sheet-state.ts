@@ -9,15 +9,18 @@ import {
 	type ProgressionQuote,
 	type StatTarget,
 } from "./client-character-sheet-contract";
+import type { ClientLifecycle } from "./client-host-contract";
+import { progressionRejectionReason } from "./client-character-sheet-feedback";
 
 /** Session-owned character facts and correlated quotes; UI samples by revision. */
 export class ClientCharacterSheetState {
 	#sheet: CharacterSheet | null = null;
+	/** Lifecycle gates purchase evaluation independently of retained character facts. */
+	#phase: ClientLifecycle["kind"] | null = null;
 	#quotes = new Map<string, ProgressionEvaluation>();
 	#pending = new Map<string, ProgressionQuote>();
 	#requestId = 0;
 	#revision = 0;
-	#feedback: string | null = null;
 
 	constructor(
 		private readonly evaluate: (
@@ -29,6 +32,8 @@ export class ClientCharacterSheetState {
 			character: number,
 			titleId: number,
 		) => Promise<void>,
+		/** Ephemeral failures use the session's shared action-feedback delivery. */
+		private readonly reportFailure: (message: string) => void,
 	) {}
 
 	/** Immediate display selection; subsequent snapshots win without confirmation tracking. */
@@ -44,14 +49,14 @@ export class ClientCharacterSheetState {
 			...sheet,
 			titleSelection: { ...sheet.titleSelection, selectedId: titleId },
 		};
-		this.#feedback = null;
 		this.#revision++;
 		try {
 			await this.sendTitle(sheet.character, titleId);
 		} catch (error) {
 			if (this.#sheet?.character !== sheet.character) return;
-			this.#feedback = `Title selection send failed: ${error instanceof Error ? error.message : String(error)}`;
-			this.#revision++;
+			this.reportFailure(
+				`Title selection send failed: ${error instanceof Error ? error.message : String(error)}`,
+			);
 		}
 	}
 
@@ -60,32 +65,45 @@ export class ClientCharacterSheetState {
 		readonly sheet: CharacterSheet | null;
 		readonly evaluations: ReadonlyMap<string, ProgressionEvaluation>;
 		readonly pendingTargets: ReadonlySet<string>;
-		readonly feedback: string | null;
+		/** Panel explanation while lifecycle prevents offering purchase quotes. */
+		readonly progressionUnavailable: string | null;
 	} {
 		return {
 			revision: this.#revision,
 			sheet: this.#sheet,
 			evaluations: this.#quotes,
 			pendingTargets: new Set(this.#pending.keys()),
-			feedback: this.#feedback,
+			progressionUnavailable:
+				this.#phase === "portal-space"
+					? "Purchases unavailable during portal travel"
+					: this.#phase !== "in-world" || this.#sheet === null
+						? "Purchases unavailable until the character is ready"
+						: null,
 		};
 	}
 
 	/** A replacement snapshot retires every old quote, even for the same GUID. */
-	reset(sheet: CharacterSheet | null): void {
-		this.#requestId++;
-		this.#quotes = new Map();
+	reset(
+		sheet: CharacterSheet | null,
+		phase: ClientLifecycle["kind"] | null,
+	): void {
 		this.#pending.clear();
-		this.#feedback = null;
 		this.#sheet = sheet;
-		this.#revision++;
+		this.#phase = phase;
+		this.#requestQuotes();
+	}
+
+	/** Withdraw old evaluations on lifecycle changes without retiring attempted purchases. */
+	setContext(phase: ClientLifecycle["kind"] | null): void {
+		if (phase === this.#phase) return;
+		this.#phase = phase;
 		this.#requestQuotes();
 	}
 
 	/** Preserve quotes across pool/buff changes; target and resource changes reprice. */
 	replace(sheet: CharacterSheet | null): void {
 		if (sheet === null || this.#sheet?.character !== sheet.character) {
-			this.reset(sheet);
+			this.reset(sheet, this.#phase);
 			return;
 		}
 		const before = this.#quoteInputs(this.#sheet);
@@ -121,17 +139,25 @@ export class ClientCharacterSheetState {
 			this.#pending.delete(
 				progressionTargetKey(progressionTarget(feedback.Rejected.intent)),
 			);
-			this.#feedback = `Purchase was not sent: ${JSON.stringify(feedback.Rejected.reason)}`;
+			this.reportFailure(
+				`Purchase was not sent: ${progressionRejectionReason(feedback.Rejected.reason)}`,
+			);
 			this.#requestQuotes();
 		} else if ("DispatchFailed" in feedback) {
-			this.#feedback = `Purchase send failed: ${feedback.DispatchFailed.message}`;
+			this.reportFailure(
+				`Purchase send failed; awaiting a server update: ${feedback.DispatchFailed.message}`,
+			);
 		}
-		this.#revision++;
 	}
 
 	async purchase(quote: ProgressionQuote): Promise<void> {
 		const sheet = this.#sheet;
-		if (sheet === null || sheet.character !== quote.quote.character) return;
+		if (
+			this.#phase !== "in-world" ||
+			sheet === null ||
+			sheet.character !== quote.quote.character
+		)
+			return;
 		const key = progressionTargetKey(progressionTarget(quote.quote.intent));
 		if (
 			this.#pending.has(key) ||
@@ -141,7 +167,6 @@ export class ClientCharacterSheetState {
 		)
 			return;
 		this.#pending.set(key, quote);
-		this.#feedback = null;
 		this.#revision++;
 		try {
 			await this.submit(quote);
@@ -150,8 +175,9 @@ export class ClientCharacterSheetState {
 			// the bridge is still settling. Its failure cannot belong to that new state.
 			if (this.#pending.get(key) !== quote) return;
 			// A bridge failure cannot prove whether the host queued the action.
-			this.#feedback = `Purchase submission failed; awaiting a server update: ${String(error)}`;
-			this.#revision++;
+			this.reportFailure(
+				`Purchase submission failed; awaiting a server update: ${String(error)}`,
+			);
 		}
 	}
 
@@ -193,8 +219,12 @@ export class ClientCharacterSheetState {
 	}
 
 	#requestQuotes(): void {
+		// Invalidate replies even when no new request is allowed during this phase.
+		const requestId = ++this.#requestId;
+		this.#quotes = new Map();
+		this.#revision++;
 		const sheet = this.#sheet;
-		if (sheet === null) return;
+		if (sheet === null || this.#phase !== "in-world") return;
 		const targets: StatTarget[] = [
 			...sheet.attributes.map((row) => ({ Attribute: row.attr_type })),
 			...sheet.vitals.map((row) => ({ Vital: row.vital_type })),
@@ -218,13 +248,9 @@ export class ClientCharacterSheetState {
 				];
 			},
 		);
-		const requestId = ++this.#requestId;
-		this.#quotes = new Map();
-		this.#revision++;
 		void this.evaluate(requestId, intents).catch((error) => {
 			if (requestId !== this.#requestId) return;
-			this.#feedback = `Unable to evaluate purchases: ${String(error)}`;
-			this.#revision++;
+			this.reportFailure(`Unable to evaluate purchases: ${String(error)}`);
 		});
 	}
 }

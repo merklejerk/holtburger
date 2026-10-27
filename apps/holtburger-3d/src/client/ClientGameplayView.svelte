@@ -286,7 +286,8 @@
 		readonly readMinimapFrame: () => MinimapFrame;
 		/** Session-owned catalog; closed windows do not stop detection. */
 		readonly nearby: ClientNearby | null;
-		readonly onSelectNearbyEntity: (guid: number) => boolean;
+		/** Shared admission for explicit entity references from chat and the nearby catalog. */
+		readonly onSelectKnownEntity: (guid: number) => boolean;
 		/** Clear session-owned navigation intent without changing selection. */
 		readonly onClearWaypoint: () => void;
 		/** Static host capability, owned by the mounted transport lifetime. */
@@ -386,7 +387,12 @@
 		/** Set an absolute normalized power from the HUD bar. */
 		readonly onPreciseJumpPowerSet: (power: number) => void;
 		readonly onPreciseJumpActivate: () => void;
-		readonly onViewportSelect: (clientX: number, clientY: number) => void;
+		/** Accepted selection click, with activation requested only on the second click. */
+		readonly onViewportSelect: (
+			clientX: number,
+			clientY: number,
+			interact: boolean,
+		) => void;
 		readonly onViewportExamine: (clientX: number, clientY: number) => void;
 		readonly onViewportHover: (clientX: number, clientY: number) => void;
 		/** Clear world hover and invalidate in-flight acquisition on surface exit. */
@@ -405,6 +411,8 @@
 		) => Promise<void>;
 		/** Report a chat submission failure through the retained chat history. */
 		readonly onSendChatError: (message: string) => void;
+		/** Chat interaction failures use the app-owned toast system. */
+		readonly onChatNotice: (message: string) => void;
 		/** Persistent world surface borrowed from the app shell. */
 		readonly canvasElement: HTMLCanvasElement;
 		/** Common DOM boundary containing both the canvas and HUD for drag/drop hit testing. */
@@ -484,7 +492,7 @@
 		debugEnabled,
 		readMinimapFrame,
 		nearby,
-		onSelectNearbyEntity,
+		onSelectKnownEntity,
 		onClearWaypoint,
 		worldMapSource,
 		characterGuid,
@@ -568,6 +576,7 @@
 		sentChatHistory,
 		onSendChat,
 		onSendChatError,
+		onChatNotice,
 		canvasElement,
 		interactionRoot,
 	}: Props = $props();
@@ -1330,6 +1339,8 @@
 					sentHistory={sentChatHistory}
 					onSend={onSendChat}
 					onSendError={onSendChatError}
+					onSelectEntity={onSelectKnownEntity}
+					onNotice={onChatNotice}
 					enabledTags={chatFilters}
 					onEnabledTagsChange={onChatFiltersChange}
 				/>
@@ -1700,7 +1711,7 @@
 							owner={nearby}
 							visible={nearbyOpen}
 							selectedGuid={selectedEntityGuid}
-							onSelectEntity={onSelectNearbyEntity}
+							onSelectEntity={onSelectKnownEntity}
 							{onExamineEntity}
 							{onSetWaypoint}
 						/>

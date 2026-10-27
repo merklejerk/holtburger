@@ -5,12 +5,21 @@ import type {
 } from "./client-host-contract";
 
 /** One flat app-authored text run; strings remain text rather than markup. */
-interface ClientChatTextSpan {
-	/** Plain prose, italic emphasis, or a monospace command/example. */
-	readonly kind: "plain" | "emphasis" | "code";
-	/** Literal displayed text; coordinate recognition still applies during history interaction. */
-	readonly text: string;
-}
+type ClientChatTextSpan =
+	| {
+			/** Plain prose, italic emphasis, or a monospace command/example. */
+			readonly kind: "plain" | "emphasis" | "code";
+			/** Literal displayed text; coordinate recognition still applies during history interaction. */
+			readonly text: string;
+	  }
+	| {
+			/** Explicit app-authored entity reference; never inferred from a displayed name. */
+			readonly kind: "entity";
+			/** Authoritative identity captured when the message was produced. */
+			readonly guid: number;
+			/** Historical display name, retained even after the entity disappears. */
+			readonly text: string;
+	  };
 
 /** One displayed row, with a single optional indentation step for command descriptions. */
 export interface ClientChatTextRow {
@@ -35,6 +44,8 @@ export type ClientChatEntry =
 export type ClientChatLine = ClientChatEntry & {
 	readonly id: number;
 	readonly receivedAt: Date;
+	/** Originating composer lifetime; retained entity links reject later character/session generations. */
+	readonly generation: number;
 };
 
 /** Independently toggleable message family in the combined chat buffer. */

@@ -51,7 +51,7 @@ export function createClientMouseMovementFixture(
 			gameEscapeCount,
 		}),
 		reset: () => {
-			gate.cancel();
+			gate.cancel("reset");
 			arbiter.reset();
 			turns.length = 0;
 			errors.length = 0;
@@ -80,7 +80,7 @@ export function createClientMouseMovementFixture(
 				cancel: (reason) => {
 					cancelMouse();
 					input.reset();
-					if (reason === "focus-transfer") arbiter.releaseHeldActions();
+					if (reason === "release-held") arbiter.releaseHeldActions();
 					else arbiter.reset();
 				},
 			});

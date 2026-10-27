@@ -137,13 +137,13 @@ export interface ScenePlacement extends SceneResidency {
 	readonly localTransform: Mat4;
 }
 
-/** Host-derived scopes reached by one placed object's complete spatial geometry. */
+/** Scene-index scopes: host-derived for bodies, conservatively prepared for static render batches. */
 export interface SceneSpatialMembership {
 	/** Deduplicated source-domain scopes; the authoritative residency scope is always included. */
 	readonly scopes: readonly SceneScope[];
 }
 
-/** Atomic dynamic-root placement and its host-derived plural spatial membership. */
+/** Atomic root placement paired with explicit plural scene-index membership. */
 export interface SceneSpatialPlacement extends ScenePlacement {
 	readonly spatialMembership: SceneSpatialMembership;
 }

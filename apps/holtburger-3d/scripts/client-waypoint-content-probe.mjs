@@ -82,7 +82,7 @@ export async function probeWaypointContent(client, evaluate) {
 	);
 	assert.equal(
 		await read(
-			"document.querySelectorAll('.chat-message .waypoint-link').length",
+			"document.querySelectorAll('.chat-message .waypoint-link[role=button]').length",
 		),
 		0,
 	);
@@ -92,12 +92,34 @@ export async function probeWaypointContent(client, evaluate) {
 		),
 		"none",
 	);
+	const originalWidth = await read(`(() => {
+		const lines = document.querySelector('.chat-lines');
+		const original = lines.style.maxWidth;
+		lines.style.maxWidth = '8ch';
+		return original;
+	})()`);
+	const lineFragments = () =>
+		read(`Array.from(document.querySelectorAll('.chat-message .ui-inline-tag'),
+		tag => Array.from(tag.getClientRects(), rect => ({width: rect.width, height: rect.height})))`);
+	const inactiveFragments = await lineFragments();
+	assert.ok(
+		inactiveFragments.some((fragments) => fragments.length > 1),
+		"Coordinate fixture must wrap across chat lines",
+	);
 	await click('[aria-label="Interact with chat history"]');
 	assert.equal(
 		await read(
-			"document.querySelectorAll('.chat-message .waypoint-link').length",
+			"document.querySelectorAll('.chat-message .waypoint-link[role=button]').length",
 		),
 		2,
+	);
+	assert.deepEqual(
+		await lineFragments(),
+		inactiveFragments,
+		"Activating chat must preserve coordinate line breaks",
+	);
+	await read(
+		`document.querySelector('.chat-lines').style.maxWidth = ${JSON.stringify(originalWidth)}`,
 	);
 	const key = async (name, code, virtualKey, modifiers) => {
 		await client.send("Input.dispatchKeyEvent", {
@@ -131,7 +153,33 @@ export async function probeWaypointContent(client, evaluate) {
 	);
 	await key("Enter", "Enter", 13, 0);
 	assert.equal(await label(), "42.1N, 33.6E");
-	await activate(".chat-message .waypoint-link", "42.1N, 33.6E");
+	const noticesBeforeSpace = await read(
+		`${api}.waypoint.read().notices.length`,
+	);
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyDown",
+		key: " ",
+		code: "Space",
+		windowsVirtualKeyCode: 32,
+	});
+	assert.equal(
+		await read(`${api}.waypoint.read().notices.length`),
+		noticesBeforeSpace,
+		"Space must wait for release before activating a tag",
+	);
+	await client.send("Input.dispatchKeyEvent", {
+		type: "keyUp",
+		key: " ",
+		code: "Space",
+		windowsVirtualKeyCode: 32,
+	});
+	await settle();
+	assert.equal(
+		await read(`${api}.waypoint.read().notices.length`),
+		noticesBeforeSpace + 1,
+		"Space release must activate the focused tag once",
+	);
+	await activate(".chat-message .waypoint-link[role=button]", "42.1N, 33.6E");
 	// A pointer control returns keyboard ownership to the game while history stays interactive.
 	const original = await label();
 	const countBeforeSelection = await read(
@@ -140,7 +188,7 @@ export async function probeWaypointContent(client, evaluate) {
 
 	await read("document.getSelection().removeAllRanges()");
 	const bounds = await read(
-		`(() => { const range=document.createRange(); range.selectNodeContents(document.querySelector('.chat-message')); const r=range.getClientRects()[0]; const link=document.querySelector('.chat-message .waypoint-link').getBoundingClientRect(); return {x:r.x+10,y:r.y+r.height/2,end:link.right+10}; })()`,
+		`(() => { const range=document.createRange(); range.selectNodeContents(document.querySelector('.chat-message')); const r=range.getClientRects()[0]; const link=document.querySelector('.chat-message .waypoint-link[role=button]').getBoundingClientRect(); return {x:r.x+10,y:r.y+r.height/2,end:link.right+10}; })()`,
 	);
 	// Native word selection and Shift-click extend the range through the inline control.
 	for (const type of ["mousePressed", "mouseReleased"])
@@ -166,7 +214,7 @@ export async function probeWaypointContent(client, evaluate) {
 		selection.includes("42.1N, 33.6E"),
 		`Native selection did not include coordinate text: ${selection}`,
 	);
-	const link = await point(".chat-message .waypoint-link");
+	const link = await point(".chat-message .waypoint-link[role=button]");
 	await mouse("mousePressed", link.x - 5, link.y, true);
 	await mouse("mouseMoved", link.x + 5, link.y, true);
 	await mouse("mouseReleased", link.x + 5, link.y, false);
@@ -187,7 +235,7 @@ export async function probeWaypointContent(client, evaluate) {
 	await read("document.getSelection().removeAllRanges()");
 	assert.equal(
 		await read(
-			"document.querySelectorAll('.chat-message .waypoint-link').length",
+			"document.querySelectorAll('.chat-message .waypoint-link[role=button]').length",
 		),
 		0,
 		"Editor Escape ends explicit history interaction",
@@ -229,7 +277,7 @@ export async function probeWaypointContent(client, evaluate) {
 		`(() => { const range = document.createRange(); range.selectNodeContents(document.querySelector('.chat-buffer strong')); const s = document.getSelection(); s.removeAllRanges(); s.addRange(range); })()`,
 	);
 	await activate(
-		'.chat-message .waypoint-link[title="Set waypoint: 0.00S, 0.0W"]',
+		'.chat-message .waypoint-link[role=button][title="Set waypoint: 0.00S, 0.0W"]',
 		"0.00S, 0.0W",
 	);
 	assert.equal(await read(`${api}.waypoint.read().gameActive`), true);
@@ -237,7 +285,7 @@ export async function probeWaypointContent(client, evaluate) {
 	await click('[aria-label="Interact with chat history"]');
 	assert.equal(
 		await read(
-			"document.querySelectorAll('.chat-message .waypoint-link').length",
+			"document.querySelectorAll('.chat-message .waypoint-link[role=button]').length",
 		),
 		0,
 	);
@@ -245,31 +293,45 @@ export async function probeWaypointContent(client, evaluate) {
 	// Deferred text arrives through the existing book owner, then renders with the normal ready state.
 	await show("book");
 	assert.equal(
-		await read("document.querySelectorAll('.book-text .waypoint-link').length"),
+		await read(
+			"document.querySelectorAll('.book-text .waypoint-link[role=button]').length",
+		),
 		0,
 	);
 	await read(
 		`${api}.bookProbe.update({guid:42, inscription:'Inscribed at 2.0N, 3.0E.', authorName:'Traveler', pages:[{index:0, authorName:'Writer', text:'First stop: 42.1N, 33.6E.\\nNext page follows.'},{index:1, authorName:'Writer', text:'Second stop: 1.2S, 3.4W.'}]})`,
 	);
 	await settle();
-	await activate(".book-text .waypoint-link", "42.1N, 33.6E");
-	await activate(".book-page:nth-child(2) .waypoint-link", "1.2S, 3.4W");
-	await activate(".book-scroll blockquote .waypoint-link", "2.0N, 3.0E");
-	await show("item");
-	await activate(".inspection-description .waypoint-link", "42.1N, 33.6E");
+	await activate(".book-text .waypoint-link[role=button]", "42.1N, 33.6E");
 	await activate(
-		"[data-inspection-portal-destination] .waypoint-link",
+		".book-page:nth-child(2) .waypoint-link[role=button]",
+		"1.2S, 3.4W",
+	);
+	await activate(
+		".book-scroll blockquote .waypoint-link[role=button]",
+		"2.0N, 3.0E",
+	);
+	await show("item");
+	await activate(
+		".inspection-description .waypoint-link[role=button]",
+		"42.1N, 33.6E",
+	);
+	await activate(
+		"[data-inspection-portal-destination] .waypoint-link[role=button]",
 		"42.1N, 33.6E",
 	);
 	await click(".inspection-description-toggle");
 	await activate(
-		'.inspection-description .waypoint-link[title="Set waypoint: 1.2S, 3.4W"]',
+		'.inspection-description .waypoint-link[role=button][title="Set waypoint: 1.2S, 3.4W"]',
 		"1.2S, 3.4W",
 	);
-	await activate(".inspection-scroll blockquote .waypoint-link", "0.00S, 0.0W");
+	await activate(
+		".inspection-scroll blockquote .waypoint-link[role=button]",
+		"0.00S, 0.0W",
+	);
 	await show("creature");
 	await activate(
-		".inspection-creature-description .waypoint-link",
+		".inspection-creature-description .waypoint-link[role=button]",
 		"40.0N, 20.0E",
 	);
 	await show("contracts");
@@ -278,9 +340,12 @@ export async function probeWaypointContent(client, evaluate) {
 		`document.querySelectorAll('.contract-row > summary').forEach(node => node.click())`,
 	);
 	await settle();
-	await activate(".contract-details p .waypoint-link", "1.2S, 3.4W");
 	await activate(
-		'.contract-details .waypoint-link[title="Set waypoint: 0.4N, 0.4E"]',
+		".contract-details p .waypoint-link[role=button]",
+		"1.2S, 3.4W",
+	);
+	await activate(
+		'.contract-details .waypoint-link[role=button][title="Set waypoint: 0.4N, 0.4E"]',
 		"0.4N, 0.4E",
 	);
 	const blockSize = await read(
@@ -293,11 +358,11 @@ export async function probeWaypointContent(client, evaluate) {
 		{ x: 128 * blockSize + 6, z: -(128 * blockSize + 12) },
 	);
 	await activate(
-		'.contract-details .waypoint-link[title="Set waypoint: 0.5N, 0.5E"]',
+		'.contract-details .waypoint-link[role=button][title="Set waypoint: 0.5N, 0.5E"]',
 		"0.5N, 0.5E",
 	);
 	await activate(
-		'.contract-details .waypoint-link[title="Set waypoint: 4.5N, 6.7E"]',
+		'.contract-details .waypoint-link[role=button][title="Set waypoint: 4.5N, 6.7E"]',
 		"4.5N, 6.7E",
 	);
 	const after = await read(
@@ -307,6 +372,8 @@ export async function probeWaypointContent(client, evaluate) {
 	return {
 		passed: true,
 		chatInteractiveOnly: true,
+		consistentWrapping: true,
+		spaceActivation: true,
 		nativeSelection: true,
 		dragSelectionCreationVerified: dragSelectionCreated,
 		clipboard: true,

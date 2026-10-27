@@ -2921,6 +2921,7 @@ fn contact_publication_preserves_world_point_across_cell_frames() {
                 acceleration: Vector3::zero(),
                 accepted_motion: AcceptedBodyMotion::default(),
                 supported_velocity: Vector3::zero(),
+                supported_push: false,
                 ground: GroundState::Airborne,
                 membership,
                 motion: Vec::new(),
@@ -3382,11 +3383,22 @@ fn sleeping_body_tolerates_small_contact_displacement_after_the_peer_leaves() {
         crate::spatial::PhysicalReferenceInput::body(None),
         true,
     );
-    scene
+    let tick = scene
         .advance_dynamic_entity_collection(&collision, MOBILE_CONTACT_TICK_SECONDS, now, |_| {
             Ok(input.clone())
         })
         .unwrap();
+    let pushed = tick
+        .outcomes
+        .iter()
+        .find_map(|outcome| match outcome {
+            DynamicEntityBodyOutcome::Integrated(update) if update.body_id == sleeper => {
+                Some(update)
+            }
+            _ => None,
+        })
+        .unwrap();
+    assert!(pushed.supported_motion.externally_driven);
     assert!(scene.body(sleeper).unwrap().pose.coords.x > origin.coords.x);
     assert_eq!(
         scene.body(sleeper).unwrap().accepted_motion.velocity,
@@ -3637,7 +3649,8 @@ fn authored_input_survives_settling_and_residency_reactivation() {
         };
         let body = scene.body(id).unwrap();
         assert!(body.pose.coords.y > start.coords.y);
-        assert!(update.supported_motion.velocity.y > 0.0);
+        assert!(update.supported_motion.accepted.velocity.y > 0.0);
+        assert!(!update.supported_motion.externally_driven);
         assert!(
             (body.pose.coords - (start.coords + offset.translation)).length() < CONTACT_EPSILON
         );
@@ -3716,7 +3729,7 @@ fn supported_character_contacts_brake_incoming_motion_and_allow_escape() {
                 };
                 // Presentation follows net supported progress after separation, while
                 // the retained physical velocity below keeps its no-incoming-force rule.
-                let observed = body.supported_motion.velocity * dt;
+                let observed = body.supported_motion.accepted.velocity * dt;
                 let error = observed - body.displacement;
                 assert!(error.x.hypot(error.y) < CONTACT_EPSILON);
             }
@@ -5487,7 +5500,7 @@ fn proportional_return_scales_with_distance_and_converges_without_overshoot() {
             + 30;
         let mut previous = start.coords.x;
         for tick in 0..ticks {
-            scene
+            let update = scene
                 .advance_dynamic_entity_collection(
                     &collision,
                     duration,
@@ -5503,6 +5516,10 @@ fn proportional_return_scales_with_distance_and_converges_without_overshoot() {
                 .unwrap();
             let body = scene.body(id).unwrap();
             if tick == 0 {
+                let DynamicEntityBodyOutcome::Integrated(first) = &update.outcomes[0] else {
+                    panic!("expected swept return");
+                };
+                assert!(first.supported_motion.externally_driven);
                 assert!(
                     (body.retained.velocity.x - distance * PHYSICAL_RETURN_GAIN).abs()
                         < CONTACT_EPSILON

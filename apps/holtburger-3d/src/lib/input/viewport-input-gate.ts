@@ -1,9 +1,12 @@
+/** Release physical controls while preserving persistent modes, or retire all input state. */
+export type InputCancellationMode = "release-held" | "reset";
+
 /** Viewport availability and cancellation, independent of DOM event delivery or game actions. */
 export class ViewportInputGate {
 	/** Independent blockers cannot release one another's ownership. */
 	readonly #blockers = new Set<symbol>();
 	/** Mounted keyboard and gesture participants in this viewport's cancellation boundary. */
-	readonly #participants = new Set<() => void>();
+	readonly #participants = new Set<(mode: InputCancellationMode) => void>();
 
 	/** Event handlers consult availability before starting actions; releases still finish normally. */
 	get allowed(): boolean {
@@ -16,7 +19,7 @@ export class ViewportInputGate {
 		const token = Symbol();
 		this.#blockers.add(token);
 		try {
-			if (wasAllowed) this.cancel();
+			if (wasAllowed) this.cancel("reset");
 		} catch (error) {
 			// No release token reaches the caller when acquisition fails.
 			this.#blockers.delete(token);
@@ -28,22 +31,22 @@ export class ViewportInputGate {
 	}
 
 	/** Attach one mounted participant. Detaching cancels it and is safe to repeat. */
-	attach(cancel: () => void): () => void {
-		const participant = () => cancel();
-		if (!this.allowed) participant();
+	attach(cancel: (mode: InputCancellationMode) => void): () => void {
+		const participant = (mode: InputCancellationMode) => cancel(mode);
+		if (!this.allowed) participant("reset");
 		this.#participants.add(participant);
 		return () => {
-			if (this.#participants.delete(participant)) participant();
+			if (this.#participants.delete(participant)) participant("reset");
 		};
 	}
 
 	/** Focus loss or a discontinuity cancels input without installing a persistent blocker. */
-	cancel(): void {
+	cancel(mode: InputCancellationMode): void {
 		const errors: unknown[] = [];
 		for (const participant of [...this.#participants]) {
 			if (!this.#participants.has(participant)) continue;
 			try {
-				participant();
+				participant(mode);
 			} catch (error) {
 				errors.push(error);
 			}

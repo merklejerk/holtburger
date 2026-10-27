@@ -149,7 +149,7 @@ pub struct HostDynamicBodyTick {
     /// Accepted root travel and placement for delivery and follow-camera sampling.
     pub path: PlacedMotionPath,
     /// Supported visual travel, including horizontal separation but excluding lifts and air travel.
-    pub supported_motion: holtburger_world::AcceptedBodyMotion,
+    pub supported_motion: holtburger_world::SupportedBodyMotion,
     /// Collision-owned local effective-state change, if any.
     pub dynamic_state_change: Option<holtburger_world::DynamicBodyPhysicsStateChange>,
     /// Immutable collision snapshot that proved the movement.

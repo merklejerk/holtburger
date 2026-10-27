@@ -1239,6 +1239,7 @@
 			...message,
 			id: nextChatMessageId++,
 			receivedAt: new Date(),
+			generation: chatComposer.generation,
 		};
 		chatMessages = [...chatMessages, line].slice(-MAXIMUM_CHAT_LINES);
 	}
@@ -2397,7 +2398,7 @@
 			cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 			{debugEnabled}
 			{nearby}
-			onSelectNearbyEntity={(guid) =>
+			onSelectKnownEntity={(guid) =>
 				entitySelection?.selectKnownEntity(guid) === true}
 			{readMinimapFrame}
 			onClearWaypoint={() => navigationWaypoint.clear()}
@@ -2570,6 +2571,8 @@
 			{sentChatHistory}
 			{logopolisLaunchRevision}
 			onSendChat={sendChat}
+			onChatNotice={(message) =>
+				toastCenter.publish({ message, tone: "warning" })}
 			onSendChatError={appendChatError}
 			{canvasElement}
 			{interactionRoot}

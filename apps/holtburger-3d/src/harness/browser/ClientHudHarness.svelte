@@ -1119,6 +1119,8 @@
 		readonly chat: {
 			readonly setPartyPresent: (present: boolean) => void;
 			readonly reset: () => void;
+			/** Focus a fresh entity tag for native browser keyboard activation checks. */
+			readonly prepareEntityKeyboard: () => Promise<void>;
 			/** Recreate the composer from synthetic saved user settings. */
 			readonly restart: () => Promise<void>;
 			readonly select: (target: ClientChatTellTarget | null) => void;
@@ -1129,6 +1131,7 @@
 			readonly professorPrompt: () => void;
 			readonly clearPrompt: () => void;
 			readonly read: () => {
+				readonly selectedEntity: number | null;
 				readonly requests: readonly ClientChatRequest[];
 				readonly destination: typeof chatComposer.destination;
 				readonly recentEmotes: readonly string[];
@@ -3919,6 +3922,7 @@
 			...message,
 			id,
 			receivedAt: new Date(2026, 7, 27, 9, id),
+			generation: chatComposer.generation,
 		};
 	}
 
@@ -4881,9 +4885,38 @@
 					commands: () => interactionCommands,
 					messages: () => messages,
 					waypoint: () => readMinimapFrame().waypoint?.target ?? null,
+					select: (guid) => selection.select(guid),
+					retireChat: () => chatComposer.reset(),
+					notice: () => toast?.message ?? null,
 				});
 			},
 			chat: {
+				prepareEntityKeyboard: async () => {
+					selection.select(null);
+					appendChat({
+						kind: "formatted-system",
+						rows: [
+							{
+								indented: false,
+								spans: [{ kind: "entity", guid: 7, text: "Keyboard entity" }],
+							},
+						],
+					});
+					await tick();
+					const historyToggle = document.querySelector<HTMLButtonElement>(
+						'[aria-label="Interact with chat history"]',
+					);
+					if (historyToggle === null)
+						throw new Error("Chat history toggle is missing");
+					historyToggle.click();
+					await tick();
+					const tag = document.querySelector<HTMLSpanElement>(
+						'[aria-label="Select entity: Keyboard entity"]',
+					);
+					if (tag === null) throw new Error("Keyboard entity tag is missing");
+					// Deliberate keyboard navigation admits native controls through the containing scope.
+					tag.focus();
+				},
 				setPartyPresent: (present) => {
 					chatComposer.inParty = present;
 				},
@@ -4926,6 +4959,7 @@
 						confirmation: null,
 					}),
 				read: () => ({
+					selectedEntity: selection.selectedGuid(),
 					requests: chatRequests.slice(),
 					destination: chatComposer.destination,
 					recentEmotes: [...chatComposer.recentEmotes],
@@ -5819,7 +5853,7 @@
 					bind:this={gameplayView}
 					{emotesEnabled}
 					nearby={nearbyOwner}
-					onSelectNearbyEntity={(guid) => selection.selectKnownEntity(guid)}
+					onSelectKnownEntity={(guid) => selection.selectKnownEntity(guid)}
 					onClearWaypoint={clearWaypoint}
 					onSetWaypoint={setWaypoint}
 					{partyHudPresent}
@@ -6088,6 +6122,9 @@
 							);
 						else
 							await interactionLifecycle.sendChat({ kind: "speech", message });
+					}}
+					onChatNotice={(message) => {
+						toast = { id: 1, message, tone: "warning" };
 					}}
 					onSendChatError={(message) => {
 						appendChat({ kind: "error", message });

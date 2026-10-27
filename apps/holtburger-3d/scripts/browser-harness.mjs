@@ -4762,16 +4762,38 @@ async function runClientHudHarness({ viteUrl }) {
 				state: { error: null, ready: true },
 			};
 		}
-		if (options.clientNearby)
+		if (options.clientNearby) {
+			const clientNearby = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeNearby",
+				[],
+			);
+			await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.chat.prepareEntityKeyboard",
+				[],
+			);
+			for (const type of ["keyDown", "keyUp"])
+				await client.send("Input.dispatchKeyEvent", {
+					type,
+					key: "Enter",
+					code: "Enter",
+					windowsVirtualKeyCode: 13,
+					...(type === "keyDown" ? { text: "\r" } : {}),
+				});
+			const selected = await evaluateExpression(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.chat.read().selectedEntity",
+			);
+			if (selected !== 7)
+				throw new Error("Native Enter did not select the chat entity");
+			clientNearby.checks.push("chat-entity-native-keyboard");
 			return {
-				clientNearby: await evaluate(
-					client,
-					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeNearby",
-					[],
-				),
+				clientNearby,
 				consoleMessages,
 				state: { error: null, ready: true },
 			};
+		}
 		if (options.clientInventory) {
 			await evaluate(
 				client,

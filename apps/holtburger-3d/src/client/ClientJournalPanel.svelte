@@ -71,6 +71,7 @@
 	{#if target === null}{contractLocationText(
 			location,
 		)}{:else}<ClientWaypointLink
+			interactive
 			text={contractLocationText(location)}
 			{target}
 			{onSetWaypoint}
@@ -222,6 +223,7 @@
 								{:else}
 									<p>
 										<ClientWaypointText
+											interactive
 											text={row.description}
 											{onSetWaypoint}
 										/>
@@ -234,6 +236,7 @@
 											<dt>Progress</dt>
 											<dd>
 												<ClientWaypointText
+													interactive
 													text={row.status.progress}
 													{onSetWaypoint}
 												/>

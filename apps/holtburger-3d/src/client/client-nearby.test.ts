@@ -84,14 +84,14 @@ describe("ClientNearby", () => {
 				{
 					indented: true,
 					spans: [
-						{ kind: "emphasis", text: "Diamond Golem" },
+						{ kind: "entity", guid: 7, text: "Diamond Golem" },
 						{ kind: "plain", text: expect.stringContaining("(5.0, 0.0, 0.0)") },
 					],
 				},
 				{
 					indented: true,
 					spans: [
-						{ kind: "emphasis", text: "Diamond Golem" },
+						{ kind: "entity", guid: 8, text: "Diamond Golem" },
 						{
 							kind: "plain",
 							text: expect.stringContaining("(10.0, 0.0, 0.0)"),
@@ -158,7 +158,7 @@ describe("ClientNearby", () => {
 				{
 					indented: false,
 					spans: [
-						{ kind: "emphasis", text: "Golem" },
+						{ kind: "entity", guid: 8, text: "Golem" },
 						{ kind: "plain", text: expect.stringContaining("10.0") },
 					],
 				},

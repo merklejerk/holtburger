@@ -1,0 +1,18 @@
+name: Alpha Release Candidate
+
+# GitHub requires this filename on the default branch to expose Run workflow.
+# Selecting 3d-next runs that branch's complete candidate workflow instead.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  select-alpha-branch:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Select the branch containing the alpha pipeline
+        run: |
+          echo '::error::Select 3d-next in the Run workflow branch dropdown to build an alpha candidate.'
+          exit 1

@@ -324,7 +324,6 @@ def manifest(artifacts: Path) -> list[Path]:
         "noticesSha256": notices_digest,
         "platforms": records,
         "assets": [{"name": path.name, "sha256": digest(path)} for path in files],
-        "nativeAcceptance": "Pending final user verification; see release notes for results",
     })
     files.append(description)
     sums = artifacts / "SHA256SUMS"

@@ -1,1 +1,9 @@
 .github/workflows/*.lock.yml linguist-generated=true merge=ours
+
+# The branding generator verifies these generated SVGs byte-for-byte.
+assets/branding/portal-static.svg text eol=lf
+apps/holtburger-3d/public/favicon.svg text eol=lf
+apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.svg text eol=lf
+
+# Hash-pinned upstream notices must retain their original bytes on every platform.
+.github/licenses/native/** -text

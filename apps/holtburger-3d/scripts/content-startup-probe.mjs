@@ -12,7 +12,7 @@ import {
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { createCdpClient } from "./cdp-client.mjs";
+import { CdpConnectionError, createCdpClient } from "./cdp-client.mjs";
 import { findAvailablePort } from "./dev-port.mjs";
 
 const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
@@ -83,6 +83,10 @@ async function evaluate(client, expression) {
 
 async function launch(mode, args) {
 	const switches = [
+		// Native packages honor Electron's profile override on every OS, including macOS.
+		...(packagedExecutable === null
+			? []
+			: [`--user-data-dir=${join(config, profileName)}`]),
 		"--remote-debugging-port=0",
 		"--use-angle=swiftshader",
 		"--enable-unsafe-swiftshader",
@@ -167,12 +171,27 @@ async function launch(mode, args) {
 			snapshot: () => evaluate(client, "window.holtburgerContent.snapshot()"),
 			async close(expectedCode) {
 				try {
-					await evaluate(client, "void window.holtburgerContent.quit()");
-					await waitFor(() => status, "orderly app exit");
-					if (status.code !== expectedCode || status.signal !== null)
+					// Quit can close the debugger before its reply arrives. Process exit is
+					// independent; only a transport closure may accompany a valid exit.
+					const [request, exit] = await Promise.allSettled([
+						evaluate(client, "void window.holtburgerContent.quit()"),
+						waitFor(() => status, "orderly app exit"),
+					]);
+					if (exit.status === "rejected") throw exit.reason;
+					if (
+						request.status === "rejected" &&
+						!(request.reason instanceof CdpConnectionError)
+					)
+						throw request.reason;
+					if (exit.value.code !== expectedCode || exit.value.signal !== null)
 						throw new Error(
-							`Application close failed: ${JSON.stringify(status)}\n${output}`,
+							`Application close failed: ${JSON.stringify(exit.value)}`,
 						);
+				} catch (error) {
+					throw new Error(
+						`${mode} close probe failed (${JSON.stringify(status)}): ${output}`,
+						{ cause: error },
+					);
 				} finally {
 					client.close();
 					if (status === null) {

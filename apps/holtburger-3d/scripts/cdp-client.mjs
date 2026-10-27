@@ -1,5 +1,11 @@
 const CDP_TIMEOUT_MS = 10_000;
 
+/** Connection failure/closure, distinct from a rejected browser command or page exception. */
+export class CdpConnectionError extends Error {
+	/** Preserve the transport category in native probe diagnostics. */
+	name = "CdpConnectionError";
+}
+
 /**
  * Small CDP transport shared by local Electron diagnostic probes.
  * @param {string} webSocketUrl
@@ -73,10 +79,10 @@ export function createCdpClient(webSocketUrl) {
 			});
 		});
 		socket.addEventListener("error", () =>
-			fail(new Error("CDP connection failed.")),
+			fail(new CdpConnectionError("CDP connection failed.")),
 		);
 		socket.addEventListener("close", () =>
-			fail(new Error("CDP connection closed.")),
+			fail(new CdpConnectionError("CDP connection closed.")),
 		);
 		socket.addEventListener("message", (event) => {
 			const message = JSON.parse(event.data);

@@ -31,7 +31,7 @@
 		onMinimumHeightChange,
 	}: Props = $props();
 	let focusedKind = $state<ClientVital["kind"]>("health");
-	/** Only the level facts used by the bar enter the bounded HUD display graph. */
+	/** Only the level facts used by the identity and XP bar enter the bounded HUD display graph. */
 	let level = $state.raw<CharacterSheet["level"] | null>(null);
 	/** Measure intrinsic rows, independent of the preferred height, so shrinking text can shrink the minimum. */
 	function measureMinimumHeight(node: HTMLElement) {
@@ -115,7 +115,12 @@
 <section class="character-hud" use:measureMinimumHeight>
 	<div class="identity-block">
 		<header class="ui-readout">
-			<span class="identity">{playerName ?? "Awaiting character"}</span>
+			<span class="identity">
+				{playerName ??
+					"Awaiting character"}{#if playerName !== null && level !== null}
+					<span class="level ui-muted">{" "}({level.level})</span>
+				{/if}
+			</span>
 			<span class="server">
 				<span class="world-name">on {worldName ?? "Unknown world"}</span>
 				<ClientConnectionBadge {readConnection} />
@@ -191,6 +196,9 @@
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
+		}
+		.level {
+			font-weight: 400;
 		}
 		.server {
 			display: flex;

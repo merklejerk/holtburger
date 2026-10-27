@@ -1,4 +1,5 @@
 import type { ActionBarDirection } from "../lib/input/input-contract";
+import type { HudSurfaceId } from "./client-hud-geometry";
 import type {
 	ClientHudViewport,
 	ResolvedClientHudPlacement,
@@ -13,6 +14,11 @@ import {
 	type ActionSlotIndex,
 } from "./client-action-bar-contract";
 import type { ClientActionBar } from "./client-action-bar-state";
+
+/** Shared stable key for an action bar's shell and collection geometry reader. */
+export function actionBarSurfaceId(id: number): HudSurfaceId {
+	return `action-bar:${id}`;
+}
 
 /** One canonical grid shared by rendering and keyboard navigation. */
 export function actionBarGrid(

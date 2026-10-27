@@ -224,6 +224,30 @@ export function anchorClientHudPlacement(
 	};
 }
 
+/** Move with the reachable preferred extent so capturing anchors cannot enlarge the result. */
+export function moveClientHudRectangle(
+	start: ResolvedClientHudPlacement,
+	viewport: ClientHudViewport,
+	minimum: PreferredClientHudExtent,
+	preferred: PreferredClientHudExtent,
+	delta: ClientPointerDelta,
+): ResolvedClientHudPlacement {
+	const width = Math.min(
+		Math.max(preferred.width, minimum.width),
+		viewport.width,
+	);
+	const height = Math.min(
+		Math.max(preferred.height, minimum.height),
+		viewport.height,
+	);
+	return {
+		left: clamp(start.left + delta.x, 0, viewport.width - width),
+		top: clamp(start.top + delta.y, 0, viewport.height - height),
+		width,
+		height,
+	};
+}
+
 /** Resize a floating rectangle from any border while keeping its opposite borders stationary. */
 export function resizeClientPanelRectangle(
 	start: ResolvedClientHudPlacement,

@@ -247,8 +247,14 @@ export const CLIENT_ACTION_BAR_TUNING = {
 	menuStripSize: 24,
 	/** Provisional cell extent before the mounted bar measures its active theme. */
 	initialCellSize: 36,
-	/** Minimum spacing between a new clone and existing action bars. */
-	cloneGap: 4,
+} as const;
+
+/** CSS-pixel placement policy shared by HUD snapping and action-bar packing. */
+export const CLIENT_HUD_SNAP_TUNING = {
+	/** Maximum pointer-derived displacement on either axis that attracts a surface. */
+	distance: 8,
+	/** Spacing between adjacent surfaces, including cloned and reset action bars. */
+	gap: 4,
 } as const;
 
 /** Small connection badge presentation policy; transport health belongs to core. */

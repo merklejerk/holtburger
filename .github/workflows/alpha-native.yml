@@ -1,0 +1,133 @@
+name: Alpha native package
+
+on:
+  workflow_call:
+    inputs:
+      commit:
+        type: string
+        required: true
+      matrix:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(inputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      CARGO_TERM_COLOR: always
+      PYTHONDONTWRITEBYTECODE: '1'
+      HOLTBURGER_SOURCE_REVISION: ${{ inputs.commit }}
+      HOLTBURGER_SOURCE_MODIFIED: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.1
+          cache: npm
+          cache-dependency-path: apps/holtburger-3d/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.95.0
+          targets: ${{ matrix.triple }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: alpha-notices
+          path: .holtburger-local/alpha-notices
+      - name: Fetch pinned alpha micro content
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/fetch_alpha_content.py .holtburger-local/alpha-content
+      - name: Install frontend dependencies
+        working-directory: apps/holtburger-3d
+        run: npm ci
+      - name: Check native branding generation
+        working-directory: apps/holtburger-3d
+        run: npm run check:branding
+      - name: Build only suite executables and the bootstrap probe
+        run: |
+          cargo build --locked --release --target '${{ matrix.triple }}' \
+            -p holtburger-cli --bin tui \
+            -p holtburger-tools --bin dat2hba --bin dat-tool \
+            -p holtburger-3d-host --bin holtburger-3d-host \
+            -p holtburger-debug-harness --bin content_bootstrap
+          SUFFIX=''
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then SUFFIX='.exe'; fi
+          echo "HOLTBURGER_HOST_BIN=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
+          echo "HOLTBURGER_PACKAGE_HOST=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
+          "target/${{ matrix.triple }}/release/content_bootstrap$SUFFIX" .holtburger-local/alpha-content/assets.hba
+      - name: Build application output and package the inspected target host
+        working-directory: apps/holtburger-3d
+        run: |
+          npm run build
+          npm run build:electron:main
+          npm run package:built -- --platform=${{ matrix.platform }} --arch=${{ matrix.architecture }}
+          npm run check:package
+          npm run smoke:sidecar
+      - name: Install Linux virtual display
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v Xvfb >/dev/null || ! command -v xauth >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install --yes --no-install-recommends xvfb xauth
+          fi
+      - name: Check packaged font/image assets and default-client content recovery
+        working-directory: apps/holtburger-3d
+        run: |
+          PACKAGE="$GITHUB_WORKSPACE/apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}"
+          case "$RUNNER_OS" in
+            macOS) EXECUTABLE="$PACKAGE/holtburger-3d.app/Contents/MacOS/holtburger-3d" ;;
+            Windows) EXECUTABLE="$PACKAGE/holtburger-3d.exe" ;;
+            Linux) EXECUTABLE="$PACKAGE/holtburger-3d" ;;
+            *) exit 1 ;;
+          esac
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then
+            xvfb-run --auto-servernum node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
+          else
+            node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
+          fi
+      - name: Assemble and inspect the extracted suite
+        run: |
+          python .github/scripts/alpha_release.py assemble \
+            --target '${{ matrix.triple }}' \
+            --package 'apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}' \
+            --content .holtburger-local/alpha-content \
+            --notices .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html \
+            --output .holtburger-local/alpha-artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alpha-${{ matrix.triple }}
+          path: .holtburger-local/alpha-artifacts/*
+          if-no-files-found: error
+          compression-level: 0
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: verification-linux-bootstrap
+          path: target/x86_64-unknown-linux-gnu/release/content_bootstrap
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: verification-linux-electron
+          path: apps/holtburger-3d/dist-electron/
+          if-no-files-found: error
+

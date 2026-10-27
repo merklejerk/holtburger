@@ -1,12 +1,80 @@
 # Alpha release from `3d-next`
 
-Status: the supported-runtime alpha.3 draft is staged at `e705767e4` with nine verified artifacts. Both Flatpaks identify 26.08; downloaded receipt/copy/bootstrap checks passed. The user-approved narrower CI suites are implemented and locally verified; native confirmation is pending. User native acceptance and publication remain outstanding.
+Status: the nine-asset alpha.3 draft at `e705767e4` is verified on 26.08 and awaits user native acceptance and publication. The revised CI split is implemented in the worktree; hosted acceptance of that split remains outstanding. The last observed CI-policy run at `1c5f06760` passed all native jobs; its sandbox job was still provisioning when observation stopped. That follow-up run is not a prerequisite for accepting the existing candidate. The steering section below governs future CI work and supersedes earlier requirements to run the complete release workflow on branch pushes or rebuild candidates at tags.
+
+## Steering: shorten feedback and publish existing artifacts
+
+The user resumed implementation after the scope revisions below. Preserve the distinction between implementation checks and the one intentional hosted candidate acceptance run. Preserve the current alpha.3 draft, source, tags, and all nine verified assets. Its final manual acceptance can proceed independently of these CI improvements. Historical phases and execution notes below describe the implementation already performed; their old trigger and validation placement is superseded here.
+
+### Goal, evidence, and ownership
+
+The release system should provide fast development feedback, build a requested candidate once, and publish accepted bytes without compiling again. Scope is CI orchestration and build-environment provisioning under `.github/`, with corresponding release instructions in `docs/ALPHA_RELEASING.md`; no application or shared-crate architecture changes are needed.
+
+- At the `1c5f06760` baseline, `.github/workflows/alpha-release.yml` starts native builds and both Flatpaks on every `3d-next` push/PR and again for alpha tags. `suite-flatpak` depends on the entire native matrix; each Flatpak job provisions separately, and the TUI job recompiles Linux binaries.
+- The saved successful alpha.3 Flatpak log records 95.4 MB of apt downloads taking 33 minutes 1 second. Installed-app verification took approximately 24 seconds. Prioritize provisioning and duplicate work over removing inexpensive checks.
+- Saved native logs show npm and Rust cache restores. A restored dependency cache does not mean production executables or installed OS dependencies are reused. Flatpak action caching covers `.flatpak-builder`, not our preceding apt/runtime installation.
+- Current source references: `.github/scripts/alpha_release.py` for identity, assembly, receipts and staging; `.github/flatpak/verify-installed` for installed smoke; existing recipes for runtime and sandbox policy.
+- External references: [hosted runner lifecycle](https://docs.github.com/en/actions/concepts/runners/github-hosted-runners), [custom VM images and eligibility](https://docs.github.com/en/actions/how-tos/manage-runners/larger-runners/use-custom-images), [Flatpak action cache and execution options](https://github.com/flatpak/flatpak-github-actions), [Rust cache behavior](https://github.com/Swatinem/rust-cache).
+
+### Intended execution model
+
+| Lane | Trigger and responsibility | Required evidence |
+| --- | --- | --- |
+| Commit validation | Relevant pushes/PRs; run shared quality checks on Linux only. Documentation-only changes skip builds. | Formatting, lint/type checks and appropriate unit tests; no Windows/macOS jobs, routine release packaging or Flatpak provisioning. |
+| Candidate | Explicit candidate request for an exact commit. Linux, Windows x64 and Apple Silicon build in parallel; both Flatpaks consume the same Linux outputs and share one Ubuntu tooling/runtime installation. | Production build, package identity/layout/architecture/notices/content checks, sidecar/bootstrap smoke, and focused native/sandbox launch and access checks. Windows/macOS do not repeat the shared unit suite. |
+| Publication | After explicit acceptance, publish the existing complete draft through GitHub's release UI or existing tooling. | Exact source/tag/version, complete inventory and checksum agreement; publish existing bytes and verify public downloads. No builds, dependency setup, or new promotion workflow. |
+
+Platform investigations are ad hoc targeted work when an actual OS issue arises. Do not build a generic dispatch interface or configurable investigation matrix.
+
+Target service times: warm commit validation under 10 minutes, warm complete candidate under 20 minutes, and publication under 2 minutes. These are initial measurement targets, not demonstrated guarantees; report cold-start and warm timings separately. Never hide a failed or incomplete check to meet a target.
+
+### Phase S1: Separate triggers and remove duplicated builds
+
+Deliverables: simplify `.github/workflows/alpha-release.yml` and its release-tool entry points as needed; update `docs/ALPHA_RELEASING.md`. Prefer existing jobs and tooling over a new orchestration framework.
+
+- [x] Separate commit validation from explicit candidate packaging. Normal pushes/PRs run Linux-only shared quality checks. Reserve Windows x64 and Apple Silicon runners for explicit candidate builds or explicit platform investigations; no automatic native OS test matrix on ordinary commits.
+- [x] On Windows/macOS candidates, build and inspect the actual native package and run focused startup/private-host/content smoke checks. Do not repeat shared unit suites or the prior four-library/nine-frontend-file selection as a blanket candidate requirement. Retain useful platform contract tests for explicit investigations and run portable coverage in Linux validation where applicable. Keep native packaging on native runners; cross-compilation infrastructure is outside scope.
+- [x] Use simple documentation-only exclusions without leaving required status checks permanently pending. Treat workflow, lockfile, build-script, recipe, and packaging-tool changes as relevant inputs. Do not build dependency-aware package/test selection.
+- [x] Resolve the actual explicit-trigger mechanism against GitHub's default-branch workflow requirements before implementing it. Use an available dispatch entry point or an explicit tag route; do not assume UI dispatch on `3d-next` works. If tags request candidates, publication must reuse that candidate rather than trigger another build.
+- [x] Separate the Linux native job from other matrix completion so Flatpak work waits only for Linux artifacts. Keep all three native platforms required for the complete candidate.
+- [x] Reuse Linux TUI and bootstrap outputs for the TUI Flatpak. Package both Flatpaks in one provisioned job/environment, preserving their distinct inventories, installed receipts and app IDs. Do not rebuild the app or Rust binaries in that job.
+- [x] Reuse candidate diagnostic outputs where useful instead of repeating npm installation/Electron compilation solely to supply probes. Keep diagnostics private and out of public bundles.
+- [x] Keep formatting, lint, shared test suites and exhaustive theme/font/recovery regression coverage in validation; record successful validation for the exact candidate source before it is eligible for publication. Keep inexpensive package smoke on each actual shipped native artifact and sandbox access/launch smoke on the actual Flatpaks. Remove redundant exhaustive executions from candidate packaging, not coverage from the project.
+
+Acceptance: trigger/job graph inspection and targeted workflow/tool checks prove ordinary commits schedule Linux validation only and explicit candidates include all three native platforms. No generic investigation interface is introduced. Do not launch a full release merely to validate YAML or selectors.
+
+### Phase S2: Reduce setup on the existing Ubuntu runners
+
+Keep the existing headless GitHub-hosted Ubuntu runners. Building Flatpaks needs command-line tools and the SDK/runtime; installed Electron checks additionally need Xvfb, D-Bus and portal services. These dependencies do not require a desktop distribution or full desktop installation. Fedora/GNOME build stacks, custom container images, custom VM images, self-hosted runners and runner orchestration are outside this implementation scope.
+
+- [x] Install the required tooling and selected runtime once in the combined Flatpak job. Reuse that installation for both bundles and installed smoke checks; retain the proven display/D-Bus activation order.
+- [ ] Consolidate jobs and retain existing caches first. Add a Flatpak download/runtime cache only if measured setup cost still warrants it. Verify supported paths, permissions, cache size and restore cost before adding a cache; do not blindly archive the whole system installation. A miss follows the normal installation path and remains observable.
+- [x] Inspect the slow apt step's package list and download source. Reduce unnecessary packages/recommendations where safe and address a demonstrated mirror/download issue narrowly. Preserve the services needed by existing sandbox checks.
+- [ ] Key any added caches by runtime, architecture and relevant provisioning inputs. Preserve the portable archive's Ubuntu 22.04 compatibility baseline independently of the Ubuntu 24.04 Flatpak job.
+- [ ] Inspect existing cache restore/save logs only as needed to explain a measured bottleneck. Do not add a cache service or broad cache-audit project. Do not treat a dependency cache as an accepted release artifact or rely on a cache hit for correctness.
+
+Acceptance: Flatpaks wait only for Linux output, reuse its production binaries, and share one tooling/runtime installation on existing Ubuntu infrastructure. Any new cache has demonstrated reuse and correct miss behavior; report remaining setup cost honestly. Installed smoke passes with existing candidate inputs. A new runner/image platform is not required to finish this phase.
+
+### Phase S3: Validate, simplify publication, and clean up
+
+- [ ] Review GitHub's existing step timings and record a short before/after comparison of the longest dependency chain. Distinguish cold setup from warm runs where evidence is available; do not add a latency-reporting system or launch extra runs just to fill a benchmark table.
+- [ ] If setup exceeds 5 minutes or a candidate approaches 20 minutes, identify the responsible step and reassess before another expensive attempt. Do not cancel a progressing job merely to retrieve logs; do not keep polling without a decision to make.
+- [ ] Make at most one intentional end-to-end candidate acceptance run after targeted checks pass. An infrastructure-only retry should reuse successful artifacts/jobs wherever possible. Further full attempts require a concrete diagnosed failure and stated reason.
+
+- [x] Restructure the existing release workflow's triggers, dependencies and duplicate work; reuse `.github/scripts/alpha_release.py` draft assembly/upload and identity/checksum validation. Reuse does not mean preserving the current slow job graph.
+- [x] Stage the complete candidate in a draft release using existing tooling. After acceptance, use GitHub's existing Publish release action or equivalent existing command to publish that draft. Document source/tag/version and checksum checks before publication and the public download check afterward. No new publication workflow, promotion framework, artifact registry, or generic candidate-selection interface is needed.
+- [x] Keep candidate bytes in the existing draft through manual acceptance. Never substitute latest-branch outputs or silently rebuild missing assets; a replacement candidate requires an explicit request. Do not build a new retention-management mechanism.
+- [x] Retain complete-inventory, no-retail-data, source/version, notices and checksum gates. A failed target may leave inspectable draft artifacts but cannot be represented as a complete publishable candidate. Keep the short installed Flatpak smoke as a candidate gate.
+- [x] Remove obsolete automatic-release triggers and duplicate setup/build/probe paths; align comments, job names, instructions and this plan with the final lifecycle. Preserve the independent main TUI nightly.
+- [x] Review the documented publication steps against the existing draft/manifest without publishing. The current alpha.3 can still be published through its existing accepted path; adopting the restructured workflow must not force a replacement build.
+
+Acceptance: one intentional end-to-end acceptance run follows targeted checks; further full attempts have a diagnosed reason. Final documentation states how to request and inspect a candidate and publish its existing draft without compilation or provisioning. Existing candidate identity/inventory/checksum checks remain intact. Record timings and remaining bottlenecks honestly; if setup remains too slow, report the limitation before separately scoping new infrastructure. User native acceptance remains at the final handoff. No new cache services, runner platforms, promotion systems, application features or release formats enter scope.
 
 ## Goal and boundaries
 
 Publish a reproducible alpha suite from one identified `3d-next` commit as GitHub Release assets, containing the TUI, h3d, and the tools and resources needed to use them.
 
-The user authorized implementation and subsequent commits/pushes. The original eight-asset candidate remains tagged at `f6d69fc1d`. The expanded candidate is `alpha-20261027-4e9f81ca9`, with a separate complete draft. The user approved the 26.08 runtime migration. Final publication waits for the replacement candidate, user native-bundle acceptance, and explicit publication authorization.
+The user authorized implementation and subsequent commits/pushes. Prior drafts/tags remain intact. The current supported-runtime candidate is `alpha-20261027-e705767e4` (`0.1.0-alpha.3`); the later CI-only policy commits preserve its exact bytes and source identity. Final publication waits for user native-bundle acceptance and explicit publication authorization.
 
 ### Accepted scope
 
@@ -260,7 +328,7 @@ Primary files: the alpha workflow, reusable build/assembly helpers under `.githu
 - [x] Preserve the TUI Flatpak's separate writable local scripts and bundled scripts, with the same micro digest. Run a no-network bootstrap/load probe inside its runtime rather than relying only on a successful Flatpak build.
 - [x] Validate the final suite after extraction, not only the nested Forge package. Reuse the existing package inspector on extracted h3d and check native symlinks/modes, expected files, micro digest, build identity, and script sidecar pairs.
 - [x] Inspect the shipped inventory for unintended local files and full content. Permit Electron's own `icudtl.dat` and runtime blobs; a blanket ban on every `.dat` filename is incorrect. Validate the exact permitted micro archive rather than assuming any `.hba` is safe.
-- [ ] Generate final filenames, per-suite build info, global release manifest, and checksums from inspected bytes. Store candidate artifacts in CI without publishing for build-verification runs.
+- [x] Generate final filenames, per-suite build info, global release manifest, and checksums from inspected bytes. Store candidate artifacts in CI without publishing for build-verification runs.
 
 Acceptance: every included platform has a correctly identified archive that passes final extraction inspection and relevant noninteractive runtime checks. Flatpak and standalone micro match suite content. No unchecked copy, missing file, target mismatch, or local full-data dependency can pass the workflow.
 
@@ -275,9 +343,9 @@ Deliverables: a suite-owned recipe and launch wrapper/desktop metadata under `.g
 - [x] Preserve TUI's writable local scripts/preferences and read-only bundled scripts/data using the existing environment contract. h3d continues to require user-supplied retail content and its existing sentinel admission. Keep micro separate from h3d content; the current host adapter already removes inherited `HOLTBURGER_DATS` before launching its private host.
 - [ ] Prove and document the display, GPU, audio, network, and portal permissions actually required. Test saved retail-directory/full-HBA selection and access from the private Rust host after restarting the installed app. Verify the picker/portal behavior; document explicit per-invocation filesystem grants for CLI content paths and conversion/inspection input/output directories where needed. Do not solve access by defaulting to unrestricted host filesystem access or redesigning content discovery.
 - [x] Add the full-suite Flatpak to `.github/workflows/alpha-release.yml`, `.github/scripts/alpha_release.py` aggregation/staging, and release contract tests. Require both Flatpaks in the complete release inventory, validate their source/version/content/notice identities, and hash both in the global manifest and SHA256SUMS. The expanded release has nine public assets (three native suites, two Flatpaks, micro ZIP, notices, manifest, checksums).
-- [ ] Install the built Flatpak in CI and run noninteractive production bootstrap, private-host smoke, existing theme/font/content-recovery probes through the installed launch path, and safe `--help` checks for both tools. Verify installed resource/identity/notice digests and permissions. Use synthetic content fixtures for recovery; never upload full retail data or run interactive TUI. Add focused tests only for new packaging/launch contracts.
+- [x] Install the built Flatpak in CI and run noninteractive production bootstrap, private-host smoke, existing theme/font/content-recovery probes through the installed launch path, and safe `--help` checks for both tools. Verify installed resource/identity/notice digests and permissions. Use synthetic content fixtures for recovery; never upload full retail data or run interactive TUI. Add focused tests only for new packaging/launch contracts.
 - [x] Update quickstart/releasing docs with full-suite install and invocation commands: default h3d client, explicit Explorer, `--command=holtburger-cli`, `--command=dat2hba`, and `--command=dat-tool`. Explain retail-data/input/output access, sandbox-owned settings/cache/scripts, graphics/audio requirements, and how the two Flatpaks differ.
-- [ ] Reassess the candidate after installed-runtime evidence. Produce a new source-specific tag and complete draft containing the expanded inventory; do not move the existing tag or attach a different-commit Flatpak to the current eight-asset candidate. Defer user native/visual verification until that new complete draft exists, then include full-suite Flatpak launch, retail access, graphics/audio/input, TUI, and tools in the final checklist.
+- [x] Reassess the candidate after installed-runtime evidence. Produce a new source-specific tag and complete draft containing the expanded inventory; do not move the existing tag or attach a different-commit Flatpak to the current eight-asset candidate. Defer user native/visual verification until that new complete draft exists, then include full-suite Flatpak launch, retail access, graphics/audio/input, TUI, and tools in the final checklist.
 
 Acceptance: installing the full-suite Flatpak provides every required suite component and preserves the default-client/explicit-Explorer contract, usable sandbox/content access, exact identity and notices, and approved content. Its installed-runtime checks pass, it appears in the new draft's nine-asset manifest/checksums, and final user acceptance remains a separate last gate.
 
@@ -290,15 +358,15 @@ Acceptance: installing the full-suite Flatpak provides every required suite comp
 - [x] Decide whether to omit diagnostic HTML entries from release Vite inputs; do so only if cleanly separable from existing verification. Source maps can remain in alpha. Neither is a reason to delay shipping.
 - [x] Remove obsolete staging helpers, duplicate packaging paths, dead tests, and any temporary asset-dependent tests. Keep useful probes in diagnostics tooling.
 - [x] Review the complete diff for crate/app boundary violations, unnecessary type fields, fallbacks, line-count growth, and accidental scope expansion.
-- [ ] Run the required checks once against the final candidate commit. Rebuild only when changes invalidate prior evidence. Prepare a short final native-bundle checklist covering extraction, OS launch, CLI arguments, content selection, and basic client use; do not require the user to execute it in this phase.
+- [x] Run the required checks once against the final candidate commit. Rebuild only when changes invalidate prior evidence. Prepare a short final native-bundle checklist covering extraction, OS launch, CLI arguments, content selection, and basic client use; do not require the user to execute it in this phase.
 
 Acceptance: candidate artifacts and quickstart are concrete and reviewable; cleanup is complete; remaining platform limitations are accurately documented. No implementation work remains concealed behind a future launcher or unperformed asset generation. User native-bundle acceptance remains pending until the complete draft release is available.
 
 ### Phase 8: Publish and verify the first alpha
 
-- [ ] Once execution/publication is authorized, create the selected non-SemVer-shaped alpha tag at the verified commit. Do not stage or commit changes without an explicit request.
-- [ ] The tag workflow runs all required validation and creates a draft prerelease only for its exact source commit. Use this as the authoritative candidate run rather than first waiting for an identical branch build and then rebuilding at a tag. Keep write permissions limited to publishing jobs; PR jobs must not publish.
-- [ ] Upload the complete suite matrix, both Flatpaks, standalone micro ZIP, manifest, and checksum file to that draft. Verify the expected asset inventory and checksums/identity before handing it to the user. Keep the release unpublished at this point.
+- [x] Once execution/publication is authorized, create the selected non-SemVer-shaped alpha tag at the verified commit. Do not stage or commit changes without an explicit request.
+- [x] The tag workflow runs all required validation and creates a draft prerelease only for its exact source commit. Use this as the authoritative candidate run rather than first waiting for an identical branch build and then rebuilding at a tag. Keep write permissions limited to publishing jobs; PR jobs must not publish.
+- [x] Upload the complete suite matrix, both Flatpaks, standalone micro ZIP, manifest, and checksum file to that draft. Verify the expected asset inventory and checksums/identity before handing it to the user. Keep the release unpublished at this point.
 - [ ] At this final handoff, provide the draft release link, exact candidate commit/version, checksums, known limitations, and the native-bundle checklist. The user verifies the platforms available to them now; record results and any unverified platforms separately from CI evidence. No earlier phase depends on these manual checks.
 - [ ] If native acceptance exposes a defect, fix it and produce a new identified candidate. Repeat affected automated checks and user checks against the replacement artifacts; do not silently substitute bytes already tested by the user.
 - [ ] Publish after final user acceptance and publication authorization. Promote the exact staged bytes that were tested; the publication step must not rebuild them. Platforms unavailable to the user retain explicit experimental/unverified status rather than invented acceptance evidence.
@@ -349,14 +417,14 @@ Acceptance: a public GitHub prerelease contains the complete agreed artifact set
 
 ## Definition of done
 
-- [ ] Agreed suite binaries/resources, both Flatpaks, and standalone micro are present as GitHub Release assets.
+- [x] Agreed suite binaries/resources, both Flatpaks, and standalone micro are present as GitHub Release assets.
 - [x] Corrected micro artifact initializes current TUI content and is shared by digest across consumers.
 - [x] h3d defaults to client, retains explicit Explorer, and uses TUI-compatible port/password flags.
 - [x] h3d uses the sentinel for admission without archive format changes or a thorough content validator.
 - [x] Portable TUI resource lookup works independently of the invocation directory.
-- [ ] Suite version and exact source commit agree across package metadata, displayed identities, tags, and manifests.
-- [ ] Platform labels match executable architectures; Linux dependencies and baseline are verified.
-- [ ] Required formatting, tests, lint/clippy, package checks, and extracted-suite checks pass without ignored warnings.
+- [x] Suite version and exact source commit agree across package metadata, displayed identities, tags, and manifests.
+- [x] Platform labels match executable architectures; Linux dependencies and baseline are verified.
+- [x] Required formatting, tests, lint/clippy, package checks, and extracted-suite checks pass without ignored warnings.
 - [ ] No full retail assets, optional tools, private data, or local caches are in the published inventory.
 - [x] Quickstart and release notes explain CLI launch, retail-data selection, unsigned status, and platform verification limits.
 - [ ] Published assets pass checksum verification; the existing main nightly remains operational.
@@ -586,3 +654,20 @@ These do not block writing the plan; resolve them at the named phase before depe
 
 - Hosted source `a891f2a1b` passed the selected Rust/frontend suites and new packaged-asset/recovery probes on Windows and Apple Silicon, and the full Linux checks. Windows frontend OS tests took 3s. Its sequential per-package Rust gate took 6m48s, versus 6m17s in the earlier broad run; that measurement does not establish a Rust speedup.
 - Batch all four library test targets into a single Cargo build/list/run configuration so dependency features resolve once, while retaining every nonempty selector check and the same 40 tests. The combined runner passed all 40 locally. Native revalidation uses the final runner configuration; no change to release candidate source or bytes.
+
+### Final native confirmation of the narrower suites
+
+- Commit `1c5f067603f4c099f4b7f119e7fe2418b767f332`, workflow `40521945836`: all three native jobs passed. Linux ran shared correctness, warnings-denied lint, full themes, packaging, and recovery. Windows/macOS ran the batched four-library selection and nine frontend files, then branding, native build/bootstrap, package inspection, sidecar, packaged asset smoke/recovery, and extraction checks.
+- Both native OS logs list 10 content, 3 catalog, 9 CLI, and 18 host tests. macOS passed all 128 frontend tests; Windows passed 127 with the existing Unix-permission-only test skipped. Both actual package probes report eight fonts, four bundled images, `coverage: assets`, and no custom reload. Linux retains full coverage, and Flatpak full coverage remains explicit for sandbox filesystem access.
+- Observed final-run Windows gate timings: frontend 4s, batched Rust compilation/tests 3m03s. The previous broad gate was 2m01s frontend and 6m17s Rust; runner/cache variation means these are measured run comparisons, not guaranteed savings. Native release compilation and runtime/tool downloads remain separate costs.
+- The final CI-policy sandbox job is still installing dependencies. Its native checks are complete; the alpha.3 tag workflow itself is already fully green and all nine draft bytes remain verified. No further source changes are planned before final sandbox confirmation and user handoff.
+
+### CI simplification implementation and targeted evidence
+
+- Resumed implementation follows the three steering phases. `alpha-checks.yml` is Linux-only on branch/PR events, with a prose-only classifier and a final status that handles skipped compilation. `alpha-release.yml` is tag-only and calls the same checks for the candidate source. `alpha-native.yml` owns native packaging, called separately for Linux and Windows/Apple Silicon so Flatpaks wait only for Linux. The former OS selector runner was removed; underlying app/crate tests remain.
+- Both Flatpaks now share an Ubuntu 24.04 tooling/runtime installation, use separate builder state/repositories/cache keys, and consume the inspected Linux archive. No Rust compilation occurs in the Flatpak job. Private compiled Electron imports and bootstrap come from Linux artifacts. Review found that those JavaScript imports still need production dependencies: the Flatpak job uses locked `npm ci --omit=dev --ignore-scripts`, not a full Electron/build-tool install.
+- Narrow provisioning change: replace only the Azure Ubuntu mirror URL implicated by the saved 33-minute stalled download; retain normal Ubuntu sources and package verification. Install required builder helpers, Xvfb authentication and portal services explicitly with `--no-install-recommends`. No new runtime-cache mechanism: the measured runtime installation was already under a minute; consolidation/mirror/package reduction come first. Hosted provisioning behavior is not yet verified.
+- Targeted evidence: actionlint passed all three workflow files; all 23 release/notices tests passed; suite version consistency and whitespace checks passed. A temporary Git fixture exercised prose push/PR skips, tag validation, shipped quickstart changes, source addition/deletion and new-branch behavior.
+- An isolated temporary app installed only four production JavaScript packages offline in approximately 0.4 seconds and imported the actual compiled probe modules. Against the existing verified alpha.3 Linux binaries, all four sidecar mode/archive cases passed, followed by client/Explorer persisted-failure/retry/reset/close checks and eight fonts/four images. The local machine lacks Xvfb; the successful package probe used the existing display with local socket permission. This proves the dependency handoff, not fresh hosted Ubuntu provisioning. No interactive TUI or visual acceptance was performed.
+- Remaining: one intentional hosted acceptance run, actual timing comparison, user native acceptance and publication. The current alpha.3 draft and all its bytes remain unchanged; no hosted run or publication has been initiated by this implementation pass.
+- Automatic approval review rejected the staging/commit command before execution because repository instructions require an explicit commit request. No files were staged or committed, and no push/tag/CI action occurred. The user subsequently explicitly authorized commit/push and one source-specific acceptance tag; local implementation and targeted verification are complete.

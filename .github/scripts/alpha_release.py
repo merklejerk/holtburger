@@ -95,7 +95,8 @@ def plan() -> None:
         )
     result = {
         "version": version, "commit": commit,
-        "matrix": {"include": [asdict(target) for target in TARGETS]},
+        "linux_matrix": {"include": [asdict(target) for target in TARGETS if target.platform == "linux"]},
+        "desktop_matrix": {"include": [asdict(target) for target in TARGETS if target.platform != "linux"]},
     }
     if "GITHUB_OUTPUT" in os.environ:
         with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:

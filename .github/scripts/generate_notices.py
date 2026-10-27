@@ -34,7 +34,7 @@ def render(report: dict, native_manifest: Path) -> str:
         "<style>body{max-width:75em;margin:2em auto;padding:0 1em}"
         "pre{white-space:pre-wrap;overflow-wrap:anywhere}</style>",
         "<h1>Holtburger third-party notices</h1>",
-        "<p>Rust runtime and build dependencies across the four alpha targets, generated "
+        "<p>Rust runtime and build dependencies across the alpha targets, generated "
         f"with cargo-about {CARGO_ABOUT_VERSION}. Electron/Chromium and font notices "
         "are also included inside the h3d application.</p>",
     ]

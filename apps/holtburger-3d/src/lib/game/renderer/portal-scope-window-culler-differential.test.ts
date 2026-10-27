@@ -106,7 +106,6 @@ describe("portal scope-window culler differential", () => {
 		}
 	});
 
-	// Exhaustive seeded assertions exceed the default timeout on hosted Intel macOS.
 	it("preserves coverage and remains invariant over seeded topology and camera families", () => {
 		const random = seededRandom(EXPANDED_TOPOLOGY_SEED);
 		for (const family of EXPANDED_FAMILIES) {
@@ -138,7 +137,7 @@ describe("portal scope-window culler differential", () => {
 				}
 			}
 		}
-	}, 30_000);
+	});
 
 	it("materializes sparse selected crossings through canonical packed markers", () => {
 		const selected = envCellScope("sparse-selected");

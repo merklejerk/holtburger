@@ -167,7 +167,7 @@ Checked tasks have implementation or local evidence recorded below; platform-wid
 
 Deliverables: agreed matrix and Linux baseline; a concrete route to supply regenerated micro content; alpha tag ownership and CI trigger design.
 
-- [x] Target Linux x86-64, Windows x86-64, macOS arm64, and macOS x86-64 to preserve the existing archive coverage. Identify a native runner for each; verify Intel macOS runner availability before writing the matrix. If unavailable, surface the reduction for a user decision rather than relabel an arm64 binary.
+- [x] Target Linux x86-64, Windows x86-64, and macOS arm64. Per the user’s scope correction, Intel macOS is excluded from alpha, nightly, and cargo-dist releases going forward.
 - [ ] Start Linux portability work with the existing h3d probe's `ubuntu-22.04` baseline, subject to confirming current dependency builds. Document any evidence requiring a newer baseline before accepting it.
 - [x] Locate the user's retail portal and English localization DATs for local micro generation. Include other DAT roles only where the corrected micro manifest needs them. Existing full HBA alone is not an input supported by `dat2hba`; do not invent a new conversion mode to avoid identifying the real source files.
 - [x] Choose a pinned, downloadable location for the approved regenerated micro ZIP and record its SHA-256 in a repository release-content descriptor. Keep it separate from the existing main-nightly mutable URL. The descriptor needs only the URL and expected digest; provenance can be recorded in release notes.
@@ -228,7 +228,7 @@ Acceptance: one version command updates all suite version owners and lockfiles; 
 
 - [x] Reassess actual micro size, bootstrap evidence, path changes, native runner availability, and dependency baselines.
 - [x] Verify the regenerated micro is available by pinned digest without giving retail assets to public CI.
-- [x] Walk the four-platform package flow using final output paths. Resolve `target/<triple>/release` versus Forge's current hardcoded `target/release` before implementing assembly.
+- [x] Walk the three-platform package flow using final output paths. Resolve `target/<triple>/release` versus Forge's current hardcoded `target/release` before implementing assembly.
 - [x] Confirm scope remains CLI-driven startup, one sentinel, no HBA format change, no optional tools, and no updater/launcher.
 - [x] Update remaining phases for findings. Raise any platform reduction or baseline increase as a concrete tradeoff before proceeding.
 - [x] Use CI and noninteractive evidence for this checkpoint; user native-bundle verification is deferred to the final release handoff and is not a prerequisite here.
@@ -310,7 +310,6 @@ Acceptance: a public GitHub prerelease contains the complete agreed artifact set
 | New gate stops recovery probes at the wrong stage | Include the sentinel in minimal synthetic fixtures intended to test later failures. |
 | Micro masks retail DATs in one directory | Preserve family selection, isolate TUI data, reject unsuitable h3d selection with guidance. |
 | Local binaries accidentally enter release | Build in pinned native CI environments; inspect linkage/architecture and accept only outputs tied to the resolved commit. |
-| Intel macOS runner is unavailable | Treat as an early feasibility decision. Never advertise the other architecture under its filename. |
 | Host-path change is defeated by npm's implicit Cargo rebuild | Establish one target-aware host selection and build once before Forge packages it. |
 | CI event SHA differs from checkout | Resolve and distribute checked-out commit identity explicitly; validate tag, manifest, and embedded labels. |
 | Two release workflows react to alpha tag | Use a disjoint tag namespace and verify the trigger behavior before publishing. |
@@ -339,7 +338,7 @@ Acceptance: a public GitHub prerelease contains the complete agreed artifact set
 These do not block writing the plan; resolve them at the named phase before dependent work.
 
 1. **Phase 1:** Where are the retail portal/localization DATs for regenerated micro content, and where should its pinned downloadable ZIP live? Investigation found only the full HBA and stale micro ZIP under local `dats/`.
-2. **Phase 1:** Is a usable native Intel macOS runner available? Default scope preserves all four nightly archive targets; any reduction needs an explicit decision.
+2. **Resolved scope:** macOS targets Apple Silicon only. Intel macOS is excluded by the user’s explicit direction; release completeness requires the three supported targets.
 3. **Phase 4:** What is the first suite version? Proposed `0.1.0-alpha.1`, independent of the dated alpha tag.
 4. **Phase 8, final handoff:** Which platforms can the user exercise interactively? Their native-bundle checks are unavailable before this point. Publish truthful experimental status for the rest; do not manufacture acceptance evidence.
 5. **Resolved implementation gap:** Rust notices now use pinned cargo-about, checksum-verified upstream clarifications, a bounded metadata-only exception, and a pinned native-library appendix. Generation and packaging are locally verified below; hosted consumption remains pending.
@@ -357,7 +356,7 @@ These do not block writing the plan; resolve them at the named phase before depe
 ### Local implementation evidence (2026-10-26)
 
 - Retail inputs located at `/home/cluracan/data/ace/Dats/client_portal.dat` and `client_local_English.dat`. No full data was copied into release staging.
-- Native runner contract: `ubuntu-22.04`/Linux x64, `windows-2022`/Windows x64, `macos-14`/arm64, and `macos-15-intel`/Intel. Intel availability verified against the official GitHub runner reference; actual matrix runs remain pending.
+- Native runner contract: `ubuntu-22.04`/Linux x64, `windows-2022`/Windows x64, and `macos-14`/arm64. The original Intel macOS target was subsequently removed by user direction; it is not a release prerequisite.
 - Corrected micro: 8,446 records (8,445 portal, one language); HBA 2,762,679 bytes, deterministic ZIP 1,546,684 bytes. SHA-256 `df24573f24e4ca46398041ab70c9188825ad6a82e5db229c4146fe8d757aa098`. Production bootstrap and CharGen load passed with 13 heritage groups. Old micro fails at missing `0x0E000003`.
 - Generator was built from the current worktree based on `06e2a97af1cc193f7886033826e6f13dd47925a3` with the micro-filter correction; no generator commit has been created. Input is staged in unpublished content draft release ID `424889586`, asset ID `679860746`; `.github/alpha-content.json` pins its API URL/digest. The actual CI download helper fetched and verified it successfully.
 - Chosen suite version: `0.1.0-alpha.1`. Version command and consistency check succeeded; Cargo.lock changed only workspace package versions, npm lockfile only root version entries.
@@ -439,3 +438,8 @@ These do not block writing the plan; resolve them at the named phase before depe
 
 - Run `40436340251` completed: Flatpak, Linux x64, and Apple Silicon passed all gates. Intel macOS passed affected Rust tests and release/bootstrap builds, then two exhaustive seeded renderer tests exceeded Vitest's default five-second timeout (5.8 and 6.3 seconds); neither reported an assertion mismatch. The remaining 413 frontend files passed.
 - Give only those two exhaustive tests a 30-second budget, preserving every seeded case and assertion and the default timeout for other tests. Both files passed locally (10 tests); native verification remains pending. Windows ASAR normalization is ready in `fcc90d679` and will ship in the same next branch push.
+
+### Platform scope correction
+
+- The user explicitly removed Intel macOS from the plan and future releases. The active matrix is Linux x86-64, Windows x86-64, and macOS Apple Silicon. Removed the Intel row from the shared alpha contract (which also controls manifest completeness), notice target graphs, legacy nightly matrix, and cargo-dist configuration; updated download/releasing docs.
+- Historical Intel investigation above is superseded. Reverted the two Intel-only exhaustive-test timeout changes; supported-platform checks retain the original defaults and full seeded case counts. Current Windows evidence will be collected before the next push, but Intel no longer gates the candidate.

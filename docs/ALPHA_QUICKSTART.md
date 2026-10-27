@@ -6,8 +6,8 @@ keep the files inside `h3d` together.
 
 ## Pick a download
 
-Choose the archive matching your operating system and CPU. macOS has separate Intel (x86-64)
-and Apple Silicon (arm64) downloads. `build-info.json` identifies the version, source commit,
+Choose the archive matching your operating system and CPU: Linux x86-64, Windows x86-64,
+or macOS Apple Silicon (arm64). `build-info.json` identifies the version, source commit,
 target, and bundled micro content. The release includes `SHA256SUMS` and a detailed manifest.
 
 Packages are unsigned. Windows/macOS may require an explicit OS launch decision. Native
@@ -56,7 +56,7 @@ cannot render the world. A retail directory normally contains `client_portal.dat
 # Linux
 ./h3d/holtburger-3d --host SERVER --port 9000 --account ACCOUNT --password PASSWORD --content /path/to/retail
 
-# macOS (Intel or Apple Silicon)
+# macOS (Apple Silicon)
 ./h3d/holtburger-3d.app/Contents/MacOS/holtburger-3d --host SERVER --port 9000 --account ACCOUNT --password PASSWORD --content /path/to/retail
 ```
 

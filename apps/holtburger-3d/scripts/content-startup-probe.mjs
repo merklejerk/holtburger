@@ -6,10 +6,11 @@ import {
 	mkdir,
 	mkdtemp,
 	readFile,
+	realpath,
 	rm,
 	writeFile,
 } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, resolve, toNamespacedPath } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { CdpConnectionError, createCdpClient } from "./cdp-client.mjs";
@@ -32,6 +33,7 @@ const config = join(directory, "config");
 const preference = join(config, profileName, "content-selection.json");
 const assets = join(directory, "assets");
 await mkdir(assets, { recursive: true });
+const fixtureIdentity = toNamespacedPath(await realpath(assets));
 await mkdir(join(config, profileName), { recursive: true });
 await copyFile(
 	join(appRoot, "scripts/fixtures/minimal-content.hba.fixture"),
@@ -79,6 +81,13 @@ async function evaluate(client, expression) {
 	if (response.exceptionDetails)
 		throw new Error(response.exceptionDetails.text);
 	return response.result.value;
+}
+
+/** Compare actual filesystem identity while preserving the host's canonical display spelling. */
+async function requireFixtureLocation(location) {
+	const identity = toNamespacedPath(await realpath(location));
+	if (identity !== fixtureIdentity)
+		throw new Error(`Expected fixture ${fixtureIdentity}, received ${identity}`);
 }
 
 async function launch(mode, args) {
@@ -235,18 +244,21 @@ try {
 		);
 		let app = await launch(mode, []);
 		try {
-			await waitFor(async () => {
-				const state = await app.snapshot();
-				if (state.phase.kind === "fatal") throw new Error(state.phase.message);
-				return state.phase.kind === "restart_required";
+			const state = await waitFor(async () => {
+				const current = await app.snapshot();
+				if (current.phase.kind === "fatal") throw new Error(current.phase.message);
+				return current.phase.kind === "restart_required" ? current : null;
 			}, `${mode} necessary-resource failure`);
-			if (
-				(await evaluate(
-					app.client,
-					"document.querySelector('.startup-overlay .pregame-footer .loading-assets')?.textContent",
-				)) !== `Assets: ${assets}`
-			)
-				throw new Error("Loading footer lost the active asset location");
+			await requireFixtureLocation(state.phase.location);
+			const footer = await evaluate(
+				app.client,
+				"document.querySelector('.startup-overlay .pregame-footer .loading-assets')?.textContent",
+			);
+			const expectedFooter = `Assets: ${state.phase.location}`;
+			if (footer !== expectedFooter)
+				throw new Error(
+					`Loading footer expected ${JSON.stringify(expectedFooter)}, received ${JSON.stringify(footer)}`,
+				);
 		} finally {
 			await app.close(mode === "client" ? 1 : 0);
 		}
@@ -256,19 +268,20 @@ try {
 			failed.selection.health.failure.kind !== "resource"
 		)
 			throw new Error("Required resource failure did not persist attention");
+		await requireFixtureLocation(failed.selection.location);
 		app = await launch(mode, []);
 		try {
 			const state = await waitFor(async () => {
 				const current = await app.snapshot();
 				return current.phase.kind === "needs_assets" ? current : null;
 			}, `${mode} recovery on next launch`);
-			if (state.phase.location !== assets)
+			if (state.phase.location !== failed.selection.location)
 				throw new Error("Recovery lost the saved location");
 			if (
 				(await evaluate(
 					app.client,
 					"document.querySelector('.asset-setup .asset-location')?.textContent",
-				)) !== `Assets: ${assets}`
+				)) !== `Assets: ${failed.selection.location}`
 			)
 				throw new Error(
 					"Loading page did not identify the selected asset location",

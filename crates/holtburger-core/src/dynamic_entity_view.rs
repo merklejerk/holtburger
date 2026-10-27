@@ -392,6 +392,8 @@ pub struct DynamicEntityMotion {
 pub enum DynamicEntityMotionActivity {
     Locomotion,
     Gesture,
+    /// Pickup/drop reach, retained through its authored return transition.
+    Reach,
     Explicit,
 }
 
@@ -423,6 +425,7 @@ impl From<MotionPlayback> for DynamicEntityMotion {
             activity: match playback.activity {
                 OrdinaryMotionActivity::Locomotion => DynamicEntityMotionActivity::Locomotion,
                 OrdinaryMotionActivity::Gesture => DynamicEntityMotionActivity::Gesture,
+                OrdinaryMotionActivity::Reach => DynamicEntityMotionActivity::Reach,
                 OrdinaryMotionActivity::Explicit => DynamicEntityMotionActivity::Explicit,
             },
         }

@@ -11,15 +11,15 @@ const HOLD_ANIM: u32 = 0x0300_0012;
 const STOP_ANIM: u32 = 0x0300_0013;
 
 fn gesture_catalog() -> MotionSequenceCatalog {
-    build_gesture_catalog(false)
+    build_gesture_catalog(false, REACH)
 }
 
-fn build_gesture_catalog(with_stop: bool) -> MotionSequenceCatalog {
+fn build_gesture_catalog(with_stop: bool, reach: u32) -> MotionSequenceCatalog {
     let cycles = [
         (STAND, STAND_ANIM, 4.0),
         (WALK, WALK_ANIM, 4.0),
         (RELEASE, HOLD_ANIM, 4.0),
-        (REACH, HOLD_ANIM, 4.0),
+        (reach, HOLD_ANIM, 4.0),
         (MISSILE_RELOAD, HOLD_ANIM, 4.0),
         (MISSILE_AIM, HOLD_ANIM, 4.0),
         (MotionCommand::FALLING.raw(), STAND_ANIM, 4.0),
@@ -37,7 +37,7 @@ fn build_gesture_catalog(with_stop: bool) -> MotionSequenceCatalog {
             MotionTable::cycle_key(STYLE, STAND),
             HashMap::from([
                 (RELEASE, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None)),
-                (REACH, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None)),
+                (reach, motion(vec![clip(ENTRY_ANIM, 4.0)], None, None)),
                 (
                     MISSILE_RELOAD,
                     motion(vec![clip(ENTRY_ANIM, 4.0)], None, None),
@@ -51,7 +51,7 @@ fn build_gesture_catalog(with_stop: bool) -> MotionSequenceCatalog {
             HashMap::from([(STAND, motion(vec![clip(RETURN_ANIM, 4.0)], None, None))]),
         ),
         (
-            MotionTable::cycle_key(STYLE, REACH),
+            MotionTable::cycle_key(STYLE, reach),
             HashMap::from([(STAND, motion(vec![clip(RETURN_ANIM, 4.0)], None, None))]),
         ),
         (
@@ -273,7 +273,14 @@ fn gestures_continue_through_takeoff_airborne_input_release_and_landing() {
             airborne.drive_manual(table, input, presentation, 0.25);
             let playback = airborne.motion_playback().unwrap();
             assert_eq!(playback.ordinary, idle.motion_playback().unwrap().ordinary);
-            assert_eq!(playback.activity, OrdinaryMotionActivity::Gesture);
+            assert_eq!(
+                playback.activity,
+                if command == REACH {
+                    OrdinaryMotionActivity::Reach
+                } else {
+                    OrdinaryMotionActivity::Gesture
+                }
+            );
             assert!(airborne.has_pending_gesture());
             assert!(airborne.has_manual_locomotion());
             assert_eq!(airborne.tick().hooks, idle.tick().hooks);
@@ -401,7 +408,7 @@ fn standing_charge_without_ready_retains_pose_without_retaining_walk_displacemen
 
 #[test]
 fn stop_transition_keeps_owning_displacement_for_every_tick_under_a_gesture() {
-    let catalog = build_gesture_catalog(true);
+    let catalog = build_gesture_catalog(true, REACH);
     let table = catalog.table(0x0900_0001).unwrap();
     let mut runtime = BodyMotionRuntime::new(table);
     runtime.accept_order(table, order(RELEASE));
@@ -514,7 +521,7 @@ fn projection_exposes_both_tracks_with_stable_occurrences_and_receiver_owned_pha
         0.1,
     );
     let first = runtime.motion_playback().unwrap();
-    assert_eq!(first.activity, OrdinaryMotionActivity::Gesture);
+    assert_eq!(first.activity, OrdinaryMotionActivity::Reach);
     assert_eq!(first.ordinary.unwrap().clip.animation_id(), ENTRY_ANIM);
     assert_eq!(first.locomotion.unwrap().clip.animation_id(), WALK_ANIM);
     runtime.drive_manual(
@@ -660,7 +667,7 @@ fn admitted_windups_and_release_preserve_manual_locomotion() {
 
 #[test]
 fn retained_locomotion_does_not_report_active_commands_after_release() {
-    let catalog = build_gesture_catalog(true);
+    let catalog = build_gesture_catalog(true, REACH);
     let table = catalog.table(0x0900_0001).unwrap();
     for manual in [false, true] {
         let mut runtime = BodyMotionRuntime::new(table);
@@ -1062,4 +1069,47 @@ fn remote_directives_and_unrelated_actions_keep_airborne_priority() {
         MotionCommand(RELEASE)
     );
     assert_eq!(registry.get(guid).unwrap().action_count(), 1);
+}
+
+#[test]
+fn pickup_variants_retain_reach_activity_through_entry_hold_and_return_while_moving() {
+    for command in [REACH, 0x4000_0136, 0x4000_0137, 0x4000_0138, 0x4000_0139] {
+        let catalog = build_gesture_catalog(false, command);
+        let table = catalog.table(0x0900_0001).unwrap();
+        let mut runtime = BodyMotionRuntime::new(table);
+        runtime.accept_order(table, order(command));
+        for (duration, animation) in [(0.25, ENTRY_ANIM), (1.0, HOLD_ANIM)] {
+            runtime.drive_manual(
+                table,
+                order(WALK),
+                CharacterMotionPresentation::Grounded,
+                duration,
+            );
+            let playback = runtime.motion_playback().unwrap();
+            assert_eq!(playback.activity, OrdinaryMotionActivity::Reach);
+            assert_eq!(playback.ordinary.unwrap().clip.animation_id(), animation);
+            assert_eq!(playback.locomotion.unwrap().clip.animation_id(), WALK_ANIM);
+            assert_eq!(runtime.tick().offset.translation.y, duration * 4.0);
+        }
+        runtime.accept_order(table, MotionOrder::default());
+        runtime.drive_manual(
+            table,
+            order(WALK),
+            CharacterMotionPresentation::Grounded,
+            0.25,
+        );
+        let playback = runtime.motion_playback().unwrap();
+        assert_eq!(playback.activity, OrdinaryMotionActivity::Reach);
+        assert_eq!(playback.ordinary.unwrap().clip.animation_id(), RETURN_ANIM);
+        runtime.drive_manual(
+            table,
+            order(WALK),
+            CharacterMotionPresentation::Grounded,
+            1.0,
+        );
+        assert_eq!(
+            runtime.motion_playback().unwrap().activity,
+            OrdinaryMotionActivity::Locomotion
+        );
+    }
 }

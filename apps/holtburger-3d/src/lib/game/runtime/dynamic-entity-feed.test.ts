@@ -170,30 +170,33 @@ describe("dynamic-entity view contract", () => {
 		).toThrow();
 	});
 
-	it("preserves independent tracks and an exact settled pose", () => {
-		const motion = {
-			ordinary: {
-				playbackId: "9007199254740993",
-				clip: { kind: "settled", animationId: 0x03000559, frame: 31 },
-			},
-			locomotion: {
-				playbackId: "2",
-				clip: {
-					kind: "playing",
-					animationId: 0x03000001,
-					lowFrame: 0,
-					highFrame: 7,
-					framerate: 30,
-					completion: "loop",
+	it.each(["gesture", "reach"] as const)(
+		"preserves independent tracks and an exact settled %s pose",
+		(activity) => {
+			const motion = {
+				ordinary: {
+					playbackId: "9007199254740993",
+					clip: { kind: "settled", animationId: 0x03000559, frame: 31 },
 				},
-			},
-			locomotionCommandActive: true,
-			activity: "gesture",
-		};
-		expect(decodeDynamicEntityView({ ...entity(1, 1), motion }).motion).toEqual(
-			motion,
-		);
-	});
+				locomotion: {
+					playbackId: "2",
+					clip: {
+						kind: "playing",
+						animationId: 0x03000001,
+						lowFrame: 0,
+						highFrame: 7,
+						framerate: 30,
+						completion: "loop",
+					},
+				},
+				locomotionCommandActive: true,
+				activity,
+			};
+			expect(
+				decodeDynamicEntityView({ ...entity(1, 1), motion }).motion,
+			).toEqual(motion);
+		},
+	);
 
 	it("requires and preserves the producer-resolved presentation class", () => {
 		const view = entity(1, 1);

@@ -518,9 +518,15 @@ fn generate(
         "world-map source revision changed before publication"
     );
     generator::check_running(&stop)?;
-    work.temporary
-        .persist(&work.path)
-        .map_err(|error| error.error)?;
+    // Preserve normal attributes and cleanup on failure while using std's Windows
+    // rename fallback: existing image receipts may still hold the destination open.
+    let temporary = tempfile::TempPath::from_path(
+        work.temporary
+            .into_temp_path()
+            .keep()
+            .map_err(|error| error.error)?,
+    );
+    fs::rename(&temporary, &work.path)?;
     *job.state
         .lock()
         .map_err(|_| anyhow::anyhow!("world-map state lock poisoned"))? = JobState::Complete;

@@ -208,7 +208,8 @@ async fn concurrent_open_progressive_reads_and_warm_cache_share_one_attempt() {
     replacement
         .write_all(b"unrelated pathname replacement")
         .unwrap();
-    replacement.persist(cache.join(CACHE_NAME)).unwrap();
+    let replacement = replacement.into_temp_path();
+    fs::rename(&replacement, cache.join(CACHE_NAME)).unwrap();
     assert_eq!(warm.read_tiles(request).await.unwrap(), expected);
     assert!(
         warm.read_tiles(ReadWorldMapTilesRequest {

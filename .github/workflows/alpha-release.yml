@@ -97,11 +97,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python .github/scripts/fetch_alpha_content.py .holtburger-local/alpha-content
       - name: Test affected Rust packages
-        run: cargo test --locked -p holtburger-dat -p holtburger-content -p holtburger-core -p holtburger-cli -p holtburger-3d-host --all-targets
+        run: cargo test --locked -p holtburger-dat -p holtburger-content -p holtburger-core -p holtburger-cli -p holtburger-3d-host -p holtburger-weenie-catalog --all-targets
       - name: Deny Rust lint warnings
         if: runner.os == 'Linux'
         run: |
-          cargo clippy --locked -p holtburger-dat -p holtburger-content -p holtburger-cli -p holtburger-3d-host --all-targets -- -D warnings
+          cargo clippy --locked -p holtburger-dat -p holtburger-content -p holtburger-cli -p holtburger-3d-host -p holtburger-weenie-catalog --all-targets -- -D warnings
           cargo clippy --locked -p holtburger-debug-harness --bin content_bootstrap -- -D warnings
       - name: Build only suite executables and the bootstrap probe
         run: |

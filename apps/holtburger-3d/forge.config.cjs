@@ -50,6 +50,16 @@ module.exports = {
 			hostPath,
 			resolve(__dirname, "../../LICENSE.md"),
 			resolve(__dirname, "../../assets/branding/icon.png"),
+			// Electron's macOS distribution keeps these outside the .app Forge retains.
+			...(process.platform === "darwin"
+				? [
+						resolve(__dirname, "node_modules/electron/dist/LICENSE"),
+						resolve(
+							__dirname,
+							"node_modules/electron/dist/LICENSES.chromium.html",
+						),
+					]
+				: []),
 		],
 		ignore: ignoreApplicationSource,
 	},

@@ -156,6 +156,8 @@
 		--ui-combat-emphasis-duration: 0.25s;
 		--ui-combat-opacity-transition-duration: 180ms;
 		--ui-combat-foreground-color: var(--ui-color-text);
+		/* Stop-engagement icon remains red independently of the gauge's metal treatment. */
+		--ui-combat-stop-color: var(--ui-color-health);
 		--ui-combat-outline-color: var(--ui-color-border);
 		--ui-combat-track-color: color-mix(
 			in srgb,

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { extractContentArguments } from "./entry-paths.mjs";
+import { probeCombatBar } from "./client-combat-bar-probe.mjs";
 import { probeSalvage } from "./client-salvage-probe.mjs";
 import { probeUserThemeLifecycle } from "./user-theme-lifecycle-probe.mjs";
 import { probeClientPresentation } from "./client-presentation-probe.mjs";
@@ -373,6 +374,12 @@ try {
 			...result.itemCooldowns,
 			browserErrors,
 		};
+	} else if (options.clientCombatBar) {
+		report = {
+			suite: "client-combat-bar",
+			evidence: result.clientHud.combatBar,
+			browserErrors,
+		};
 	} else if (options.clientHud) {
 		const evidence = {
 			clientHud: result.clientHud,
@@ -652,6 +659,7 @@ function parseArgs(args) {
 		clientWaypoint: false,
 		clientHousing: false,
 		clientHud: false,
+		clientCombatBar: false,
 		clientHudSnapping: false,
 		uiShowcase: false,
 		itemCooldowns: false,
@@ -844,6 +852,10 @@ function parseArgs(args) {
 				break;
 			case "--world-map":
 				parsed.worldMap = true;
+				break;
+			case "--client-combat-bar":
+				parsed.clientHud = true;
+				parsed.clientCombatBar = true;
 				break;
 			case "--client-waypoint":
 				parsed.clientHud = true;
@@ -2203,6 +2215,7 @@ Options:
   --client-text-scaling Verify text/icon scaling, theme composition, native dialogs, and retained UI.
   --client-mouse-movement Verify held mouse movement, steering, and cancellation.
   --client-hud-snapping Verify action-bar adjacency, alignment, and pointer release.
+  --client-combat-bar   Verify attack controls, projectile supply, and HUD cancellation.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
   --client-inventory    Verify inventory gestures, item use, give confirmations, and suppression.
@@ -4746,6 +4759,18 @@ async function runClientHudHarness({ viteUrl }) {
 			};
 		}
 		await waitForClientHudHarnessApi(client);
+		if (options.clientCombatBar)
+			return {
+				clientHud: {
+					combatBar: await probeCombatBar(
+						client,
+						evaluateExpression,
+						options.screenshotPath,
+					),
+				},
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
 		if (options.clientHudSnapping)
 			return {
 				clientHudSnapping: await probeHudSnapping(client, evaluateExpression),

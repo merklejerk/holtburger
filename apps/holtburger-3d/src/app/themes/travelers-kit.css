@@ -50,6 +50,7 @@
 			--ui-spell-scrollbar-track-opacity: 28%;
 			--ui-spell-scrollbar-thumb-opacity: 75%;
 			--ui-combat-foreground-color: #f2d6ae;
+			--ui-combat-stop-color: #c34b39;
 			--ui-combat-outline-color: #573621;
 			--ui-combat-track-color: #241a14;
 			--ui-combat-height-color: #17130f80;
@@ -553,6 +554,16 @@
 		}
 		.ui-theme .combat-bar .power-control:focus-visible .power-handle {
 			filter: var(--ui-combat-handle-focus-filter);
+		}
+
+		/* Red enamel inset in the same copper fitting as the gauge. */
+		.ui-theme .combat-bar .stop-face {
+			stroke: var(--combat-metal);
+			stroke-width: 2;
+			filter: drop-shadow(0 1px 1px #160c09cc);
+		}
+		.ui-theme .combat-bar .stop-attack:active:not(:disabled) .stop-face {
+			fill: #8c3024;
 		}
 
 		/* A slim companion instrument to the combat gauge, using the existing jump geometry. */

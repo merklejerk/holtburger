@@ -266,6 +266,8 @@
 		/** Accepted setting interactions used to replay combat-HUD feedback. */
 		readonly combatProfileSelectionRevision: number;
 		readonly onCombatProfileSelect: (profile: ClientAttackProfile) => void;
+		/** Cancel attack intent without changing stance or selection. */
+		readonly onStopCombat: () => void;
 		/** Shared normal casting action used by the spell browser. */
 		readonly onCastSpell: (spellId: number) => void;
 		/** Gameplay lifecycle admits stance commands. */
@@ -492,6 +494,7 @@
 		combatControls,
 		combatProfileSelectionRevision,
 		onCombatProfileSelect,
+		onStopCombat,
 		onCastSpell,
 		combatEnabled,
 		emotesEnabled,
@@ -1225,6 +1228,7 @@
 				onPlacementChange={(placement) =>
 					changeHudPlacement("combatBar", placement)}
 				onProfileSelect={onCombatProfileSelect}
+				{onStopCombat}
 			/>
 		{/if}
 

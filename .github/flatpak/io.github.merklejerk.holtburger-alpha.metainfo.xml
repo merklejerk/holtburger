@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.merklejerk.holtburger-alpha</id>
+  <metadata_license>MIT</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+  <name>Holtburger Alpha</name>
+  <summary>Experimental Asheron's Call client suite</summary>
+  <description>
+    <p>Includes the 3D client, Explorer, terminal client, and archive tools.</p>
+    <p>Client launch requires account and connection arguments. The 3D client requires user-supplied retail data.</p>
+  </description>
+  <launchable type="desktop-id">io.github.merklejerk.holtburger-alpha.desktop</launchable>
+  <url type="homepage">https://github.com/merklejerk/holtburger</url>
+</component>

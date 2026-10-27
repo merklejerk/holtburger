@@ -8,6 +8,49 @@ import { createUiThemeLoader } from "../app/ui-theme";
 const loader = createUiThemeLoader(document);
 const input = document.querySelector("input");
 
+/** Decode the bundled theme's actual images from the active stylesheet in every package mode. */
+async function bundledAssets() {
+	const sheet = [...document.styleSheets].find((sheet) =>
+		sheet.href?.includes("travelers-kit"),
+	);
+	if (!sheet) throw new Error("Bundled stylesheet is missing");
+	const specimen = document.createElement("div");
+	specimen.className = "ui-theme";
+	specimen.style.cssText =
+		"position:fixed;visibility:hidden;pointer-events:none";
+	specimen.innerHTML =
+		'<div class="ui-panel"><div class="ui-frame"></div><input type="checkbox" checked><div class="minimap-frame"></div></div>';
+	document.body.append(specimen);
+	try {
+		const panel = specimen.querySelector(".ui-panel");
+		if (panel === null) throw new Error("Bundled theme fixture is missing");
+		const sources = [
+			getComputedStyle(panel).borderImageSource,
+			...[...specimen.querySelectorAll(".ui-frame,input,.minimap-frame")].map(
+				(node) => getComputedStyle(node).backgroundImage,
+			),
+		].join(",");
+		const urls = [...sources.matchAll(/(?<=url\(")[^"]+(?="\))/g)].map(
+			(match) => match[0],
+		);
+		const unique = [...new Set(urls)];
+		for (const url of unique) {
+			const image = new Image();
+			image.src = url;
+			try {
+				await image.decode();
+			} catch (error) {
+				throw new Error(`Could not decode bundled image: ${url}`, {
+					cause: error,
+				});
+			}
+		}
+		return { href: sheet.href, decoded: unique.length };
+	} finally {
+		specimen.remove();
+	}
+}
+
 /** Load the registered faces for each Base role; browser fallback alone cannot pass. */
 async function baseFonts() {
 	const style = getComputedStyle(document.documentElement);
@@ -247,6 +290,7 @@ async function settings() {
 
 Object.assign(window, {
 	__UI_THEME_ASSET_PROBE__: {
+		bundledAssets,
 		baseFonts,
 		apply,
 		cancellation,

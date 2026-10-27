@@ -1,0 +1,13 @@
+#!/bin/sh
+# Grant only the temporary profile; content uses a separate read-only document-portal grant.
+set -eu
+: "${FLATPAK_USER_DIR:?Set the installation path before the probe overrides XDG_DATA_HOME}"
+profile=
+for argument in "$@"; do
+  case "$argument" in
+    --user-data-dir=*) profile=${argument#--user-data-dir=} ;;
+  esac
+done
+: "${profile:?The packaged probe must supply an isolated user-data directory}"
+profile_root=$(dirname "$profile")
+exec flatpak run --user --filesystem="$profile_root":rw io.github.merklejerk.holtburger-alpha "$@"

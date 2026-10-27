@@ -1,0 +1,5 @@
+--- a/rules.mk
++++ b/rules.mk
+@@ -12 +12 @@
+-$(OBJ)/$(1)/%.o $(DEP)/$(1)/%.d: $$($(1)_SOURCE_DIR_FULL)/%.cc | _$(1)_builddir
++$(OBJ)/$(1)/%.o: $$($(1)_SOURCE_DIR_FULL)/%.cc | _$(1)_builddir

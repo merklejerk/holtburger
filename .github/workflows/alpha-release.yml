@@ -170,6 +170,13 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: verification-linux-bootstrap
+          path: target/x86_64-unknown-linux-gnu/release/content_bootstrap
+          if-no-files-found: error
+
   flatpak:
     needs: plan
     # Builder 1.4 supports the SDK's appstreamcli; 22.04 still expects appstream-compose.
@@ -240,6 +247,11 @@ jobs:
           mkdir -p .holtburger-local/alpha-artifacts
           cp holtburger-cli.flatpak '.holtburger-local/alpha-artifacts/holtburger-cli-${{ needs.plan.outputs.version }}-x86_64.flatpak'
           cp .holtburger-local/alpha-content/micro-hba.zip '.holtburger-local/alpha-artifacts/holtburger-micro-${{ needs.plan.outputs.version }}.zip'
+          LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-cli)
+          python .github/scripts/alpha_release.py record-tui-flatpak \
+            --files "$LOCATION/files" \
+            --bundle '.holtburger-local/alpha-artifacts/holtburger-cli-${{ needs.plan.outputs.version }}-x86_64.flatpak' \
+            --output .holtburger-local/alpha-artifacts/metadata-holtburger-cli-flatpak.json
       - uses: actions/upload-artifact@v4
         with:
           name: alpha-flatpak
@@ -247,8 +259,82 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
+  suite-flatpak:
+    needs: [plan, native]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      HOLTBURGER_SOURCE_REVISION: ${{ needs.plan.outputs.commit }}
+      HOLTBURGER_SOURCE_MODIFIED: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.13.1'
+          cache: npm
+          cache-dependency-path: apps/holtburger-3d/package-lock.json
+      - name: Install diagnostic dependencies
+        working-directory: apps/holtburger-3d
+        run: |
+          npm ci
+          npm run build:electron:main
+      - uses: actions/download-artifact@v4
+        with:
+          name: alpha-x86_64-unknown-linux-gnu
+          path: .holtburger-local/alpha-native-linux
+      - uses: actions/download-artifact@v4
+        with:
+          name: verification-linux-bootstrap
+          path: .holtburger-local/alpha-linux-probes
+      - name: Install Flatpak tooling and runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes flatpak flatpak-builder dbus-x11 xvfb xdg-desktop-portal xdg-desktop-portal-gtk
+          sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install --noninteractive --assumeyes flathub org.freedesktop.Platform/x86_64/24.08 org.freedesktop.Sdk/x86_64/24.08
+      - name: Materialize the recipe from the verified Linux archive
+        run: |
+          SUITE=$(python .github/scripts/alpha_release.py prepare-suite-flatpak \
+            --artifacts .holtburger-local/alpha-native-linux \
+            --output .holtburger-local/alpha-suite-flatpak.json)
+          echo "HOLTBURGER_FLATPAK_SUITE=$SUITE" >> "$GITHUB_ENV"
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: holtburger-alpha.flatpak
+          manifest-path: .holtburger-local/alpha-suite-flatpak.json
+          cache: true
+      - name: Verify installed bootstrap, tools, portals, private host, and renderer assets
+        run: |
+          flatpak install --user --noninteractive --assumeyes holtburger-alpha.flatpak
+          chmod +x .holtburger-local/alpha-linux-probes/content_bootstrap
+          dbus-run-session -- xvfb-run --auto-servernum \
+            .github/flatpak/verify-installed \
+            "$GITHUB_WORKSPACE/.holtburger-local/alpha-linux-probes/content_bootstrap"
+      - name: Inspect installed bytes and stage the full-suite Flatpak
+        run: |
+          mkdir -p .holtburger-local/alpha-artifacts
+          BUNDLE='.holtburger-local/alpha-artifacts/holtburger-alpha-${{ needs.plan.outputs.version }}-x86_64.flatpak'
+          cp holtburger-alpha.flatpak "$BUNDLE"
+          LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-alpha)
+          python .github/scripts/alpha_release.py record-suite-flatpak \
+            --files "$LOCATION/files" --suite "$HOLTBURGER_FLATPAK_SUITE" \
+            --bundle "$BUNDLE" \
+            --output .holtburger-local/alpha-artifacts/metadata-holtburger-alpha-flatpak.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alpha-suite-flatpak
+          path: .holtburger-local/alpha-artifacts/*
+          if-no-files-found: error
+          compression-level: 0
+
   stage:
-    needs: [plan, native, flatpak]
+    needs: [plan, native, flatpak, suite-flatpak]
     if: startsWith(github.ref, 'refs/tags/alpha-')
     runs-on: ubuntu-22.04
     permissions:

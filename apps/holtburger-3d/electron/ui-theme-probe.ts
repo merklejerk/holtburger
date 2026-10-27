@@ -254,24 +254,7 @@ app.whenReady().then(async () => {
 				`${settingsApi}.read().state.selection.activeId === ${JSON.stringify(bundledId)}`,
 			);
 			const bundledAssets = async () =>
-				read(`(async () => {
-    const sheet = [...document.styleSheets].find(sheet => sheet.href?.includes('travelers-kit'));
-    if (!sheet) throw new Error('Bundled stylesheet is missing');
-    const specimen = document.createElement('div');
-    specimen.className = 'ui-theme';
-    specimen.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none';
-    specimen.innerHTML = '<div class="ui-panel"><div class="ui-frame"></div><input type="checkbox" checked><div class="minimap-frame"></div></div>';
-    document.body.append(specimen);
-    try {
-     const panel = specimen.querySelector('.ui-panel');
-     const sources = [getComputedStyle(panel).borderImageSource,
-      ...[...specimen.querySelectorAll('.ui-frame,input,.minimap-frame')].map(node => getComputedStyle(node).backgroundImage)].join(',');
-     const urls = [...sources.matchAll(/url\\("([^"]+)"\\)/g)].map(match => match[1]);
-     const unique = [...new Set(urls)];
-     for (const url of unique) { const image = new Image(); image.src = url; try { await image.decode(); } catch (error) { throw new Error("Could not decode bundled image: " + url + "; " + String(error)); } }
-     return { href: sheet.href, decoded: unique.length };
-    } finally { specimen.remove(); }
-   })()`);
+				read("window.__UI_THEME_ASSET_PROBE__.bundledAssets()");
 			const assets = z
 				.object({ href: z.string(), decoded: z.number() })
 				.parse(await bundledAssets());

@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Holtburger Alpha
+Comment=Experimental Asheron's Call client suite; account arguments required
+Exec=holtburger-3d
+Icon=io.github.merklejerk.holtburger-alpha
+Terminal=true
+Categories=Game;RolePlaying;
+Keywords=asheron;ac;client;tui;

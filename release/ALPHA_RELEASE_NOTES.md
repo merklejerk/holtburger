@@ -4,6 +4,11 @@ Includes TUI, h3d with explicit Explorer mode, `dat2hba`, `dat-tool`, bundled sc
 their derived data, and micro content for TUI. h3d requires a user-supplied retail DAT
 installation or full HBA. No full retail archives are distributed.
 
+Linux x86-64 offers a complete-suite Flatpak as well as the native archive. The separate
+TUI-only Flatpak remains available. The full-suite Flatpak defaults to h3d client; use
+`--command=holtburger-cli`, `--command=dat-tool`, or `--command=dat2hba` for the other binaries.
+Read the quickstart for retail-data portal access and explicit tool input/output grants.
+
 Read `QUICKSTART.md` inside the suite. Client mode is h3d's default and requires CLI
 connection/account arguments. Both clients use `-p` for port and `-P` for password.
 

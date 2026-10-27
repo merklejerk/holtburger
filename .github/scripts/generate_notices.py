@@ -1,4 +1,4 @@
-"""Generate the alpha's Rust and embedded native-library notices with cargo-about."""
+"""Generate the alpha's Rust and native dependency notices with cargo-about."""
 
 import argparse
 import hashlib
@@ -59,7 +59,7 @@ def render(report: dict, native_manifest: Path) -> str:
         for crate in used_by:
             sections.append(f"<li>{escape(crate['name'])} {escape(crate['version'])}</li>")
         sections.append(f"</ul><pre>{escape(text)}</pre>")
-    sections.append("<h1>Embedded native libraries</h1>")
+    sections.append("<h1>Native libraries and packaging helpers</h1>")
     if not native["files"]:
         raise ValueError("No embedded native-library notices")
     for notice in native["files"]:

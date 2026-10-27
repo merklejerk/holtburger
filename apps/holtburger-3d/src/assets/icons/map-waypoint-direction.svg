@@ -1,4 +1,4 @@
 <svg xmlns="http://www.w3.org/2000/svg" x="-34" y="-14" width="68" height="23" viewBox="-34 -14 68 23">
   <!-- The arc follows the minimap disc rim; the central point projects outward. -->
-  <path d="M-32 6 A89 89 0 0 1-6 .2 L0-12 6 .2 A89 89 0 0 1 32 6 Q0 3-32 6Z" fill="var(--ui-color-accent, #f0cf78)" stroke="var(--ui-color-well, #20252c)" stroke-width="1.5" stroke-linejoin="round" />
+  <path d="M-32 6 A89 89 0 0 1-6 .2 L0-12 6 .2 A89 89 0 0 1 32 6 Q0 3-32 6Z" fill="var(--ui-color-accent, #f0cf78)" stroke="var(--ui-color-highlight, #fff2c2)" stroke-width="1.5" stroke-linejoin="round" />
 </svg>

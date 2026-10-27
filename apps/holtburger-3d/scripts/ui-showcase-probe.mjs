@@ -211,6 +211,9 @@ export async function probeUiShowcase(client, evaluate) {
 	await wait(
 		"document.querySelectorAll('.party-member').length === 8 && document.querySelector('.character-hud progress')?.value === 50",
 	);
+	await wait(
+		"document.querySelector('[aria-label=\"Show waypoint guide\"]').checked && !document.querySelector('.minimap-waypoint-row').hidden && document.querySelector('.minimap-waypoint-pointer').style.display !== 'none'",
+	);
 	assert.equal(
 		await read(
 			() => document.querySelector('[aria-label="Showcase theme"]').value,
@@ -292,12 +295,9 @@ export async function probeUiShowcase(client, evaluate) {
 	assert.equal(materials.draft, "Retained draft");
 	assert.deepEqual(materials.vitalColors, baseline.vitalColors);
 	await probeResizeFrame();
-	// The new preview drives production navigation, including its own clear action.
-	await read(() =>
-		document.querySelector('[aria-label="Show waypoint guide"]').click(),
-	);
+	// The default preview drives production navigation, including its own clear action.
 	await wait(
-		"!document.querySelector('.minimap-waypoint-row').hidden && document.querySelector('.minimap-waypoint-pointer').style.display !== 'none'",
+		"!document.querySelector('.minimap-waypoint-row').hidden && document.querySelector('.minimap-waypoint-pointer').style.display !== 'none' && getComputedStyle(document.querySelector('.minimap-waypoint-pointer')).filter.includes('drop-shadow')",
 	);
 	assert.equal(
 		await read(
@@ -504,6 +504,14 @@ export async function probeUiShowcase(client, evaluate) {
 	});
 	await wait(
 		"!document.querySelector('[aria-label=\"Showcase theme\"]').disabled",
+	);
+	assert.equal(
+		await read(() =>
+			getComputedStyle(
+				document.querySelector(".minimap-waypoint-pointer"),
+			).filter.includes("drop-shadow"),
+		),
+		true,
 	);
 	const hudFamilies = await read(() => {
 		const icon = document.querySelector(".shortcut-dock button");

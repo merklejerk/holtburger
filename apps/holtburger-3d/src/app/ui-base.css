@@ -1161,6 +1161,17 @@
 	.ui-theme .ui-waypoint-marker {
 		color: var(--ui-color-accent);
 	}
+	.ui-theme .minimap-waypoint-pointer {
+		/* A bright core and broader halo lift the rim guide above map and frame detail. */
+		filter: drop-shadow(0 0 2px var(--ui-color-highlight))
+			drop-shadow(0 0 6px var(--ui-color-accent));
+		animation: ui-waypoint-glow 1.8s ease-in-out infinite;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.ui-theme .minimap-waypoint-pointer {
+			animation: none;
+		}
+	}
 	.ui-theme .ui-world-map-label {
 		font: var(--ui-world-map-label-font, 11px var(--ui-font-body));
 		fill: var(--ui-world-map-label-color, var(--ui-color-text));
@@ -1435,7 +1446,15 @@
 	}
 }
 
-/* Animation names are global so theme stylesheets can replace either recipe. */
+/* Animation names are global so theme stylesheets can replace their recipes. */
+/* Pulse only the halo; the arrow's position, bearing and opacity stay steady. */
+@keyframes ui-waypoint-glow {
+	50% {
+		filter: drop-shadow(0 0 4px var(--ui-color-highlight))
+			drop-shadow(0 0 12px var(--ui-color-accent));
+	}
+}
+
 @keyframes ui-toast-pop {
 	from {
 		opacity: 0;

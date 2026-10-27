@@ -563,6 +563,8 @@ pub enum ClientChatMessageWire {
     Combat {
         message: String,
         emphasized: bool,
+        /// Typed defender evasion survives formatting for local chat admission.
+        self_evasion: bool,
     },
     Emote {
         sender: String,
@@ -2171,6 +2173,7 @@ fn project_combat_feedback(feedback: &CombatFeedback) -> Option<ClientChatMessag
         ClientChatMessageWire::Combat {
             message,
             emphasized,
+            self_evasion: matches!(feedback, CombatFeedback::EvasionDefenderNotification { .. }),
         }
     })
 }
@@ -3337,6 +3340,25 @@ mod tests {
     }
 
     #[test]
+    fn defender_evasion_retains_identity_without_parsing_the_message() {
+        let event = project_client_event(ClientViewEvent::CombatFeedback(
+            CombatFeedback::EvasionDefenderNotification {
+                attacker_name: "Drudge".to_string(),
+            },
+        ));
+        let Some(ClientHostEvent::ChatMessage(ClientChatMessageWire::Combat {
+            self_evasion,
+            message,
+            ..
+        })) = event
+        else {
+            panic!("self evasion must project as chat");
+        };
+        assert!(self_evasion);
+        assert_eq!(message, "You evaded Drudge's attack.");
+    }
+
+    #[test]
     fn combat_damage_projects_as_a_typed_chat_line() {
         let projected = project_client_event(ClientViewEvent::CombatFeedback(
             CombatFeedback::AttackerNotification {
@@ -3358,6 +3380,7 @@ mod tests {
                 ClientChatMessageWire::Combat {
                     message,
                     emphasized,
+                    self_evasion,
                 },
             outcome,
         }) = projected
@@ -3369,6 +3392,7 @@ mod tests {
             "You hit Drudge for 37 slashing damage. Critical hit. [Recklessness, Sneak Attack]"
         );
         assert!(emphasized);
+        assert!(!self_evasion);
         assert!(matches!(
             outcome.outcome,
             ClientCombatOutcomeKindWire::Damage {

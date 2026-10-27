@@ -1,3 +1,5 @@
+import type { ClientChatSuppressionSettings } from "./client-settings-contract";
+
 import type {
 	ClientChatChannel,
 	ClientChatMessage,
@@ -309,4 +311,27 @@ function channelTone(channel: ClientChatChannel): ClientChatTone {
 		case "unknown":
 			return "speech";
 	}
+}
+
+/** Admission policy runs before retention, independently of the history visibility toggles. */
+export function clientChatShouldSuppress(
+	settings: ClientChatSuppressionSettings,
+	message: ClientChatEntry,
+): boolean {
+	if (
+		settings.hideSpellIncantations &&
+		"category" in message &&
+		message.category === "spellcasting"
+	)
+		return true;
+	if (!settings.hideSelfEvasionsAndResists) return false;
+	if (message.kind === "combat") return message.selfEvasion;
+	// ACE WorldObject_Magic.cs:199 sends self resistance as Magic system chat, without punctuation.
+	// Restrict to that source/category and require a caster name; ordinary speech must survive.
+	return (
+		message.kind === "server" &&
+		message.category === "magic" &&
+		message.message.startsWith("You resist the spell cast by ") &&
+		message.message.length > "You resist the spell cast by ".length
+	);
 }

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ClientChatSuppressionSettings } from "./client-settings-contract";
 	import ClientGameplaySettingsControls from "./ClientGameplaySettingsControls.svelte";
 	import type {
 		ClientGameplayOption,
@@ -63,6 +64,11 @@
 
 	export type SettingsTab = "graphics" | "audio" | "ui" | "input" | "gameplay";
 	interface Props {
+		/** Local chat admission preferences, independent of server character options. */
+		readonly chatSuppression: ClientChatSuppressionSettings;
+		readonly onChatSuppressionChange: (
+			settings: ClientChatSuppressionSettings,
+		) => void;
 		/** Server-saved gameplay choices and current character admission. */
 		readonly gameplayPreferences: ClientGameplayPreferences | null;
 		readonly gameplayEnabled: boolean;
@@ -98,6 +104,8 @@
 		readonly onResetHudPlacements: () => void;
 	}
 	let {
+		chatSuppression,
+		onChatSuppressionChange,
 		gameplayPreferences,
 		gameplayEnabled,
 		onGameplayOptionChange,
@@ -343,11 +351,46 @@
 			active={selectedTab === "gameplay"}
 			scroll={false}
 		>
-			<ClientGameplaySettingsControls
-				preferences={gameplayPreferences}
-				enabled={gameplayEnabled}
-				onChange={onGameplayOptionChange}
-			/>
+			<div class="settings-section">
+				<details class="ui-disclosure ui-disclosure-section" open>
+					<summary>Chat</summary>
+					<div class="settings-section ui-disclosure-body">
+						<label class="ui-checkbox">
+							<input
+								type="checkbox"
+								checked={chatSuppression.hideSelfEvasionsAndResists}
+								onchange={(event) =>
+									onChatSuppressionChange({
+										...chatSuppression,
+										hideSelfEvasionsAndResists: event.currentTarget.checked,
+									})}
+							/>
+							Hide self evasions/resists
+						</label>
+						<label class="ui-checkbox">
+							<input
+								type="checkbox"
+								checked={chatSuppression.hideSpellIncantations}
+								onchange={(event) =>
+									onChatSuppressionChange({
+										...chatSuppression,
+										hideSpellIncantations: event.currentTarget.checked,
+									})}
+							/>
+							Hide spell incantations
+						</label>
+						<p>
+							Hidden messages are discarded. Changes apply to future messages
+							only.
+						</p>
+					</div>
+				</details>
+				<ClientGameplaySettingsControls
+					preferences={gameplayPreferences}
+					enabled={gameplayEnabled}
+					onChange={onGameplayOptionChange}
+				/>
+			</div>
 		</UiTabPanel>
 		{#if selectedTab === "graphics"}
 			<div

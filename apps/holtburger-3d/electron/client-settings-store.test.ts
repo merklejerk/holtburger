@@ -51,6 +51,45 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it("defaults chat suppression on for old profiles and persists explicit opt-outs", async () => {
+		const path = await temporarySettingsPath();
+		try {
+			await writeFile(
+				path,
+				JSON.stringify({
+					formatVersion: 1,
+					user: { chatFilters: { version: 1, value: ["chat"] } },
+					characters: {},
+				}),
+			);
+			const store = new ClientSettingsStore(path, initialWindow);
+			await store.load();
+			const loaded = await store.loadUser(defaultUser, "persisted");
+			expect(loaded.unavailable).toEqual([]);
+			// Startup composes absent sections from first-run defaults.
+			expect({ ...defaultUser, ...loaded.sections }).toMatchObject({
+				chatSuppression: {
+					hideSelfEvasionsAndResists: true,
+					hideSpellIncantations: true,
+				},
+				chatFilters: ["chat"],
+			});
+			const chatSuppression = {
+				hideSelfEvasionsAndResists: false,
+				hideSpellIncantations: false,
+			};
+			await store.saveUserPatch({ sections: { chatSuppression } });
+			const reloaded = new ClientSettingsStore(path, initialWindow);
+			await reloaded.load();
+			expect(await reloaded.loadUser(defaultUser, "persisted")).toMatchObject({
+				sections: { chatSuppression, chatFilters: ["chat"] },
+				unavailable: [],
+			});
+		} finally {
+			await rm(dirname(path), { recursive: true, force: true });
+		}
+	});
+
 	it("evolves older graphics preferences and persists disabled ambient nameplates", async () => {
 		const path = await temporarySettingsPath();
 		const { alwaysShowEntityNameplates, ...olderGraphics } =

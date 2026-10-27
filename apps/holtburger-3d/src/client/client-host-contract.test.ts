@@ -226,11 +226,13 @@ describe("client host wire contract", () => {
 				kind: "combat",
 				message: "You hit a Drudge for 37 slash damage.",
 				emphasized: true,
+				selfEvasion: false,
 			}),
 		).toEqual({
 			kind: "combat",
 			message: "You hit a Drudge for 37 slash damage.",
 			emphasized: true,
+			selfEvasion: false,
 		});
 		expect(
 			decodeClientChatMessage({

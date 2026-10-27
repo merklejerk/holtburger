@@ -348,6 +348,8 @@ const chatMessageSchema = z.discriminatedUnion("kind", [
 			kind: z.literal("combat"),
 			message: z.string(),
 			emphasized: z.boolean(),
+			/** Host-proven defender evasion; never inferred from formatted prose. */
+			selfEvasion: z.boolean(),
 		})
 		.strict(),
 ]);

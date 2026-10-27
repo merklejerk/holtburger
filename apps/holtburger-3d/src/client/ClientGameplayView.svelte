@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ClientChatSuppressionSettings } from "./client-settings-contract";
 	import type {
 		ClientGameplayOption,
 		ClientGameplayPreferences,
@@ -167,6 +168,11 @@
 	import ClientSystemMenu from "./ClientSystemMenu.svelte";
 
 	interface Props {
+		/** Local chat admission preferences, independent of server character options. */
+		readonly chatSuppression: ClientChatSuppressionSettings;
+		readonly onChatSuppressionChange: (
+			settings: ClientChatSuppressionSettings,
+		) => void;
 		/** Current character Gameplay controls, independent of local preference storage. */
 		readonly gameplayPreferences: ClientGameplayPreferences | null;
 		readonly gameplayEnabled: boolean;
@@ -427,6 +433,8 @@
 	}
 
 	let {
+		chatSuppression,
+		onChatSuppressionChange,
 		canReturnToMenu,
 		canDisconnect,
 		onReturnToMainMenu,
@@ -1762,6 +1770,8 @@
 					{:else if panel === "settings"}
 						{#key characterGuid}
 							<ClientSettingsPanel
+								{chatSuppression}
+								{onChatSuppressionChange}
 								{gameplayPreferences}
 								{gameplayEnabled}
 								{onGameplayOptionChange}

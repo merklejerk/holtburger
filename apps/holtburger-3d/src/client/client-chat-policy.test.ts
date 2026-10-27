@@ -4,6 +4,7 @@ import {
 	CLIENT_CHAT_FILTER_TAGS,
 	clientChatChannelLabel,
 	clientChatFiltersAllow,
+	clientChatShouldSuppress,
 	clientChatTone,
 	clientChatMessageLabel,
 	type ClientChatEntry,
@@ -176,6 +177,7 @@ describe("client chat presentation policy", () => {
 			kind: "combat",
 			message: "You hit a Drudge.",
 			emphasized: false,
+			selfEvasion: false,
 		});
 		const system = line({ kind: "system", message: "Welcome" });
 		const error = line({ kind: "error", message: "Renderer failed" });
@@ -198,7 +200,12 @@ describe("client chat presentation policy", () => {
 	it("assigns combat feedback its dedicated color family", () => {
 		expect(
 			clientChatTone(
-				line({ kind: "combat", message: "You evade.", emphasized: false }),
+				line({
+					kind: "combat",
+					message: "You evade.",
+					emphasized: false,
+					selfEvasion: false,
+				}),
 			),
 		).toBe("combat");
 	});
@@ -243,5 +250,91 @@ describe("client chat presentation policy", () => {
 			),
 		).toBe("guild");
 		expect(clientChatChannelLabel("co-vassals")).toBe("Co-Vassals");
+	});
+});
+
+describe("chat admission suppression", () => {
+	const enabled = {
+		hideSelfEvasionsAndResists: true,
+		hideSpellIncantations: true,
+	};
+	const selfEvasion: ClientChatEntry = {
+		kind: "combat",
+		message: "You evaded Drudge's attack.",
+		emphasized: false,
+		selfEvasion: true,
+	};
+	const selfResist = {
+		kind: "server",
+		category: "magic",
+		message: "You resist the spell cast by Drudge",
+	} as const;
+	const incantation = {
+		kind: "speech",
+		category: "spellcasting",
+		sender: "Mira",
+		speakerKind: "player",
+		message: "Martine's incantation",
+	} as const;
+	it("drops both kinds of self defense independently of incantations", () => {
+		for (const message of [selfEvasion, selfResist]) {
+			expect(clientChatShouldSuppress(enabled, message)).toBe(true);
+			expect(
+				clientChatShouldSuppress(
+					{ ...enabled, hideSpellIncantations: false },
+					message,
+				),
+			).toBe(true);
+			expect(
+				clientChatShouldSuppress(
+					{ ...enabled, hideSelfEvasionsAndResists: false },
+					message,
+				),
+			).toBe(false);
+		}
+	});
+	it.each(["player", "non-player", "unknown"] as const)(
+		"drops %s incantations",
+		(speakerKind) => {
+			expect(
+				clientChatShouldSuppress(enabled, { ...incantation, speakerKind }),
+			).toBe(true);
+			expect(
+				clientChatShouldSuppress(
+					{ ...enabled, hideSelfEvasionsAndResists: false },
+					incantation,
+				),
+			).toBe(true);
+			expect(
+				clientChatShouldSuppress(
+					{ ...enabled, hideSpellIncantations: false },
+					incantation,
+				),
+			).toBe(false);
+		},
+	);
+	it("keeps outgoing evasion/resistance, damage, ordinary speech, and unknown feedback", () => {
+		const messages: ClientChatEntry[] = [
+			{
+				...selfEvasion,
+				selfEvasion: false,
+				message: "Drudge evaded your attack.",
+			},
+			{
+				...selfEvasion,
+				selfEvasion: false,
+				message: "Drudge hit you for 10 damage.",
+			},
+			{ ...selfResist, message: "Drudge resists your spell" },
+			{ ...selfResist, message: "You resist the spell cast by " },
+			{ ...selfResist, message: "You cast Armor Self on yourself." },
+			{ ...selfResist, category: { raw: 999 } },
+			{ ...selfResist, category: "system" },
+			{ ...incantation, category: "speech", message: selfResist.message },
+			{ kind: "system", message: selfResist.message },
+			{ kind: "error", message: "Unable to cast spell." },
+		];
+		for (const message of messages)
+			expect(clientChatShouldSuppress(enabled, message)).toBe(false);
 	});
 });

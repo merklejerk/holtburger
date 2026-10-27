@@ -40,6 +40,8 @@
 		powerControl={null}
 	/>
 	<ClientSettingsPanel
+		chatSuppression={defaults.chatSuppression}
+		onChatSuppressionChange={() => {}}
 		gameplayPreferences={null}
 		gameplayEnabled={false}
 		onGameplayOptionChange={async () => {

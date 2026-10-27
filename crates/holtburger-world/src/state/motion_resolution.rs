@@ -3,8 +3,8 @@ use crate::entity::{
 };
 use crate::motion::{
     CharacterMotionPresentation, LocomotionPresentationSource, MotionCommand, MotionOrder,
-    MotionRuntimeRegistry, RemoteFramePolicy, RemoteMotionInput, RemoteMotionSample, SequenceTick,
-    ServerDirectedTarget, observed_locomotion_order,
+    MotionRuntimeRegistry, ObservedCharacterMotion, RemoteFramePolicy, RemoteMotionInput,
+    RemoteMotionSample, SequenceTick, ServerDirectedTarget, observed_locomotion_order,
 };
 use crate::spatial::{
     ContactState, DynamicBodyActivity, PhysicalBodyDefinition, RetainedBodyKinematics,
@@ -366,14 +366,19 @@ impl WorldState {
             return Ok(());
         };
         let order = match source {
-            LocomotionPresentationSource::Observed(motion) => observed_locomotion_order(
-                table,
-                authored.style,
-                motion,
-                body.pose.rotation,
-                presentation,
-                entity.scale.effective(),
-            )?,
+            LocomotionPresentationSource::Observed(motion) => {
+                return self.motion_runtimes.observe_locomotion(
+                    table,
+                    guid,
+                    ObservedCharacterMotion {
+                        motion,
+                        orientation: body.pose.rotation,
+                        presentation,
+                        object_scale: entity.scale.effective(),
+                    },
+                    elapsed.as_secs_f32(),
+                );
+            }
             LocomotionPresentationSource::Command(order)
                 if presentation == CharacterMotionPresentation::Grounded =>
             {

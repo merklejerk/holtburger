@@ -5,15 +5,28 @@ use holtburger_common::Quaternion;
 use holtburger_content::MotionSequenceTable;
 
 use super::{CharacterMotionPresentation, MotionCommand, MotionOrder};
-use crate::spatial::AcceptedBodyMotion;
+use crate::spatial::{AcceptedBodyMotion, SupportedBodyMotion};
 
 /// Mutually exclusive presentation input; commanded travel is never labelled accepted physics.
 #[derive(Debug, Clone, Copy)]
 pub enum LocomotionPresentationSource {
     /// Accepted supported travel and turning, used for remote entities and undriven local bodies.
-    Observed(AcceptedBodyMotion),
+    Observed(SupportedBodyMotion),
     /// Controller-resolved locomotion channels, including their requested gait and rates.
     Command(MotionOrder),
+}
+
+/// Coherent post-solve facts for the registry's observed-playback transition.
+#[derive(Debug, Clone, Copy)]
+pub struct ObservedCharacterMotion {
+    /// Accepted supported movement and the solver's external-drive classification.
+    pub motion: SupportedBodyMotion,
+    /// Published body facing used to interpret world-space travel.
+    pub orientation: Quaternion,
+    /// Support/charge presentation resolved by the body's authority.
+    pub presentation: CharacterMotionPresentation,
+    /// Effective object scale used to rate the selected gait.
+    pub object_scale: f32,
 }
 
 /// Visual walk/backward/sidestep reference speed at object scale one; not a physical speed limit.

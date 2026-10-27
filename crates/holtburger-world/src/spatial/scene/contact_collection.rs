@@ -2,7 +2,9 @@
 
 use super::*;
 use crate::spatial::contact_profile::ContactPhaseProfile;
-use crate::spatial::{AcceptedBodyMotion, ContactBodyUpdate, advance_body_contact_collection};
+use crate::spatial::{
+    AcceptedBodyMotion, ContactBodyUpdate, SupportedBodyMotion, advance_body_contact_collection,
+};
 
 /// One admitted producer sample and its private reference continuation for the collection.
 struct CollectionActuator {
@@ -12,6 +14,8 @@ struct CollectionActuator {
     reconciliation: Option<PoseReconciliationState>,
     /// Independent final nominal continuation used to decide return completion.
     nominal_velocity: Vector3,
+    /// Supported return or authority-facing drive applied during this collection.
+    external_drive: bool,
 }
 
 impl CollectionActuator {
@@ -208,7 +212,7 @@ impl SpatialScene {
                         displacement: tick.motion.path.final_point().center()
                             - tick.motion.path.initial().center(),
                         launch_admitted: false,
-                        supported_motion: AcceptedBodyMotion::default(),
+                        supported_motion: SupportedBodyMotion::default(),
                         path: tick.motion.path,
                     },
                 ));
@@ -241,6 +245,7 @@ impl SpatialScene {
                         input,
                         reconciliation,
                         nominal_velocity: body.nominal.velocity,
+                        external_drive: false,
                     },
                 );
             }
@@ -273,6 +278,7 @@ impl SpatialScene {
                         .input
                         .step(body, ground, interval, &mut actuator.reconciliation)?;
                 actuator.nominal_velocity = input.nominal_velocity;
+                actuator.external_drive |= input.external_drive;
                 Ok(input.actuation)
             },
         )?;
@@ -320,6 +326,7 @@ impl SpatialScene {
             // Contact preparation has already matched actuation to the installed definition.
             let is_character =
                 matches!(actuator.input.actuation, PhysicalBodyActuation::Grounded(_));
+            let externally_driven = actuator.external_drive || update.supported_push;
             if let Some(destination) = actuator.finish(
                 &mut body,
                 &update,
@@ -370,9 +377,12 @@ impl SpatialScene {
                         &body,
                         &update.motion,
                     )?,
-                    supported_motion: AcceptedBodyMotion {
-                        velocity: update.supported_velocity,
-                        omega: update.accepted_motion.omega,
+                    supported_motion: SupportedBodyMotion {
+                        accepted: AcceptedBodyMotion {
+                            velocity: update.supported_velocity,
+                            omega: update.accepted_motion.omega,
+                        },
+                        externally_driven,
                     },
                 },
             ));

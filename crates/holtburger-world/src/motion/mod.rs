@@ -43,7 +43,7 @@ pub use directed::{
 pub use observed::{
     LocomotionPresentationSource, OBSERVED_ANGULAR_IDLE_RATE_RADIANS,
     OBSERVED_LINEAR_IDLE_SPEED_MPS, OBSERVED_RUN_SPEED_MPS, OBSERVED_TURN_RATE_RADIANS,
-    OBSERVED_WALK_SPEED_MPS, observed_locomotion_order,
+    OBSERVED_WALK_SPEED_MPS, ObservedCharacterMotion, observed_locomotion_order,
 };
 pub use registry::{
     AuthoredCollisionPose, BodyMotionRuntime, MAX_AUTHORED_ACTIONS, MotionActionEnqueueOutcome,

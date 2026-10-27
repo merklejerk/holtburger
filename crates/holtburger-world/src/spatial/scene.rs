@@ -107,7 +107,7 @@ pub struct DynamicEntityBodyTick {
     pub dynamic_state_change: Option<super::DynamicBodyPhysicsStateChange>,
     /// Supported visual travel, including accepted horizontal separation but excluding lifts
     /// and airborne travel. This observation is never physical continuation velocity.
-    pub supported_motion: super::AcceptedBodyMotion,
+    pub supported_motion: super::SupportedBodyMotion,
     /// A supported launch was admitted during this collection, for packet/feedback publication.
     pub launch_admitted: bool,
     /// Accepted timed geometry, retained for host path publication without another solve.

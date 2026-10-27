@@ -19,7 +19,7 @@ exclude = ["apps/holtburger-3d-legacy/src-tauri"]
 default-members = ["apps/holtburger-cli"]
 
 [workspace.package]
-version = "0.1.0-alpha.3"
+version = "0.1.0-alpha.4"
 edition = "2024"
 authors = ["holtburger contributors"]
 license = "AGPL-3.0"

@@ -2395,6 +2395,7 @@
 			{combatControls}
 			{combatProfileSelectionRevision}
 			onCombatProfileSelect={selectCombatProfile}
+			onStopCombat={stopCombat}
 			combatEnabled={lifecycle.kind === "in-world"}
 			emotesEnabled={gameplayInputEnabled}
 			onToggleCombat={() => void toggleCombatMode()}

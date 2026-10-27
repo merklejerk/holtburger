@@ -5975,6 +5975,9 @@
 						missile: { height: "medium", accuracy: 0.5 },
 					}}
 					onCombatProfileSelect={selectCombatProfile}
+					onStopCombat={() => {
+						combatStatus = { desired: null, state: "idle", refill: null };
+					}}
 					combatEnabled={true}
 					onToggleCombat={() => {
 						if (!showcase) return;

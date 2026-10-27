@@ -34,6 +34,8 @@
 	const GAUGE_TUNING = {
 		viewBoxWidth: 300,
 		viewBoxHeight: 130,
+		/** Keep the arc in place while reserving panel space for controls below it. */
+		gaugeTop: 15,
 		arcBaselineY: 112,
 		arcRadiusX: 96,
 		arcRadiusY: 76,
@@ -44,8 +46,8 @@
 		backdropBleedX: 15,
 		backdropBleedTop: 9,
 		backdropBleedBottom: 11,
-		/** Space between the gauge backdrop and its remaining-projectile readout. */
-		projectileSupplyGap: 4,
+		/** Space separating the attack-height controls from the stop/ammunition footer. */
+		footerGap: 8,
 		breakpointLabelSize: 24,
 		breakpointOutwardDistance: 16,
 		breakpointEndpointClearance: 10,
@@ -59,7 +61,7 @@
 
 	const arcCenterX = GAUGE_TUNING.viewBoxWidth / 2;
 	const gaugeLeft = (COMBAT_GAUGE_SIZE.width - GAUGE_TUNING.viewBoxWidth) / 2;
-	const gaugeTop = (COMBAT_GAUGE_SIZE.height - GAUGE_TUNING.viewBoxHeight) / 2;
+	const gaugeTop = GAUGE_TUNING.gaugeTop;
 	const arcBaseline = gaugeTop + GAUGE_TUNING.arcBaselineY;
 	const arcLeft = gaugeLeft + arcCenterX - GAUGE_TUNING.arcRadiusX;
 	const innerArcInset =
@@ -176,6 +178,8 @@
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 		/** Commit an attack profile and engage the current selection when present. */
 		readonly onProfileSelect: (profile: ClientAttackProfile) => void;
+		/** Stop the current engagement through the same action used by Escape. */
+		readonly onStopCombat: () => void;
 	}
 
 	let {
@@ -191,6 +195,7 @@
 		enabled,
 		onPlacementChange,
 		onProfileSelect,
+		onStopCombat,
 	}: Props = $props();
 
 	/** Only a bounded display sample enters Svelte; unknown supply has no readout. */
@@ -562,33 +567,86 @@
 				>{binding.hint ?? ""}</span
 			>
 		{/each}
-		{#if remaining !== null && profile.kind === "missile"}
-			<div
-				class="projectile-supply"
-				role="img"
-				aria-label={remaining === "∞"
-					? "Unlimited projectiles"
-					: `${remaining} projectiles remaining`}
-				style:top={`${arcBaseline + GAUGE_TUNING.backdropBleedBottom + GAUGE_TUNING.projectileSupplyGap}px`}
+		<div
+			class="combat-footer"
+			style:top={`${arcBaseline + GAUGE_TUNING.backdropBleedBottom + GAUGE_TUNING.footerGap}px`}
+		>
+			<button
+				type="button"
+				class="stop-attack"
+				disabled={!enabled || status.desired === null}
+				aria-label="Stop attacking"
+				title="Stop attacking (Esc)"
+				onclick={onStopCombat}
+				><svg viewBox="0 0 28 28" aria-hidden="true">
+					<rect class="stop-face" x="3" y="3" width="22" height="22" />
+				</svg></button
 			>
-				<span aria-hidden="true"
-					><EquipmentSlotIcon slot={AMMUNITION_SLOT} /></span
+			{#if remaining !== null && profile.kind === "missile"}
+				<div
+					class="projectile-supply"
+					role="img"
+					aria-label={remaining === "∞"
+						? "Unlimited projectiles"
+						: `${remaining} projectiles remaining`}
 				>
-				<strong>{remaining}</strong>
-			</div>
-		{/if}
+					<span aria-hidden="true"
+						><EquipmentSlotIcon slot={AMMUNITION_SLOT} /></span
+					>
+					<strong>{remaining}</strong>
+				</div>
+			{/if}
+		</div>
 	</div>
 </ClientHudPanel>
 
 <style>
 	@layer components {
+		.combat-footer {
+			position: absolute;
+			left: 0;
+			width: 100%;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			gap: 4px;
+		}
+		.stop-attack {
+			display: grid;
+			place-items: center;
+			width: 32px;
+			height: 32px;
+			padding: 0;
+			pointer-events: auto;
+			border: 0;
+			background: transparent;
+			color: var(--ui-combat-stop-color);
+			cursor: pointer;
+		}
+		.stop-attack svg {
+			width: 28px;
+			height: 28px;
+			pointer-events: none;
+		}
+		.stop-face {
+			fill: currentColor;
+		}
+		.stop-attack:hover:not(:disabled) svg,
+		.stop-attack:focus-visible svg {
+			transform: scale(1.15);
+		}
+		.stop-attack:focus-visible {
+			outline: 2px solid var(--ui-color-focus);
+			outline-offset: 2px;
+		}
+		.stop-attack:disabled {
+			opacity: 0.35;
+			cursor: default;
+		}
 		.projectile-supply {
 			--ui-inventory-equipment-slot-icon-size: 16px;
 			--ui-inventory-equipment-slot-icon-color: currentColor;
 
-			position: absolute;
-			left: 0;
-			width: 100%;
 			display: flex;
 			align-items: center;
 			justify-content: center;

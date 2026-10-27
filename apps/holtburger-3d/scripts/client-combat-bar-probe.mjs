@@ -318,11 +318,51 @@ export async function probeCombatBar(
 		null,
 	);
 
+	// The HUD cancellation callback clears intent without changing displayed stance or power.
+	for (const mode of ["melee", "missile"]) {
+		await read(`${api}.begin('${mode}')`);
+		await settle();
+		assert.equal(
+			await read("document.querySelector('.stop-attack').disabled"),
+			true,
+		);
+		await read(`${api}.active('${mode}')`);
+		await settle();
+		assert.equal(
+			await read("document.querySelector('.stop-attack').disabled"),
+			false,
+		);
+		const profile = await read(
+			"document.querySelector('.power-control').getAttribute('aria-valuenow')",
+		);
+		await read("document.querySelector('.stop-attack').click()");
+		await settle();
+		assert.equal(await read(`${api}.status().desired`), null);
+		assert.equal(
+			await read("document.querySelector('.stop-attack').disabled"),
+			true,
+		);
+		assert.equal(
+			await read("document.querySelector('.combat-bar').dataset.combatMode"),
+			mode,
+		);
+		assert.equal(
+			await read(
+				"document.querySelector('.power-control').getAttribute('aria-valuenow')",
+			),
+			profile,
+		);
+	}
+
 	await read(`${api}.end()`);
 	await settle();
 	assert.equal(
 		await read("document.querySelectorAll('.combat-bar').length"),
 		0,
 	);
-	return { immediateEngagement: true, precisePower: 0.62 };
+	return {
+		immediateEngagement: true,
+		precisePower: 0.62,
+		stopEngagement: true,
+	};
 }

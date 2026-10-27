@@ -313,7 +313,8 @@ jobs:
         run: |
           flatpak install --user --noninteractive --assumeyes holtburger-alpha.flatpak
           chmod +x .holtburger-local/alpha-linux-probes/content_bootstrap
-          dbus-run-session -- xvfb-run --auto-servernum \
+          # Portal services inherit their display from the D-Bus activation environment.
+          xvfb-run --auto-servernum dbus-run-session -- \
             .github/flatpak/verify-installed \
             "$GITHUB_WORKSPACE/.holtburger-local/alpha-linux-probes/content_bootstrap"
       - name: Inspect installed bytes and stage the full-suite Flatpak

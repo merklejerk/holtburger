@@ -66,8 +66,9 @@ Both Flatpaks reuse the inspected Linux archive without rebuilding its executabl
 Their combined job waits only for Linux, independently of Windows/macOS, and installs tooling
 and runtime once. Separate builder state/repository directories keep the app inventories
 independent. Private bootstrap and compiled Electron probe imports come from the Linux job.
-The Flatpak job installs only locked production JavaScript dependencies for those imports
-(`npm ci --omit=dev --ignore-scripts`); it does not reinstall Electron/build tools or compile probes.
+The Flatpak job installs locked JavaScript dependencies with `npm ci --ignore-scripts`:
+compiled imports need zod/MessagePack and package inspection needs `@electron/asar`.
+Skipping install scripts avoids downloading Electron; the job does not compile probes or the app.
 The headless Ubuntu runner needs no desktop installation or alternate distribution.
 The provisioning step still downloads OS packages and SDK/runtime on a fresh runner;
 it uses the main Ubuntu archive in place of the previously stalled Azure mirror and explicitly

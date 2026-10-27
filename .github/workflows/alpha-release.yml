@@ -91,10 +91,10 @@ jobs:
         with:
           name: verification-linux-electron
           path: apps/holtburger-3d/dist-electron
-      - name: Install only probe runtime dependencies
+      - name: Install locked inspection and probe dependencies
         working-directory: apps/holtburger-3d
-        # Compiled probe imports still use zod/msgpack; skip Electron and build tools.
-        run: npm ci --omit=dev --ignore-scripts
+        # Package inspection uses @electron/asar; skip Electron's binary install and rebuilds.
+        run: npm ci --ignore-scripts
       - uses: actions/download-artifact@v4
         with:
           name: alpha-notices

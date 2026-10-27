@@ -1,8 +1,6 @@
 import { app, BrowserWindow, ipcMain } from "electron";
 import { cp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
-import { mkdtempSync } from "node:fs";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { TRAVELERS_KIT_THEME_ID } from "../src/app/ui-theme-contract.js";
@@ -36,7 +34,10 @@ if (origin === undefined) throw new Error("Missing --probe-origin");
 const packageRoot = process.argv
 	.find((arg) => arg.startsWith("--probe-package-root="))
 	?.slice("--probe-package-root=".length);
-const directory = mkdtempSync(join(tmpdir(), "holtburger-user-theme-probe-"));
+const directory = process.argv
+	.find((arg) => arg.startsWith("--probe-directory="))
+	?.slice("--probe-directory=".length);
+if (directory === undefined) throw new Error("Missing --probe-directory");
 app.setPath("userData", join(directory, "profile"));
 app.whenReady().then(async () => {
 	let window: BrowserWindow | undefined;
@@ -408,12 +409,10 @@ app.whenReady().then(async () => {
 			[],
 		);
 		window.destroy();
-		await rm(directory, { recursive: true, force: true });
 		app.exit(0);
 	} catch (error) {
 		console.error(error);
 		window?.destroy();
-		await rm(directory, { recursive: true, force: true });
 		app.exit(1);
 	}
 });

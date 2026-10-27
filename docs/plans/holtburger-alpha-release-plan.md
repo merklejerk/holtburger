@@ -443,3 +443,8 @@ These do not block writing the plan; resolve them at the named phase before depe
 
 - The user explicitly removed Intel macOS from the plan and future releases. The active matrix is Linux x86-64, Windows x86-64, and macOS Apple Silicon. Removed the Intel row from the shared alpha contract (which also controls manifest completeness), notice target graphs, legacy nightly matrix, and cargo-dist configuration; updated download/releasing docs.
 - Historical Intel investigation above is superseded. Reverted the two Intel-only exhaustive-test timeout changes; supported-platform checks retain the original defaults and full seeded case counts. Current Windows evidence will be collected before the next push, but Intel no longer gates the candidate.
+
+### Windows theme-probe cleanup ownership
+
+- Run `40439544821` passed Linux, Apple Silicon, and Flatpak. Windows passed Rust/frontend/branding, native package inspection (confirming ASAR normalization), and sidecar smoke. Both development and built-file theme assertions passed, but the diagnostic process attempted to remove its own still-open Chromium profile database, received `EBUSY`, then repeated cleanup in its catch path and timed out.
+- The parent Node probe now creates the temporary directory, passes it explicitly, and removes it after the Electron child closes. Cleanup uses the existing bounded filesystem retry pattern; errors still fail the probe. The child reports its assertion result and exits without deleting its live profile. The complete local theme probe, actual temporary-directory removal, Electron build/type checks, and frontend lint passed; native Windows confirmation remains pending.

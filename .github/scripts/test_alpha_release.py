@@ -3,6 +3,7 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import stat
 import struct
@@ -10,10 +11,11 @@ import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
+from contextlib import redirect_stdout
 
 from alpha_release import (
     TARGETS, archive_suite, digest, executable_architecture, extract_suite,
-    manifest, stage, validate_tag,
+    create_tag, manifest, plan, stage, validate_tag,
     record_suite_flatpak, suite_flatpak_manifest,
     record_tui_flatpak,
     flatpak_runtime_ref, SUITE_FLATPAK_RECIPE,
@@ -149,6 +151,97 @@ class ReleaseVersionTests(unittest.TestCase):
             (app / "package-lock.json").write_text(json.dumps(lock))
             with self.assertRaisesRegex(ValueError, "package-lock.json root package"):
                 check_versions(root)
+
+
+class CandidatePlanningTests(unittest.TestCase):
+    """Manual candidates retain tag/source identity and rerun without moving tags."""
+
+    def test_manual_plan_emits_one_tag_for_the_selected_source(self):
+        commit = "a" * 40
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "outputs"
+            with (
+                patch.dict(os.environ, {
+                    "GITHUB_EVENT_NAME": "workflow_dispatch",
+                    "GITHUB_REF": "refs/heads/3d-next",
+                    "GITHUB_OUTPUT": str(output),
+                }, clear=True),
+                patch("alpha_release.check_versions", return_value="0.1.0-alpha.4"),
+                patch("alpha_release.source_identity", return_value=(commit, False)),
+                patch("alpha_release.run", return_value="2026-10-27") as source_date,
+                patch("alpha_release.subprocess.run") as ancestry,
+                redirect_stdout(io.StringIO()) as stdout,
+            ):
+                plan()
+            result = json.loads(stdout.getvalue())
+            self.assertEqual(result["commit"], commit)
+            self.assertEqual(result["tag"], f"alpha-20261027-{commit[:9]}")
+            self.assertIn(f"tag={result['tag']}\n", output.read_text())
+            source_date.assert_called_once_with("git", "show", "-s", "--format=%cs", commit)
+            self.assertEqual(ancestry.call_args.args[0], [
+                "git", "merge-base", "--is-ancestor", commit, "origin/3d-next",
+            ])
+
+    def test_manual_plan_rejects_another_branch_before_packaging(self):
+        with (
+            patch.dict(os.environ, {
+                "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/main",
+            }, clear=True),
+            patch("alpha_release.check_versions", return_value="0.1.0-alpha.4"),
+            patch("alpha_release.source_identity", return_value=("a" * 40, False)),
+        ):
+            with self.assertRaisesRegex(ValueError, "3d-next branch"):
+                plan()
+
+    def test_tag_plan_preserves_the_requested_tag(self):
+        commit = "a" * 40
+        tag = f"alpha-20261026-{commit[:8]}"
+        with (
+            patch.dict(os.environ, {"GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": tag}, clear=True),
+            patch("alpha_release.check_versions", return_value="0.1.0-alpha.4"),
+            patch("alpha_release.source_identity", return_value=(commit, False)),
+            patch("alpha_release.subprocess.run"),
+            redirect_stdout(io.StringIO()) as stdout,
+        ):
+            plan()
+        self.assertEqual(json.loads(stdout.getvalue())["tag"], tag)
+
+    def test_tag_creation_ignores_longer_prefix_matches(self):
+        commit = "a" * 40
+        tag = f"alpha-20261027-{commit[:9]}"
+        with (
+            patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repo"}),
+            patch("alpha_release.source_identity", return_value=(commit, False)),
+            patch("alpha_release.run", side_effect=[
+                json.dumps([{"ref": f"refs/tags/{tag}0"}]), "{}",
+            ]) as api,
+            redirect_stdout(io.StringIO()),
+        ):
+            create_tag(tag)
+        self.assertEqual(api.call_args.args, (
+            "gh", "api", "repos/owner/repo/git/refs", "--method", "POST",
+            "--raw-field", f"ref=refs/tags/{tag}", "--raw-field", f"sha={commit}",
+        ))
+
+    def test_tag_rerun_reuses_only_the_same_lightweight_source(self):
+        commit = "a" * 40
+        tag = f"alpha-20261027-{commit[:9]}"
+        for kind, target in (("commit", commit), ("commit", "b" * 40), ("tag", "b" * 40)):
+            with (
+                self.subTest(kind=kind, target=target),
+                patch.dict(os.environ, {"GITHUB_REPOSITORY": "owner/repo"}),
+                patch("alpha_release.source_identity", return_value=(commit, False)),
+                patch("alpha_release.run", return_value=json.dumps([{
+                    "ref": f"refs/tags/{tag}", "object": {"type": kind, "sha": target},
+                }])) as api,
+                redirect_stdout(io.StringIO()),
+            ):
+                if kind == "commit" and target == commit:
+                    create_tag(tag)
+                else:
+                    with self.assertRaisesRegex(ValueError, "does not identify"):
+                        create_tag(tag)
+                self.assertEqual(api.call_count, 1)
 
 
 class ReleaseManifestTests(unittest.TestCase):

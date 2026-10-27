@@ -50,10 +50,26 @@ Prose-only changes outside shipped documentation skip compilation while still re
 `Alpha validation` status. Configure that final status as the branch requirement rather than
 individual conditionally skipped matrix jobs.
 
-`Alpha Release Candidate` runs only for an explicitly pushed alpha tag. It calls the same
-validation workflow for that exact source, in parallel with production packaging. Tagged
-candidates must be committed on `3d-next`, version-consistent, and clean.
-Resolve the intended commit before creating a tag:
+After committing and pushing the intended release inputs to `3d-next`, open GitHub
+**Actions → Alpha Release Candidate → Run workflow**, select **3d-next**, and run it.
+The workflow uses the commit selected when dispatching, checks the suite version and clean
+source identity, and creates `alpha-YYYYMMDD-COMMITPREFIX` using the commit's committer date
+and first nine commit characters. The source-owned date keeps the generated tag stable across
+reruns on later days. It then validates and packages that same source in the same run, finally
+staging a draft prerelease. It does not bump the version or publish the draft.
+
+GitHub requires the dispatch workflow definition on the repository's default branch (`main`)
+before exposing the button. Land the workflow definition there as well as on `3d-next`,
+then select `3d-next` in the branch dropdown. Other branches are rejected. See
+[GitHub's manual-run documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
+
+The built-in token creates the tag without triggering a second tag-push workflow, so no
+personal token is required. A rerun can reuse an existing lightweight tag for the identical
+commit; a conflicting tag is rejected rather than moved. Candidate runs do not automatically
+cancel an in-progress candidate.
+
+An explicitly pushed alpha tag remains an alternative entry point. Resolve the intended
+commit before creating one:
 
 ```sh
 # After merging development changes, bumping the version, reviewing notices if needed,
@@ -66,8 +82,9 @@ git tag alpha-YYYYMMDD-COMMITPREFIX FULL_COMMIT_SHA
 git push origin refs/tags/alpha-YYYYMMDD-COMMITPREFIX
 ```
 
-These are operator commands, not automatic cleanup steps. Resolve any uncommitted changes
-before tagging. A new source needs a new tag and candidate; never move an earlier alpha tag.
+These are optional operator commands, not automatic cleanup steps. Resolve any uncommitted
+changes before preparing a candidate. A new source needs a new tag and candidate; never move
+an earlier alpha tag.
 Version `0.1.0-alpha.4` above is the next example after the alpha.3 baseline, not an automatic bump.
 
 The non-SemVer tag namespace avoids triggering the separate cargo-dist release workflow.

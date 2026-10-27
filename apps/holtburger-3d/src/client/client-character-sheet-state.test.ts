@@ -84,6 +84,89 @@ function quote(character = 7): ProgressionQuote {
 }
 
 describe("ClientCharacterSheetState", () => {
+	it("withdraws portal purchases and reprices unchanged facts on return", async () => {
+		const evaluate = vi.fn<
+			(
+				requestId: number,
+				intents: readonly ProgressionIntent[],
+			) => Promise<void>
+		>(async () => {});
+		const submit = vi.fn(async () => {});
+		const owner = new ClientCharacterSheetState(
+			evaluate,
+			submit,
+			async () => {},
+			() => {},
+		);
+		const baseline = sheet();
+		owner.reset(baseline, "in-world");
+		const oldRequest = evaluate.mock.calls.at(-1)?.[0];
+		if (oldRequest === undefined) throw new Error("missing initial evaluation");
+		owner.acceptEvaluations(oldRequest, [{ intent, result: { Ok: quote() } }]);
+		owner.setContext("portal-space");
+		expect(owner.read().sheet).toBe(baseline);
+		expect(owner.read().evaluations.size).toBe(0);
+		expect(owner.read().progressionUnavailable).toContain("portal travel");
+		owner.acceptEvaluations(oldRequest, [{ intent, result: { Ok: quote() } }]);
+		expect(owner.read().evaluations.size).toBe(0);
+		await owner.purchase(quote());
+		expect(submit).not.toHaveBeenCalled();
+		owner.acceptFeedback({ Rejected: { intent, reason: "CharacterNotReady" } });
+		owner.replace(baseline);
+		expect(evaluate).toHaveBeenCalledTimes(1);
+		owner.setContext("in-world");
+		owner.replace(baseline);
+		owner.setContext("in-world");
+		expect(evaluate).toHaveBeenCalledTimes(2);
+		const newRequest = evaluate.mock.calls.at(-1)?.[0];
+		if (newRequest === undefined) throw new Error("missing return evaluation");
+		owner.acceptEvaluations(oldRequest, [
+			{ intent, result: { Err: "CharacterNotReady" } },
+		]);
+		expect(owner.read().evaluations.size).toBe(0);
+		owner.acceptEvaluations(newRequest, [{ intent, result: { Ok: quote() } }]);
+		expect(owner.read().progressionUnavailable).toBeNull();
+		await owner.purchase(quote());
+		expect(submit).toHaveBeenCalledTimes(1);
+	});
+
+	it("retains attempted-purchase guards across portal travel", async () => {
+		const submit = vi.fn(async () => {});
+		const owner = new ClientCharacterSheetState(
+			async () => {},
+			submit,
+			async () => {},
+			() => {},
+		);
+		owner.reset(sheet(), "in-world");
+		await owner.purchase(quote());
+		owner.setContext("portal-space");
+		owner.setContext("in-world");
+		owner.replace(sheet());
+		await owner.purchase(quote());
+		expect(submit).toHaveBeenCalledTimes(1);
+		expect(owner.read().pendingTargets.size).toBe(1);
+		owner.replace(sheet(7, 2));
+		expect(owner.read().pendingTargets.size).toBe(0);
+	});
+
+	it("recovers portal snapshots without evaluating until world entry completes", () => {
+		const evaluate = vi.fn(async () => {});
+		const owner = new ClientCharacterSheetState(
+			evaluate,
+			async () => {},
+			async () => {},
+			() => {},
+		);
+		const baseline = sheet();
+		owner.reset(baseline, "in-world");
+		owner.reset(baseline, "portal-space");
+		expect(evaluate).toHaveBeenCalledTimes(1);
+		expect(owner.read().sheet).toBe(baseline);
+		owner.setContext("in-world");
+		expect(evaluate).toHaveBeenCalledTimes(2);
+	});
+
 	it("retains admin-sized level and XP facts exactly", () => {
 		const baseline = sheet();
 		const attribute = baseline.attributes[0];
@@ -105,8 +188,9 @@ describe("ClientCharacterSheetState", () => {
 			async () => {},
 			async () => {},
 			async () => {},
+			() => {},
 		);
-		owner.reset(admin);
+		owner.reset(admin, "in-world");
 		expect(owner.read().sheet?.level.currentXp).toBe("18446744073709551615");
 		expect(owner.read().sheet?.attributes[0]?.spent_xp).toBe(4_100_490_438);
 		expect(owner.read().sheet?.armor).toBe(321);
@@ -124,8 +208,9 @@ describe("ClientCharacterSheetState", () => {
 			evaluate,
 			submit,
 			async () => {},
+			() => {},
 		);
-		owner.reset(sheet());
+		owner.reset(sheet(), "in-world");
 		const firstRequest = evaluate.mock.calls.at(0)?.[0];
 		if (firstRequest === undefined) throw new Error("missing quote request");
 		owner.acceptEvaluations(firstRequest, [
@@ -155,11 +240,12 @@ describe("ClientCharacterSheetState", () => {
 			evaluate,
 			submit,
 			async () => {},
+			() => {},
 		);
-		owner.reset(sheet());
+		owner.reset(sheet(), "in-world");
 		const oldRequest = evaluate.mock.calls.at(0)?.[0];
 		if (oldRequest === undefined) throw new Error("missing quote request");
-		owner.reset(sheet(8));
+		owner.reset(sheet(8), "in-world");
 		owner.acceptEvaluations(oldRequest, [{ intent, result: { Ok: quote() } }]);
 		expect(owner.read().evaluations.size).toBe(0);
 		await owner.purchase(quote());
@@ -177,9 +263,10 @@ describe("ClientCharacterSheetState", () => {
 			evaluate,
 			async () => {},
 			async () => {},
+			() => {},
 		);
 		const before = sheet();
-		owner.reset(before);
+		owner.reset(before, "in-world");
 		const firstRequest = evaluate.mock.calls.at(-1)?.[0];
 		if (firstRequest === undefined)
 			throw new Error("missing first quote request");
@@ -202,9 +289,10 @@ describe("ClientCharacterSheetState", () => {
 			evaluate,
 			async () => {},
 			async () => {},
+			() => {},
 		);
 		const initial = sheet();
-		owner.reset(initial);
+		owner.reset(initial, "in-world");
 		const requests = evaluate.mock.calls.length;
 		owner.replace({
 			...initial,
@@ -217,17 +305,21 @@ describe("ClientCharacterSheetState", () => {
 	});
 
 	it("keeps an ambiguous bridge failure guarded until authoritative target change", async () => {
+		const reportFailure = vi.fn();
 		const owner = new ClientCharacterSheetState(
 			async () => undefined,
 			async () => {
 				throw new Error("bridge closed");
 			},
 			async () => {},
+			reportFailure,
 		);
-		owner.reset(sheet());
+		owner.reset(sheet(), "in-world");
 		await owner.purchase(quote());
 		expect(owner.read().pendingTargets.size).toBe(1);
-		expect(owner.read().feedback).toContain("awaiting a server update");
+		expect(reportFailure).toHaveBeenCalledWith(
+			expect.stringContaining("awaiting a server update"),
+		);
 	});
 
 	it.each(["reset", "target update"] as const)(
@@ -239,19 +331,21 @@ describe("ClientCharacterSheetState", () => {
 			const submission = new Promise<void>((_resolve, reject) => {
 				rejectSubmission = reject;
 			});
+			const reportFailure = vi.fn();
 			const owner = new ClientCharacterSheetState(
 				async () => undefined,
 				() => submission,
 				async () => {},
+				reportFailure,
 			);
-			owner.reset(sheet());
+			owner.reset(sheet(), "in-world");
 			const purchase = owner.purchase(quote());
-			if (transition === "reset") owner.reset(sheet());
+			if (transition === "reset") owner.reset(sheet(), "in-world");
 			else owner.replace(sheet(7, 2));
 			const revision = owner.read().revision;
 			rejectSubmission(new Error("retired bridge failure"));
 			await purchase;
-			expect(owner.read().feedback).toBeNull();
+			expect(reportFailure).not.toHaveBeenCalled();
 			expect(owner.read().pendingTargets.size).toBe(0);
 			expect(owner.read().revision).toBe(revision);
 		},
@@ -272,8 +366,9 @@ describe("optimistic title selection", () => {
 			async () => {},
 			async () => {},
 			send,
+			() => {},
 		);
-		owner.reset({ ...sheet(), titleSelection: titles });
+		owner.reset({ ...sheet(), titleSelection: titles }, "in-world");
 		const selection = owner.selectTitle(42);
 		expect(owner.read().sheet?.titleSelection?.selectedId).toBe(42);
 		expect(send).toHaveBeenCalledWith(7, 42);
@@ -282,21 +377,25 @@ describe("optimistic title selection", () => {
 		expect(send).toHaveBeenCalledTimes(1);
 		owner.replace({ ...sheet(), titleSelection: titles });
 		expect(owner.read().sheet?.titleSelection?.selectedId).toBe(1);
-		owner.reset(sheet(8));
+		owner.reset(sheet(8), "in-world");
 		expect(owner.read().sheet?.titleSelection).toBeNull();
 	});
 	it("reports invocation errors without rolling back or locking selection", async () => {
 		const send = vi.fn(async () => {
 			throw new Error("host unavailable");
 		});
+		const reportFailure = vi.fn();
 		const owner = new ClientCharacterSheetState(
 			async () => {},
 			async () => {},
 			send,
+			reportFailure,
 		);
-		owner.reset({ ...sheet(), titleSelection: titles });
+		owner.reset({ ...sheet(), titleSelection: titles }, "in-world");
 		await owner.selectTitle(42);
-		expect(owner.read().feedback).toContain("host unavailable");
+		expect(reportFailure).toHaveBeenCalledWith(
+			"Title selection send failed: host unavailable",
+		);
 		expect(owner.read().sheet?.titleSelection?.selectedId).toBe(42);
 		await owner.selectTitle(1);
 		expect(send).toHaveBeenCalledTimes(2);

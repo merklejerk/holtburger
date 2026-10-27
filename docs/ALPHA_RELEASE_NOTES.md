@@ -5,7 +5,7 @@ their derived data, and micro content for TUI. h3d requires a user-supplied reta
 installation or full HBA. No full retail archives are distributed.
 
 Linux x86-64 offers a complete-suite Flatpak as well as the native archive. The separate
-TUI-only Flatpak remains available. The full-suite Flatpak defaults to h3d client; use
+TUI-only Flatpak remains available. Both alpha Flatpaks use freedesktop 26.08. The full-suite Flatpak defaults to h3d client; use
 `--command=holtburger-cli`, `--command=dat-tool`, or `--command=dat2hba` for the other binaries.
 Read the quickstart for retail-data portal access and explicit tool input/output grants.
 

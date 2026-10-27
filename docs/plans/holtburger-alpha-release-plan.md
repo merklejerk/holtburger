@@ -1,12 +1,12 @@
 # Alpha release from `3d-next`
 
-Status: the original three-platform candidate is staged and verified as an unpublished draft. Scope now also requires a full-suite Linux x86-64 Flatpak. That addition and a new complete candidate remain pending; user native acceptance still occurs only at the final handoff.
+Status: the user approved upgrading both alpha Flatpaks to 26.08. The prior nine-asset `0.1.0-alpha.2` draft remains intact. Local 26.08 build/runtime compatibility passed; a new `0.1.0-alpha.3` candidate and hosted validation are pending. User native acceptance and publication remain outstanding.
 
 ## Goal and boundaries
 
 Publish a reproducible alpha suite from one identified `3d-next` commit as GitHub Release assets, containing the TUI, h3d, and the tools and resources needed to use them.
 
-The user authorized implementation and subsequent commits/pushes. The original candidate is tagged at `f6d69fc1d`; the newly requested full-suite Flatpak is scoped below and is not present in that candidate. Final publication waits for user native-bundle acceptance and explicit publication authorization.
+The user authorized implementation and subsequent commits/pushes. The original eight-asset candidate remains tagged at `f6d69fc1d`. The expanded candidate is `alpha-20261027-4e9f81ca9`, with a separate complete draft. The user approved the 26.08 runtime migration. Final publication waits for the replacement candidate, user native-bundle acceptance, and explicit publication authorization.
 
 ### Accepted scope
 
@@ -197,7 +197,7 @@ Primary files: `crates/holtburger-dat/src/manifest.rs`, its tests, `apps/holtbur
 - [x] Generate a fresh micro ZIP with corrected `dat2hba --profile micro` from identified retail inputs, then run the diagnostic against it. Record generator commit, digest, size, namespace inventory, and bootstrap result.
 - [x] Inspect its contents and confirm it lacks the sentinel and visual resource classes excluded by the micro manifest. Stage only `assets.hba` into the micro ZIP.
 - [x] Complete the Phase 1 content-asset handoff and pin the URL/digest. Fetch into a clean staging directory, fail on HTTP errors/digest mismatch/unexpected ZIP entries, and validate the fetched bytes through the same bootstrap diagnostic.
-- [ ] Use this exact artifact for all suite archives, the standalone micro asset, and both Flatpaks. Do not replace the main nightly's input implicitly.
+- [x] Use this exact artifact for all suite archives, the standalone micro asset, and both Flatpaks. Do not replace the main nightly's input implicitly.
 
 Acceptance: current bootstrap and character-generation reads succeed with the regenerated micro artifact; the existing published five-record micro fails the probe as expected during investigation; every alpha consumer verifies and uses the same digest. Do not retain a permanent test tied to the old downloadable artifact.
 
@@ -266,7 +266,7 @@ Acceptance: every included platform has a correctly identified archive that pass
 
 ### Phase 6A: Add the full-suite Flatpak
 
-Deliverables: a suite-owned recipe and launch wrapper/desktop metadata under `.github/flatpak/`, alpha CI integration, complete manifest/checksum coverage, and installed-runtime evidence. Implementation and local installed-runtime checks are complete; hosted verification and the new complete candidate remain pending. The existing TUI recipe remains independently usable by `main` nightly.
+Deliverables: a suite-owned recipe and launch wrapper/desktop metadata under `.github/flatpak/`, alpha CI integration, complete manifest/checksum coverage, and installed-runtime evidence. Implementation, local/hosted installed-runtime checks, and the new complete draft are verified. The approved 26.08 migration requires a replacement candidate; final user checks remain pending. The existing TUI recipe remains independently usable by `main` nightly.
 
 - [x] Establish a distinct application ID, `io.github.merklejerk.holtburger-alpha`, so installation does not replace the TUI-only app or reuse its settings namespace. Limit this new artifact to Linux x86-64; no new native targets or Flathub publication are required.
 - [x] Start with the existing freedesktop 24.08 runtime baseline and prove compatibility of the actual Electron version and all suite binaries. Evaluate the standard Electron BaseApp/Zypak integration described by Flatpak's Electron guide. Pin any additional build inputs and include their original notices. Do not assume that copying the portable archive alone provides a functioning Electron sandbox; retain the sandbox rather than passing `--no-sandbox`.
@@ -368,11 +368,13 @@ Acceptance: a public GitHub prerelease contains the complete agreed artifact set
 
 These do not block writing the plan; resolve them at the named phase before dependent work.
 
-1. **Phase 1:** Where are the retail portal/localization DATs for regenerated micro content, and where should its pinned downloadable ZIP live? Investigation found only the full HBA and stale micro ZIP under local `dats/`.
+1. **Resolved micro:** Regenerated approved micro from the local retail portal/localization DATs; the descriptor pins the public content-only release by asset URL and digest. Full retail inputs remain local.
 2. **Resolved scope:** macOS targets Apple Silicon only. Intel macOS is excluded by the user’s explicit direction; release completeness requires the three supported targets.
-3. **Phase 4:** What is the first suite version? Proposed `0.1.0-alpha.1`, independent of the dated alpha tag.
+3. **Resolved version:** The original candidate used `0.1.0-alpha.1`; the expanded candidate uses `0.1.0-alpha.2`, managed by `release_version.py` across Cargo/npm and both lockfiles.
 4. **Phase 8, final handoff:** Which platforms can the user exercise interactively? Their native-bundle checks are unavailable before this point. Publish truthful experimental status for the rest; do not manufacture acceptance evidence.
-5. **Resolved implementation gap:** Rust notices now use pinned cargo-about, checksum-verified upstream clarifications, a bounded metadata-only exception, and a pinned native-library appendix. Generation and packaging are locally verified below; hosted consumption remains pending.
+5. **Resolved implementation gap:** Rust notices now use pinned cargo-about, checksum-verified upstream clarifications, a bounded metadata-only exception, and a pinned native-library appendix. Generation and hosted packaging passed across all three native targets and both Flatpaks.
+
+6. **Resolved runtime:** The user approved upgrading both alpha Flatpaks to 26.08. The full-suite recipe owns that selection, consumed by the generated TUI alpha recipe, both CI installation steps, installed verification, and release aggregation. Preserve main nightly independence and prior draft bytes. The new candidate must pass 26.08 compatibility and hosted gates before final user acceptance.
 
 ## Decisions and execution journal
 
@@ -538,3 +540,27 @@ These do not block writing the plan; resolve them at the named phase before depe
 - Run `40457944193` on tagged source `e7a2368e623dc76660b4d7c73376a06afcfe9a18` passed plan/notices, TUI Flatpak, and every Linux/Windows/Apple Silicon native gate, including the new actual-package theme/font checks. The full-suite Flatpak built and installed successfully; its production bootstrap loaded 13 heritage groups, both tool commands and resource/script permissions passed, and private-host smoke passed both modes with DAT/HBA fixtures.
 - The portal gate then failed with GTK `cannot open display` and no FileChooser interface. The workflow started D-Bus before Xvfb, so activated portal services inherited no display. Reverse the wrappers: `xvfb-run --auto-servernum dbus-run-session -- ...`. This gives the bus and its activated services the same virtual display as the app while retaining one session for every probe. No app permissions, recipe, runtime code, or assertions changed. Actionlint, all 23 release/notices tests, and whitespace checks passed.
 - This was a CI setup mistake, not a reason to waive the portal check. The next source-specific candidate must pass the full pipeline before the nine-asset draft can be staged. Preserve the previous tags and original eight-asset draft.
+
+### Expanded candidate draft and round-trip verification (2026-10-27)
+
+- Candidate `0.1.0-alpha.2`, source `4e9f81ca91fabec7d5eea70e6090024487342d75`, tag `alpha-20261027-4e9f81ca9`. Run `40461087883` is green. All three native targets and TUI Flatpak passed on attempt 1. Full-suite Flatpak and staging passed on the targeted attempt 2; successful native jobs were retained, not rebuilt.
+- The first full-suite setup attempt downloaded 100 MB from Ubuntu's package mirror in 13min49s. Cancellation completed while the install was progressing; stopping it was premature. The log exposed the mirror delay and the runtime EOL notice. Retried only the full-suite job and downstream staging at the same source; no source/tag or native artifact changes. This retry cleared setup quickly.
+- Corrected-session hosted probes passed production bootstrap (13 heritage groups), private-host smoke in both modes with DAT/HBA fixtures, resource/script permissions, both tool commands, FileChooser v3, read-only document-portal input and explicit conversion/export output grants, both-mode content recovery, eight base fonts, four bundled images, and custom font/theme replacement. Installed-copy verification passed before upload. No interactive TUI or visual/gameplay acceptance was performed.
+- Draft: https://github.com/merklejerk/holtburger/releases/tag/untagged-d18a09dd64fac8c22b89 (ID `425131143`), unpublished prerelease at the exact source. Nine assets: three native suites, full-suite Flatpak, TUI-only Flatpak, standalone micro ZIP, notices HTML, manifest, and SHA256SUMS. Draft creation/staging succeeded using the create response directly. The original tag/draft remains intact.
+- Verified all nine remote digests against the manifest/checksums, exact source/version/architectures, both Flatpak receipts, and shared approved micro/notice identities. Downloaded the actual draft full-suite Flatpak, manifest, checksums, and notices and verified their hashes. The inspected CI Linux archive matches its release digest.
+- Replaced the task's modified local prototype with the actual downloaded Flatpak, preserving user data. Every installed suite file/link matches the verified Linux input; its complete installed receipt equals the release-manifest entry. The exact candidate bootstrap probe loaded all 13 heritage groups from installed micro content. The installed local app is now the actual unmodified candidate.
+- Full-suite Flatpak SHA-256: `73a51ed47822962db5e2fc3125b015d77877cda81e05fabb64799d0963143871`. SHA256SUMS file SHA-256: `5b25c93b7f937a4568af879a30ce667696cf6ac061cc7d19c1a4f4117eb23ace`. Notices HTML: `df6cff53ad469edafdf9d47ad38aef22fd4def03357e9b13cef931d985040b82`. Micro ZIP remains `df24573f24e4ca46398041ab70c9188825ad6a82e5db229c4146fe8d757aa098`.
+- Both alpha Flatpaks inherit the now-EOL 24.08 runtime. Upstream's final 24.08 release directs migration to 25.08 or 26.08; its current table supports 26.08 through September 2028. A runtime-choice question is pending. Preserve this verified baseline draft while that is resolved; upgrading requires a newly identified candidate and affected compatibility checks.
+- Final native/visual checklist remains in `docs/ALPHA_RELEASING.md`: checksum/extraction, terminal TUI and alternate working directory, implicit h3d client with connection arguments and retail selection, explicit Explorer, basic gameplay/input/audio/window behavior, and full Flatpak retail selection across restarts plus TUI/tool grants. Record actual available platforms/results separately from CI. Publish only after acceptance and explicit authorization, promoting the exact accepted bytes.
+- This handoff evidence update remains outside the tagged source; it changes no candidate artifact or tag.
+
+### Approved 26.08 runtime migration
+
+- User explicitly approved upgrading both alpha Flatpaks. Preserve the verified alpha.2 draft and select a new alpha.3 candidate after local compatibility checks. The full-suite recipe owns runtime/SDK selection; the generated TUI alpha recipe, installed TUI validator, both alpha CI installation steps, and aggregation consume that policy. Main nightly's independent TUI recipe/workflow remain unchanged.
+- Verified actual Flathub 26.08 refs: Platform `df26daaf9d07610b4a72cc4585566194051275ac68396597b06474396f66427c`, SDK `a1b744b072d9f55d061e35382547ae80dad8d92abecc1da7dc1818de2daabfd3`, reported version 26.08.4. Installed both in the local user installation for preflight.
+- Built the verified alpha.2 Linux input diagnostically on 26.08. The newer SDK compiler diagnosed an upstream `FlagOrBool` copy-constructor typo (`other.value` vs declared `value_`). Added a one-line source patch while retaining compiler warnings as errors and the existing exact helper commit/licenses. The helper then compiled without warnings/errors. AppStream's SDK tool emitted an optional OpenSlide plugin-load warning; icon export and build succeeded, and no compiler check was suppressed.
+- Full installed 26.08 preflight passed bootstrap (13 heritage groups), tool commands, both-mode DAT/HBA private-host smoke, read-only portal input and explicit writable tool output, palette conversion/export identity, both-mode content recovery, eight base fonts, four bundled images, and custom theme/font reload. TUI shared libraries resolve inside 26.08; interactive TUI and visual/gameplay acceptance remain user-owned.
+- Release tooling/notices: 23 tests and actionlint passed. Aggregation now rejects a receipt on a different runtime, preventing mixed-runtime alpha assets. Hosted validation and the new source-specific nine-asset draft remain pending.
+
+- Exported the actual 26.08 diagnostic bundle and passed the production installed-copy verifier: every native input file/link, wrapper/tool entry, original helper notice, architecture, runtime, and bundle receipt matched. This preflight uses the prior clean Linux input and local packaging edits; it is not the new publishable candidate.
+- Bumped the centrally managed suite version to `0.1.0-alpha.3`; Cargo/npm manifests and both lockfiles agree, with only workspace package versions changed. All 23 release/notices tests, actionlint, version consistency, and whitespace checks passed. The next authoritative tag run must produce the complete nine-asset replacement draft before user native checks.

@@ -37,6 +37,10 @@
 		/** Set the current local destination without submitting chat. */
 		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 		readonly messages: readonly ClientChatLine[];
+		/** Existing selection owner checks current local facts and retention distance. */
+		readonly onSelectEntity: (guid: number) => boolean;
+		/** Unavailable or historical entity references report through the toast owner. */
+		readonly onNotice: (message: string) => void;
 		/** User-selected clock format for all buffered message timestamps. */
 		readonly clockFormat: ClientClockFormat;
 		/** App-owned locally queued input, oldest first. */
@@ -58,6 +62,8 @@
 	const {
 		onSetWaypoint,
 		messages,
+		onSelectEntity,
+		onNotice,
 		clockFormat,
 		sentHistory,
 		onSend,
@@ -478,6 +484,17 @@
 		setBufferHovered(false);
 	}
 
+	function selectEntity(line: ClientChatLine, guid: number): void {
+		if (line.generation !== composer.generation) {
+			onNotice("This entity link belongs to a previous character or session.");
+			return;
+		}
+		if (!onSelectEntity(guid))
+			onNotice(
+				"This entity is currently outside selection range or unavailable.",
+			);
+	}
+
 	function linePrefix(line: ClientChatLine): string {
 		const time = line.receivedAt.toLocaleTimeString([], {
 			hour: "2-digit",
@@ -552,12 +569,14 @@
 							<span class="chat-message"
 								>{#if line.kind === "formatted-system"}<ClientChatFormattedText
 										rows={line.rows}
+										onSelectEntity={(guid) => selectEntity(line, guid)}
 										interactive={historyInteractive}
 										{onSetWaypoint}
-									/>{:else if historyInteractive}<ClientWaypointText
+									/>{:else}<ClientWaypointText
 										text={line.message}
+										interactive={historyInteractive}
 										{onSetWaypoint}
-									/>{:else}{line.message}{/if}</span
+									/>{/if}</span
 							>
 						</p>
 					{/each}

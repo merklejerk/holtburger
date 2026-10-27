@@ -238,15 +238,22 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 				message,
 				id,
 				receivedAt: new Date(0),
+				generation: 0,
 			}),
 		);
 		runClientHelpCommand("/help", (entry) => {
-			messages.push({ ...entry, id: messages.length, receivedAt: new Date(0) });
+			messages.push({
+				...entry,
+				id: messages.length,
+				receivedAt: new Date(0),
+				generation: 0,
+			});
 		});
 		messages.push({
 			kind: "formatted-system",
 			id: messages.length,
 			receivedAt: new Date(0),
+			generation: 0,
 			rows: [
 				{
 					indented: true,
@@ -274,6 +281,10 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 				},
 				onSendError: (message) => {
 					throw new Error(`Unexpected chat submission failure: ${message}`);
+				},
+				onSelectEntity: () => false,
+				onNotice: (message) => {
+					throw new Error(message);
 				},
 				onSetWaypoint: () => {
 					waypointActivations += 1;
@@ -311,8 +322,8 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 				throw new Error("Missing chat history interaction control");
 			historyToggle.click();
 			await settle();
-			const links = chatTarget.querySelectorAll<HTMLButtonElement>(
-				"button.waypoint-link",
+			const links = chatTarget.querySelectorAll<HTMLSpanElement>(
+				'.waypoint-link[role="button"]',
 			);
 			require(links.length ===
 				2, "Outdoor history and formatted coordinates should each offer a waypoint");

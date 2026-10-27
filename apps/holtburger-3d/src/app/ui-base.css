@@ -586,6 +586,22 @@
 		color: var(--ui-color-highlight);
 	}
 
+	/* Entity and coordinate references stay recognizable in click-through chat and active surfaces. */
+	.ui-theme .ui-inline-tag {
+		user-select: text;
+		color: var(--ui-color-accent);
+		font-weight: 600;
+		text-decoration: underline dotted;
+		text-underline-offset: 0.15em;
+	}
+	.ui-theme .ui-inline-tag[role="button"] {
+		cursor: pointer;
+	}
+	.ui-theme .ui-inline-tag[role="button"]:is(:hover, :focus-visible) {
+		color: var(--ui-color-highlight);
+		text-decoration-style: solid;
+	}
+
 	.ui-theme .ui-button {
 		min-height: 24px;
 		padding: 2px 7px;
@@ -768,6 +784,7 @@
 		:is(
 			.ui-button,
 			.ui-inline-button,
+			.ui-inline-tag[role="button"],
 			.ui-tab,
 			.ui-option,
 			.ui-input,

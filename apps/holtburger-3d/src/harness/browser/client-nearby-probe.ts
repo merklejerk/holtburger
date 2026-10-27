@@ -25,6 +25,10 @@ export async function probeClientNearby(dependencies: {
 	}[];
 	readonly messages: () => readonly ClientChatLine[];
 	readonly waypoint: () => MapWaypointTarget | null;
+	/** Exercise historical links through the mounted production chat and selection owners. */
+	readonly select: (guid: number | null) => void;
+	readonly retireChat: () => void;
+	readonly notice: () => string | null;
 }) {
 	const { owner, emit } = dependencies;
 	function require(condition: boolean, message: string): asserts condition {
@@ -33,9 +37,7 @@ export async function probeClientNearby(dependencies: {
 	const wait = (ms: number) =>
 		new Promise<void>((resolve) => setTimeout(resolve, ms));
 	const click = async (selector: string) => {
-		const button = document.querySelector<HTMLButtonElement | HTMLInputElement>(
-			selector,
-		);
+		const button = document.querySelector<HTMLElement>(selector);
 		require(button !== null, `missing control ${selector}`);
 		button.scrollIntoView({ block: "nearest", inline: "nearest" });
 		const rectangle = button.getBoundingClientRect();
@@ -247,13 +249,14 @@ export async function probeClientNearby(dependencies: {
 	const matchMode = document.querySelector<HTMLSelectElement>(
 		".alert-editor select",
 	);
-	require(matchMode?.value === "substring", "new alerts default to substring matching");
+	require(matchMode?.value ===
+		"substring", "new alerts default to substring matching");
 	input(".alert-editor input", "golem");
 	await tick();
-	require(
-		document.querySelector(".alert-editor")?.textContent?.includes("2 current matches") === true,
-		"substring draft matches names without wildcard syntax",
-	);
+	require(document
+		.querySelector(".alert-editor")
+		?.textContent?.includes("2 current matches") ===
+		true, "substring draft matches names without wildcard syntax");
 	require(matchMode !== null, "match mode editor exists");
 	matchMode.value = "glob";
 	matchMode.dispatchEvent(new Event("change", { bubbles: true }));
@@ -338,7 +341,10 @@ export async function probeClientNearby(dependencies: {
 		alertFills = 0;
 		clear.call(this, x, y, width, height);
 	};
-	context.fill = function (path?: Path2D | CanvasFillRule, rule?: CanvasFillRule) {
+	context.fill = function (
+		path?: Path2D | CanvasFillRule,
+		rule?: CanvasFillRule,
+	) {
 		if (path instanceof Path2D) {
 			alertFills++;
 			alertColor = String(this.fillStyle);
@@ -350,8 +356,7 @@ export async function probeClientNearby(dependencies: {
 		require(alertFillCount() ===
 			2, "both tracked entities use the alert glyph in the same map frame");
 		const baselineColor = readAlertColor();
-		require(baselineColor !==
-			null, "tracked canvas appearance is available");
+		require(baselineColor !== null, "tracked canvas appearance is available");
 		const minimapScope = document.querySelector<HTMLElement>(".minimap");
 		require(minimapScope !== null, "minimap scope exists");
 		const theme = document.createElement("style");
@@ -373,7 +378,8 @@ export async function probeClientNearby(dependencies: {
 		try {
 			document.dispatchEvent(new Event(UI_THEME_CHANGED_EVENT));
 			await settle();
-			require(readAlertColor() === "#112233", "theme color reaches the actual alert glyph canvas fill");
+			require(readAlertColor() ===
+				"#112233", "theme color reaches the actual alert glyph canvas fill");
 			const category = document.querySelector<HTMLElement>(
 				'.category-icon[data-entity-category="monster"]',
 			);
@@ -396,7 +402,6 @@ export async function probeClientNearby(dependencies: {
 				getComputedStyle(filter).borderColor === "rgb(171, 61, 91)" &&
 				getComputedStyle(launcher).width ===
 					"24px", "shared pill and rim control tokens accept theme overrides");
-
 		} finally {
 			theme.remove();
 			document.dispatchEvent(new Event(UI_THEME_CHANGED_EVENT));
@@ -486,24 +491,34 @@ export async function probeClientNearby(dependencies: {
 				...interior,
 				placement: {
 					...interior.placement,
-					pose: { ...interior.placement.pose, landblockId: cellId(landblockId) },
+					pose: {
+						...interior.placement.pose,
+						landblockId: cellId(landblockId),
+					},
 				},
 			},
 		});
 	};
 	moveTargetToCell(0x00010100);
-	const mixedLocation = owner.read().rows.find((row) => row.guid === 7)?.location;
-	require(
-		mixedLocation !== undefined && mixedLocation.waypoint !== null && !mixedLocation.text.startsWith("Cell"),
-		"mixed-landblock interior exposes surface coordinates and waypoint",
-	);
-	require(owner.trackedGuids().has(7), "mixed-landblock interior retains map tracking");
+	const mixedLocation = owner
+		.read()
+		.rows.find((row) => row.guid === 7)?.location;
+	require(mixedLocation !== undefined &&
+		mixedLocation.waypoint !== null &&
+		!mixedLocation.text.startsWith(
+			"Cell",
+		), "mixed-landblock interior exposes surface coordinates and waypoint");
+	require(owner
+		.trackedGuids()
+		.has(7), "mixed-landblock interior retains map tracking");
 	dependencies.scene.replace(nearbySceneInterest("0x0001ffff", "dungeon"));
-	const dungeonLocation = owner.read().rows.find((row) => row.guid === 7)?.location;
-	require(
-		dungeonLocation?.waypoint === null && dungeonLocation.text.startsWith("Cell 0x00010100"),
-		"dungeon context preserves cell-local coordinates",
-	);
+	const dungeonLocation = owner
+		.read()
+		.rows.find((row) => row.guid === 7)?.location;
+	require(dungeonLocation?.waypoint === null &&
+		dungeonLocation.text.startsWith(
+			"Cell 0x00010100",
+		), "dungeon context preserves cell-local coordinates");
 	dependencies.scene.replace(mixedRequest);
 	moveTargetToCell(0x00010001);
 	const beforeSceneReturn = dependencies.messages().length;
@@ -531,11 +546,71 @@ export async function probeClientNearby(dependencies: {
 	await click('[aria-label="Close Nearby"]');
 	require(examineRequests().length ===
 		1, "catalog updates do not submit additional examinations");
+	// Alerts retain explicit IDs, and links only acquire pointer interaction with history enabled.
+	require(document.querySelector('.entity-chat-tag[role="button"]') ===
+		null, "click-through chat renders entity names as text");
+	await click('[aria-label="Interact with chat history"]');
+	const entityTag = (name: string) => {
+		const tags = document.querySelectorAll<HTMLSpanElement>(
+			`.chat-buffer [role="button"][aria-label="Select entity: ${name}"]`,
+		);
+		const tag = tags.item(tags.length - 1);
+		require(tag !== null, `missing chat entity ${name}`);
+		return tag;
+	};
+	const gold = entityTag("Gold Golem");
+	dependencies.select(7);
+	const range = document.createRange();
+	range.selectNodeContents(gold);
+	const textSelection = document.getSelection();
+	require(textSelection !== null, "browser exposes text selection");
+	textSelection.removeAllRanges();
+	textSelection.addRange(range);
+	gold.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+	require(dependencies.selected() ===
+		7, "text selection does not acquire the entity");
+	textSelection.removeAllRanges();
+	await click('[aria-label="Select entity: Gold Golem"]');
+	require(dependencies.selected() ===
+		10, "chat selects the captured entity identity");
+	require(examineRequests().length ===
+		1, "chat entity selection does not examine the entity");
+
+	emit("client-entity-facts-changed", {
+		projectileSupply: null,
+		salvage: null,
+		worldContainer: null,
+		upserts: [],
+		removed: [10],
+	});
+	dependencies.select(7);
+	gold.click();
+	await tick();
+	require(dependencies.selected() === 7 &&
+		dependencies.notice() ===
+			"This entity is currently outside selection range or unavailable.", "unavailable chat reference preserves selection and reports a toast");
+	dependencies.select(8);
+	dependencies.retireChat();
+	await tick();
+	await click('[aria-label="Interact with chat history"]');
+	entityTag("Diamond Golem").click();
+	await tick();
+	require(dependencies.selected() === 8 &&
+		dependencies.notice() ===
+			"This entity link belongs to a previous character or session.", "old-generation chat reference cannot select a currently known entity");
+	await click('[aria-label="Interact with chat history"]');
+	require(document.querySelector('.entity-chat-tag[role="button"]') ===
+		null, "ending history interaction restores click-through text");
 	return {
 		passed: true,
 		entities: facts.length,
 		tracked: owner.trackedGuids().size,
 		checks: [
+			"chat-entity-selection",
+			"chat-entity-drag-protection",
+			"chat-entity-unavailable-toast",
+			"chat-entity-generation-guard",
+			"chat-entity-click-through",
 			"compact-launcher",
 			"catalog-row-controls",
 			"pointer-hit-testing",

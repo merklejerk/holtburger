@@ -111,11 +111,18 @@ acceptance remains the final publication gate.
 
 ## Dependency notices
 
-The plan job installs the version of `cargo-about` named by
-`python3 .github/scripts/generate_notices.py tool-version`, then generates one
-`THIRD_PARTY_NOTICES.html` for all three target graphs. The same file is included in every
-suite and the Flatpak, and uploaded separately for review. Suite metadata and the final
-manifest pin its digest. Electron/Chromium and font notices remain inside h3d.
+Rust/native notices are generated locally and committed as
+`.github/licenses/THIRD_PARTY_NOTICES.html`, with a generated
+`THIRD_PARTY_NOTICES.inputs.json` freshness record beside it. CI runs
+`python3 .github/scripts/generate_notices.py check` without installing cargo-about or
+accessing license sources. It rejects changed Cargo manifests/lockfile, notice policy,
+original native notices, generator code, or altered/missing generated output.
+Ordinary application source changes do not require regeneration.
+
+The candidate job uploads that committed HTML for all three native target graphs.
+The same file is included in every suite and both Flatpaks, and uploaded separately for
+review. Suite metadata and the final manifest pin its digest. Electron/Chromium and font
+notices remain inside h3d through the existing package checks.
 
 `.github/about.toml` selects declared SPDX alternatives and supplies checksum-verified
 original upstream files where crates omit them. `.github/native-notices.json` pins original
@@ -130,11 +137,21 @@ upstream source supplies a standalone notice. The output labels its declared MIT
 as metadata-sourced, omits the canonical template attribution without inventing a holder or
 year, and includes the original ICU data notice separately. A new version requires review.
 
-For local generation after installing that tool version:
+When changing Cargo manifests/lockfile (including the suite version) or notice inputs,
+install the pinned tool locally if needed, generate and review the output, and commit
+both generated files with the input change:
 
 ```sh
-python3 .github/scripts/generate_notices.py generate --output .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html
+VERSION=$(python3 .github/scripts/generate_notices.py tool-version)
+cargo install --locked --features cli --version "$VERSION" cargo-about
+python3 .github/scripts/generate_notices.py generate
+python3 .github/scripts/generate_notices.py check
+git diff -- .github/licenses/THIRD_PARTY_NOTICES.html .github/licenses/THIRD_PARTY_NOTICES.inputs.json
 ```
+
+Local generation retrieves checksum-verified upstream license clarifications and needs
+network access. Do not hand-edit the generated digest record to bypass regeneration.
+This avoids repeating tool compilation and license collection in the release path.
 
 ## Final handoff and publication
 

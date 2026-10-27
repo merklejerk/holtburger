@@ -224,6 +224,28 @@ describe("Electron launch arguments", () => {
 		).toThrow("Debug port was specified more than once.");
 	});
 
+	it.each([
+		["--enable-vsync"],
+		["--enable-vsync", "--uncapped"],
+		["--uncapped", "--enable-vsync"],
+	])(
+		"forwards the vsync override to Electron without adding a renderer query: %j",
+		(...args) => {
+			const launch = extractElectronLaunchArguments([
+				...args,
+				"--landblock=0x7fffff",
+			]);
+			expect(launch.args).toEqual(["--landblock=0x7fffff"]);
+			expect(launch.electronSwitches).toContain("--enable-vsync");
+		},
+	);
+
+	it("rejects a value on the vsync override", () => {
+		expect(() =>
+			extractElectronLaunchArguments(["--enable-vsync=false"]),
+		).toThrow("--enable-vsync does not accept a value.");
+	});
+
 	it("combines debug and uncapped switches without consuming renderer flags", () => {
 		expect(
 			extractElectronLaunchArguments([

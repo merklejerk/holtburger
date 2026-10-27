@@ -6,6 +6,16 @@ Electron-backed development surface for Holtburger's replacement 3D client. Auth
 content and simulation behavior runs in the `holtburger-3d-host` Rust sidecar; the renderer reaches
 it through the context-isolated Electron preload boundary.
 
+On Windows, Electron defaults to `--use-angle=gl` and `--disable-gpu-vsync` to work
+around low scene frame rates and sluggish UI scrolling. An explicit native
+`--use-angle=...` switch overrides the backend default. The app-owned `--enable-vsync`
+flag restores GPU vsync on any platform, overriding the Windows default, an explicit
+`--disable-gpu-vsync`, and `--uncapped` regardless of argument order. It also removes
+`--disable-frame-rate-limit`, because Chromium's frame-rate bypass implicitly disables
+GPU vsync. Chromium has no matching native enable switch; `--disable-gpu-vsync=false`
+does not restore vsync.
+These workarounds can cause transient startup presentation artifacts on some systems.
+
 The Explorer runs the shared content, scene, runtime, and WebGL2 rendering architecture against real
 client data. Client mode is a separate first-cut composition: `ClientRuntime` owns the network,
 world, collision, movement, and camera authorities, while the renderer consumes the focused dynamic

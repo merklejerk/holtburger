@@ -10,7 +10,8 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[2]
 APP = ROOT / "apps/holtburger-3d"
 
-# Each entry builds only this package's library test target. Dependencies remain Cargo-owned.
+# Build these library targets together so Cargo resolves shared dependency features once.
+# Selectors use distinct module/test names across these packages.
 RUST_TESTS = {
     "holtburger-content": ("repository::mounting::tests::",),
     "holtburger-weenie-catalog": (
@@ -42,15 +43,18 @@ FRONTEND_TESTS = (
 
 def rust_tests() -> None:
     """Check every selector against the compiled inventory before executing the selected tests."""
+    packages = [argument for package in RUST_TESTS for argument in ("-p", package)]
+    filters = [selector for selectors in RUST_TESTS.values() for selector in selectors]
+    command = ["cargo", "test", "--locked", *packages, "--lib", "--", *filters]
+    inventory = subprocess.check_output([*command, "--list"], cwd=ROOT, text=True)
+    names = [line.removesuffix(": test") for line in inventory.splitlines() if line.endswith(": test")]
     for package, selectors in RUST_TESTS.items():
-        command = ["cargo", "test", "--locked", "-p", package, "--lib", "--", *selectors]
-        inventory = subprocess.check_output([*command, "--list"], cwd=ROOT, text=True)
-        names = [line.removesuffix(": test") for line in inventory.splitlines() if line.endswith(": test")]
         for selector in selectors:
             if not any(selector in name for name in names):
                 raise ValueError(f"OS test selector matched no tests in {package}: {selector}")
-        print(f"OS contracts: {package} --lib ({len(names)} tests)", flush=True)
-        subprocess.run(command, cwd=ROOT, check=True)
+        count = sum(any(selector in name for selector in selectors) for name in names)
+        print(f"OS contracts: {package} --lib ({count} tests)", flush=True)
+    subprocess.run(command, cwd=ROOT, check=True)
 
 
 def frontend_tests() -> None:

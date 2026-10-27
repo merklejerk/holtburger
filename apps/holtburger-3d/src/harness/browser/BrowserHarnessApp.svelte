@@ -479,6 +479,14 @@
 			cameraYawDegrees: number,
 			cameraPitchDegrees: number,
 		) => void;
+		/** Place an EnvCell camera with an explicit projection for paired work-count probes. */
+		readonly setEnvCellCameraProjection: (
+			envCellId: string,
+			position: readonly [number, number, number],
+			cameraYawDegrees: number,
+			cameraPitchDegrees: number,
+			projection: Pick<Camera, "far" | "fov" | "near">,
+		) => void;
 		/** Change EnvCell rendering policy without changing camera placement or scene interest. */
 		readonly setEnvCellRenderMode: (
 			envCellRenderMode: "flat" | "portal",
@@ -1557,6 +1565,22 @@
 		cameraYawDegrees: number,
 		cameraPitchDegrees: number,
 	): void {
+		setEnvCellCameraProjection(
+			rawEnvCellId,
+			position,
+			cameraYawDegrees,
+			cameraPitchDegrees,
+			{ far: CAMERA_FAR, fov: CAMERA_FOV_DEGREES, near: CAMERA_NEAR },
+		);
+	}
+
+	function setEnvCellCameraProjection(
+		rawEnvCellId: string,
+		position: readonly [number, number, number],
+		cameraYawDegrees: number,
+		cameraPitchDegrees: number,
+		projection: Pick<Camera, "far" | "fov" | "near">,
+	): void {
 		if (!runtime) throw new Error("Browser harness runtime is not ready.");
 		if (
 			position.length !== 3 ||
@@ -1571,9 +1595,7 @@
 		const landblockId = `${envCellId.slice(0, 6)}ffff` as LandblockOwnerId;
 		const cameraPosition = new Vec3(...position);
 		applyHarnessCamera(runtime, {
-			far: CAMERA_FAR,
-			fov: CAMERA_FOV_DEGREES,
-			near: CAMERA_NEAR,
+			...projection,
 			placement: {
 				envCellId,
 				landblockId,
@@ -1589,10 +1611,8 @@
 		);
 		cameraEvidence = {
 			envCellId,
-			far: CAMERA_FAR,
-			fov: CAMERA_FOV_DEGREES,
+			...projection,
 			landblockId,
-			near: CAMERA_NEAR,
 			pitchDegrees: cameraPitchDegrees,
 			policy: "explicit-env-cell",
 			position,
@@ -4704,6 +4724,7 @@
 						);
 					},
 					setEnvCellCamera,
+					setEnvCellCameraProjection,
 					setEnvCellRenderMode,
 					setLayerVisibility,
 					setOutdoorCamera,

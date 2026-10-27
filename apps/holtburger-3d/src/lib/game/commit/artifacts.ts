@@ -12,6 +12,7 @@ import type { StaticDetailRole } from "../resolution/static-detail-role";
 import type {
 	SceneEnvCellScopeInput,
 	ScenePlacement,
+	SceneSpatialPlacement,
 	ScenePortalCrossingInput,
 } from "../scene";
 import type {
@@ -158,7 +159,8 @@ export interface StaticObjectRenderable {
 
 /** One immutable object publication emitted before SceneGraph assigns its node identity. */
 export interface StaticObjectArtifact {
-	readonly placement: ScenePlacement;
+	/** Authored ownership and explicit scene-index coverage, finalized before publication. */
+	readonly placement: SceneSpatialPlacement;
 	/** Bounds in the object root's local coordinate space. */
 	readonly localBounds: AABB3;
 	readonly renderable: StaticObjectRenderable;

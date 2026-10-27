@@ -1,0 +1,173 @@
+{
+  "provenance": {
+    "date": "2026-10-27",
+    "baseCommit": "d64f31c7ef476805da4582d93ffca6eeb89bc270",
+    "workingTree": "Includes the uncommitted island-selection experiment documented in the investigation.",
+    "archive": {
+      "path": "/home/cluracan/code/holtburger/dats/assets.hba",
+      "bytes": 634425693,
+      "sha256": "20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7"
+    }
+  },
+  "landblockId": "0x8a02ffff",
+  "method": {
+    "inputs": "Production decodeEnvCellRecord and planEnvCellMaterialization; batch pass also uses prepareStaticObjectGeometry.",
+    "residentBounds": "Transform each static resident root-local AABB by its production placement.",
+    "batchBounds": "Use production baked-batch bounds, already in landblock render coordinates.",
+    "candidateTest": "AABB crosses the accepted half-space of an authored source portal plane by more than the tolerance and overlaps the immediate target cell AABB.",
+    "tolerance": 0.0002,
+    "limitations": [
+      "Facility Hub only; no archive-wide frequency claim.",
+      "Conservative AABB candidate tests, not exact geometry or retail membership.",
+      "Immediate owner-cell portals only; no recursive coverage traversal.",
+      "Indoor targets only; no exterior coverage result.",
+      "Reported triangles are source resident triangles or baked range triangles, not final GPU submissions."
+    ]
+  },
+  "cellCount": 279,
+  "residentJobCount": 279,
+  "staticResidentCount": 188,
+  "residentsWithoutBounds": 0,
+  "candidateResidentCount": 9,
+  "candidateResidentOwnerCount": 9,
+  "nonemptyBatchCount": 69,
+  "candidateBatchCount": 10,
+  "candidateResidents": [
+    {
+      "owner": "0x8a020108",
+      "sourceDid": "0x020001e7",
+      "sourceIndex": 0,
+      "targets": ["0x8a020107"],
+      "sourceTriangles": 32
+    },
+    {
+      "owner": "0x8a02010d",
+      "sourceDid": "0x020001e7",
+      "sourceIndex": 0,
+      "targets": ["0x8a02010c"],
+      "sourceTriangles": 32
+    },
+    {
+      "owner": "0x8a02011c",
+      "sourceDid": "0x020001e7",
+      "sourceIndex": 0,
+      "targets": ["0x8a02011b"],
+      "sourceTriangles": 32
+    },
+    {
+      "owner": "0x8a02015f",
+      "sourceDid": "0x02000623",
+      "sourceIndex": 0,
+      "targets": ["0x8a02015e"],
+      "sourceTriangles": 146
+    },
+    {
+      "owner": "0x8a02018c",
+      "sourceDid": "0x020001e7",
+      "sourceIndex": 0,
+      "targets": ["0x8a02018b"],
+      "sourceTriangles": 32
+    },
+    {
+      "owner": "0x8a0201af",
+      "sourceDid": "0x020001e7",
+      "sourceIndex": 0,
+      "targets": ["0x8a0201ad"],
+      "sourceTriangles": 32
+    },
+    {
+      "owner": "0x8a0201c9",
+      "sourceDid": "0x02000623",
+      "sourceIndex": 0,
+      "targets": ["0x8a020211", "0x8a0201c8"],
+      "sourceTriangles": 146
+    },
+    {
+      "owner": "0x8a0201dc",
+      "sourceDid": "0x020001e7",
+      "sourceIndex": 0,
+      "targets": ["0x8a0201da"],
+      "sourceTriangles": 32
+    },
+    {
+      "owner": "0x8a0201fe",
+      "sourceDid": "0x020001e7",
+      "sourceIndex": 0,
+      "targets": ["0x8a0201fd"],
+      "sourceTriangles": 32
+    }
+  ],
+  "candidateBatches": [
+    {
+      "owner": "0x8a020108",
+      "targets": ["0x8a020107"],
+      "residentCount": 1,
+      "drawRangeCount": 2,
+      "bakedTriangles": 32
+    },
+    {
+      "owner": "0x8a02010d",
+      "targets": ["0x8a02010c"],
+      "residentCount": 1,
+      "drawRangeCount": 2,
+      "bakedTriangles": 32
+    },
+    {
+      "owner": "0x8a02011c",
+      "targets": ["0x8a02011b"],
+      "residentCount": 1,
+      "drawRangeCount": 2,
+      "bakedTriangles": 32
+    },
+    {
+      "owner": "0x8a02015e",
+      "targets": ["0x8a020141"],
+      "residentCount": 6,
+      "drawRangeCount": 1,
+      "bakedTriangles": 72
+    },
+    {
+      "owner": "0x8a02015f",
+      "targets": ["0x8a02015e"],
+      "residentCount": 7,
+      "drawRangeCount": 4,
+      "bakedTriangles": 218
+    },
+    {
+      "owner": "0x8a02018c",
+      "targets": ["0x8a02018b"],
+      "residentCount": 1,
+      "drawRangeCount": 2,
+      "bakedTriangles": 32
+    },
+    {
+      "owner": "0x8a0201af",
+      "targets": ["0x8a0201ad"],
+      "residentCount": 1,
+      "drawRangeCount": 2,
+      "bakedTriangles": 32
+    },
+    {
+      "owner": "0x8a0201c9",
+      "targets": ["0x8a020211", "0x8a0201c8"],
+      "residentCount": 7,
+      "drawRangeCount": 4,
+      "bakedTriangles": 218
+    },
+    {
+      "owner": "0x8a0201dc",
+      "targets": ["0x8a0201da"],
+      "residentCount": 1,
+      "drawRangeCount": 2,
+      "bakedTriangles": 32
+    },
+    {
+      "owner": "0x8a0201fe",
+      "targets": ["0x8a0201fd"],
+      "residentCount": 1,
+      "drawRangeCount": 2,
+      "bakedTriangles": 32
+    }
+  ],
+  "exporterProvenance": "Older prebuilt /home/cluracan/code/holtburger/target/debug/portal_trace_archive (2026-10-21 binary). The baseCommit in provenance identifies the inspecting worktree, not that executable. See coverage-census.json for the current-tool census."
+}

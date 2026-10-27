@@ -1,0 +1,893 @@
+{
+  "method": "Post-acceptance cleanup regression: production selection only; historical policies removed. No timing assertions or visual checks.",
+  "browserErrors": [],
+  "cases": [
+    {
+      "pose": "missing",
+      "projection": "harness",
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 90,
+        "near": 0.5,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": 1.8338585764566988,
+        "policy": "explicit-env-cell",
+        "position": [26556.624, 2.634, -310.044],
+        "yawDegrees": 2.3151290824215223
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 28,
+        "submittedStaticObjectTriangleCount": 964,
+        "submittedEnvCellShellDrawCount": 19,
+        "submittedEnvCellShellTriangleCount": 166,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 1
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "lostScopes": [],
+        "untraversedStaticOwners": ["0x8a0201c9"],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a020210",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a0201c0",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    },
+    {
+      "pose": "visible",
+      "projection": "harness",
+      "camera": {
+        "envCellId": "0x8a0201c9",
+        "fov": 90,
+        "near": 0.5,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -34.37231541353605,
+        "policy": "explicit-env-cell",
+        "position": [26556.553, 5.208, -308.627],
+        "yawDegrees": 2.543128675858857
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 35,
+        "submittedStaticObjectTriangleCount": 928,
+        "submittedEnvCellShellDrawCount": 27,
+        "submittedEnvCellShellTriangleCount": 202,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0
+      },
+      "traversal": {
+        "root": "0x8a0201c9",
+        "lostScopes": [],
+        "untraversedStaticOwners": [],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a020210",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    },
+    {
+      "pose": "missing",
+      "projection": "client-default",
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": 1.8338585764566988,
+        "policy": "explicit-env-cell",
+        "position": [26556.624, 2.634, -310.044],
+        "yawDegrees": 2.3151290824215223
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 27,
+        "submittedStaticObjectTriangleCount": 962,
+        "submittedEnvCellShellDrawCount": 18,
+        "submittedEnvCellShellTriangleCount": 164,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "lostScopes": [],
+        "untraversedStaticOwners": ["0x8a0201c9"],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a020210",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a0201c0",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    },
+    {
+      "pose": "visible",
+      "projection": "client-default",
+      "camera": {
+        "envCellId": "0x8a0201c9",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -34.37231541353605,
+        "policy": "explicit-env-cell",
+        "position": [26556.553, 5.208, -308.627],
+        "yawDegrees": 2.543128675858857
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 33,
+        "submittedStaticObjectTriangleCount": 850,
+        "submittedEnvCellShellDrawCount": 26,
+        "submittedEnvCellShellTriangleCount": 196,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0
+      },
+      "traversal": {
+        "root": "0x8a0201c9",
+        "lostScopes": [],
+        "untraversedStaticOwners": [],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    }
+  ],
+  "transition": [
+    {
+      "fraction": 0,
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": 1.8338585764566988,
+        "policy": "explicit-env-cell",
+        "position": [26556.624, 2.634, -310.044],
+        "yawDegrees": 2.3151290824215223
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 27,
+        "submittedStaticObjectTriangleCount": 962,
+        "submittedEnvCellShellDrawCount": 18,
+        "submittedEnvCellShellTriangleCount": 164,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "lostScopes": [],
+        "untraversedStaticOwners": ["0x8a0201c9"],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a020210",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a0201c0",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    },
+    {
+      "fraction": 0.25,
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -7.217684921041489,
+        "policy": "explicit-env-cell",
+        "position": [26556.60625, 3.2775, -309.68975],
+        "yawDegrees": 2.372128980780856
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 43,
+        "submittedStaticObjectTriangleCount": 1040,
+        "submittedEnvCellShellDrawCount": 34,
+        "submittedEnvCellShellTriangleCount": 242,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "lostScopes": [],
+        "untraversedStaticOwners": ["0x8a0201c9"],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a020210",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a0201c0",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    },
+    {
+      "fraction": 0.5,
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -16.269228418539676,
+        "policy": "explicit-env-cell",
+        "position": [26556.588499999998, 3.9210000000000003, -309.3355],
+        "yawDegrees": 2.4291288791401895
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 43,
+        "submittedStaticObjectTriangleCount": 1040,
+        "submittedEnvCellShellDrawCount": 34,
+        "submittedEnvCellShellTriangleCount": 242,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "lostScopes": [],
+        "untraversedStaticOwners": ["0x8a0201c9"],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a020210",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a0201c0",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    },
+    {
+      "fraction": 0.75,
+      "camera": {
+        "envCellId": "0x8a0201c9",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -25.320771916037863,
+        "policy": "explicit-env-cell",
+        "position": [26556.57075, 4.564500000000001, -308.98125],
+        "yawDegrees": 2.4861287774995233
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 39,
+        "submittedStaticObjectTriangleCount": 958,
+        "submittedEnvCellShellDrawCount": 31,
+        "submittedEnvCellShellTriangleCount": 232,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0
+      },
+      "traversal": {
+        "root": "0x8a0201c9",
+        "lostScopes": [],
+        "untraversedStaticOwners": [],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a020210",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    },
+    {
+      "fraction": 1,
+      "camera": {
+        "envCellId": "0x8a0201c9",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -34.37231541353605,
+        "policy": "explicit-env-cell",
+        "position": [26556.553, 5.208, -308.627],
+        "yawDegrees": 2.543128675858857
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 33,
+        "submittedStaticObjectTriangleCount": 850,
+        "submittedEnvCellShellDrawCount": 26,
+        "submittedEnvCellShellTriangleCount": 196,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0
+      },
+      "traversal": {
+        "root": "0x8a0201c9",
+        "lostScopes": [],
+        "untraversedStaticOwners": [],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    },
+    {
+      "fraction": 0.75,
+      "camera": {
+        "envCellId": "0x8a0201c9",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -25.320771916037863,
+        "policy": "explicit-env-cell",
+        "position": [26556.57075, 4.564500000000001, -308.98125],
+        "yawDegrees": 2.4861287774995233
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 39,
+        "submittedStaticObjectTriangleCount": 958,
+        "submittedEnvCellShellDrawCount": 31,
+        "submittedEnvCellShellTriangleCount": 232,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0
+      },
+      "traversal": {
+        "root": "0x8a0201c9",
+        "lostScopes": [],
+        "untraversedStaticOwners": [],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a020210",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    },
+    {
+      "fraction": 0.5,
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -16.269228418539676,
+        "policy": "explicit-env-cell",
+        "position": [26556.588499999998, 3.9210000000000003, -309.3355],
+        "yawDegrees": 2.4291288791401895
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 43,
+        "submittedStaticObjectTriangleCount": 1040,
+        "submittedEnvCellShellDrawCount": 34,
+        "submittedEnvCellShellTriangleCount": 242,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "lostScopes": [],
+        "untraversedStaticOwners": ["0x8a0201c9"],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a020210",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a0201c0",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    },
+    {
+      "fraction": 0.25,
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -7.217684921041489,
+        "policy": "explicit-env-cell",
+        "position": [26556.60625, 3.2775, -309.68975],
+        "yawDegrees": 2.372128980780856
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 43,
+        "submittedStaticObjectTriangleCount": 1040,
+        "submittedEnvCellShellDrawCount": 34,
+        "submittedEnvCellShellTriangleCount": 242,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "lostScopes": [],
+        "untraversedStaticOwners": ["0x8a0201c9"],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a020210",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a0201c0",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    },
+    {
+      "fraction": 0,
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": 1.8338585764566988,
+        "policy": "explicit-env-cell",
+        "position": [26556.624, 2.634, -310.044],
+        "yawDegrees": 2.3151290824215223
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 27,
+        "submittedStaticObjectTriangleCount": 962,
+        "submittedEnvCellShellDrawCount": 18,
+        "submittedEnvCellShellTriangleCount": 164,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "lostScopes": [],
+        "untraversedStaticOwners": ["0x8a0201c9"],
+        "queriedStaticNodesByScope": [
+          {
+            "scope": "0x8a0201c8",
+            "count": 1,
+            "drawRanges": 3,
+            "triangles": 74
+          },
+          {
+            "scope": "0x8a0201c9",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a020210",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015f",
+            "count": 1,
+            "drawRanges": 4,
+            "triangles": 218
+          },
+          {
+            "scope": "0x8a0201c1",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a0201c0",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          },
+          {
+            "scope": "0x8a02015e",
+            "count": 1,
+            "drawRanges": 1,
+            "triangles": 72
+          }
+        ]
+      }
+    }
+  ]
+}

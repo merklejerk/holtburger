@@ -46,6 +46,58 @@ your Flatpak tools, then invoke it with connection arguments:
 flatpak run io.github.merklejerk.holtburger-cli --host SERVER --port 9000 --account ACCOUNT --password PASSWORD
 ```
 
+## Full-suite Flatpak (Linux x86-64)
+
+`holtburger-alpha-VERSION-x86_64.flatpak` contains the complete suite, including h3d/Explorer,
+TUI, both tools, scripts, and micro content. It uses a separate application ID from the
+TUI-only Flatpak. Replace `VERSION` with the release version, then install:
+
+```sh
+flatpak install --user ./holtburger-alpha-VERSION-x86_64.flatpak
+```
+
+The default command launches h3d client and requires account/connection arguments. h3d still
+needs your retail DAT directory or full HBA. For an explicit CLI content path, grant that
+directory read access for the invocation:
+
+```sh
+flatpak run --filesystem=/path/to/retail:ro io.github.merklejerk.holtburger-alpha \
+  --host SERVER --port 9000 --account ACCOUNT --password PASSWORD --content /path/to/retail
+
+flatpak run --filesystem=/path/to/retail:ro io.github.merklejerk.holtburger-alpha \
+  explorer --content /path/to/retail
+```
+
+Use absolute paths and quote options containing spaces. The folder picker can obtain access
+through the desktop's document portal; this requires a working desktop portal backend.
+Saved portal selections retain their grants across app launches. An explicit `--content`
+override remains temporary, so repeat its filesystem grant when invoking it again.
+
+Other suite commands are available through `--command`:
+
+```sh
+flatpak run --command=holtburger-cli io.github.merklejerk.holtburger-alpha \
+  --host SERVER --port 9000 --account ACCOUNT --password PASSWORD
+flatpak run --command=dat-tool io.github.merklejerk.holtburger-alpha --help
+flatpak run --command=dat2hba io.github.merklejerk.holtburger-alpha --help
+```
+
+For conversion/export, grant input directories `:ro` and output directories `:rw` before the
+application ID. For example, conversion from your retail files into your own output folder:
+
+```sh
+flatpak run --filesystem=/path/to/retail:ro --filesystem=/path/to/output:rw \
+  --command=dat2hba io.github.merklejerk.holtburger-alpha --profile full \
+  /path/to/retail/client_portal.dat /path/to/retail/client_cell_1.dat \
+  /path/to/retail/client_local_English.dat /path/to/output/assets.hba
+```
+
+Settings, caches, and writable script preferences live under the Flatpak's own
+`~/.var/app/io.github.merklejerk.holtburger-alpha/` state. Bundled scripts and micro data are
+read-only. The h3d process uses your selected full data rather than the TUI micro. Graphics
+and audio use the desktop's Wayland/X11, GPU, and audio services. See release notes for the
+platforms and desktop behavior actually verified.
+
 ## h3d client
 
 h3d requires your own retail DAT installation or a full HBA. The bundled TUI micro content

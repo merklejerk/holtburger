@@ -212,6 +212,20 @@
       "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/third_party/wasm-api/LICENSE",
       "encoding": "utf-8",
       "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08"
+    },
+    {
+      "component": "zypak",
+      "path": "licenses/native/zypak/LICENSE",
+      "sourceUrl": "https://github.com/refi64/zypak/blob/ded79a2f8a509adc21834b95a9892073d4a91fdc/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "db87e67f94ffffed1513469f065d0ca51afdca3ab94fc8455cc779a38cf707db"
+    },
+    {
+      "component": "nickle",
+      "path": "licenses/native/nickle/LICENSE",
+      "sourceUrl": "https://github.com/refi64/nickle/blob/0ac7f5dbf659caa8d1d45cb57e942f2bc565da1e/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "db87e67f94ffffed1513469f065d0ca51afdca3ab94fc8455cc779a38cf707db"
     }
   ]
 }

@@ -1,0 +1,17 @@
+#!/bin/sh
+# Exercise the private installed host using only the smoke probe's synthetic content.
+set -eu
+content=
+previous=
+for argument in "$@"; do
+  if [ "$previous" = --content ]; then
+    content=$argument
+    break
+  fi
+  previous=$argument
+done
+: "${content:?The host smoke probe must supply a content path}"
+fixture_root=$(dirname "$content")
+exec flatpak run --user --filesystem="$fixture_root":ro \
+  --command=/app/lib/holtburger/h3d/resources/holtburger-3d-host \
+  io.github.merklejerk.holtburger-alpha "$@"

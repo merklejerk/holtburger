@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Native lifecycle verification only: no screenshots or visual acceptance judgments.
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { parseArgs, promisify } from "node:util";
 import {
 	copyFile,
 	mkdir,
@@ -10,39 +11,55 @@ import {
 	rm,
 	writeFile,
 } from "node:fs/promises";
-import { join, resolve, toNamespacedPath } from "node:path";
+import { basename, dirname, join, resolve, toNamespacedPath } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { CdpConnectionError, createCdpClient } from "./cdp-client.mjs";
 import { findAvailablePort } from "./dev-port.mjs";
+import { probePackagedThemeAssets } from "./packaged-theme-assets.mjs";
 
 const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const workspace = resolve(appRoot, "../..");
-const [option, executable, ...extra] = process.argv.slice(2);
-if (
-	option !== undefined &&
-	(option !== "--package" || executable === undefined || extra.length !== 0)
-)
-	throw new Error("Usage: content-startup-probe.mjs [--package <executable>]");
-const packagedExecutable =
-	executable === undefined ? null : resolve(executable);
+const runFile = promisify(execFile);
+const { values } = parseArgs({
+	options: { package: { type: "string" }, flatpak: { type: "boolean" } },
+});
+if (values.flatpak === true && values.package !== undefined)
+	throw new Error("Choose --package <executable> or --flatpak");
+const launchTarget =
+	values.flatpak === true
+		? {
+				kind: "flatpak",
+				executable: join(workspace, ".github/flatpak/probe-launch"),
+				appId: JSON.parse(
+					await readFile(
+						join(
+							workspace,
+							".github/flatpak/io.github.merklejerk.holtburger-alpha.json",
+						),
+						"utf8",
+					),
+				).id,
+			}
+		: values.package === undefined
+			? { kind: "development" }
+			: { kind: "package", executable: resolve(values.package) };
 const profileName =
-	packagedExecutable === null ? "holtburger-3d-dev" : "holtburger-3d";
+	launchTarget.kind === "development" ? "holtburger-3d-dev" : "holtburger-3d";
 const directory = await mkdtemp(join(tmpdir(), "h3d-content-probe-"));
 const config = join(directory, "config");
 const preference = join(config, profileName, "content-selection.json");
-const assets = join(directory, "assets");
-await mkdir(assets, { recursive: true });
-const fixtureIdentity = toNamespacedPath(await realpath(assets));
+const localAssets = join(directory, "assets");
+await mkdir(localAssets, { recursive: true });
 await mkdir(join(config, profileName), { recursive: true });
 await copyFile(
 	join(appRoot, "scripts/fixtures/minimal-content.hba.fixture"),
-	join(assets, "assets.hba"),
+	join(localAssets, "assets.hba"),
 );
 const vitePort = await findAvailablePort();
 const origin = `http://127.0.0.1:${vitePort}`;
 const vite =
-	packagedExecutable === null
+	launchTarget.kind === "development"
 		? spawn(
 				process.execPath,
 				[
@@ -79,21 +96,26 @@ async function evaluate(client, expression) {
 		returnByValue: true,
 	});
 	if (response.exceptionDetails)
-		throw new Error(response.exceptionDetails.text);
+		throw new Error(
+			response.exceptionDetails.exception?.description ??
+				response.exceptionDetails.text,
+		);
 	return response.result.value;
 }
 
 /** Compare actual filesystem identity while preserving the host's canonical display spelling. */
-async function requireFixtureLocation(location) {
-	const identity = toNamespacedPath(await realpath(location));
-	if (identity !== fixtureIdentity)
-		throw new Error(`Expected fixture ${fixtureIdentity}, received ${identity}`);
+async function requireFixtureLocation(location, fixture) {
+	const identity = await fixture.canonicalize(location);
+	if (identity !== fixture.identity)
+		throw new Error(
+			`Expected fixture ${fixture.identity}, received ${identity}`,
+		);
 }
 
 async function launch(mode, args) {
 	const switches = [
 		// Native packages honor Electron's profile override on every OS, including macOS.
-		...(packagedExecutable === null
+		...(launchTarget.kind === "development"
 			? []
 			: [`--user-data-dir=${join(config, profileName)}`]),
 		"--remote-debugging-port=0",
@@ -106,9 +128,11 @@ async function launch(mode, args) {
 		...(mode === "client" ? ["--account", "content-probe", "--port", "1"] : []),
 	];
 	const command =
-		packagedExecutable === null ? process.execPath : packagedExecutable;
+		launchTarget.kind === "development"
+			? process.execPath
+			: launchTarget.executable;
 	const commandArgs =
-		packagedExecutable === null
+		launchTarget.kind === "development"
 			? [
 					join(appRoot, "node_modules/electron/cli.js"),
 					...switches,
@@ -219,7 +243,37 @@ async function launch(mode, args) {
 	}
 }
 
+let portalGrant = null;
 try {
+	if (launchTarget.kind === "flatpak") {
+		const { stdout } = await runFile("flatpak", [
+			"document-export",
+			"--unique",
+			"--allow-read",
+			`--app=${launchTarget.appId}`,
+			localAssets,
+		]);
+		const location = stdout.trim();
+		portalGrant = { location, id: basename(dirname(location)) };
+	}
+	const assets = portalGrant === null ? localAssets : portalGrant.location;
+	// Portal canonical paths belong to the app's mount namespace, not the outside runner.
+	const canonicalize =
+		launchTarget.kind === "flatpak"
+			? async (location) => {
+					const { stdout } = await runFile("flatpak", [
+						"run",
+						"--user",
+						"--command=realpath",
+						launchTarget.appId,
+						"-e",
+						"--",
+						location,
+					]);
+					return stdout.trim();
+				}
+			: async (location) => toNamespacedPath(await realpath(location));
+	const fixture = { identity: await canonicalize(assets), canonicalize };
 	if (vite !== null)
 		await waitFor(async () => {
 			if (vite.exitCode !== null) throw new Error(`Vite exited: ${viteOutput}`);
@@ -246,10 +300,11 @@ try {
 		try {
 			const state = await waitFor(async () => {
 				const current = await app.snapshot();
-				if (current.phase.kind === "fatal") throw new Error(current.phase.message);
+				if (current.phase.kind === "fatal")
+					throw new Error(current.phase.message);
 				return current.phase.kind === "restart_required" ? current : null;
 			}, `${mode} necessary-resource failure`);
-			await requireFixtureLocation(state.phase.location);
+			await requireFixtureLocation(state.phase.location, fixture);
 			const footer = await evaluate(
 				app.client,
 				"document.querySelector('.startup-overlay .pregame-footer .loading-assets')?.textContent",
@@ -268,7 +323,7 @@ try {
 			failed.selection.health.failure.kind !== "resource"
 		)
 			throw new Error("Required resource failure did not persist attention");
-		await requireFixtureLocation(failed.selection.location);
+		await requireFixtureLocation(failed.selection.location, fixture);
 		app = await launch(mode, []);
 		try {
 			const state = await waitFor(async () => {
@@ -376,6 +431,13 @@ try {
 				"unselected"
 			)
 				throw new Error("Clear-content retained the saved source");
+			if (launchTarget.kind !== "development" && mode === "client")
+				await probePackagedThemeAssets({
+					client: app.client,
+					read: (expression) => evaluate(app.client, expression),
+					waitFor,
+					profileDirectory: join(config, profileName),
+				});
 		} finally {
 			await app.close(0);
 		}
@@ -392,12 +454,22 @@ try {
 	console.log(
 		JSON.stringify({
 			ok: true,
-			packaged: packagedExecutable !== null,
+			packaged: launchTarget.kind !== "development",
+			documentPortal: launchTarget.kind === "flatpak",
 			platform: process.platform,
 			results,
 		}),
 	);
 } finally {
 	vite?.kill();
-	await rm(directory, { recursive: true, force: true });
+	try {
+		if (portalGrant !== null)
+			await runFile("flatpak", [
+				"document-unexport",
+				"--doc-id",
+				portalGrant.id,
+			]);
+	} finally {
+		await rm(directory, { recursive: true, force: true });
+	}
 }

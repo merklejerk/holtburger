@@ -2,6 +2,7 @@
 """Assemble, inspect, and stage an alpha suite without publishing it."""
 
 import argparse
+import configparser
 from dataclasses import asdict, dataclass
 import hashlib
 import json
@@ -38,6 +39,7 @@ TARGETS = (
 SCRIPTS = ("fighter.js", "mage.js", "mage.data.json", "mage.data.bin")
 TOOLS = ("holtburger-cli", "dat2hba", "dat-tool")
 APP = ROOT / "apps/holtburger-3d"
+SUITE_FLATPAK_RECIPE = ROOT / ".github/flatpak/io.github.merklejerk.holtburger-alpha.json"
 
 
 def run(*arguments: str, cwd: Path = ROOT) -> str:
@@ -317,11 +319,28 @@ def manifest(artifacts: Path) -> list[Path]:
     if flatpak.stat().st_size == 0:
         raise ValueError("Empty TUI Flatpak")
     files.extend([micro, flatpak, notices])
+    flatpaks = []
+    linux = next(record for record in records if record["target"] == "x86_64-unknown-linux-gnu")
+    for stem in ("holtburger-cli", "holtburger-alpha"):
+        record = json.loads((artifacts / f"metadata-{stem}-flatpak.json").read_text())
+        if any((record["commit"] != commit, record["version"] != version, record["modified"],
+                record["target"] != linux["target"], record["microSha256"] != expected_micro,
+                record["microHbaSha256"] != linux["microHbaSha256"],
+                record["noticesSha256"] != notices_digest,
+                record["appId"] != f"io.github.merklejerk.{stem}")):
+            raise ValueError(f"Flatpak release identity mismatch: {stem}")
+        expected_name = f"{stem}-{version}-x86_64.flatpak"
+        if record["archive"] != expected_name or digest(artifacts / expected_name) != record["sha256"]:
+            raise ValueError(f"Flatpak release archive mismatch: {stem}")
+        if stem == "holtburger-alpha":
+            files.append(artifacts / expected_name)
+        flatpaks.append(record)
     description = artifacts / "release-manifest.json"
     write_json(description, {
         "version": version, "commit": commit, "microSha256": expected_micro,
         "noticesSha256": notices_digest,
         "platforms": records,
+        "flatpaks": flatpaks,
         "assets": [{"name": path.name, "sha256": digest(path)} for path in files],
     })
     files.append(description)
@@ -339,12 +358,16 @@ def stage(artifacts: Path, tag: str) -> None:
                 f".[] | select(.tag_name == {json.dumps(tag)}) | @json")
     releases = [json.loads(line) for line in lines.splitlines()]
     if not releases:
-        run("gh", "release", "create", tag, "--repo", "merklejerk/holtburger", "--verify-tag",
-            "--target", commit, "--draft", "--prerelease", "--title", f"Holtburger {check_versions()}",
-            "--notes-file", str(ROOT / "docs/ALPHA_RELEASE_NOTES.md"))
-        lines = run("gh", "api", "repos/merklejerk/holtburger/releases", "--paginate", "--jq",
-                    f".[] | select(.tag_name == {json.dumps(tag)}) | @json")
-        releases = [json.loads(line) for line in lines.splitlines()]
+        remote = run("gh", "api", f"repos/merklejerk/holtburger/commits/{tag}", "--jq", ".sha")
+        if remote != commit:
+            raise ValueError("Remote alpha tag does not point to the candidate commit")
+        # The create response owns the draft identity. A fresh list can omit the new draft.
+        created = run("gh", "api", "repos/merklejerk/holtburger/releases", "--method", "POST",
+                      "--raw-field", f"tag_name={tag}", "--raw-field", f"target_commitish={commit}",
+                      "--raw-field", f"name=Holtburger {check_versions()}",
+                      "--field", "draft=true", "--field", "prerelease=true",
+                      "--field", f"body=@{ROOT / 'docs/ALPHA_RELEASE_NOTES.md'}")
+        releases = [json.loads(created)]
     if len(releases) != 1:
         raise ValueError("Expected exactly one alpha draft release")
     release = releases[0]
@@ -368,6 +391,8 @@ def flatpak_manifest(notices: Path, output: Path) -> None:
     recipe = ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml"
     manifest = json.loads(run("flatpak-builder", "--show-manifest", str(recipe)))
     module, = manifest["modules"]
+    # Preserve the inspected prebuilt binary; its receipt binds the exact input bytes.
+    module.setdefault("build-options", {})["no-debuginfo"] = True
     for source in module["sources"]:
         source["path"] = str((recipe.parent / source["path"]).resolve())
     for path in (notices.resolve(), ROOT / "LICENSE.md"):
@@ -378,7 +403,140 @@ def flatpak_manifest(notices: Path, output: Path) -> None:
             f"install -Dm644 {path.name} /app/share/licenses/holtburger/{path.name}"
         )
     output.parent.mkdir(parents=True, exist_ok=True)
+    commit, modified = source_identity()
+    identity = output.parent / "tui-build-info.json"
+    write_json(identity, {
+        "commit": commit, "modified": modified, "version": check_versions(),
+        "target": "x86_64-unknown-linux-gnu",
+        "microSha256": json.loads((ROOT / ".github/alpha-content.json").read_text())["sha256"],
+        "microHbaSha256": digest(ROOT / "dats/assets.hba"),
+        "noticesSha256": digest(notices),
+        "binarySha256": digest(ROOT / "target/release/holtburger-cli"),
+    })
+    module["sources"].append({"type": "file", "path": str(identity.resolve())})
+    module["build-commands"].append(
+        "install -Dm644 tui-build-info.json /app/share/holtburger/build-info.json"
+    )
     write_json(output, manifest)
+
+
+def require_flatpak_candidate(info: dict) -> None:
+    """Admit only an inspected Linux package with the current candidate identity."""
+    if info["target"] != "x86_64-unknown-linux-gnu":
+        raise ValueError("The alpha Flatpaks require Linux x86-64 inputs")
+    commit, _ = source_identity()
+    if (info["commit"], info["version"], info["modified"]) != (commit, check_versions(), False):
+        raise ValueError("Flatpak input does not match the clean candidate identity")
+
+
+def installed_flatpak_runtime(files: Path, recipe: dict) -> str:
+    """Check the installed application's ID/runtime against its owning recipe."""
+    metadata = configparser.ConfigParser(interpolation=None)
+    metadata.read(files.parent / "metadata")
+    runtime = f"{recipe['runtime']}/x86_64/{recipe['runtime-version']}"
+    if metadata["Application"]["name"] != recipe["id"]:
+        raise ValueError("Installed Flatpak application ID differs from its recipe")
+    if metadata["Application"]["runtime"] != runtime:
+        raise ValueError("Installed Flatpak runtime differs from its recipe")
+    return runtime
+
+
+def record_tui_flatpak(files: Path, bundle: Path, output: Path) -> None:
+    """Bind the TUI artifact to its installed binary, content, notices, and build identity."""
+    info = json.loads((files / "share/holtburger/build-info.json").read_text())
+    require_flatpak_candidate(info)
+    binary = files / "bin/holtburger-cli"
+    if executable_architecture(binary) != "x64":
+        raise ValueError("Installed TUI Flatpak executable is not x86-64")
+    for path, field in ((binary, "binarySha256"),
+                        (files / "share/holtburger/dats/assets.hba", "microHbaSha256"),
+                        (files / "share/licenses/holtburger/THIRD_PARTY_NOTICES.html", "noticesSha256")):
+        if digest(path) != info[field]:
+            raise ValueError(f"Installed TUI Flatpak input differs: {path.name}")
+    recipe = json.loads(run("flatpak-builder", "--show-manifest",
+                            str(ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml")))
+    runtime = installed_flatpak_runtime(files, recipe)
+    if not bundle.stat().st_size:
+        raise ValueError("Empty TUI Flatpak")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    write_json(output, {**info, "appId": recipe["id"], "runtime": runtime,
+                        "archive": bundle.name, "sha256": digest(bundle)})
+
+
+def suite_flatpak_manifest(suite: Path, output: Path) -> None:
+    """Package the already-inspected Linux suite without rebuilding its executables."""
+    info = verify_suite(suite)
+    require_flatpak_candidate(info)
+    manifest = json.loads(run("flatpak-builder", "--show-manifest", str(SUITE_FLATPAK_RECIPE)))
+    for dependency in manifest["modules"]:
+        for source in dependency["sources"]:
+            if "path" in source:
+                source["path"] = str((SUITE_FLATPAK_RECIPE.parent / source["path"]).resolve())
+    module = next(module for module in manifest["modules"] if module["name"] == "holtburger-alpha")
+    module["sources"].append({"type": "dir", "path": str(suite.resolve()), "dest": "suite"})
+    module["build-commands"].extend(
+        f"ln -s /app/lib/holtburger/{tool} /app/bin/{tool}" for tool in TOOLS
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    write_json(output, manifest)
+
+
+def prepare_suite_flatpak(artifacts: Path, output: Path) -> Path:
+    """Extract only the verified Linux job's archive as the full Flatpak's immutable input."""
+    record = json.loads((artifacts / "metadata-x86_64-unknown-linux-gnu.json").read_text())
+    require_flatpak_candidate(record)
+    archive = artifacts / record["archive"]
+    if archive.parent != artifacts or digest(archive) != record["sha256"]:
+        raise ValueError("Full-suite Flatpak input archive digest/path mismatch")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    extracted = Path(tempfile.mkdtemp(prefix="suite-flatpak-input-", dir=output.parent))
+    suite = extract_suite(archive, extracted)
+    suite_flatpak_manifest(suite, output)
+    return suite.resolve()
+
+
+def record_suite_flatpak(files: Path, suite: Path, bundle: Path, output: Path) -> None:
+    """Verify the installed app against its native input before recording bundle identity."""
+    info = verify_suite(suite)
+    installed = files / "lib/holtburger"
+    if verify_suite(installed) != info:
+        raise ValueError("Installed Flatpak suite identity differs from its native input")
+    require_flatpak_candidate(info)
+    expected = {path.relative_to(suite) for path in suite.rglob("*")}
+    actual = {path.relative_to(installed) for path in installed.rglob("*")}
+    if actual != expected:
+        raise ValueError("Installed Flatpak suite inventory differs from its native input")
+    for relative in expected:
+        source, destination = suite / relative, installed / relative
+        if source.is_symlink():
+            if not destination.is_symlink() or os.readlink(source) != os.readlink(destination):
+                raise ValueError(f"Installed Flatpak suite link differs: {relative}")
+        elif source.is_file():
+            if destination.is_symlink() or digest(source) != digest(destination):
+                raise ValueError(f"Installed Flatpak suite file differs: {relative}")
+    if digest(files / "bin/holtburger-3d") != digest(SUITE_FLATPAK_RECIPE.parent / "holtburger-3d"):
+        raise ValueError("Installed Flatpak launcher differs from the sandbox wrapper")
+    for tool in TOOLS:
+        if os.readlink(files / "bin" / tool) != f"/app/lib/holtburger/{tool}":
+            raise ValueError(f"Installed Flatpak tool entry differs: {tool}")
+    for component in ("zypak", "nickle"):
+        original = ROOT / ".github/licenses/native" / component / "LICENSE"
+        if digest(files / "share/licenses" / component / "LICENSE") != digest(original):
+            raise ValueError(f"Installed Flatpak helper notice needs review: {component}")
+    for executable in ("zypak-helper", "zypak-sandbox"):
+        if executable_architecture(files / "bin" / executable) != "x64":
+            raise ValueError(f"Installed Flatpak helper architecture differs: {executable}")
+    recipe = json.loads(SUITE_FLATPAK_RECIPE.read_text())
+    runtime = installed_flatpak_runtime(files, recipe)
+    if not bundle.stat().st_size:
+        raise ValueError("Empty full-suite Flatpak")
+    helper = json.loads((SUITE_FLATPAK_RECIPE.parent / "zypak.json").read_text())
+    output.parent.mkdir(parents=True, exist_ok=True)
+    write_json(output, {
+        **info, "appId": recipe["id"], "runtime": runtime,
+        "sandboxHelperCommit": helper["sources"][0]["commit"],
+        "archive": bundle.name, "sha256": digest(bundle),
+    })
 
 
 def main() -> None:
@@ -401,6 +559,21 @@ def main() -> None:
     flatpak = commands.add_parser("flatpak-manifest")
     flatpak.add_argument("--notices", type=Path, required=True)
     flatpak.add_argument("--output", type=Path, required=True)
+    suite_flatpak = commands.add_parser("suite-flatpak-manifest")
+    suite_flatpak.add_argument("--suite", type=Path, required=True)
+    suite_flatpak.add_argument("--output", type=Path, required=True)
+    prepare_flatpak = commands.add_parser("prepare-suite-flatpak")
+    prepare_flatpak.add_argument("--artifacts", type=Path, required=True)
+    prepare_flatpak.add_argument("--output", type=Path, required=True)
+    flatpak_record = commands.add_parser("record-suite-flatpak")
+    flatpak_record.add_argument("--files", type=Path, required=True)
+    flatpak_record.add_argument("--suite", type=Path, required=True)
+    flatpak_record.add_argument("--bundle", type=Path, required=True)
+    flatpak_record.add_argument("--output", type=Path, required=True)
+    tui_record = commands.add_parser("record-tui-flatpak")
+    tui_record.add_argument("--files", type=Path, required=True)
+    tui_record.add_argument("--bundle", type=Path, required=True)
+    tui_record.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args()
     if arguments.command == "plan":
         plan()
@@ -412,6 +585,15 @@ def main() -> None:
         manifest(arguments.artifacts.resolve())
     elif arguments.command == "flatpak-manifest":
         flatpak_manifest(arguments.notices, arguments.output)
+    elif arguments.command == "suite-flatpak-manifest":
+        suite_flatpak_manifest(arguments.suite.resolve(), arguments.output)
+    elif arguments.command == "prepare-suite-flatpak":
+        print(prepare_suite_flatpak(arguments.artifacts.resolve(), arguments.output.resolve()))
+    elif arguments.command == "record-suite-flatpak":
+        record_suite_flatpak(arguments.files.resolve(), arguments.suite.resolve(),
+                             arguments.bundle.resolve(), arguments.output)
+    elif arguments.command == "record-tui-flatpak":
+        record_tui_flatpak(arguments.files.resolve(), arguments.bundle.resolve(), arguments.output)
     else:
         stage(arguments.artifacts.resolve(), arguments.tag)
 

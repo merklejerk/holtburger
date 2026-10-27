@@ -46,12 +46,26 @@ to `3d-next`. All native builds consume the same commit, version, and micro dige
 Linux x86-64, Windows x86-64, and macOS Apple Silicon build on native runners. Forge consumes
 the explicitly targeted Rust host through `HOLTBURGER_PACKAGE_HOST`, avoiding an implicit
 native rebuild. CI validates the final suite after extraction and stages the complete matrix,
-TUI Flatpak, standalone micro ZIP, manifest, and checksums into one draft.
+TUI-only and full-suite Flatpaks, standalone micro ZIP, notices, manifest, and checksums into
+one draft. The complete inventory is nine assets.
 
 Portable Linux builds use Ubuntu 22.04. The separate Flatpak job uses Ubuntu 24.04's
 builder 1.4, which supports the 24.08 SDK's `appstreamcli`; the older 22.04 builder
 expects `appstream-compose`. Flatpak runtime requirements remain defined by the declared
 24.08 runtime. Its installed production-bootstrap probe verifies binary compatibility.
+
+The full-suite Flatpak reuses the inspected Linux archive without rebuilding its executables.
+Its recipe under `.github/flatpak/` builds only pinned Zypak to support Chromium's nested
+sandbox; the 24.08 runtime supplies the other linked libraries. The small upstream Makefile
+patch tracks actual object targets and leaves dependency files compiler-generated. Original
+Zypak/nickle notices are pinned with the native notices and retained in the installed app.
+
+CI installs the full-suite artifact and verifies exact suite bytes, native architecture,
+wrapper/tool entry points, app ID/runtime, bootstrap, private-host protocol, and packaged
+recovery/theme/font behavior. Synthetic document-portal input and explicit output grants
+exercise real conversion/export without retail data. Probe executables/launchers remain CI
+tooling and are not public release binaries. Both Flatpaks contribute installed identity
+receipts; aggregation rejects missing assets, wrong source/content/notices, or changed bytes.
 
 ## Dependency notices
 
@@ -90,6 +104,8 @@ link, source commit, checksums, known limitations, and this checklist:
 3. Launch h3d using CLI connection arguments and select the user's retail installation.
 4. Check basic gameplay, input, audio, window scaling, and OS launch behavior on available platforms.
 5. Launch explicit Explorer; report any failures with redacted commands and build identity.
+6. Install the full-suite Flatpak and repeat client/Explorer checks, including portal selection
+   across restarts, graphics/audio/input, TUI invocation, and tool input/output permissions.
 
 Record actual manual results and unverified platforms in draft release notes. A defect requires
 a corrected, newly identified candidate and repeated affected checks. Never replace accepted

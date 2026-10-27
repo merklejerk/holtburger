@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>io.github.merklejerk.holtburger-cli</id>
   <metadata_license>MIT</metadata_license>
-  <project_license>GPL-3.0</project_license>
+  <project_license>AGPL-3.0</project_license>
   <name>Holtburger CLI</name>
   <summary>Terminal client for Asheron's Call</summary>
   <description>

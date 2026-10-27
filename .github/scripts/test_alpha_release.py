@@ -14,6 +14,8 @@ import zipfile
 from alpha_release import (
     TARGETS, archive_suite, digest, executable_architecture, extract_suite,
     manifest, stage, validate_tag,
+    record_suite_flatpak, suite_flatpak_manifest,
+    record_tui_flatpak,
 )
 from fetch_alpha_content import unpack_micro
 from release_version import check_versions, validate_version
@@ -160,17 +162,29 @@ class ReleaseManifestTests(unittest.TestCase):
             micro.write_bytes(b"synthetic micro")
             notices = root / "THIRD_PARTY_NOTICES.html"
             notices.write_text("original notices")
-            (root / f"holtburger-cli-{version}-x86_64.flatpak").write_bytes(b"flatpak")
+            hba_sha256 = hashlib.sha256(b"synthetic HBA").hexdigest()
             for target in TARGETS:
                 archive = root / f"suite-{target.triple}.zip"
                 archive.write_bytes(target.triple.encode())
                 record = {
                     "commit": commit, "version": version, "modified": False,
                     "target": target.triple, "microSha256": digest(micro),
+                    "microHbaSha256": hba_sha256,
                     "noticesSha256": digest(notices), "archive": archive.name,
                     "sha256": digest(archive),
                 }
                 (root / f"metadata-{target.triple}.json").write_text(json.dumps(record))
+            for stem in ("holtburger-cli", "holtburger-alpha"):
+                bundle = root / f"{stem}-{version}-x86_64.flatpak"
+                bundle.write_bytes(stem.encode())
+                record = {
+                    "commit": commit, "version": version, "modified": False,
+                    "target": next(target.triple for target in TARGETS if target.platform == "linux"),
+                    "microSha256": digest(micro), "microHbaSha256": hba_sha256,
+                    "noticesSha256": digest(notices), "appId": f"io.github.merklejerk.{stem}",
+                    "archive": bundle.name, "sha256": digest(bundle),
+                }
+                (root / f"metadata-{stem}-flatpak.json").write_text(json.dumps(record))
             (root / ".github").mkdir()
             descriptor = root / ".github/alpha-content.json"
             descriptor.write_text(json.dumps({"sha256": digest(micro)}))
@@ -179,6 +193,22 @@ class ReleaseManifestTests(unittest.TestCase):
                 files = manifest(root)
                 self.assertIn(notices, files)
                 self.assertIn("THIRD_PARTY_NOTICES.html", (root / "SHA256SUMS").read_text())
+                full_suite = root / f"holtburger-alpha-{version}-x86_64.flatpak"
+                self.assertIn(full_suite, files)
+                self.assertEqual(len(files), 9)
+                full_suite.write_bytes(b"substituted bundle")
+                with self.assertRaisesRegex(ValueError, "Flatpak release archive mismatch"):
+                    manifest(root)
+                full_suite.unlink()
+                with self.assertRaises(FileNotFoundError):
+                    manifest(root)
+                full_suite.write_bytes(b"holtburger-alpha")
+                receipt = root / "metadata-holtburger-alpha-flatpak.json"
+                record = json.loads(receipt.read_text())
+                receipt.write_text(json.dumps({**record, "commit": "b" * 40}))
+                with self.assertRaisesRegex(ValueError, "Flatpak release identity mismatch"):
+                    manifest(root)
+                receipt.write_text(json.dumps(record))
                 notices.write_text("different notices")
                 with self.assertRaisesRegex(ValueError, "Release identity mismatch"):
                     manifest(root)
@@ -188,8 +218,147 @@ class ReleaseManifestTests(unittest.TestCase):
                     manifest(root)
 
 
+class SuiteFlatpakTests(unittest.TestCase):
+    """A second package format must preserve the inspected candidate's identity and bytes."""
+
+    def setUp(self):
+        self.commit = "a" * 40
+        self.info = {
+            "commit": self.commit, "version": check_versions(), "modified": False,
+            "target": next(target.triple for target in TARGETS if target.platform == "linux"),
+        }
+
+    def test_manifest_binds_the_inspected_suite_and_resolves_source_paths(self):
+        recipe = {"modules": [{
+            "name": "helper", "sources": [{"type": "patch", "path": "helper.patch"}],
+        }, {
+            "name": "holtburger-alpha", "build-commands": [],
+            "sources": [{"type": "file", "path": "launcher"}],
+        }]}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            suite, output = root / "inspected suite", root / "generated/manifest.json"
+            with patch("alpha_release.verify_suite", return_value=self.info), \
+                 patch("alpha_release.source_identity", return_value=(self.commit, False)), \
+                 patch("alpha_release.run", return_value=json.dumps(recipe)):
+                suite_flatpak_manifest(suite, output)
+            modules = json.loads(output.read_text())["modules"]
+            self.assertTrue(Path(modules[0]["sources"][0]["path"]).is_absolute())
+            sources = modules[1]["sources"]
+            self.assertTrue(Path(sources[0]["path"]).is_absolute())
+            self.assertEqual(sources[-1], {"type": "dir", "path": str(suite.resolve()), "dest": "suite"})
+
+    def test_wrong_commit_modified_input_and_wrong_platform_are_refused(self):
+        for change in ({"commit": "b" * 40}, {"modified": True}, {"target": "other-target"}):
+            with self.subTest(change=change), \
+                 patch("alpha_release.verify_suite", return_value={**self.info, **change}), \
+                 patch("alpha_release.source_identity", return_value=(self.commit, False)), \
+                 patch("alpha_release.run") as command:
+                with self.assertRaises(ValueError):
+                    suite_flatpak_manifest(Path("suite"), Path("manifest.json"))
+                command.assert_not_called()
+
+    def test_changed_installed_executable_is_refused_even_with_matching_build_info(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            suite, files = root / "native", root / "files"
+            installed = files / "lib/holtburger"
+            suite.mkdir()
+            installed.mkdir(parents=True)
+            (suite / "executable").write_bytes(b"inspected native executable")
+            (installed / "executable").write_bytes(b"changed executable")
+            with patch("alpha_release.verify_suite", return_value=self.info), \
+                 patch("alpha_release.source_identity", return_value=(self.commit, False)):
+                with self.assertRaisesRegex(ValueError, "suite file differs"):
+                    record_suite_flatpak(files, suite, root / "bundle", root / "receipt")
+
+
+class TuiFlatpakTests(unittest.TestCase):
+    """Installed TUI receipts must bind the binary and data, not just a bundle filename."""
+
+    def test_installed_inputs_are_hashed_and_substitution_is_refused(self):
+        commit = "a" * 40
+        version = check_versions()
+        recipe = {"id": "io.github.merklejerk.holtburger-cli",
+                  "runtime": "org.example.Runtime", "runtime-version": "test"}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            files = root / "app/files"
+            binary = files / "bin/holtburger-cli"
+            binary.parent.mkdir(parents=True)
+            elf = bytearray(64)
+            elf[:6] = b"\x7fELF\x02\x01"
+            struct.pack_into("<H", elf, 18, 62)
+            binary.write_bytes(elf)
+            micro = files / "share/holtburger/dats/assets.hba"
+            micro.parent.mkdir(parents=True)
+            micro.write_bytes(b"synthetic content")
+            notices = files / "share/licenses/holtburger/THIRD_PARTY_NOTICES.html"
+            notices.parent.mkdir(parents=True)
+            notices.write_text("original notices")
+            runtime = "org.example.Runtime/x86_64/test"
+            (files.parent / "metadata").write_text(
+                f"[Application]\nname={recipe['id']}\nruntime={runtime}\n"
+            )
+            info = {"commit": commit, "version": version, "modified": False,
+                    "target": next(target.triple for target in TARGETS if target.platform == "linux"),
+                    "binarySha256": digest(binary), "microHbaSha256": digest(micro),
+                    "noticesSha256": digest(notices)}
+            (files / "share/holtburger/build-info.json").write_text(json.dumps(info))
+            bundle, output = root / "tui.flatpak", root / "receipt.json"
+            bundle.write_bytes(b"test bundle")
+            with patch("alpha_release.source_identity", return_value=(commit, False)), \
+                 patch("alpha_release.run", return_value=json.dumps(recipe)):
+                record_tui_flatpak(files, bundle, output)
+                record = json.loads(output.read_text())
+                self.assertEqual(record["sha256"], digest(bundle))
+                self.assertEqual(record["runtime"], runtime)
+                self.assertEqual(record["appId"], recipe["id"])
+                micro.write_bytes(b"substituted content")
+                with self.assertRaisesRegex(ValueError, "Installed TUI Flatpak input differs"):
+                    record_tui_flatpak(files, bundle, output)
+
+
 class DraftPublicationTests(unittest.TestCase):
     """Reruns must reuse matching bytes and must never modify a published release."""
+
+    def test_created_draft_response_is_used_when_release_lists_remain_empty(self):
+        commit = "a" * 40
+        tag = "alpha-20261027-" + commit[:8]
+        with tempfile.TemporaryDirectory() as temporary:
+            artifact = Path(temporary) / "suite.zip"
+            artifact.write_bytes(b"verified candidate")
+            calls = []
+
+            def github(*arguments):
+                calls.append(arguments)
+                if "--paginate" in arguments:
+                    return ""
+                if arguments[2].endswith("commits/" + tag):
+                    return commit
+                if arguments[:3] == ("gh", "api", "repos/merklejerk/holtburger/releases"):
+                    self.assertIn("draft=true", arguments)
+                    self.assertIn("prerelease=true", arguments)
+                    return json.dumps({"draft": True, "target_commitish": commit,
+                                       "assets": [], "html_url": "https://example.invalid/draft"})
+                self.assertEqual(arguments[:3], ("gh", "release", "upload"))
+                return ""
+
+            with patch("alpha_release.manifest", return_value=[artifact]), \
+                 patch("alpha_release.source_identity", return_value=(commit, False)), \
+                 patch("alpha_release.run", side_effect=github):
+                stage(Path(temporary), tag)
+            self.assertEqual(sum("--paginate" in call for call in calls), 1)
+            self.assertEqual(sum(call[:3] == ("gh", "release", "upload") for call in calls), 1)
+
+    def test_remote_tag_for_another_commit_is_refused_before_creating_a_draft(self):
+        commit = "a" * 40
+        with patch("alpha_release.manifest", return_value=[]), \
+             patch("alpha_release.source_identity", return_value=(commit, False)), \
+             patch("alpha_release.run", side_effect=["", "b" * 40]) as command:
+            with self.assertRaisesRegex(ValueError, "Remote alpha tag"):
+                stage(Path("artifacts"), "alpha-20261027-" + commit[:8])
+            self.assertEqual(command.call_count, 2)
 
     def test_existing_matching_asset_is_reused_and_only_missing_asset_is_uploaded(self):
         commit = "a" * 40

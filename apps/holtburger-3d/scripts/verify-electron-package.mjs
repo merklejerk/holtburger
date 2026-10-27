@@ -89,6 +89,13 @@ export async function verifyElectronPackage(packageRoot) {
 	const packageMetadata = JSON.parse(
 		readArchiveFile("package.json").toString(),
 	);
+	const sourcePackage = JSON.parse(
+		await readFile(join(appRoot, "package.json"), "utf8"),
+	);
+	if (packageMetadata.desktopName !== sourcePackage.desktopName)
+		throw new Error(
+			"Packaged desktop filename differs from the application manifest",
+		);
 	const buildMetadata = JSON.parse(
 		readArchiveFile("dist/build-info.json").toString(),
 	);
@@ -124,9 +131,7 @@ export async function verifyElectronPackage(packageRoot) {
 		if (!archiveEntries.has(`/${archiveEntry}`)) {
 			throw new Error(`packaged ASAR is missing /${archiveEntry}`);
 		}
-		if (
-			!readArchiveFile(archiveEntry).equals(await readFile(sourcePath))
-		) {
+		if (!readArchiveFile(archiveEntry).equals(await readFile(sourcePath))) {
 			throw new Error(`packaged ASAR differs from source: /${archiveEntry}`);
 		}
 	}

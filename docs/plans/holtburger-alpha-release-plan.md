@@ -1,12 +1,12 @@
 # Alpha release from `3d-next`
 
-Status: implementation stopped at the dependency-notice gap below, per the user's instruction to stop on major gaps. Hosted platform verification and final native acceptance remain pending.
+Status: the original three-platform candidate is staged and verified as an unpublished draft. Scope now also requires a full-suite Linux x86-64 Flatpak. That addition and a new complete candidate remain pending; user native acceptance still occurs only at the final handoff.
 
 ## Goal and boundaries
 
 Publish a reproducible alpha suite from one identified `3d-next` commit as GitHub Release assets, containing the TUI, h3d, and the tools and resources needed to use them.
 
-The user has authorized implementing this plan. No commits or source pushes have been made; final publication waits for user native-bundle acceptance.
+The user authorized implementation and subsequent commits/pushes. The original candidate is tagged at `f6d69fc1d`; the newly requested full-suite Flatpak is scoped below and is not present in that candidate. Final publication waits for user native-bundle acceptance and explicit publication authorization.
 
 ### Accepted scope
 
@@ -15,7 +15,8 @@ The user has authorized implementing this plan. No commits or source pushes have
 - Make client mode the default h3d entry. Continue requiring connection/account arguments; no graphical login flow or launcher is needed.
 - Align h3d short flags with TUI: `-p` means port and `-P` means password. Keep `--port` and `--password`.
 - Ship `fighter.js`, `mage.js`, `mage.data.json`, and `mage.data.bin`. The script-derived data is approved for distribution.
-- Ship a regenerated micro HBA for TUI, including the standalone micro download. Preserve the TUI Flatpak artifact.
+- Ship a regenerated micro HBA for TUI, including the standalone micro download. Preserve the TUI-only Flatpak artifact.
+- Add a Linux x86-64 full-suite Flatpak containing h3d/explicit Explorer, the private host and Electron resources, TUI, both required tools, the approved scripts/derived data, micro HBA, quickstart, build identity, and notices. Publish it alongside the native suites and TUI-only Flatpak.
 - Keep h3d's runtime UI resources, themes, fonts, branding, licenses, and third-party notices in its application package.
 - Supply a quickstart, checksums, release identity, and a platform/dependency limitations statement.
 - Publish the alpha as a separate prerelease channel. Preserve the existing `main` TUI nightly.
@@ -27,7 +28,7 @@ The user has authorized implementing this plan. No commits or source pushes have
 - Do not distribute full retail DATs, full HBAs, `weenies.hwc`, local settings, credentials, runtime caches, or captured live-session data.
 - Do not ship optional specialized tools (`export-weenie-catalog`, `survey-weenie-catalog`, `soul-emotes`, `weenie-resists`) or debug-harness binaries.
 - Do not add HBA profile metadata, change the archive version, or build a completeness validator. Passing the sentinel check is a suitability heuristic; later resource failures remain ordinary visible errors.
-- Do not add a login UI, separate launcher, updater, h3d Flatpak, or additional installer formats. Unsigned application archives are acceptable for alpha.
+- Do not add a login UI, separate launcher, updater, or installer formats beyond the native archives and agreed Flatpaks. Unsigned application archives are acceptable for alpha.
 - Do not change the retail decompile. No gameplay or rendering feature work is needed for this release.
 - Do not run the interactive TUI for diagnostics. Use focused noninteractive probes and package inspection. Visual acceptance belongs to the user.
 - The user cannot verify native release bundles until the end. Phases 1–7 must progress using automated evidence without requiring user installation or launch checks. Final native acceptance uses the complete staged release artifacts immediately before publication.
@@ -77,6 +78,12 @@ Previously inspected public references:
 - [GitHub workflow events](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows): default-branch restrictions matter for scheduled/manual-dispatch workflow installation.
 - [GitHub release management](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository): draft/prerelease publication behavior. Recheck repository settings before implementing publication.
 
+Full-suite Flatpak packaging references (2026-10-27):
+
+- [Flatpak Electron guide](https://docs.flatpak.org/en/latest/electron.html): Electron BaseApp, Zypak launch integration, and app packaging.
+- [Flatpak sandbox permissions](https://docs.flatpak.org/en/latest/sandbox-permissions.html): filesystem, display/GPU/audio/network access and portal boundaries.
+- Existing `electron/main.ts` owns `hostBinaryPath`, packaged host spawn, sandboxed renderer settings, and the directory picker. Packaging wrappers must preserve those app-layer contracts; they do not belong in shared Rust crates.
+
 ## Design principles and ownership
 
 1. One source commit, suite version, and micro artifact digest per release. Every matrix job consumes that same resolved identity.
@@ -97,6 +104,7 @@ Previously inspected public references:
 | --- | --- |
 | `holtburger-alpha-<version>-<rust-target>.zip` on Windows/macOS; `.tar.gz` on Linux | Complete suite for that architecture. |
 | `holtburger-cli-<version>-x86_64.flatpak` | TUI only, including the same micro HBA and scripts. |
+| `holtburger-alpha-<version>-x86_64.flatpak` | Complete Linux suite, including h3d/Explorer, TUI, both tools, scripts/derived data, micro, identity, quickstart, and notices. Required in the expanded scope. |
 | `holtburger-micro-<version>.zip` | Standalone regenerated micro archive; ZIP root contains `assets.hba`. |
 | `SHA256SUMS` | Digests of downloadable suite, Flatpak, micro, and release manifest assets. |
 | `release-manifest.json` | Exact version, source commit, micro digest, per-platform build environment and executable architectures, verification status, and asset filenames. Used for support and publication validation. |
@@ -161,7 +169,7 @@ An explicit override is never replaced by automatic search. A saved unsuitable s
 
 ## Phased implementation
 
-Checked tasks have implementation or local evidence recorded below; platform-wide acceptance still requires hosted builds. Unchecked tasks remain outstanding. At each milestone record commands, results, source commit, and any course correction in this document.
+Checked tasks have implementation or local evidence recorded below. Baseline application behavior retains its recorded evidence; release-assembly and candidate gates are reopened for the full-suite Flatpak addition and its new complete candidate. Unchecked tasks remain outstanding. At each milestone record commands, results, source commit, and any course correction in this document.
 
 ### Phase 1: Establish artifact prerequisites and platform matrix
 
@@ -189,7 +197,7 @@ Primary files: `crates/holtburger-dat/src/manifest.rs`, its tests, `apps/holtbur
 - [x] Generate a fresh micro ZIP with corrected `dat2hba --profile micro` from identified retail inputs, then run the diagnostic against it. Record generator commit, digest, size, namespace inventory, and bootstrap result.
 - [x] Inspect its contents and confirm it lacks the sentinel and visual resource classes excluded by the micro manifest. Stage only `assets.hba` into the micro ZIP.
 - [x] Complete the Phase 1 content-asset handoff and pin the URL/digest. Fetch into a clean staging directory, fail on HTTP errors/digest mismatch/unexpected ZIP entries, and validate the fetched bytes through the same bootstrap diagnostic.
-- [x] Use this exact artifact for all suite archives, the standalone micro asset, and TUI Flatpak. Do not replace the main nightly's input implicitly.
+- [ ] Use this exact artifact for all suite archives, the standalone micro asset, and both Flatpaks. Do not replace the main nightly's input implicitly.
 
 Acceptance: current bootstrap and character-generation reads succeed with the regenerated micro artifact; the existing published five-record micro fails the probe as expected during investigation; every alpha consumer verifies and uses the same digest. Do not retain a permanent test tied to the old downloadable artifact.
 
@@ -256,6 +264,23 @@ Primary files: the alpha workflow, reusable build/assembly helpers under `.githu
 
 Acceptance: every included platform has a correctly identified archive that passes final extraction inspection and relevant noninteractive runtime checks. Flatpak and standalone micro match suite content. No unchecked copy, missing file, target mismatch, or local full-data dependency can pass the workflow.
 
+### Phase 6A: Add the full-suite Flatpak
+
+Deliverables: a suite-owned recipe and launch wrapper/desktop metadata under `.github/flatpak/`, alpha CI integration, complete manifest/checksum coverage, and installed-runtime evidence. Implementation and local installed-runtime checks are complete; hosted verification and the new complete candidate remain pending. The existing TUI recipe remains independently usable by `main` nightly.
+
+- [x] Establish a distinct application ID, `io.github.merklejerk.holtburger-alpha`, so installation does not replace the TUI-only app or reuse its settings namespace. Limit this new artifact to Linux x86-64; no new native targets or Flathub publication are required.
+- [x] Start with the existing freedesktop 24.08 runtime baseline and prove compatibility of the actual Electron version and all suite binaries. Evaluate the standard Electron BaseApp/Zypak integration described by Flatpak's Electron guide. Pin any additional build inputs and include their original notices. Do not assume that copying the portable archive alone provides a functioning Electron sandbox; retain the sandbox rather than passing `--no-sandbox`.
+- [x] Reuse the inspected Linux suite from the same workflow/source as the packaging input when runtime compatibility is proven. Preserve the intact Forge package/private host, exact executable inventory, scripts/sidecars, micro, docs, notices, and build info. If compatibility requires a runtime-specific build, record that evidence and build the same resolved source/locked inputs; do not change portable Linux's baseline implicitly.
+- [x] Install TUI and both tools as invocable commands and keep the complete Electron application in its own installation directory. Make h3d the default Flatpak command through a narrow wrapper that forwards arguments unchanged. Keep explicit `explorer` and CLI account/connection requirements; add no launcher or login flow.
+- [x] Preserve TUI's writable local scripts/preferences and read-only bundled scripts/data using the existing environment contract. h3d continues to require user-supplied retail content and its existing sentinel admission. Keep micro separate from h3d content; the current host adapter already removes inherited `HOLTBURGER_DATS` before launching its private host.
+- [ ] Prove and document the display, GPU, audio, network, and portal permissions actually required. Test saved retail-directory/full-HBA selection and access from the private Rust host after restarting the installed app. Verify the picker/portal behavior; document explicit per-invocation filesystem grants for CLI content paths and conversion/inspection input/output directories where needed. Do not solve access by defaulting to unrestricted host filesystem access or redesigning content discovery.
+- [x] Add the full-suite Flatpak to `.github/workflows/alpha-release.yml`, `.github/scripts/alpha_release.py` aggregation/staging, and release contract tests. Require both Flatpaks in the complete release inventory, validate their source/version/content/notice identities, and hash both in the global manifest and SHA256SUMS. The expanded release has nine public assets (three native suites, two Flatpaks, micro ZIP, notices, manifest, checksums).
+- [ ] Install the built Flatpak in CI and run noninteractive production bootstrap, private-host smoke, existing theme/font/content-recovery probes through the installed launch path, and safe `--help` checks for both tools. Verify installed resource/identity/notice digests and permissions. Use synthetic content fixtures for recovery; never upload full retail data or run interactive TUI. Add focused tests only for new packaging/launch contracts.
+- [x] Update quickstart/releasing docs with full-suite install and invocation commands: default h3d client, explicit Explorer, `--command=holtburger-cli`, `--command=dat2hba`, and `--command=dat-tool`. Explain retail-data/input/output access, sandbox-owned settings/cache/scripts, graphics/audio requirements, and how the two Flatpaks differ.
+- [ ] Reassess the candidate after installed-runtime evidence. Produce a new source-specific tag and complete draft containing the expanded inventory; do not move the existing tag or attach a different-commit Flatpak to the current eight-asset candidate. Defer user native/visual verification until that new complete draft exists, then include full-suite Flatpak launch, retail access, graphics/audio/input, TUI, and tools in the final checklist.
+
+Acceptance: installing the full-suite Flatpak provides every required suite component and preserves the default-client/explicit-Explorer contract, usable sandbox/content access, exact identity and notices, and approved content. Its installed-runtime checks pass, it appears in the new draft's nine-asset manifest/checksums, and final user acceptance remains a separate last gate.
+
 ### Phase 7: Cleanup, documentation, and candidate review
 
 - [x] Write durable quickstart content covering native executable paths on all OSes, long-form connection arguments, explicit Explorer, user-supplied retail data, and the TUI micro/full distinction.
@@ -272,8 +297,8 @@ Acceptance: candidate artifacts and quickstart are concrete and reviewable; clea
 ### Phase 8: Publish and verify the first alpha
 
 - [ ] Once execution/publication is authorized, create the selected non-SemVer-shaped alpha tag at the verified commit. Do not stage or commit changes without an explicit request.
-- [ ] The tag workflow repeats required validation and creates a draft prerelease only for its exact source commit. Keep write permissions limited to publishing jobs; PR jobs must not publish.
-- [ ] Upload the complete suite matrix, TUI Flatpak, standalone micro ZIP, manifest, and checksum file to that draft. Verify the expected asset inventory and checksums/identity before handing it to the user. Keep the release unpublished at this point.
+- [ ] The tag workflow runs all required validation and creates a draft prerelease only for its exact source commit. Use this as the authoritative candidate run rather than first waiting for an identical branch build and then rebuilding at a tag. Keep write permissions limited to publishing jobs; PR jobs must not publish.
+- [ ] Upload the complete suite matrix, both Flatpaks, standalone micro ZIP, manifest, and checksum file to that draft. Verify the expected asset inventory and checksums/identity before handing it to the user. Keep the release unpublished at this point.
 - [ ] At this final handoff, provide the draft release link, exact candidate commit/version, checksums, known limitations, and the native-bundle checklist. The user verifies the platforms available to them now; record results and any unverified platforms separately from CI evidence. No earlier phase depends on these manual checks.
 - [ ] If native acceptance exposes a defect, fix it and produce a new identified candidate. Repeat affected automated checks and user checks against the replacement artifacts; do not silently substitute bytes already tested by the user.
 - [ ] Publish after final user acceptance and publication authorization. Promote the exact staged bytes that were tested; the publication step must not rebuild them. Platforms unavailable to the user retain explicit experimental/unverified status rather than invented acceptance evidence.
@@ -298,6 +323,7 @@ Acceptance: a public GitHub prerelease contains the complete agreed artifact set
 | Frontend quality | Existing `npm run check`, `npm run lint:ts`, `npm run test:ts`, `npm run check:branding`; other established lint gates as needed by touched code. |
 | Package runtime | Existing smoke/content/theme checks adjusted for client-default and sentinel admission; no asset-free test accidentally claims real-content success. |
 | Native portability | Target inspection plus native runner/runtime dependency checks for shell, host, and tools throughout implementation; user-owned native/visual acceptance only at the final draft-release handoff. |
+| Full-suite Flatpak | Installed app provides the complete suite, sandboxed Electron/private-host execution, bootstrap/recovery/theme/font probes, tool help, writable-state isolation, retail/tool path access, and identity/resource/notice digest checks. |
 | Final download | Extracted suite and native package validation, symlink/mode checks, micro digest, exact inventory, and checksum round trip after publication. |
 
 ## Risks and mitigations
@@ -315,23 +341,28 @@ Acceptance: a public GitHub prerelease contains the complete agreed artifact set
 | Two release workflows react to alpha tag | Use a disjoint tag namespace and verify the trigger behavior before publishing. |
 | Tag-push workflow bypasses default-branch dispatch assumptions | Start with explicit alpha tag pushes; later UI/schedule support is optional follow-up. |
 | Signing/desktop behavior differs across OSes | State unsigned/experimental status and record actual native verification. Do not disable Electron sandboxing to make tests pass. |
+| Electron or its private host fails inside Flatpak | Prove the installed launch path with the supported Electron/Flatpak sandbox integration, runtime dependency checks, and existing recovery probes before staging. |
+| Flatpak picker paths or tool input/output paths are inaccessible | Verify portal grants persist to the private host and across restarts; document narrow CLI filesystem grants. Keep full data out of the package. |
+| New Flatpak is appended to an older-source candidate | Require a new complete source-specific candidate with both Flatpaks in its manifest/checksums; preserve existing tagged bytes. |
 | User native-bundle checks are unavailable during implementation | Progress using CI/noninteractive evidence; stage the complete draft release before the final manual handoff, then publish those exact tested bytes. |
 | Packaging effort grows into product feature work | Keep launcher/login/updater, completeness validation, optional tools, and extra formats excluded. |
 
 ## Definition of done
 
-- [ ] Agreed suite binaries/resources, TUI Flatpak, and standalone micro are present as GitHub Release assets.
+- [ ] Agreed suite binaries/resources, both Flatpaks, and standalone micro are present as GitHub Release assets.
 - [x] Corrected micro artifact initializes current TUI content and is shared by digest across consumers.
 - [x] h3d defaults to client, retains explicit Explorer, and uses TUI-compatible port/password flags.
 - [x] h3d uses the sentinel for admission without archive format changes or a thorough content validator.
 - [x] Portable TUI resource lookup works independently of the invocation directory.
 - [ ] Suite version and exact source commit agree across package metadata, displayed identities, tags, and manifests.
-- [x] Platform labels match executable architectures; Linux dependencies and baseline are verified.
+- [ ] Platform labels match executable architectures; Linux dependencies and baseline are verified.
 - [ ] Required formatting, tests, lint/clippy, package checks, and extracted-suite checks pass without ignored warnings.
 - [ ] No full retail assets, optional tools, private data, or local caches are in the published inventory.
 - [x] Quickstart and release notes explain CLI launch, retail-data selection, unsigned status, and platform verification limits.
 - [ ] Published assets pass checksum verification; the existing main nightly remains operational.
 - [ ] Final user native-bundle/visual acceptance and any unverified platforms are recorded without overstating support; published bytes match the accepted candidate.
+
+- [ ] Full-suite Flatpak installed-runtime checks and final user acceptance cover h3d/Explorer, TUI, tools, retail-data access, and sandbox-owned writable state.
 
 ## Open execution questions
 
@@ -458,3 +489,40 @@ These do not block writing the plan; resolve them at the named phase before depe
 ### Final documentation audit
 
 - Added the missing source/build reference to the bundled quickstart: use its full `build-info.json` commit, then the checked-in alpha workflow and releasing guide for pinned tools, native commands, system packages, content inputs, and notice generation. This documentation-only correction and the evidence/checklist updates will be committed before selecting the candidate tag. Application code is unchanged from the fully green `7ef77b941` run; the new commit still requires its own release identity and validation.
+
+### Final draft and native handoff (2026-10-27)
+
+- Candidate version: `0.1.0-alpha.1`; source `f6d69fc1d7cfd99e2b448f264fbc3bc93e426727`; tag `alpha-20261027-f6d69fc1d`. Branch run `40444064218` passed the complete three-native-target/Flatpak matrix before tagging. Tag run `40445457806` repeated and passed those gates; only the Alpha Release Candidate workflow was triggered for the tag.
+- Draft: https://github.com/merklejerk/holtburger/releases/tag/untagged-6f80e0969341efe37a40 (release ID `425023413`). It remains an unpublished prerelease at the exact source commit. Contains eight assets: Linux x86-64, Windows x86-64, Apple Silicon suites; TUI Flatpak; standalone micro ZIP; notices HTML; release manifest; SHA256SUMS. Intel macOS is excluded.
+- First staging attempt created the correct empty draft, then its immediate list query did not return it. A staging-only retry reused that draft and the original inspected artifacts successfully; no binary rebuild or tag change. Run attempt 2 is green. This records the observed API/list visibility behavior rather than presuming a cause.
+- Checked the complete remote asset inventory/digests against `release-manifest.json` and `SHA256SUMS`, including source/version/target/micro/notice identity. Downloaded the actual draft Linux suite, manifest, checksum file, and notices and verified each SHA-256. Extracted the downloaded Linux suite and ran the production release validator successfully (native headers, package/host identity, scripts, resources, notices, symlinks, and exact inventory). No screenshots or interactive TUI/native acceptance were performed.
+- SHA256SUMS file SHA-256: `bfff2650e6404bcd6ca20be294fc91147efedb4debf32f4c92161096492be15d`. Micro ZIP remains `df24573f24e4ca46398041ab70c9188825ad6a82e5db229c4146fe8d757aa098`; notices HTML `5e4b42a13fe211b9ccb19410a48826d93f015492f3ee0f25f66caa2122fb7183`.
+- Final handoff is now ready: user verifies checksum/native extraction, terminal TUI launch including another working directory, implicit h3d client with CLI account/connection arguments and retail data selection, basic gameplay/input/audio/window behavior, and explicit Explorer on available platforms. Record actual platforms/results in draft notes. Unsigned OS launch behavior and untested platforms remain experimental. Stop here for the user's eyes; publication and post-publication verification remain outstanding. Promote these exact bytes only after acceptance and explicit publication authorization.
+- This final evidence update remains outside the tagged source; no candidate source identity or release artifact was changed to record its own verification.
+
+### Full-suite Flatpak scope expansion (2026-10-27)
+
+- User requested adding a Flatpak version of the complete `holtburger-alpha` bundle. This supersedes the earlier h3d-Flatpak exclusion. Preserve the TUI-only Flatpak and add a separate full-suite Linux x86-64 artifact/application identity.
+- Added Phase 6A covering Electron sandbox/runtime integration, private-host execution, retail-data and tool filesystem access, resource/state separation, installed-runtime validation, notices, CI/manifest/checksum integration, documentation, and a new complete nine-asset candidate. Existing native platform coverage and the no-login/no-launcher/no-full-retail-data constraints remain in force.
+- This change updates scope only. No full-suite Flatpak has been implemented or built; the current unpublished eight-asset draft remains the original candidate and does not satisfy the expanded release inventory. Native user checks remain deferred to the final complete-candidate handoff.
+
+### Full-suite Flatpak local implementation and feasibility
+
+- Inspected the official Electron BaseApp 24.08 recipe/commit and the actual 24.08 runtime. The existing native Electron binary and private Rust host resolve their libraries there. Zypak upstream explicitly supports packaging without BaseApp; use only Zypak rather than copying BaseApp's unused extra desktop libraries. Pin the same `ded79a2f8a509adc21834b95a9892073d4a91fdc` helper revision and its recorded nickle submodule `0ac7f5dbf659caa8d1d45cb57e942f2bc565da1e`.
+- Added `.github/flatpak/` recipe, sandbox launch wrapper, desktop metadata/icon integration, and exact helper source/license inputs. The suite is copied intact into `/app/lib/holtburger`; TUI/tools are command links and h3d is the default through Zypak. Existing micro/script environment contracts are preserved. Checked readable micro data, read-only bundled scripts, and a distinct writable script directory without launching TUI.
+- Built and installed an initial prototype and the production recipe locally using the already inspected `f6d69fc1d` Linux suite as diagnostic input. Both tool help commands passed. The existing automated content recovery probe passed default client and Explorer through the installed wrapper, including saved state, retry/reset, override isolation, and bounded exit. Local tests used the available Wayland display; no screenshots or visual acceptance. CI still needs its Xvfb launch and portal/path checks.
+- The probe's isolated XDG data directory initially hid the user Flatpak installation; set `FLATPAK_USER_DIR` to the actual installation for diagnostics. Forcing X11 while only the Wayland/fallback-X11 manifest sockets were granted failed as expected; the normal declared Wayland launch passed. Keep native display selection and document explicit test overrides rather than adding product fallback policy.
+- The pinned helper's make rules advertised a nonexistent second dependency-file target. A configuration-only adjustment was incorrect; replaced it with a tiny source patch that leaves dependency files compiler-generated and tracks only the actual object target. The final production build had no warnings or errors and retained strict C++ warnings. Native suite files disable debug extraction so their inspected bytes remain unchanged; only the newly built helper is stripped.
+- Added `suite-flatpak-manifest` and `record-suite-flatpak` commands to existing release tooling. Recipe materialization rejects wrong platform/source/version or modified native inputs and resolves all local inputs, including helper patches. Installed verification compares every native suite entry and file/link against its source, plus wrapper, tool commands, original helper notices, executable architecture, app ID, and runtime; records the actual bundle digest and provenance. The exported/installed production-recipe prototype passed this byte-for-byte check and repeated both-mode recovery. It is local diagnostic evidence, not a publishable expanded candidate.
+- Vendored both original helper notice texts with pinned source URLs/digests and verified their presence in regenerated common notice HTML. Aligned the Electron desktop filename with the new app ID and added an actual-package metadata check; the prior package correctly fails that new check. A fresh native package is required for the new candidate. Corrected the TUI AppStream license identifier to its Cargo owner; the full-suite metadata follows the Electron manifest. No dependency versions were changed.
+- Release-tool tests: 20 passed, including new candidate identity, relocated helper input, and installed-file tamper refusals. Frontend lint, metadata ownership checks, version consistency, and diff whitespace checks passed. Remaining work: CI/manifest integration, installed bootstrap/theme/font and filesystem/portal probes, durable launch/access docs, final code review, then a new complete nine-asset candidate and final user acceptance.
+
+### Full-suite Flatpak integration and installed probes
+
+- Integrated the full-suite job with the verified Linux archive and a private CI bootstrap executable. Neither the probe nor diagnostic launchers enter the public artifact inventory. Both Flatpaks now carry installed-byte/source/content/notice receipts; aggregation requires all nine assets. The TUI-only nightly recipe remains independently usable.
+- Installed full-suite probes passed locally: production bootstrap, both tool help commands, private-host smoke, read-only bundled resources and writable local scripts, document-portal content recovery in client and Explorer, eight base fonts, four bundled theme images, and custom theme/font replacement. The actual document-portal tool probe converted and exported synthetic DAT data through Unicode/space-containing paths, verified read-only input and an explicit writable output grant, and compared authored palette bytes. FileChooser portal version was 4, above Electron's required 3. No interactive TUI or visual acceptance was performed.
+- Portal paths canonicalize inside the app namespace as `/run/flatpak/doc/...`; the outside runner cannot resolve those paths. The recovery probe now compares identity using `realpath` inside the target sandbox while retaining saved-path/footer assertions. A shared renderer harness supplies the packaged theme/image checks for native packages and Flatpak.
+- Common notices include the original pinned Zypak and nickle licenses. Quickstart and release notes now distinguish the two Flatpaks, CLI filesystem grants, portal access, isolated settings/scripts, and default h3d invocation. The installed local app is an explicitly modified diagnostic build, not a release candidate.
+- Fixed draft staging to consume the GitHub create response directly after verifying the remote tag's exact source. A regression test reproduces the observed missing-new-draft list response without retrying a binary build. Existing-draft reuse and upload validation remain in place.
+- Release tooling/notices: 23 tests passed; workflow actionlint, frontend type checks, ESLint, dead-code checks, changed-file formatting, and diff whitespace checks passed. Hosted verification remains required. Bumped the centrally owned suite version and both lockfiles to `0.1.0-alpha.2`; dependency versions are unchanged.
+- The next candidate uses one authoritative tag workflow with all required gates. Cancel an overlapping identical branch run rather than paying for the complete native matrix twice. Preserve the old tag/draft and stage a new complete nine-asset draft before requesting the user's native checks.

@@ -1,4 +1,5 @@
 import { tick } from "svelte";
+import gameplayPreferences from "./fixtures/gameplay-preferences.json";
 import { emptyHousing } from "../../client/client-housing-contract";
 import type { ItemStructure } from "../../app/item-structure";
 import type { ClientEntityFacts } from "../../client/client-entity-mirror";
@@ -252,6 +253,7 @@ export async function probeClientInventory(options: {
 			knownSpells: null,
 			enchantments: null,
 			appearanceOptions: { showHelmet: true, showCloak: true },
+			gameplayPreferences,
 			party: null,
 			partyPreferences: null,
 			friends: null,

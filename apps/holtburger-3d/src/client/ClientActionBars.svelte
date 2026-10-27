@@ -12,6 +12,7 @@
 		type ActionItemDisplay,
 	} from "./client-action-item";
 	import { onMount, tick } from "svelte";
+	import { useClientHudGeometry } from "./client-hud-geometry-context";
 	import ClientActionBarView from "./ClientActionBar.svelte";
 	import type { ItemDragSession } from "./client-item-drag";
 	import type { ClientWorldContainerPanelState } from "./client-world-container-panel-state";
@@ -33,11 +34,12 @@
 		type ClientHudViewport,
 	} from "./client-hud-layout";
 	import {
+		actionBarSurfaceId,
 		findActionBarClonePlacement,
 		resetActionBarPlacements,
 		type ActionBarGeometry,
 	} from "./client-action-bar-layout";
-	import { CLIENT_TUNING, CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
+	import { CLIENT_TUNING, CLIENT_HUD_SNAP_TUNING } from "./client-tuning";
 	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
 	import type { InputDisplayPlatform } from "../lib/input/input-presentation";
 	interface Props {
@@ -96,20 +98,26 @@
 		onPickInventoryTarget,
 		onInventoryNotice,
 	}: Props = $props();
-	// Readers belong to mounted surfaces; cloning pulls geometry once at the user action.
-	const geometry = new Map<number, () => ActionBarGeometry>();
+	const geometry = useClientHudGeometry();
+	// Natural extents remain bar-owned; actual rectangles belong to the common HUD registry.
+	const preferredExtents = new Map<
+		number,
+		() => ActionBarGeometry["preferred"]
+	>();
 	function readGeometry(id: number): ActionBarGeometry {
-		const read = geometry.get(id);
+		const read = preferredExtents.get(id);
 		if (read === undefined)
-			throw new Error(`Missing action bar geometry ${id}`);
-		return read();
+			throw new Error(`Missing action bar preferred extent ${id}`);
+		const bounds = geometry.readBounds(actionBarSurfaceId(id));
+		if (bounds === null) throw new Error(`Action bar ${id} is hidden`);
+		return { bounds, preferred: read() };
 	}
 	function resetPlacements(): boolean {
 		const reset = resetActionBarPlacements(
 			bars,
 			readGeometry,
 			viewport,
-			CLIENT_ACTION_BAR_TUNING.cloneGap,
+			CLIENT_HUD_SNAP_TUNING.gap,
 		);
 		if (reset === null) {
 			inventory.reportFailure(
@@ -149,7 +157,7 @@
 						bar.id === id ? sourceGeometry.bounds : readGeometry(bar.id).bounds,
 					),
 					viewport,
-					CLIENT_ACTION_BAR_TUNING.cloneGap,
+					CLIENT_HUD_SNAP_TUNING.gap,
 				);
 				if (rectangle === null) {
 					inventory.reportFailure(
@@ -367,9 +375,9 @@
 		{viewport}
 		{items}
 		onmount={(read) => {
-			geometry.set(bar.id, read);
+			preferredExtents.set(bar.id, read);
 			return () => {
-				geometry.delete(bar.id);
+				preferredExtents.delete(bar.id);
 			};
 		}}
 		onchange={change}

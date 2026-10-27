@@ -168,6 +168,20 @@ function entryArguments(): {
 		if (!app.commandLine.hasSwitch(name))
 			app.commandLine.appendSwitch(name, value);
 	}
+	if (process.platform === "win32") {
+		// Windows compatibility workarounds for low scene FPS and sluggish UI scrolling.
+		// Preserve an explicitly selected ANGLE backend for driver-specific diagnostics.
+		if (!app.commandLine.hasSwitch("use-angle"))
+			app.commandLine.appendSwitch("use-angle", "gl");
+		if (!app.commandLine.hasSwitch("disable-gpu-vsync"))
+			app.commandLine.appendSwitch("disable-gpu-vsync");
+	}
+	// Chromium's frame-rate-limit bypass also disables GPU vsync in the GPU subprocess.
+	// Remove both switches so the explicit app override wins over native flags and --uncapped.
+	if (app.commandLine.hasSwitch("enable-vsync")) {
+		app.commandLine.removeSwitch("disable-gpu-vsync");
+		app.commandLine.removeSwitch("disable-frame-rate-limit");
+	}
 	return {
 		path: buildEntryPath(entry.path, launch.args),
 		title: entry.title + (release ? " (release host)" : ""),

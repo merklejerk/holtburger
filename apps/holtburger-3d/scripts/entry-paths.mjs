@@ -145,6 +145,12 @@ export function extractElectronLaunchArguments(args) {
 	for (let index = 0; index < args.length; index += 1) {
 		const argument = args[index];
 		const parsed = parseLongArgument(argument);
+		if (parsed.name === "enable-vsync") {
+			if (parsed.value !== undefined)
+				throw new Error("--enable-vsync does not accept a value.");
+			switches.add("--enable-vsync");
+			continue;
+		}
 		if (parsed.name === "dev") {
 			// Keep renderer diagnostics on their existing query contract in both launch paths.
 			remainingArgs.push(

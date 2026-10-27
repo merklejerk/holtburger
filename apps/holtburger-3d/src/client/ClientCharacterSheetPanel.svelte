@@ -11,9 +11,9 @@
 		progressionTargetKey,
 		type CharacterSheet,
 		type ProgressionIntent,
-		type ProgressionUnavailable,
 		type StatTarget,
 	} from "./client-character-sheet-contract";
+	import { progressionUnavailableReason } from "./client-character-sheet-feedback";
 	import type { ClientCharacterSheetState } from "./client-character-sheet-state";
 	import type { ClientTimedEnchantments } from "./client-lifecycle-session";
 	import { enchantmentKey } from "./client-enchantments-view";
@@ -216,25 +216,6 @@
 				false)
 		);
 	}
-	function unavailableReason(value: ProgressionUnavailable): string {
-		if (value === "AwaitingTargetUpdate")
-			return "Awaiting a server update for this stat";
-		if (value === "CharacterNotReady") return "Character is still loading";
-		if (typeof value === "object" && value !== null && "World" in value) {
-			const world = value.World;
-			if (world === "RankCap") return "Rank cap reached";
-			if (world === "SkillNotTrained") return "Train this skill first";
-			if (world === "NotTrainable") return "This skill cannot be trained";
-			if (world === "AlreadyTrained") return "Already trained";
-			if (typeof world === "object" && world !== null) {
-				if ("InsufficientXp" in world)
-					return `Requires ${formatQuantity(world.InsufficientXp.required)} XP; ${formatQuantity(BigInt(world.InsufficientXp.available))} available`;
-				if ("InsufficientCredits" in world)
-					return `Requires ${world.InsufficientCredits.required} skill credits; ${world.InsufficientCredits.available} available`;
-			}
-		}
-		return "Purchase is unavailable from current character facts";
-	}
 	function action(
 		intent: ProgressionIntent,
 		target: StatTarget,
@@ -292,14 +273,17 @@
 			key: progressionIntentKey(intent),
 			label: actionLabel,
 			cost,
-			disabled: pending || quote === null,
-			reason: pending
-				? "Awaiting a server update for this stat"
-				: evaluation?.result && "Err" in evaluation.result
-					? unavailableReason(evaluation.result.Err)
-					: cost === null
-						? "Calculating cost…"
-						: `${description} immediately for ${formatQuantity(cost.quantity)} ${cost.unit}`,
+			disabled:
+				display.progressionUnavailable !== null || pending || quote === null,
+			reason:
+				display.progressionUnavailable ??
+				(pending
+					? "Awaiting a server update for this stat"
+					: evaluation?.result && "Err" in evaluation.result
+						? progressionUnavailableReason(evaluation.result.Err)
+						: cost === null
+							? "Calculating cost…"
+							: `${description} immediately for ${formatQuantity(cost.quantity)} ${cost.unit}`),
 			purchase: () => {
 				if (quote !== null) void owner.purchase(quote);
 			},
@@ -530,9 +514,7 @@
 		<div class="progression-page">
 			<div class="progression-scroll">
 				{#if sheet === null}
-					<p role="status">
-						{display.feedback ?? "Waiting for character details…"}
-					</p>
+					<p role="status">Waiting for character details…</p>
 				{:else}
 					<header class="progression-summary">
 						<div class="character-identity">
@@ -623,9 +605,6 @@
 							</div>
 						{/if}
 					</header>
-					{#if display.feedback !== null}<p role="status" class="feedback">
-							{display.feedback}
-						</p>{/if}
 					{#if spellLoadError !== null}<p role="status" class="feedback">
 							{spellLoadError}
 						</p>{/if}
@@ -729,9 +708,7 @@
 		active={activeTab === "defenses"}
 	>
 		{#if sheet === null}
-			<p role="status">
-				{display.feedback ?? "Waiting for character details…"}
-			</p>
+			<p role="status">Waiting for character details…</p>
 		{:else}
 			{#if spellLoadError !== null}<p role="status" class="feedback">
 					{spellLoadError}

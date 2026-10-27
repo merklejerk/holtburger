@@ -1245,6 +1245,8 @@
 		readonly setEnchantments: (resolved: ResolvedEnchantments) => void;
 		/** Inject coherent character facts and correlated quotes through session listeners. */
 		readonly setCharacterSheet: (sheet: unknown) => void;
+		/** Exercise portal admission through the production lifecycle listener. */
+		readonly setCharacterPortalSpace: (active: boolean) => void;
 		readonly replyProgression: (evaluation: unknown) => void;
 		readonly replyProgressionFeedback: (feedback: unknown) => void;
 		readonly retireCharacterSheet: (lateSheet: unknown) => boolean;
@@ -5299,11 +5301,33 @@
 			setCharacterSheet: (sheet) => {
 				emitInteractionEvent("client-character-sheet-updated", sheet);
 			},
+			setCharacterPortalSpace: (active) => {
+				emitInteractionEvent(
+					"client-lifecycle-changed",
+					active
+						? {
+								kind: "portal-space",
+								cause: "teleport",
+								worldGeneration:
+									interactionLifecycle.state().worldGeneration + 1,
+							}
+						: { kind: "in-world" },
+				);
+			},
 			replyProgression: (evaluation) => {
 				emitInteractionEvent("client-progression-evaluated", evaluation);
 			},
 			replyProgressionFeedback: (feedback) => {
-				emitInteractionEvent("client-progression-feedback", feedback);
+				// Other probes own isolated toast centers; match app delivery only for this injection.
+				const unsubscribe = interactionLifecycle.subscribe((event) => {
+					if (event.type === "action-feedback")
+						inventoryToasts.publish(event.feedback);
+				});
+				try {
+					emitInteractionEvent("client-progression-feedback", feedback);
+				} finally {
+					unsubscribe();
+				}
 			},
 			retireCharacterSheet: (lateSheet) => {
 				emitInteractionEvent("client-lifecycle-changed", {

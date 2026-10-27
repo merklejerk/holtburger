@@ -254,12 +254,8 @@
 		--ui-entity-category-icon-size: 18px;
 		--ui-minimap-button-size: 20px;
 		--ui-minimap-button-radius: 50%;
-		/* Canvas tracking decorations resolve these CSS values on cold theme changes. */
-		--ui-minimap-tracked-color: rgba(110, 240, 255, 0.95);
-		--ui-minimap-tracked-width: 2px;
-		--ui-minimap-tracked-gap: 7px;
-		--ui-minimap-tracked-dash-length: 2px;
-		--ui-minimap-tracked-dash-gap: 2px;
+		/* Canvas alert markers resolve this CSS color on cold theme changes. */
+		--ui-minimap-alert-color: rgba(110, 240, 255, 0.95);
 		/* Catalog row and disclosure density; spell icon size changes display only. */
 		--ui-spell-panel-padding: 8px;
 		--ui-catalog-row-padding: 4px 6px;

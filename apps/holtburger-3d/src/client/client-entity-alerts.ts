@@ -4,7 +4,7 @@ import { z } from "zod";
 const ENTITY_ALERT_PATTERN_LIMIT = 256;
 const matchSchema = z
 	.object({
-		mode: z.enum(["exact", "glob"]),
+		mode: z.enum(["substring", "exact", "glob"]),
 		pattern: z.string().trim().min(1).max(ENTITY_ALERT_PATTERN_LIMIT),
 	})
 	.strict()
@@ -40,7 +40,7 @@ function entityAlertKey(match: EntityAlertRule["match"]): string {
 	)}`;
 }
 
-/** Only exact-name rules own the row toggle; matching globs remain independent. */
+/** Only exact-name rules own the row toggle; other match modes remain independent. */
 export function findExactEntityAlert(
 	rules: readonly EntityAlertRule[],
 	name: string,
@@ -92,12 +92,14 @@ function globTokens(pattern: string): { tokens: GlobToken[]; error: boolean } {
 	return { tokens, error: escaped };
 }
 
-/** Whole-name matcher with bounded O(pattern × name) work; no regex backtracking. */
+/** Literal substring/exact matching or bounded O(pattern × name) glob matching. */
 export function compileEntityAlert(
 	match: EntityAlertRule["match"],
 ): (name: string) => boolean {
 	const valid = matchSchema.parse(match);
 	const normalized = valid.pattern.toLowerCase();
+	if (valid.mode === "substring")
+		return (name) => name.trim().toLowerCase().includes(normalized);
 	if (valid.mode === "exact")
 		return (name) => name.trim().toLowerCase() === normalized;
 	const { tokens } = globTokens(valid.pattern);

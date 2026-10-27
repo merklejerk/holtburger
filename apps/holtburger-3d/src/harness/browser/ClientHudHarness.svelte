@@ -3979,6 +3979,14 @@
 						view: {
 							...second.view,
 							identity: { ...second.view.identity, guid: 8 },
+							presentation: {
+								...second.view.presentation,
+								radar: {
+									...second.view.presentation.radar,
+									category: "other",
+									behavior: "ShowNever",
+								},
+							},
 						},
 					},
 				];

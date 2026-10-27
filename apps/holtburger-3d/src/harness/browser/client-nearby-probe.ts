@@ -1,5 +1,4 @@
 import { UI_THEME_CHANGED_EVENT } from "../../app/ui-theme";
-import { readMinimapTrackingAppearance } from "../../app/minimap-tracking-appearance";
 import type { RenderSceneInterestController } from "../../lib/game/runtime/render-scene-interest-controller";
 import { nearbySceneInterest } from "../../client/client-nearby.test-support";
 import { tick } from "svelte";
@@ -245,6 +244,19 @@ export async function probeClientNearby(dependencies: {
 		document.querySelector(
 			".alert-editor select",
 		), "panel dialog includes match mode in its focus cycle");
+	const matchMode = document.querySelector<HTMLSelectElement>(
+		".alert-editor select",
+	);
+	require(matchMode?.value === "substring", "new alerts default to substring matching");
+	input(".alert-editor input", "golem");
+	await tick();
+	require(
+		document.querySelector(".alert-editor")?.textContent?.includes("2 current matches") === true,
+		"substring draft matches names without wildcard syntax",
+	);
+	require(matchMode !== null, "match mode editor exists");
+	matchMode.value = "glob";
+	matchMode.dispatchEvent(new Event("change", { bubbles: true }));
 	input(".alert-editor input", "*Golem*");
 	await tick();
 	require(document
@@ -315,66 +327,38 @@ export async function probeClientNearby(dependencies: {
 	const context = canvas?.getContext("2d");
 	require(context !== null &&
 		context !== undefined, "actual map canvas is mounted");
-	const stroke = context.stroke;
+	const fill = context.fill;
+	const originalFill = context.fill.bind(context);
 	const clear = context.clearRect;
-	let trackedStrokes = 0;
-	let trackedAppearance: {
-		color: string;
-		width: number;
-		dash: number[];
-		radius: number;
-	} | null = null;
-	let lastRadius = 0;
-	const arc = context.arc;
-	context.arc = function (
-		x,
-		y,
-		radius,
-		startAngle,
-		endAngle,
-		counterclockwise,
-	) {
-		lastRadius = radius;
-		arc.call(this, x, y, radius, startAngle, endAngle, counterclockwise);
-	};
-	const readTrackedAppearance = () => trackedAppearance;
-	const trackedStrokeCount = () => trackedStrokes;
+	let alertFills = 0;
+	let alertColor: string | null = null;
+	const readAlertColor = () => alertColor;
+	const alertFillCount = () => alertFills;
 	context.clearRect = function (x, y, width, height) {
-		trackedStrokes = 0;
+		alertFills = 0;
 		clear.call(this, x, y, width, height);
 	};
-	context.stroke = function (path?: Path2D) {
-		if (this.getLineDash().length > 0) {
-			trackedStrokes++;
-			trackedAppearance = {
-				color: String(this.strokeStyle),
-				width: this.lineWidth,
-				dash: this.getLineDash(),
-				radius: lastRadius,
-			};
-		}
-		if (path !== undefined) stroke.bind(this)(path);
-		else stroke.bind(this)();
+	context.fill = function (path?: Path2D | CanvasFillRule, rule?: CanvasFillRule) {
+		if (path instanceof Path2D) {
+			alertFills++;
+			alertColor = String(this.fillStyle);
+			originalFill(path, rule);
+		} else originalFill(path);
 	};
 	try {
 		await settle();
-		require(trackedStrokeCount() ===
-			2, "both tracked entities are decorated in the same map frame");
-		const baselineAppearance = readTrackedAppearance();
-		require(baselineAppearance !==
+		require(alertFillCount() ===
+			2, "both tracked entities use the alert glyph in the same map frame");
+		const baselineColor = readAlertColor();
+		require(baselineColor !==
 			null, "tracked canvas appearance is available");
 		const minimapScope = document.querySelector<HTMLElement>(".minimap");
 		require(minimapScope !== null, "minimap scope exists");
-		const baselineTracking = readMinimapTrackingAppearance(minimapScope);
 		const theme = document.createElement("style");
 		theme.textContent = `@layer overrides {
 			:root {
 				--ui-color-success: rgb(17, 34, 51);
-				--ui-minimap-tracked-color: var(--ui-color-success);
-				--ui-minimap-tracked-width: calc(1px + 2px);
-				--ui-minimap-tracked-gap: 9px;
-				--ui-minimap-tracked-dash-length: 5px;
-				--ui-minimap-tracked-dash-gap: 3px;
+				--ui-minimap-alert-color: var(--ui-color-success);
 				--ui-entity-category-icon-size: 24px;
 				--ui-minimap-button-size: 24px;
 				--ui-icon-stroke-width: 2.4;
@@ -389,15 +373,7 @@ export async function probeClientNearby(dependencies: {
 		try {
 			document.dispatchEvent(new Event(UI_THEME_CHANGED_EVENT));
 			await settle();
-			const themed = readTrackedAppearance();
-			require(themed?.color === "#112233" &&
-				themed.width === 3 &&
-				themed.dash.join(",") ===
-					"5,3", "theme CSS colors and calculated lengths reach the actual minimap canvas");
-			require(themed.radius ===
-				baselineAppearance.radius +
-					9 -
-					baselineTracking.gap, "theme ring spacing reaches canvas geometry");
+			require(readAlertColor() === "#112233", "theme color reaches the actual alert glyph canvas fill");
 			const category = document.querySelector<HTMLElement>(
 				'.category-icon[data-entity-category="monster"]',
 			);
@@ -420,73 +396,28 @@ export async function probeClientNearby(dependencies: {
 				getComputedStyle(filter).borderColor === "rgb(171, 61, 91)" &&
 				getComputedStyle(launcher).width ===
 					"24px", "shared pill and rim control tokens accept theme overrides");
-			const scope = document.querySelector<HTMLElement>(".minimap");
-			require(scope !== null, "minimap scope exists");
-			const invalid = document.createElement("div");
-			invalid.style.position = "relative";
-			invalid.style.width = "200px";
-			scope.append(invalid);
-			try {
-				invalid.style.setProperty("--ui-minimap-tracked-gap", "10%");
-				invalid.style.setProperty("--ui-minimap-tracked-dash-length", "5%");
-				const percentages = readMinimapTrackingAppearance(invalid);
-				require(percentages.gap === 20 &&
-					percentages.dash[0] ===
-						10, "percentage ring dimensions resolve to used pixels");
-				invalid.style.removeProperty("--ui-minimap-tracked-gap");
-				invalid.style.removeProperty("--ui-minimap-tracked-dash-length");
-				for (const [property, value, message] of [
-					[
-						"--ui-minimap-tracked-color",
-						"not-a-color",
-						"Invalid minimap theme color",
-					],
-					[
-						"--ui-minimap-tracked-gap",
-						"not-a-length",
-						"Invalid minimap theme length",
-					],
-					["--ui-minimap-tracked-width", "0px", "must be positive"],
-					["--ui-minimap-tracked-gap", "auto", "Invalid minimap theme length"],
-				]) {
-					invalid.style.setProperty(property, value);
-					let failure = "";
-					try {
-						readMinimapTrackingAppearance(invalid);
-					} catch (error) {
-						if (!(error instanceof Error)) throw error;
-						failure = error.message;
-					}
-					require(failure.includes(
-						message,
-					), `theme validation reports ${property}`);
-					invalid.style.removeProperty(property);
-				}
-			} finally {
-				invalid.remove();
-			}
+
 		} finally {
 			theme.remove();
 			document.dispatchEvent(new Event(UI_THEME_CHANGED_EVENT));
 			await settle();
 		}
-		require(readTrackedAppearance()?.color ===
-			baselineAppearance.color, "theme removal restores cached canvas appearance");
+		require(readAlertColor() ===
+			baselineColor, "theme removal restores cached canvas appearance");
 
 		const globToggle = '.alert-rules [aria-label="Alert for *Golem*"]';
 		await click(globToggle);
 		await settle();
 		require(owner.trackedGuids().size ===
 			1, "disabling a glob preserves the overlapping exact match");
-		require(trackedStrokeCount() ===
+		require(alertFillCount() ===
 			1, "rule edits redraw tracking without entity motion");
 		await click(globToggle);
 		await settle();
-		require(trackedStrokeCount() ===
-			2, "reactivating the rule restores both map decorations");
+		require(alertFillCount() ===
+			2, "reactivating the rule restores both alert icons");
 	} finally {
-		context.arc = arc;
-		context.stroke = stroke;
+		context.fill = fill;
 		context.clearRect = clear;
 	}
 	await click("#nearby-entities-tab");
@@ -540,6 +471,41 @@ export async function probeClientNearby(dependencies: {
 	} finally {
 		owner.read = read;
 	}
+	// Resolve one interior pose through production demand and exercise both location branches.
+	const mixedRequest = nearbySceneInterest("0x0001ffff", "outdoor");
+	dependencies.scene.replace({
+		...mixedRequest,
+		radii: { ...mixedRequest.radii, envCellRadius: 0 },
+		ambientOutdoorEnvCellOwners: new Set(["0x0001ffff"]),
+	});
+	const interior = nearbyPose(7, 5);
+	const moveTargetToCell = (landblockId: number) => {
+		emit("client-dynamic-entity", {
+			kind: "upserted",
+			entity: {
+				...interior,
+				placement: {
+					...interior.placement,
+					pose: { ...interior.placement.pose, landblockId: cellId(landblockId) },
+				},
+			},
+		});
+	};
+	moveTargetToCell(0x00010100);
+	const mixedLocation = owner.read().rows.find((row) => row.guid === 7)?.location;
+	require(
+		mixedLocation !== undefined && mixedLocation.waypoint !== null && !mixedLocation.text.startsWith("Cell"),
+		"mixed-landblock interior exposes surface coordinates and waypoint",
+	);
+	require(owner.trackedGuids().has(7), "mixed-landblock interior retains map tracking");
+	dependencies.scene.replace(nearbySceneInterest("0x0001ffff", "dungeon"));
+	const dungeonLocation = owner.read().rows.find((row) => row.guid === 7)?.location;
+	require(
+		dungeonLocation?.waypoint === null && dungeonLocation.text.startsWith("Cell 0x00010100"),
+		"dungeon context preserves cell-local coordinates",
+	);
+	dependencies.scene.replace(mixedRequest);
+	moveTargetToCell(0x00010001);
 	const beforeSceneReturn = dependencies.messages().length;
 	dependencies.scene.replace(nearbySceneInterest("0x1234ffff", "dungeon"));
 	require(owner.trackedGuids().size === 0 &&
@@ -588,7 +554,10 @@ export async function probeClientNearby(dependencies: {
 			"editor-cancellation",
 			"icon-alert-actions",
 			"multiple-matches",
-			"canvas-decoration",
+			"uniform-alert-icon",
+			"radar-hidden-alert-icon",
+			"substring-default-preview",
+			"mixed-interior-coordinates",
 			"nearby-theme-overrides",
 			"canvas-theme-refresh",
 			"rule-toggle-invalidation",

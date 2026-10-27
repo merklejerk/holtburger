@@ -21,6 +21,16 @@ Composition changes only the rendered pose.
 - The pure compositor receives complete sampled poses, the verified layout, and chest weight.
   It reads no input state, global tuning, assets, or effect state.
 
+Remote observed gait uses accepted supported travel only when the retained command requests
+walking, running, turning, or sidestepping, or the solver applies a return/facing drive or accepts
+a supported contact push. Authored root translation and rotation alone do not grant the observed
+track ownership: a standing or custom animation can move without becoming a walking command.
+When neither commanded locomotion nor external work requires an observed track, the shared motion
+registry retires that track and reveals the uninterrupted authored cursor. Selection and retirement
+are one registry-owned transition; client and Explorer adapters submit observations without
+reconstructing that lifecycle. Manual locomotion, support presentation, action clocks, and physical
+travel keep their existing owners.
+
 Unsupported topology retains ordinary presentation. Compatible topology with an incomplete
 sample is a contract error. A clip authoring fewer setup parts is supported by the existing
 sampler, which retains the unauthored parts before composition.

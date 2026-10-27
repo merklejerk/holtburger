@@ -2373,6 +2373,165 @@ fn retiring_observations_preserves_authored_cursor_actions_and_ticks() {
 }
 
 #[test]
+fn observed_gaits_follow_commands_external_work_and_support() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = holtburger_common::Guid(1);
+    let observation = ObservedCharacterMotion {
+        motion: crate::SupportedBodyMotion {
+            accepted: crate::AcceptedBodyMotion {
+                velocity: Vector3::new(0.0, OBSERVED_LINEAR_IDLE_SPEED_MPS * 2.0, 0.0),
+                omega: Vector3::zero(),
+            },
+            externally_driven: false,
+        },
+        orientation: Quaternion::identity(),
+        presentation: CharacterMotionPresentation::Grounded,
+        object_scale: 1.0,
+    };
+    for command in [
+        MotionCommand::WALK_FORWARD,
+        MotionCommand::RUN_FORWARD,
+        MotionCommand::TURN_RIGHT,
+    ] {
+        let mut registry = MotionRuntimeRegistry::new();
+        let mut order = MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            ..MotionOrder::default()
+        };
+        if command.is_modifier() {
+            order.turn = Some((command, 1.0));
+        } else {
+            order.forward = Some((command, 1.0));
+        }
+        registry.drive(table, guid, order, 0.0);
+        registry
+            .observe_locomotion(table, guid, observation, 0.25)
+            .unwrap();
+        assert_eq!(
+            registry
+                .motion_playback(guid)
+                .unwrap()
+                .locomotion
+                .unwrap()
+                .clip
+                .animation_id(),
+            WALK_ANIM
+        );
+        registry
+            .observe_locomotion(
+                table,
+                guid,
+                ObservedCharacterMotion {
+                    motion: crate::SupportedBodyMotion::default(),
+                    ..observation
+                },
+                0.25,
+            )
+            .unwrap();
+        assert_eq!(
+            registry
+                .motion_playback(guid)
+                .unwrap()
+                .locomotion
+                .unwrap()
+                .clip
+                .animation_id(),
+            STAND_ANIM
+        );
+    }
+    let mut registry = MotionRuntimeRegistry::new();
+    registry.drive(table, guid, MotionOrder::default(), 0.25);
+    let before = registry.get(guid).unwrap().clone();
+    registry
+        .observe_locomotion(
+            table,
+            guid,
+            ObservedCharacterMotion {
+                motion: crate::SupportedBodyMotion {
+                    externally_driven: true,
+                    ..observation.motion
+                },
+                ..observation
+            },
+            0.25,
+        )
+        .unwrap();
+    assert_eq!(
+        registry
+            .motion_playback(guid)
+            .unwrap()
+            .locomotion
+            .unwrap()
+            .clip
+            .animation_id(),
+        WALK_ANIM
+    );
+    registry
+        .observe_locomotion(table, guid, observation, 0.25)
+        .unwrap();
+    assert!(registry.motion_playback(guid).unwrap().locomotion.is_none());
+    let restored = registry.get(guid).unwrap();
+    assert_eq!(
+        restored.sequence().frame_number(),
+        before.sequence().frame_number()
+    );
+    assert_eq!(restored.tick(), before.tick());
+    for presentation in [
+        CharacterMotionPresentation::Ready,
+        CharacterMotionPresentation::Falling,
+    ] {
+        registry
+            .observe_locomotion(
+                table,
+                guid,
+                ObservedCharacterMotion {
+                    presentation,
+                    ..observation
+                },
+                0.25,
+            )
+            .unwrap();
+        assert!(registry.motion_playback(guid).unwrap().locomotion.is_some());
+    }
+}
+
+#[test]
+fn retiring_observed_gait_preserves_manual_control() {
+    let catalog = catalog();
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = holtburger_common::Guid(1);
+    let mut registry = MotionRuntimeRegistry::new();
+    registry.drive_manual(
+        table,
+        guid,
+        MotionOrder {
+            style: Some(MotionCommand(STYLE)),
+            forward: Some((MotionCommand::WALK_FORWARD, 1.0)),
+            ..MotionOrder::default()
+        },
+        CharacterMotionPresentation::Grounded,
+        0.25,
+    );
+    let before = registry.motion_playback(guid).unwrap();
+    registry
+        .observe_locomotion(
+            table,
+            guid,
+            ObservedCharacterMotion {
+                motion: crate::SupportedBodyMotion::default(),
+                orientation: Quaternion::identity(),
+                presentation: CharacterMotionPresentation::Grounded,
+                object_scale: 1.0,
+            },
+            0.25,
+        )
+        .unwrap();
+    assert_eq!(registry.motion_playback(guid).unwrap(), before);
+    assert!(registry.get(guid).unwrap().has_manual_locomotion());
+}
+
+#[test]
 fn world_locomotion_sources_preserve_physics_and_action_priority() {
     let mut world = crate::WorldState::synthetic();
     world.set_motion_sequences(catalog());
@@ -2418,10 +2577,43 @@ fn world_locomotion_sources_preserve_physics_and_action_priority() {
             .rotate_vector(Vector3::new(0.0, OBSERVED_WALK_SPEED_MPS, 0.0)),
         omega: Vector3::zero(),
     };
+    // Authored sway may exceed the gait threshold without granting observed playback ownership.
+    // Exercise both translation and turning; an entirely blocked sample must also retain idle.
+    let before_sway = world.motion_runtimes.get(guid).unwrap().clone();
+    for accepted in [
+        observed,
+        crate::AcceptedBodyMotion {
+            velocity: Vector3::zero(),
+            omega: Vector3::new(0.0, 0.0, OBSERVED_ANGULAR_IDLE_RATE_RADIANS * 2.0),
+        },
+        crate::AcceptedBodyMotion::default(),
+    ] {
+        world
+            .present_character_locomotion(
+                body_id,
+                LocomotionPresentationSource::Observed(crate::SupportedBodyMotion {
+                    accepted,
+                    externally_driven: false,
+                }),
+                CharacterMotionPresentation::Grounded,
+                std::time::Duration::from_secs_f32(0.25),
+            )
+            .unwrap();
+        let after = world.motion_runtimes.get(guid).unwrap();
+        assert!(after.motion_playback().unwrap().locomotion.is_none());
+        assert_eq!(
+            after.sequence().frame_number(),
+            before_sway.sequence().frame_number()
+        );
+        assert_eq!(after.tick(), before_sway.tick());
+    }
     world
         .present_character_locomotion(
             body_id,
-            LocomotionPresentationSource::Observed(observed),
+            LocomotionPresentationSource::Observed(crate::SupportedBodyMotion {
+                accepted: observed,
+                externally_driven: true,
+            }),
             CharacterMotionPresentation::Grounded,
             std::time::Duration::from_secs_f32(1.5),
         )
@@ -2498,20 +2690,18 @@ fn world_locomotion_sources_preserve_physics_and_action_priority() {
     world
         .present_character_locomotion(
             body_id,
-            LocomotionPresentationSource::Observed(crate::spatial::AcceptedBodyMotion::default()),
+            LocomotionPresentationSource::Observed(crate::SupportedBodyMotion::default()),
             CharacterMotionPresentation::Grounded,
             std::time::Duration::from_millis(125),
         )
         .unwrap();
-    assert_eq!(
+    assert!(
         world
             .motion_runtimes
             .motion_playback(guid)
-            .and_then(|motion| motion.locomotion)
-            .map(|layer| layer.clip)
             .unwrap()
-            .animation_id(),
-        STAND_ANIM
+            .locomotion
+            .is_none()
     );
     world.motion_runtimes.enqueue_action(table, guid, action(1));
     let authored = world

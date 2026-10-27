@@ -174,12 +174,14 @@ impl PhysicalBodyInput {
             ground,
             authored,
         )?;
+        let mut external_drive = false;
         if let (Some(state), Some(ordinary)) = (correction.as_mut(), ordinary) {
             let authority_heading = state.take_correction_heading();
             // Consume authority once even when explicit sticky facing owns this interval.
             if let Some(rotation) = authority_heading
                 && sticky_heading.is_none()
             {
+                external_drive |= rotation != body.pose.rotation;
                 heading = Some(rotation.to_heading());
             }
             let error = PhysicalReferenceDomain::for_definition(physical.definition)
@@ -202,6 +204,7 @@ impl PhysicalBodyInput {
                     Some(support) => {
                         let correction_velocity =
                             reference_velocity(error - support.normal * error.dot(&support.normal));
+                        external_drive |= correction_velocity != Vector3::zero();
                         actuation.with_supported_drive(
                             nominal_velocity + correction_velocity,
                             support.normal,
@@ -222,6 +225,7 @@ impl PhysicalBodyInput {
         Ok(PreparedBodyMovement {
             actuation,
             nominal_velocity,
+            external_drive,
         })
     }
 }

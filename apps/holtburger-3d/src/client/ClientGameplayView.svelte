@@ -91,6 +91,7 @@
 	import type { ChatComposeResolution } from "./client-chat-compose";
 	import type { ClientChatLine } from "./client-chat-policy";
 	import ClientActionBars from "./ClientActionBars.svelte";
+	import { provideClientHudGeometry } from "./client-hud-geometry-context";
 	import type { ClientActionBar } from "./client-action-bar-state";
 	import type { ClientFriendsState } from "./client-friends-state";
 	import ClientSocialPanel from "./ClientSocialPanel.svelte";
@@ -580,6 +581,7 @@
 		canvasElement,
 		interactionRoot,
 	}: Props = $props();
+	provideClientHudGeometry();
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
 	const displayPlatform = inputDisplayPlatform(navigator.userAgent);

@@ -180,7 +180,7 @@ jobs:
   flatpak:
     needs: plan
     # Builder 1.4 supports the SDK's appstreamcli; 22.04 still expects appstream-compose.
-    # Flatpak targets the 24.08 runtime; portable Linux keeps its 22.04 baseline.
+    # Alpha Flatpaks share the suite recipe runtime; portable Linux keeps its 22.04 baseline.
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -218,7 +218,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes flatpak flatpak-builder dbus-x11
           sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install --noninteractive --assumeyes flathub org.freedesktop.Platform/x86_64/24.08 org.freedesktop.Sdk/x86_64/24.08
+          RUNTIME_VERSION=$(python -c 'import json; print(json.load(open(".github/flatpak/io.github.merklejerk.holtburger-alpha.json"))["runtime-version"])')
+          sudo flatpak install --noninteractive --assumeyes flathub "org.freedesktop.Platform/x86_64/$RUNTIME_VERSION" "org.freedesktop.Sdk/x86_64/$RUNTIME_VERSION"
       - name: Add alpha notices to the shared Flatpak recipe
         run: |
           python .github/scripts/alpha_release.py flatpak-manifest \
@@ -297,7 +298,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes flatpak flatpak-builder dbus-x11 xvfb xdg-desktop-portal xdg-desktop-portal-gtk
           sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install --noninteractive --assumeyes flathub org.freedesktop.Platform/x86_64/24.08 org.freedesktop.Sdk/x86_64/24.08
+          RUNTIME_VERSION=$(python -c 'import json; print(json.load(open(".github/flatpak/io.github.merklejerk.holtburger-alpha.json"))["runtime-version"])')
+          sudo flatpak install --noninteractive --assumeyes flathub "org.freedesktop.Platform/x86_64/$RUNTIME_VERSION" "org.freedesktop.Sdk/x86_64/$RUNTIME_VERSION"
       - name: Materialize the recipe from the verified Linux archive
         run: |
           SUITE=$(python .github/scripts/alpha_release.py prepare-suite-flatpak \

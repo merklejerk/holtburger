@@ -9,7 +9,7 @@ verification. No stage creates commits or moves existing tags.
 From the repository root:
 
 ```sh
-python3 .github/scripts/release_version.py bump 0.1.0-alpha.2
+python3 .github/scripts/release_version.py bump 0.1.0-alpha.3
 python3 .github/scripts/release_version.py check
 ```
 
@@ -50,14 +50,17 @@ TUI-only and full-suite Flatpaks, standalone micro ZIP, notices, manifest, and c
 one draft. The complete inventory is nine assets.
 
 Portable Linux builds use Ubuntu 22.04. The separate Flatpak job uses Ubuntu 24.04's
-builder 1.4, which supports the 24.08 SDK's `appstreamcli`; the older 22.04 builder
+builder 1.4, which supports the SDK's `appstreamcli`; the older 22.04 builder
 expects `appstream-compose`. Flatpak runtime requirements remain defined by the declared
-24.08 runtime. Its installed production-bootstrap probe verifies binary compatibility.
+26.08 runtime. Its installed production-bootstrap probe verifies binary compatibility.
+The full-suite recipe owns the alpha runtime selection; the generated TUI alpha recipe and
+both CI installation steps consume it. The main nightly keeps its independent TUI recipe.
 
 The full-suite Flatpak reuses the inspected Linux archive without rebuilding its executables.
 Its recipe under `.github/flatpak/` builds only pinned Zypak to support Chromium's nested
-sandbox; the 24.08 runtime supplies the other linked libraries. The small upstream Makefile
-patch tracks actual object targets and leaves dependency files compiler-generated. Original
+sandbox; the 26.08 runtime supplies the other linked libraries. Two small build patches track
+actual object targets with compiler-generated dependency files and correct an upstream
+copy-constructor member typo diagnosed by the 26.08 SDK. Original
 Zypak/nickle notices are pinned with the native notices and retained in the installed app.
 
 CI installs the full-suite artifact and verifies exact suite bytes, native architecture,

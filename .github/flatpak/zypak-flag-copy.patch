@@ -1,0 +1,5 @@
+--- a/src/base/enum_util.h
++++ b/src/base/enum_util.h
+@@ -23 +23 @@
+-  FlagOrBool(const FlagOrBool<T>& other) : value_(other.value) {}
++  FlagOrBool(const FlagOrBool<T>& other) : value_(other.value_) {}

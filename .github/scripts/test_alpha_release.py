@@ -16,6 +16,7 @@ from alpha_release import (
     manifest, stage, validate_tag,
     record_suite_flatpak, suite_flatpak_manifest,
     record_tui_flatpak,
+    flatpak_runtime_ref, SUITE_FLATPAK_RECIPE,
 )
 from fetch_alpha_content import unpack_micro
 from release_version import check_versions, validate_version
@@ -183,6 +184,7 @@ class ReleaseManifestTests(unittest.TestCase):
                     "microSha256": digest(micro), "microHbaSha256": hba_sha256,
                     "noticesSha256": digest(notices), "appId": f"io.github.merklejerk.{stem}",
                     "archive": bundle.name, "sha256": digest(bundle),
+                    "runtime": flatpak_runtime_ref(json.loads(SUITE_FLATPAK_RECIPE.read_text())),
                 }
                 (root / f"metadata-{stem}-flatpak.json").write_text(json.dumps(record))
             (root / ".github").mkdir()
@@ -206,6 +208,9 @@ class ReleaseManifestTests(unittest.TestCase):
                 receipt = root / "metadata-holtburger-alpha-flatpak.json"
                 record = json.loads(receipt.read_text())
                 receipt.write_text(json.dumps({**record, "commit": "b" * 40}))
+                with self.assertRaisesRegex(ValueError, "Flatpak release identity mismatch"):
+                    manifest(root)
+                receipt.write_text(json.dumps({**record, "runtime": "org.example.Other/x86_64/test"}))
                 with self.assertRaisesRegex(ValueError, "Flatpak release identity mismatch"):
                     manifest(root)
                 receipt.write_text(json.dumps(record))
@@ -308,7 +313,7 @@ class TuiFlatpakTests(unittest.TestCase):
             bundle, output = root / "tui.flatpak", root / "receipt.json"
             bundle.write_bytes(b"test bundle")
             with patch("alpha_release.source_identity", return_value=(commit, False)), \
-                 patch("alpha_release.run", return_value=json.dumps(recipe)):
+                 patch("alpha_release.tui_flatpak_recipe", return_value=recipe):
                 record_tui_flatpak(files, bundle, output)
                 record = json.loads(output.read_text())
                 self.assertEqual(record["sha256"], digest(bundle))

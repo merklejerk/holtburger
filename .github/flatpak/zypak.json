@@ -7,7 +7,8 @@
       "url": "https://github.com/refi64/zypak",
       "commit": "ded79a2f8a509adc21834b95a9892073d4a91fdc"
     },
-    { "type": "patch", "path": "zypak-make-dependencies.patch" }
+    { "type": "patch", "path": "zypak-make-dependencies.patch" },
+    { "type": "patch", "path": "zypak-flag-copy.patch" }
   ],
   "post-install": [
     "install -Dm644 LICENSE /app/share/licenses/zypak/LICENSE",

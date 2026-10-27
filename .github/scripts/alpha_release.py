@@ -40,6 +40,7 @@ SCRIPTS = ("fighter.js", "mage.js", "mage.data.json", "mage.data.bin")
 TOOLS = ("holtburger-cli", "dat2hba", "dat-tool")
 APP = ROOT / "apps/holtburger-3d"
 SUITE_FLATPAK_RECIPE = ROOT / ".github/flatpak/io.github.merklejerk.holtburger-alpha.json"
+TUI_FLATPAK_RECIPE = ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml"
 
 
 def run(*arguments: str, cwd: Path = ROOT) -> str:
@@ -320,6 +321,7 @@ def manifest(artifacts: Path) -> list[Path]:
         raise ValueError("Empty TUI Flatpak")
     files.extend([micro, flatpak, notices])
     flatpaks = []
+    runtime = flatpak_runtime_ref(json.loads(SUITE_FLATPAK_RECIPE.read_text()))
     linux = next(record for record in records if record["target"] == "x86_64-unknown-linux-gnu")
     for stem in ("holtburger-cli", "holtburger-alpha"):
         record = json.loads((artifacts / f"metadata-{stem}-flatpak.json").read_text())
@@ -327,7 +329,7 @@ def manifest(artifacts: Path) -> list[Path]:
                 record["target"] != linux["target"], record["microSha256"] != expected_micro,
                 record["microHbaSha256"] != linux["microHbaSha256"],
                 record["noticesSha256"] != notices_digest,
-                record["appId"] != f"io.github.merklejerk.{stem}")):
+                record["appId"] != f"io.github.merklejerk.{stem}", record["runtime"] != runtime)):
             raise ValueError(f"Flatpak release identity mismatch: {stem}")
         expected_name = f"{stem}-{version}-x86_64.flatpak"
         if record["archive"] != expected_name or digest(artifacts / expected_name) != record["sha256"]:
@@ -386,15 +388,23 @@ def stage(artifacts: Path, tag: str) -> None:
     print(f"Draft staged for final user verification: {release['html_url']}")
 
 
+def tui_flatpak_recipe() -> dict:
+    """Use the alpha runtime while preserving the main nightly's independent TUI recipe."""
+    recipe = json.loads(run("flatpak-builder", "--show-manifest", str(TUI_FLATPAK_RECIPE)))
+    suite = json.loads(SUITE_FLATPAK_RECIPE.read_text())
+    for key in ("runtime", "runtime-version", "sdk"):
+        recipe[key] = suite[key]
+    return recipe
+
+
 def flatpak_manifest(notices: Path, output: Path) -> None:
     """Extend the shared recipe for alpha without changing the main nightly's inputs."""
-    recipe = ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml"
-    manifest = json.loads(run("flatpak-builder", "--show-manifest", str(recipe)))
+    manifest = tui_flatpak_recipe()
     module, = manifest["modules"]
     # Preserve the inspected prebuilt binary; its receipt binds the exact input bytes.
     module.setdefault("build-options", {})["no-debuginfo"] = True
     for source in module["sources"]:
-        source["path"] = str((recipe.parent / source["path"]).resolve())
+        source["path"] = str((TUI_FLATPAK_RECIPE.parent / source["path"]).resolve())
     for path in (notices.resolve(), ROOT / "LICENSE.md"):
         if not path.stat().st_size:
             raise ValueError(f"Empty Flatpak notice input: {path}")
@@ -429,11 +439,16 @@ def require_flatpak_candidate(info: dict) -> None:
         raise ValueError("Flatpak input does not match the clean candidate identity")
 
 
+def flatpak_runtime_ref(recipe: dict) -> str:
+    """Canonical runtime identity for the alpha's supported Linux x86-64 architecture."""
+    return f"{recipe['runtime']}/x86_64/{recipe['runtime-version']}"
+
+
 def installed_flatpak_runtime(files: Path, recipe: dict) -> str:
     """Check the installed application's ID/runtime against its owning recipe."""
     metadata = configparser.ConfigParser(interpolation=None)
     metadata.read(files.parent / "metadata")
-    runtime = f"{recipe['runtime']}/x86_64/{recipe['runtime-version']}"
+    runtime = flatpak_runtime_ref(recipe)
     if metadata["Application"]["name"] != recipe["id"]:
         raise ValueError("Installed Flatpak application ID differs from its recipe")
     if metadata["Application"]["runtime"] != runtime:
@@ -453,8 +468,7 @@ def record_tui_flatpak(files: Path, bundle: Path, output: Path) -> None:
                         (files / "share/licenses/holtburger/THIRD_PARTY_NOTICES.html", "noticesSha256")):
         if digest(path) != info[field]:
             raise ValueError(f"Installed TUI Flatpak input differs: {path.name}")
-    recipe = json.loads(run("flatpak-builder", "--show-manifest",
-                            str(ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml")))
+    recipe = tui_flatpak_recipe()
     runtime = installed_flatpak_runtime(files, recipe)
     if not bundle.stat().st_size:
         raise ValueError("Empty TUI Flatpak")

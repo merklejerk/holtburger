@@ -680,12 +680,20 @@ mod tests {
             vec![0xff],
         ));
         let repository = ContentRepository::from_mounts(vec![source.clone()]);
-        let runtime = ContentAssetRuntime::new(ContentAssetService::new(
-            Arc::new(repository),
-            Arc::new(ContentDecodeCache::new()),
-        ));
+        let runtime = ContentAssetRuntime::with_worker_limit(
+            ContentAssetService::new(Arc::new(repository), Arc::new(ContentDecodeCache::new())),
+            1,
+        );
+        // Admit both waiters before decoding; join! alone permits a fast first load to finish.
+        let permit = runtime.worker_slots.acquire().await.unwrap();
         let request = ContentAssetRequest::GfxObj(file_id);
-        let (first, second) = tokio::join!(runtime.load(request.clone()), runtime.load(request));
+        let first = runtime.load(request.clone());
+        let second = runtime.load(request);
+        tokio::pin!(first, second);
+        assert!(futures::poll!(first.as_mut()).is_pending());
+        assert!(futures::poll!(second.as_mut()).is_pending());
+        drop(permit);
+        let (first, second) = tokio::join!(first, second);
         for result in [first, second] {
             let error = result.unwrap_err();
             let resource = error

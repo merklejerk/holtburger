@@ -7,5 +7,6 @@ pub mod theme;
 pub mod utils;
 pub mod version;
 
+pub mod installation;
 pub mod types;
 pub mod update;

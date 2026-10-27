@@ -178,10 +178,10 @@ describe("parseClientLaunchArguments", () => {
 			parseClientLaunchArguments([
 				"-h",
 				"localhost",
-				"-P=9010",
+				"-p=9010",
 				"-a",
 				"ash",
-				"-p=secret",
+				"-P=secret",
 				"-i",
 			]),
 		).toEqual({

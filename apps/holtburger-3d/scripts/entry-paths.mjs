@@ -25,9 +25,9 @@ const CLIENT_LAUNCH_ARGUMENT_NAMES = new Set([
 const CLIENT_SHORT_ARGUMENT_NAMES = new Map([
 	["s", "server"],
 	["h", "host"],
-	["P", "port"],
+	["p", "port"],
 	["a", "account"],
-	["p", "password"],
+	["P", "password"],
 	["i", "ignore-config"],
 ]);
 const CLIENT_BOOLEAN_ARGUMENT_NAMES = new Set([
@@ -37,6 +37,14 @@ const CLIENT_BOOLEAN_ARGUMENT_NAMES = new Set([
 
 function isKnownEntry(value) {
 	return Object.hasOwn(ENTRY_PATHS, value);
+}
+
+/** An omitted positional entry selects the client, including launches starting with short flags. */
+export function extractEntryArguments(args) {
+	const explicit = args[0] !== undefined && !args[0].startsWith("-");
+	const name = explicit ? args[0] : "client";
+	requireEntry(name);
+	return { name, args: explicit ? args.slice(1) : args };
 }
 
 /** Consume shared content selection before entry, client, or renderer argument parsing. */
@@ -290,7 +298,7 @@ export function requireEntry(value) {
 
 	const knownEntries = Object.keys(ENTRY_PATHS).join(", ");
 	throw new Error(
-		`Unknown dev entry "${value ?? ""}". Expected one of: ${knownEntries}.`,
+		`Unknown application entry "${value ?? ""}". Expected one of: ${knownEntries}.`,
 	);
 }
 

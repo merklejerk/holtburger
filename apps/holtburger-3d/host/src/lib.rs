@@ -32,6 +32,7 @@ pub mod client_runtime;
 pub mod client_squelch;
 pub mod client_vendor;
 pub mod content_failure;
+pub mod content_selection;
 pub mod env_cell_source;
 pub mod explorer_entity_delivery;
 pub mod explorer_entity_driver;

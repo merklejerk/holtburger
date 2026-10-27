@@ -1,0 +1,217 @@
+{
+  "packages": {
+    "v8": "130.0.7",
+    "deno_core_icudata": "0.74.0"
+  },
+  "icuData": {
+    "repository": "https://chromium.googlesource.com/chromium/deps/icu",
+    "revision": "9408c6fd4a39e6fef0e1c4077602e1c83b15f3fb",
+    "path": "common/icudtl.dat",
+    "gitBlobSha1": "331d2f39dc500327bf138b4f3f1e5105da384932"
+  },
+  "files": [
+    {
+      "component": "abseil",
+      "path": "licenses/native/abseil/LICENSE",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/src/third_party/abseil-cpp/+/1f7e21e34c3807a8841c9562cfc8b3213eb50bfc/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "c79a7fea0e3cac04cd43f20e7b648e5a0ff8fa5344e644b0ee09ca1162b62747"
+    },
+    {
+      "component": "fast-float",
+      "path": "licenses/native/fast-float/LICENSE-APACHE",
+      "sourceUrl": "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float/+/3e57d8dcfb0a04b5a8a26b486b54490a2e9b310f/LICENSE-APACHE",
+      "encoding": "utf-8",
+      "sha256": "097a889aa954d04e088b790b10a4014d6189561d0a6013935a73ce3d4ddaaf06"
+    },
+    {
+      "component": "fast-float",
+      "path": "licenses/native/fast-float/LICENSE-BOOST",
+      "sourceUrl": "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float/+/3e57d8dcfb0a04b5a8a26b486b54490a2e9b310f/LICENSE-BOOST",
+      "encoding": "utf-8",
+      "sha256": "8d8291caf1cee26d23acf3eb67c9f9a2d58f1c681b16a4fbe8cbfb9e3c0b5a9b"
+    },
+    {
+      "component": "fast-float",
+      "path": "licenses/native/fast-float/LICENSE-MIT",
+      "sourceUrl": "https://chromium.googlesource.com/external/github.com/fastfloat/fast_float/+/3e57d8dcfb0a04b5a8a26b486b54490a2e9b310f/LICENSE-MIT",
+      "encoding": "utf-8",
+      "sha256": "e562f3f974ced7e69dd1db77b820b36bcf8f30377f1aa105723fba449c53c4e6"
+    },
+    {
+      "component": "fp16",
+      "path": "licenses/native/fp16/LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/Maratyszcza/FP16/0a92994d729ff76a58f692d3028ca1b64b145d91/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf"
+    },
+    {
+      "component": "icu",
+      "path": "licenses/native/icu/LICENSE",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/deps/icu/+/9408c6fd4a39e6fef0e1c4077602e1c83b15f3fb/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "17510cf7a58b4879b887ec05a45d72cf1b73544dd9ec7e72f20110ed104229ee"
+    },
+    {
+      "component": "icu",
+      "path": "licenses/native/icu/license.html",
+      "sourceUrl": "https://chromium.googlesource.com/chromium/deps/icu/+/9408c6fd4a39e6fef0e1c4077602e1c83b15f3fb/license.html",
+      "encoding": "utf-8",
+      "sha256": "c62d7697c03979f5056d28b338fafc7a1152820f7b379adf4a9d88cd37160f96"
+    },
+    {
+      "component": "libcxx",
+      "path": "licenses/native/libcxx/LICENSE.TXT",
+      "sourceUrl": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxx/+/50ab693ecb611942ce4440d8c9ed707ee65ed5e8/LICENSE.TXT",
+      "encoding": "utf-8",
+      "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b"
+    },
+    {
+      "component": "libcxxabi",
+      "path": "licenses/native/libcxxabi/LICENSE.TXT",
+      "sourceUrl": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libcxxabi/+/29b2e9a0f48688da116692cb04758393053d269c/LICENSE.TXT",
+      "encoding": "utf-8",
+      "sha256": "e2b35be49f7284a45b7baca8fc7b3ab7440e7902392b2528a457816b5bb2a15c"
+    },
+    {
+      "component": "libunwind",
+      "path": "licenses/native/libunwind/LICENSE.TXT",
+      "sourceUrl": "https://chromium.googlesource.com/external/github.com/llvm/llvm-project/libunwind/+/dc70138c3e68e2f946585f134e20815851e26263/LICENSE.TXT",
+      "encoding": "utf-8",
+      "sha256": "b5efebcaca80879234098e52d1725e6d9eb8fb96a19fce625d39184b705f7b6d"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "81680185f0cb339021e3b73714499264de72f33b17cfdb0c14f400de6d95cf0e"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/LICENSE.fdlibm",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/LICENSE.fdlibm",
+      "encoding": "utf-8",
+      "sha256": "e7115e18444dae09d17f361ddc365fb1d342640fe500796209c63f7c80dfae10"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/LICENSE.strongtalk",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/LICENSE.strongtalk",
+      "encoding": "utf-8",
+      "sha256": "6a585a9f466654abc8fc0829d56b1bc987e3a073d31faa03bba37d33640a23cd"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/LICENSE.v8",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/LICENSE.v8",
+      "encoding": "utf-8",
+      "sha256": "4af93c12062c58058378de2397dc1c92bbff9ddfb1d583a01c84127557ce97ca"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/src__third_party__siphash__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/src/third_party/siphash/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "36ffd9dc085d529a7e60e1276d73ae5a030b020313e6c5408593a6ae2af39673"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/src__third_party__utf8-decoder__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/src/third_party/utf8-decoder/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "3f712e5fbdfdbd5ee7d9b8c8152580220df55de47f4eba2f26c95c4de19ad096"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/src__third_party__valgrind__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/src/third_party/valgrind/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "ebf25b8ce59c9e8883acd1ca75b6fc121937ca034f666c4077d2be739d2e1622"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/src__third_party__vtune__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/src/third_party/vtune/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "cfe7599e45f340a35b4635090382897ca1526bc49b5e1889047f0168d131c415"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/third_party__colorama__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/third_party/colorama/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "15137d6c822e3ab097093a33c3a39a9df699f373f6438867ad534ff60762a947"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/third_party__fp16__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/third_party/fp16/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "c91377adafa2f498211a4fe017788e20c38892124673860f068f2919c289193d"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/third_party__glibc__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/third_party/glibc/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/third_party__highway__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/third_party/highway/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "43070e2d4e532684de521b885f385d0841030efa2b1a20bafb76133a5e1379c1"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/third_party__inspector_protocol__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/third_party/inspector_protocol/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "450ebb9e9e50c2809d9ca581931fc8946d8d5aa0c8c35aae9ac471342fe4a88e"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/third_party__jsoncpp__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/third_party/jsoncpp/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "76c45ece83a26117f86f4e349e7df118708e061e87225328fb478ce1e8b3eb86"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/third_party__re2__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/third_party/re2/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "6040cda75d90b1738292a631d89934c411ef7ffd543c4d6a1b7edfc8edf29449"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/third_party__test262-harness__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/third_party/test262-harness/LICENSE",
+      "encoding": "windows-1252",
+      "sha256": "6f773009a428850c799150b7e0f1806796486dc40302aac5c2fbf4d69a6e1839"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/third_party__v8__builtins__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/third_party/v8/builtins/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "b9a6d9320b8f2693e8d41e496ce56caadacaddcca9be2a64a61749278f425cf2"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/third_party__v8__codegen__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/third_party/v8/codegen/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "17e4f539024be2749ee729d1e2f01d24cef12ece8c9bf18e91a4349be29c80bf"
+    },
+    {
+      "component": "v8",
+      "path": "licenses/native/v8/third_party__wasm-api__LICENSE",
+      "sourceUrl": "https://raw.githubusercontent.com/denoland/v8/da24147866cee8f676686056f481734c57e8a8df/third_party/wasm-api/LICENSE",
+      "encoding": "utf-8",
+      "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08"
+    }
+  ]
+}

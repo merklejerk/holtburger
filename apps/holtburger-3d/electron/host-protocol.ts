@@ -272,10 +272,10 @@ export class SidecarHostClient {
 	#rejectConnected!: (reason: unknown) => void;
 	#shutdown: Promise<void> | undefined;
 	#failure: SidecarProtocolError | undefined;
-	#contentLocation: string | undefined;
+	/** Both facts become available atomically when the versioned handshake is accepted. */
+	#identity: { contentLocation: string; version: string } | undefined;
 	#latestContentFailure: ContentFailure | undefined;
 	readonly #contentListeners = new Set<(failure: ContentFailure) => void>();
-	#handshakeComplete = false;
 	readonly #handshakeTimeout: ReturnType<typeof setTimeout>;
 
 	constructor(process: SidecarProcessLike, expectedMode?: HostMode) {
@@ -333,9 +333,16 @@ export class SidecarHostClient {
 
 	/** Canonical selection identity becomes available after a successful handshake. */
 	get contentLocation(): string {
-		if (this.#contentLocation === undefined)
+		if (this.#identity === undefined)
 			throw new Error("Host content is not initialized");
-		return this.#contentLocation;
+		return this.#identity.contentLocation;
+	}
+
+	/** Packaged-host version used by release verification after connect completes. */
+	get hostVersion(): string {
+		if (this.#identity === undefined)
+			throw new Error("Host is not initialized");
+		return this.#identity.version;
 	}
 
 	/** Register synchronously before connect; replay any diagnostic already received. */
@@ -411,7 +418,7 @@ export class SidecarHostClient {
 
 	async #stop(): Promise<void> {
 		if (this.#closed) return;
-		if (!this.#handshakeComplete || this.#failure !== undefined) {
+		if (this.#identity === undefined || this.#failure !== undefined) {
 			this.#process.kill();
 			await this.#waitForClose();
 			return;
@@ -508,7 +515,7 @@ export class SidecarHostClient {
 			for (const frame of frames) {
 				if (frame.kind === "startup_failed") {
 					if (
-						this.#handshakeComplete ||
+						this.#identity !== undefined ||
 						frame.protocol_version !== PROTOCOL_VERSION
 					) {
 						this.#fail(
@@ -524,7 +531,7 @@ export class SidecarHostClient {
 					return;
 				}
 				if (frame.kind === "handshake") {
-					if (this.#handshakeComplete) {
+					if (this.#identity !== undefined) {
 						this.#fail(
 							new SidecarProtocolError(
 								"duplicate_handshake",
@@ -561,13 +568,15 @@ export class SidecarHostClient {
 						kind: "handshake_ack",
 						protocol_version: PROTOCOL_VERSION,
 					});
-					this.#handshakeComplete = true;
-					this.#contentLocation = frame.content_location;
+					this.#identity = {
+						contentLocation: frame.content_location,
+						version: frame.host_version,
+					};
 					clearTimeout(this.#handshakeTimeout);
 					this.#resolveConnected();
 					continue;
 				}
-				if (!this.#handshakeComplete) {
+				if (this.#identity === undefined) {
 					this.#fail(
 						new SidecarProtocolError(
 							"handshake_required",

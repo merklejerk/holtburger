@@ -1,0 +1,275 @@
+name: Alpha Release Candidate
+
+on:
+  push:
+    branches: [3d-next]
+    tags: ['alpha-[0-9]*']
+  pull_request:
+    branches: [3d-next]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: alpha-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  plan:
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      commit: ${{ steps.identity.outputs.commit }}
+      matrix: ${{ steps.identity.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.95.0
+          components: rustfmt
+      - name: Resolve one clean source identity and native matrix
+        id: identity
+        run: python .github/scripts/alpha_release.py plan
+      - name: Check release tooling
+        run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate notices for all native targets
+        run: |
+          VERSION=$(python .github/scripts/generate_notices.py tool-version)
+          cargo install --locked --features cli --version "$VERSION" cargo-about
+          python .github/scripts/generate_notices.py generate --output .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alpha-notices
+          path: .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html
+          if-no-files-found: error
+
+  native:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOLTBURGER_SOURCE_REVISION: ${{ needs.plan.outputs.commit }}
+      HOLTBURGER_SOURCE_MODIFIED: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.1
+          cache: npm
+          cache-dependency-path: apps/holtburger-3d/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.95.0
+          components: clippy
+          targets: ${{ matrix.triple }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: alpha-notices
+          path: .holtburger-local/alpha-notices
+      - name: Fetch pinned alpha micro content
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/fetch_alpha_content.py .holtburger-local/alpha-content
+      - name: Test affected Rust packages
+        run: cargo test --locked -p holtburger-dat -p holtburger-content -p holtburger-core -p holtburger-cli -p holtburger-3d-host --all-targets
+      - name: Deny Rust lint warnings
+        if: runner.os == 'Linux'
+        run: |
+          cargo clippy --locked -p holtburger-dat -p holtburger-content -p holtburger-cli -p holtburger-3d-host --all-targets -- -D warnings
+          cargo clippy --locked -p holtburger-debug-harness --bin content_bootstrap -- -D warnings
+      - name: Build only suite executables and the bootstrap probe
+        run: |
+          cargo build --locked --release --target '${{ matrix.triple }}' \
+            -p holtburger-cli --bin tui \
+            -p holtburger-tools --bin dat2hba --bin dat-tool \
+            -p holtburger-3d-host --bin holtburger-3d-host \
+            -p holtburger-debug-harness --bin content_bootstrap
+          SUFFIX=''
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then SUFFIX='.exe'; fi
+          echo "HOLTBURGER_HOST_BIN=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
+          echo "HOLTBURGER_PACKAGE_HOST=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
+          "target/${{ matrix.triple }}/release/content_bootstrap$SUFFIX" .holtburger-local/alpha-content/assets.hba
+      - name: Install frontend dependencies
+        working-directory: apps/holtburger-3d
+        run: npm ci
+      - name: Check frontend, Electron boundary, and branding
+        working-directory: apps/holtburger-3d
+        run: |
+          npm run check
+          npm run lint:ts
+          npm run test:ts
+          npm run check:branding
+      - name: Build application output and package the inspected target host
+        working-directory: apps/holtburger-3d
+        run: |
+          npm run build
+          npm run build:electron:main
+          npm run package:built -- --platform=${{ matrix.platform }} --arch=${{ matrix.architecture }}
+          npm run check:package
+          npm run smoke:sidecar
+      - name: Install Linux virtual display
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes xvfb
+      - name: Exercise themes, font decoding, and default-client content recovery
+        working-directory: apps/holtburger-3d
+        run: |
+          PACKAGE="$GITHUB_WORKSPACE/apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}"
+          case "$RUNNER_OS" in
+            macOS) EXECUTABLE="$PACKAGE/holtburger-3d.app/Contents/MacOS/holtburger-3d" ;;
+            Windows) EXECUTABLE="$PACKAGE/holtburger-3d.exe" ;;
+            Linux) EXECUTABLE="$PACKAGE/holtburger-3d" ;;
+            *) exit 1 ;;
+          esac
+          if [[ "$RUNNER_OS" == 'Linux' ]]; then
+            xvfb-run --auto-servernum npm run probe:user-themes:built
+            xvfb-run --auto-servernum node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
+          else
+            npm run probe:user-themes:built
+            node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
+          fi
+      - name: Assemble and inspect the extracted suite
+        run: |
+          python .github/scripts/alpha_release.py assemble \
+            --target '${{ matrix.triple }}' \
+            --package 'apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}' \
+            --content .holtburger-local/alpha-content \
+            --notices .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html \
+            --output .holtburger-local/alpha-artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alpha-${{ matrix.triple }}
+          path: .holtburger-local/alpha-artifacts/*
+          if-no-files-found: error
+          compression-level: 0
+
+  flatpak:
+    needs: plan
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    env:
+      HOLTBURGER_SOURCE_REVISION: ${{ needs.plan.outputs.commit }}
+      HOLTBURGER_SOURCE_MODIFIED: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.95.0
+          targets: x86_64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/download-artifact@v4
+        with:
+          name: alpha-notices
+          path: .holtburger-local/alpha-notices
+      - name: Fetch pinned alpha micro
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/fetch_alpha_content.py .holtburger-local/alpha-content
+      - name: Build TUI and noninteractive bootstrap probe
+        run: |
+          cargo build --locked --release --target x86_64-unknown-linux-gnu -p holtburger-cli --bin tui -p holtburger-debug-harness --bin content_bootstrap
+          mkdir -p target/release
+          cp target/x86_64-unknown-linux-gnu/release/tui target/release/holtburger-cli
+          cp .holtburger-local/alpha-content/assets.hba dats/assets.hba
+      - name: Install Flatpak tooling and runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes flatpak flatpak-builder dbus-x11
+          sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install --noninteractive --assumeyes flathub org.freedesktop.Platform/x86_64/24.08 org.freedesktop.Sdk/x86_64/24.08
+      - name: Add alpha notices to the shared Flatpak recipe
+        run: |
+          python .github/scripts/alpha_release.py flatpak-manifest \
+            --notices .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html \
+            --output .holtburger-local/alpha-flatpak.json
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: holtburger-cli.flatpak
+          manifest-path: .holtburger-local/alpha-flatpak.json
+          cache: true
+      - name: Load production bootstrap inside the Flatpak runtime
+        run: |
+          flatpak install --user --noninteractive --assumeyes holtburger-cli.flatpak
+          dbus-run-session -- flatpak run \
+            --filesystem="$GITHUB_WORKSPACE/target/x86_64-unknown-linux-gnu/release:ro" \
+            --command="$GITHUB_WORKSPACE/target/x86_64-unknown-linux-gnu/release/content_bootstrap" \
+            io.github.merklejerk.holtburger-cli /app/share/holtburger/dats/assets.hba
+          EXPECTED=$(sha256sum .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html)
+          ACTUAL=$(dbus-run-session -- flatpak run --command=sha256sum io.github.merklejerk.holtburger-cli /app/share/licenses/holtburger/THIRD_PARTY_NOTICES.html)
+          test "${ACTUAL%% *}" = "${EXPECTED%% *}"
+          EXPECTED=$(sha256sum .holtburger-local/alpha-content/assets.hba)
+          ACTUAL=$(dbus-run-session -- flatpak run --command=sha256sum io.github.merklejerk.holtburger-cli /app/share/holtburger/dats/assets.hba)
+          test "${ACTUAL%% *}" = "${EXPECTED%% *}"
+      - name: Stage Flatpak and standalone micro
+        run: |
+          mkdir -p .holtburger-local/alpha-artifacts
+          cp holtburger-cli.flatpak '.holtburger-local/alpha-artifacts/holtburger-cli-${{ needs.plan.outputs.version }}-x86_64.flatpak'
+          cp .holtburger-local/alpha-content/micro-hba.zip '.holtburger-local/alpha-artifacts/holtburger-micro-${{ needs.plan.outputs.version }}.zip'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alpha-flatpak
+          path: .holtburger-local/alpha-artifacts/*
+          if-no-files-found: error
+          compression-level: 0
+
+  stage:
+    needs: [plan, native, flatpak]
+    if: startsWith(github.ref, 'refs/tags/alpha-')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      actions: read
+    env:
+      HOLTBURGER_SOURCE_REVISION: ${{ needs.plan.outputs.commit }}
+      HOLTBURGER_SOURCE_MODIFIED: '0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: alpha-*
+          path: .holtburger-local/alpha-artifacts
+          merge-multiple: true
+      - name: Stage the complete draft for final user native verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALPHA_TAG: ${{ github.ref_name }}
+        run: python .github/scripts/alpha_release.py stage .holtburger-local/alpha-artifacts "$ALPHA_TAG"

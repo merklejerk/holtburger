@@ -88,7 +88,7 @@ async function launch(mode, args) {
 		"--enable-unsafe-swiftshader",
 	];
 	const gameArgs = [
-		mode,
+		...(mode === "explorer" ? ["explorer"] : []),
 		...args,
 		...(mode === "client" ? ["--account", "content-probe", "--port", "1"] : []),
 	];
@@ -113,13 +113,15 @@ async function launch(mode, args) {
 			APPDATA: config,
 			LOCALAPPDATA: join(directory, "local"),
 			HOLTBURGER_ELECTRON_DEV_ORIGIN: origin,
-			HOLTBURGER_HOST_BIN: join(
-				workspace,
-				"target/debug",
-				process.platform === "win32"
-					? "holtburger-3d-host.exe"
-					: "holtburger-3d-host",
-			),
+			HOLTBURGER_HOST_BIN:
+				process.env.HOLTBURGER_HOST_BIN ??
+				join(
+					workspace,
+					"target/debug",
+					process.platform === "win32"
+						? "holtburger-3d-host.exe"
+						: "holtburger-3d-host",
+				),
 		},
 		stdio: ["ignore", "pipe", "pipe"],
 	});

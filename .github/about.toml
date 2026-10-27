@@ -1,0 +1,132 @@
+# Notices cover runtime and build dependencies across the alpha's four native targets.
+# SPDX alternatives are selected in this order; original attribution text is retained.
+accepted = [
+  "Apache-2.0", "MIT", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unicode-DFS-2016",
+  "Zlib", "BSD-2-Clause", "MPL-2.0", "WTFPL", "CC0-1.0", "MIT-0", "BSL-1.0",
+  "bzip2-1.0.6", "Unlicense", "0BSD", "AGPL-3.0", "AGPL-3.0-only", "OpenSSL",
+]
+ignore-dev-dependencies = true
+workarounds = ["ring", "rustls", "rustix"]
+targets = [
+  "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc",
+  "aarch64-apple-darwin", "x86_64-apple-darwin",
+]
+
+# Original notice from Nugine/simd at 220c2e5f615d897b999aba46acdce3d281ef4ca4.
+[base64-simd.clarify]
+license = "MIT"
+[[base64-simd.clarify.git]]
+path = "LICENSE"
+checksum = "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d"
+
+# Original notice from Nugine/simd at f3381a842a6b86f4eafd5ac587f8081cd7e9bb2f.
+[simd-abstraction.clarify]
+license = "MIT"
+[[simd-abstraction.clarify.git]]
+path = "LICENSE"
+checksum = "71674605ec4c087fe9eb534e3e4f9e26eb2e4aabcd76a29fd156c6a844d44b3d"
+
+# Original notice from denoland/deno_core at eb0cfb120535cf6b002759588924f58edd8bd279.
+[deno_core.clarify]
+license = "MIT"
+[[deno_core.clarify.git]]
+path = "LICENSE.md"
+checksum = "ee79dd206fb5aa60a7485104ea78ba2a78935d6586cbb83c616db2579543f756"
+
+# Original notice from denoland/deno_core at eb0cfb120535cf6b002759588924f58edd8bd279.
+[deno_ops.clarify]
+license = "MIT"
+[[deno_ops.clarify.git]]
+path = "LICENSE.md"
+checksum = "ee79dd206fb5aa60a7485104ea78ba2a78935d6586cbb83c616db2579543f756"
+
+# Original notice from denoland/deno_core at eb0cfb120535cf6b002759588924f58edd8bd279.
+[serde_v8.clarify]
+license = "MIT"
+[[serde_v8.clarify.git]]
+path = "LICENSE.md"
+checksum = "ee79dd206fb5aa60a7485104ea78ba2a78935d6586cbb83c616db2579543f756"
+
+# Original notice from denoland/deno_error at 228834723b7add645ea98763f6fdbbe0982816fa.
+[deno_error_macro.clarify]
+license = "MIT"
+[[deno_error_macro.clarify.git]]
+path = "LICENSE"
+checksum = "e70487678a799f089f7f78db7302e779d5dc7320ccd02cc13f494a4fb8b88300"
+
+# Original notice from denoland/rusty_v8 at 7cd928aa442759f9f09c57952a902641536e5335.
+[v8.clarify]
+license = "MIT"
+[[v8.clarify.git]]
+path = "LICENSE"
+checksum = "1c6356fb751d45f0c53093ebf8a7f5e580e802f51999178e19d60f3ec39e147d"
+
+# Original notice from iShape-Rust/iKeySort at 10a9a72f0cdae785dd2185896eed138b09945515.
+[i_key_sort.clarify]
+license = "MIT"
+[[i_key_sort.clarify.git]]
+path = "LICENSE"
+checksum = "47e00f18b265d350a2860d3899f17dd1c7689b966545e929df8ffa7033f5acdc"
+
+# Original notice from jam1garner/binrw at 27e35354f1c85d6aa47fb3ff1a1d3a493bd92e89.
+[binrw.clarify]
+license = "MIT"
+[[binrw.clarify.git]]
+path = "LICENSE"
+checksum = "08159509fe99d146416fe110053a7360ddfccbba5f0c8f955bdbda025d4d2a20"
+
+# Original notice from jam1garner/binrw at 27e35354f1c85d6aa47fb3ff1a1d3a493bd92e89.
+[binrw_derive.clarify]
+license = "MIT"
+[[binrw_derive.clarify.git]]
+path = "LICENSE"
+checksum = "08159509fe99d146416fe110053a7360ddfccbba5f0c8f955bdbda025d4d2a20"
+
+# Original notice from ratatui/ratatui at 0a2a7c0363a4806b0cf05c1915bf7cdd438f756c.
+[ratatui-core.clarify]
+license = "MIT"
+[[ratatui-core.clarify.git]]
+path = "LICENSE"
+checksum = "50eb43e8d742c9c61a9391e42b2184fce54dbd1893a1bb1c85b8c9ee217ab1f5"
+
+# Original notice from ratatui/ratatui at 0a2a7c0363a4806b0cf05c1915bf7cdd438f756c.
+[ratatui-crossterm.clarify]
+license = "MIT"
+[[ratatui-crossterm.clarify.git]]
+path = "LICENSE"
+checksum = "50eb43e8d742c9c61a9391e42b2184fce54dbd1893a1bb1c85b8c9ee217ab1f5"
+
+# Original notice from ratatui/ratatui at 0a2a7c0363a4806b0cf05c1915bf7cdd438f756c.
+[ratatui-widgets.clarify]
+license = "MIT"
+[[ratatui-widgets.clarify.git]]
+path = "LICENSE"
+checksum = "50eb43e8d742c9c61a9391e42b2184fce54dbd1893a1bb1c85b8c9ee217ab1f5"
+
+# Original notice from ratatui/ratatui at 0a2a7c0363a4806b0cf05c1915bf7cdd438f756c.
+[ratatui.clarify]
+license = "MIT"
+[[ratatui.clarify.git]]
+path = "LICENSE"
+checksum = "50eb43e8d742c9c61a9391e42b2184fce54dbd1893a1bb1c85b8c9ee217ab1f5"
+
+# Published combined notice retains the native-library attributions.
+[aws-lc-rs.clarify]
+license = "ISC AND (Apache-2.0 OR ISC)"
+[[aws-lc-rs.clarify.files]]
+path = "LICENSE"
+checksum = "b50b376e7d24a0598488b730c3034ffcd0b58dd36c0913a24b9903a3cfd04bf7"
+
+# Published combined notice retains the native-library attributions.
+[aws-lc-sys.clarify]
+license = "ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0)"
+[[aws-lc-sys.clarify.files]]
+path = "LICENSE"
+checksum = "728536b4160e051f86d7c9c388f704866b3d512cd7df97ac3516c65279523c4e"
+
+# libm keeps its MIT notice in the repository subtree.
+[libm.clarify]
+license = "MIT"
+[[libm.clarify.git]]
+path = "libm/LICENSE.txt"
+checksum = "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"

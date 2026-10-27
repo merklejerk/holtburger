@@ -36,6 +36,8 @@ struct ContentRepositoryDiscovery {
     explicit_path: Option<PathBuf>,
     environment_path: Option<PathBuf>,
     portable_path: PathBuf,
+    /// Caller-owned portable installation, after the invocation directory and before user data.
+    bundled_path: Option<PathBuf>,
     platform_data_path: Option<PathBuf>,
 }
 
@@ -45,6 +47,7 @@ impl ContentRepositoryDiscovery {
             explicit_path,
             environment_path: std::env::var_os(HOLTBURGER_DATS_ENV).map(PathBuf::from),
             portable_path: PathBuf::from("./dats"),
+            bundled_path: None,
             platform_data_path: platform_content_path(),
         }
     }
@@ -57,8 +60,11 @@ impl ContentRepositoryDiscovery {
                 if self.portable_path.exists() {
                     self.portable_path.clone()
                 } else {
-                    self.platform_data_path
-                        .clone()
+                    self.bundled_path
+                        .as_ref()
+                        .filter(|path| path.exists())
+                        .cloned()
+                        .or_else(|| self.platform_data_path.clone())
                         .unwrap_or_else(|| self.portable_path.clone())
                 }
             })
@@ -146,7 +152,22 @@ impl ContentRepository {
     /// `HOLTBURGER_DATS`, `./dats`, then the platform data directory. A selected directory mounts
     /// every HBA in that directory; any other selected path resolves as an HBA file or base path.
     pub fn discover(explicit_path: Option<PathBuf>) -> Result<Self> {
-        let path = ContentRepositoryDiscovery::from_system(explicit_path).resolve_path();
+        Self::open_discovered(ContentRepositoryDiscovery::from_system(explicit_path))
+    }
+
+    /// Adds an app-supplied portable directory after explicit/environment/working-directory paths.
+    /// Executable layout is owned by the frontend, not the shared content layer.
+    pub fn discover_with_portable(
+        explicit_path: Option<PathBuf>,
+        bundled_path: PathBuf,
+    ) -> Result<Self> {
+        let mut discovery = ContentRepositoryDiscovery::from_system(explicit_path);
+        discovery.bundled_path = Some(bundled_path);
+        Self::open_discovered(discovery)
+    }
+
+    fn open_discovered(discovery: ContentRepositoryDiscovery) -> Result<Self> {
+        let path = discovery.resolve_path();
         if path.is_dir() {
             Self::from_hba_dir(path)
         } else {
@@ -402,11 +423,13 @@ mod tests {
         let platform_data_path = root.path().join("platform-dats");
         let explicit_path = root.path().join("explicit.hba");
         let environment_path = root.path().join("environment.hba");
+        let bundled_path = root.path().join("bundle/dats");
 
         let mut discovery = ContentRepositoryDiscovery {
             explicit_path: Some(explicit_path.clone()),
             environment_path: Some(environment_path.clone()),
             portable_path: portable_path.clone(),
+            bundled_path: Some(bundled_path.clone()),
             platform_data_path: Some(platform_data_path.clone()),
         };
         assert_eq!(discovery.resolve_path(), explicit_path);
@@ -416,6 +439,9 @@ mod tests {
 
         discovery.environment_path = None;
         assert_eq!(discovery.resolve_path(), platform_data_path);
+
+        std::fs::create_dir_all(&bundled_path).unwrap();
+        assert_eq!(discovery.resolve_path(), bundled_path);
 
         std::fs::create_dir(&portable_path).expect("portable directory should be created");
         assert_eq!(discovery.resolve_path(), portable_path);

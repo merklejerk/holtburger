@@ -32,6 +32,7 @@
 	const CONTROLLED_ARROW_HALF_WIDTH = 5;
 	/** Generous pointer target around deliberately small map markers. */
 	const BLIP_HIT_RADIUS = 8;
+	const EMPTY_ALERT_GUIDS: ReadonlySet<number> = new Set();
 	/** Gap between a marker and its selected-identity ring. */
 	const SELECTED_BLIP_RING_GAP = 3;
 	/** Ignore click-scale pointer jitter before detaching the viewed centre. */
@@ -41,9 +42,11 @@
 <script lang="ts">
 	import { observeUiTheme } from "./ui-theme";
 	import {
-		readMinimapTrackingAppearance,
-		type MinimapTrackingAppearance,
-	} from "./minimap-tracking-appearance";
+		readMinimapAlertMarker,
+		drawMinimapAlertMarker,
+		MINIMAP_ALERT_ICON_SIZE,
+		type MinimapAlertMarker,
+	} from "./minimap-alert-marker";
 	import MinimapResetIcon from "../assets/icons/minimap-reset.svg?component";
 	import MapWaypointDirectionIcon from "../assets/icons/map-waypoint-direction.svg?component";
 	import MapWaypointPinIcon from "../assets/icons/map-waypoint-pin.svg?component";
@@ -191,7 +194,7 @@
 		onFooterExtentChange,
 	}: Props = $props();
 	let minimapElement: HTMLElement;
-	let trackingAppearance: MinimapTrackingAppearance | null = null;
+	let alertMarker: MinimapAlertMarker | null = null;
 	let waypointMarker: SVGGElement;
 	let waypointPointer: SVGGElement;
 	let waypointRow: HTMLButtonElement;
@@ -285,7 +288,7 @@
 
 	onMount(() => {
 		const stopTheme = observeUiTheme(minimapElement, () => {
-			trackingAppearance = readMinimapTrackingAppearance(minimapElement);
+			alertMarker = readMinimapAlertMarker(minimapElement);
 		});
 		const element = footerElement;
 		const observer = new ResizeObserver(() => {
@@ -444,11 +447,26 @@
 			frame.presentedEntities(),
 			overlay,
 			frame.subject?.kind === "controlled-entity" ? frame.subject.guid : null,
+			frame.trackedGuids ?? EMPTY_ALERT_GUIDS,
 		)) {
 			// Clip space is [-1, 1] with +Y up; canvas pixels run down from the top-left.
 			const x = ((blip.clipX + 1) / 2) * size;
 			const y = ((1 - blip.clipY) / 2) * size;
-			drawTrackedBlipRing(context, frame, blip.guid, x, y);
+			if (blip.appearance.category === "alert") {
+				if (alertMarker === null)
+					throw new Error("Minimap alert marker is not initialized.");
+				drawMinimapAlertMarker(context, alertMarker, x, y);
+				hitTargets.push({ guid: blip.guid, name: blip.name, x, y });
+				drawSelectedBlipRing(
+					context,
+					frame,
+					blip.guid,
+					x,
+					y,
+					MINIMAP_ALERT_ICON_SIZE / 2,
+				);
+				continue;
+			}
 			if (blip.span !== null && blip.appearance.category !== "controlled") {
 				const startX = ((blip.span.startX + 1) * size) / 2;
 				const startY = ((1 - blip.span.startY) * size) / 2;
@@ -517,49 +535,17 @@
 		reconcileBlipHover();
 	}
 
-	/** Tracking adds an outer decoration without changing the existing selection primitives. */
-	function drawTrackedBlipRing(
-		context: CanvasRenderingContext2D,
-		frame: MinimapFrame,
-		guid: number,
-		x: number,
-		y: number,
-	): void {
-		if (frame.trackedGuids?.has(guid) && trackingAppearance !== null) {
-			context.save();
-			context.beginPath();
-			context.arc(
-				x,
-				y,
-				MAP_BLIP_RADIUS_PIXELS + trackingAppearance.gap,
-				0,
-				Math.PI * 2,
-			);
-			context.setLineDash(trackingAppearance.dash);
-			context.lineWidth = trackingAppearance.width;
-			context.strokeStyle = trackingAppearance.color;
-			context.stroke();
-			context.restore();
-		}
-	}
-
 	function drawSelectedBlipRing(
 		context: CanvasRenderingContext2D,
 		frame: MinimapFrame,
 		guid: number,
 		x: number,
 		y: number,
+		radius = Math.max(CONTROLLED_ARROW_HALF_WIDTH, MAP_BLIP_RADIUS_PIXELS),
 	): void {
 		if (frame.selectedGuid !== guid) return;
 		context.beginPath();
-		context.arc(
-			x,
-			y,
-			Math.max(CONTROLLED_ARROW_HALF_WIDTH, MAP_BLIP_RADIUS_PIXELS) +
-				SELECTED_BLIP_RING_GAP,
-			0,
-			Math.PI * 2,
-		);
+		context.arc(x, y, radius + SELECTED_BLIP_RING_GAP, 0, Math.PI * 2);
 		context.lineWidth = 2;
 		context.strokeStyle = "rgba(255, 244, 128, 0.95)";
 		context.stroke();

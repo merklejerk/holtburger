@@ -206,7 +206,7 @@ export class ClientNearby {
 					guid,
 					facts: entity.nearby,
 					corpse: entity.corpse,
-					location: nearbyLocation(pose),
+					location: this.#location(pose),
 					distance:
 						player === null
 							? null
@@ -292,6 +292,16 @@ export class ClientNearby {
 			: encounter.absentAt === null;
 	}
 
+	/** Scene demand already carries the profile-resolved distinction between mixed owners and dungeons. */
+	#location(pose: DynamicEntityWorldPlacement) {
+		return nearbyLocation(
+			pose,
+			this.#sceneMembership?.surfaceMapEligible(
+				dynamicEntityResidency(pose),
+			) === true,
+		);
+	}
+
 	#poses(): Map<number, DynamicEntityWorldPlacement> {
 		const poses = new Map<number, DynamicEntityWorldPlacement>();
 		for (const entity of this.#options.session.mirror.currentEntities()) {
@@ -345,7 +355,7 @@ export class ClientNearby {
 				tracked.add(guid);
 				if (!encounter.detected) {
 					if (notifications === "announce")
-						this.#queue(entity.nearby.name, nearbyLocation(pose).text);
+						this.#queue(entity.nearby.name, this.#location(pose).text);
 					// Silent matches seed the encounter too, so a subsequent world
 					// update cannot announce an entity already covered by the edit.
 					encounter.detected = true;

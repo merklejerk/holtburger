@@ -32,11 +32,11 @@ export const NEARBY_FILTER_OPTIONS = NEARBY_ENTITY_CATEGORIES.map(
 	(category) => [category, NEARBY_CATEGORY_DETAILS[category].label] as const,
 );
 
-/** Prepared location with honest indoor text and an outdoor-only waypoint. */
+/** Prepared location with surface coordinates when resolved, otherwise cell-local text. */
 export interface NearbyLocation {
 	/** Captured text, reused by details and chat without reformatting a moving target. */
 	readonly text: string;
-	/** No surface-map intent is fabricated for interior cells. */
+	/** Surface navigation is available only for a resolved surface location. */
 	readonly waypoint: MapWaypointTarget | null;
 }
 
@@ -109,12 +109,13 @@ export function filterNearbyRows(
 		});
 }
 
-/** Format accepted AC coordinates at the source; interior cells retain cell-local meaning. */
+/** Format accepted AC coordinates using owner-resolved surface eligibility. */
 export function nearbyLocation(
 	placement: DynamicEntityWorldPlacement,
+	surfaceMapEligible: boolean,
 ): NearbyLocation {
 	const pose = placement.pose;
-	if ((pose.landblockId & 0xffff) >= 0x100) {
+	if (!surfaceMapEligible) {
 		const { x, y, z } = pose.coords;
 		return {
 			text: `Cell 0x${pose.landblockId.toString(16).padStart(8, "0")} (${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)})`,

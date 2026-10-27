@@ -20,6 +20,36 @@ describe("entity alert matching", () => {
 	])("glob %s against %s", (pattern, name, expected) => {
 		expect(compileEntityAlert({ mode: "glob", pattern })(name)).toBe(expected);
 	});
+	it.each([
+		[" golem ", "Diamond GOLEM", true],
+		["golem", "Golem", true],
+		["golem", "Drudge", false],
+		["*golem?", "Diamond *Golem? Guardian", true],
+		["*golem?", "Diamond Golem!", false],
+		["雪", "雪狐", true],
+	])("substring %s against %s", (pattern, name, expected) => {
+		expect(compileEntityAlert({ mode: "substring", pattern })(name)).toBe(
+			expected,
+		);
+	});
+	it("persists substring rules and rejects equivalent substring duplicates", () => {
+		const rule: EntityAlertRule = {
+			id: "one",
+			enabled: true,
+			match: { mode: "substring", pattern: "Golem" },
+		};
+		expect(entityAlertRulesSchema.parse([rule])).toEqual([rule]);
+		expect(
+			entityAlertRulesSchema.safeParse([
+				rule,
+				{
+					...rule,
+					id: "two",
+					match: { mode: "substring", pattern: " golem " },
+				},
+			]).success,
+		).toBe(false);
+	});
 	it("preserves literal wildcard characters in exact-name additions", () => {
 		const matches = compileEntityAlert({ mode: "exact", pattern: "*Golem?" });
 		expect(matches("*golem?")).toBe(true);

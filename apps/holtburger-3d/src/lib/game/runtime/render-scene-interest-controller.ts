@@ -16,6 +16,8 @@ import type { ResolvedSceneInterestTarget } from "./scene-target";
 export interface SceneInterestMembership {
 	/** Null means that no scene target has been established. */
 	contains(residency: SceneResidency): boolean | null;
+	/** Surface-map eligibility for admitted residency; null while outside known scene demand. */
+	surfaceMapEligible(residency: SceneResidency): boolean | null;
 	/** Explicit interest transitions; never emitted at render cadence. */
 	subscribe(listener: () => void): () => void;
 }
@@ -102,6 +104,12 @@ export class RenderSceneInterestController implements SceneInterestMembership {
 				? LandblockLayerKind.Terrain
 				: LandblockLayerKind.EnvCells;
 		return this.#state.interest.get(residency.landblockId)?.has(layer) === true;
+	}
+
+	/** Outdoor EnvCell demand is admitted only for profile-classified mixed owners. */
+	surfaceMapEligible(residency: SceneResidency): boolean | null {
+		if (this.contains(residency) !== true) return null;
+		return this.#state.kind === "outdoor";
 	}
 
 	subscribe(listener: () => void): () => void {

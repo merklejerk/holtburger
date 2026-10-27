@@ -438,11 +438,9 @@ with the stable category key, such as `monster` or `door-or-switch`. For example
 ```
 
 Minimap rim controls share `--ui-minimap-button-size` and
-`--ui-minimap-button-radius`. Tracked rings use `--ui-minimap-tracked-color`,
-`--ui-minimap-tracked-width`, `--ui-minimap-tracked-gap`,
-`--ui-minimap-tracked-dash-length`, and `--ui-minimap-tracked-dash-gap`.
-Color values can reference palette variables; lengths support CSS units and
-`calc()`. Width must be positive; spacing and dash lengths may be zero.
+`--ui-minimap-button-radius`. Alert matches replace ordinary entity markers with
+one filled star, painted using `--ui-minimap-alert-color`. The color can reference
+palette variables.
 The existing theme loader's change notification resolves these values for
 Canvas2D without recreating the minimap or reading CSS each frame.
 

@@ -63,6 +63,25 @@ describe("RenderSceneInterestController", () => {
 		controller.follow(outdoor("0xda55ffff"));
 		expect(listener).toHaveBeenCalledTimes(4);
 	});
+	it("resolves surface eligibility for mixed interiors separately from dungeon cells", () => {
+		const controller = new RenderSceneInterestController();
+		const inside = {
+			landblockId: "0xda55ffff",
+			envCellId: "0xda550100",
+		} as const;
+		expect(controller.surfaceMapEligible(inside)).toBeNull();
+		controller.replace({
+			...outdoor(inside.landblockId),
+			radii: { ...RADII, envCellRadius: 0 },
+			ambientOutdoorEnvCellOwners: new Set([inside.landblockId]),
+		});
+		expect(controller.contains(inside)).toBe(true);
+		expect(controller.surfaceMapEligible(inside)).toBe(true);
+		controller.replace(dungeon(inside.landblockId));
+		expect(controller.surfaceMapEligible(inside)).toBe(false);
+		controller.replace(dungeon("0xdb55ffff"));
+		expect(controller.surfaceMapEligible(inside)).toBeNull();
+	});
 	it("rejects invalid policy before changing its state", () => {
 		const controller = new RenderSceneInterestController();
 		const invalid = {

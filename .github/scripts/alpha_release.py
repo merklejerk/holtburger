@@ -87,14 +87,23 @@ def plan() -> None:
     commit, modified = source_identity()
     if modified:
         raise ValueError("Release planning requires a clean source checkout")
-    if os.environ.get("GITHUB_REF_TYPE") == "tag":
-        validate_tag(os.environ["GITHUB_REF_NAME"], commit)
+    tag = ""
+    if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
+        if os.environ["GITHUB_REF"] != "refs/heads/3d-next":
+            raise ValueError("Run the alpha candidate workflow on the 3d-next branch")
+        # Source-owned dates keep retries on later days attached to the same candidate.
+        commit_date = run("git", "show", "-s", "--format=%cs", commit).replace("-", "")
+        tag = f"alpha-{commit_date}-{commit[:9]}"
+    elif os.environ.get("GITHUB_REF_TYPE") == "tag":
+        tag = os.environ["GITHUB_REF_NAME"]
+    if tag:
+        validate_tag(tag, commit)
         subprocess.run(
             ["git", "merge-base", "--is-ancestor", commit, "origin/3d-next"],
             cwd=ROOT, check=True,
         )
     result = {
-        "version": version, "commit": commit,
+        "version": version, "commit": commit, "tag": tag,
         "linux_matrix": {"include": [asdict(target) for target in TARGETS if target.platform == "linux"]},
         "desktop_matrix": {"include": [asdict(target) for target in TARGETS if target.platform != "linux"]},
     }
@@ -104,6 +113,26 @@ def plan() -> None:
                 encoded = json.dumps(value) if isinstance(value, dict) else value
                 output.write(f"{key}={encoded}\n")
     print(json.dumps(result))
+
+
+def create_tag(tag: str) -> None:
+    """Create an immutable lightweight candidate tag; reruns may reuse the same source."""
+    commit, modified = source_identity()
+    if modified:
+        raise ValueError("Candidate tagging requires a clean source checkout")
+    validate_tag(tag, commit)
+    repository = os.environ["GITHUB_REPOSITORY"]
+    ref = f"refs/tags/{tag}"
+    matches = json.loads(run("gh", "api", f"repos/{repository}/git/matching-refs/tags/{tag}"))
+    existing = [entry for entry in matches if entry["ref"] == ref]
+    if existing:
+        target = existing[0]["object"]
+        if target["type"] != "commit" or target["sha"] != commit:
+            raise ValueError("Existing candidate tag does not identify the source commit")
+    else:
+        run("gh", "api", f"repos/{repository}/git/refs", "--method", "POST",
+            "--raw-field", f"ref={ref}", "--raw-field", f"sha={commit}")
+    print(f"Candidate tag ready: {tag}")
 
 
 def executable_architecture(path: Path) -> str:
@@ -558,6 +587,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("plan")
+    tag = commands.add_parser("create-tag")
+    tag.add_argument("tag")
     build = commands.add_parser("assemble")
     build.add_argument("--target", choices=[target.triple for target in TARGETS], required=True)
     build.add_argument("--package", type=Path, required=True)
@@ -592,6 +623,8 @@ def main() -> None:
     arguments = parser.parse_args()
     if arguments.command == "plan":
         plan()
+    elif arguments.command == "create-tag":
+        create_tag(arguments.tag)
     elif arguments.command == "assemble":
         assemble(arguments)
     elif arguments.command == "verify":

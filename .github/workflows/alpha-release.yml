@@ -1,6 +1,7 @@
 name: Alpha Release Candidate
 
 on:
+  workflow_dispatch:
   push:
     tags: ['alpha-[0-9]*']
 
@@ -9,7 +10,7 @@ permissions:
 
 concurrency:
   group: alpha-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,7 +19,10 @@ env:
 jobs:
   plan:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     outputs:
+      tag: ${{ steps.identity.outputs.tag }}
       version: ${{ steps.identity.outputs.version }}
       commit: ${{ steps.identity.outputs.commit }}
       linux_matrix: ${{ steps.identity.outputs.linux_matrix }}
@@ -52,8 +56,15 @@ jobs:
           name: alpha-notices
           path: .github/licenses/THIRD_PARTY_NOTICES.html
           if-no-files-found: error
+      - name: Create the manually requested candidate tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ALPHA_TAG: ${{ steps.identity.outputs.tag }}
+        run: python .github/scripts/alpha_release.py create-tag "$ALPHA_TAG"
 
   validation:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/3d-next'
     uses: ./.github/workflows/alpha-checks.yml
 
   linux:
@@ -213,7 +224,6 @@ jobs:
 
   stage:
     needs: [plan, validation, linux, desktop, flatpak]
-    if: startsWith(github.ref, 'refs/tags/alpha-')
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -237,5 +247,5 @@ jobs:
       - name: Stage the complete draft for final user native verification
         env:
           GH_TOKEN: ${{ github.token }}
-          ALPHA_TAG: ${{ github.ref_name }}
+          ALPHA_TAG: ${{ needs.plan.outputs.tag }}
         run: python .github/scripts/alpha_release.py stage .holtburger-local/alpha-artifacts "$ALPHA_TAG"

@@ -78,7 +78,11 @@
 	{#if inspection.description !== null}<p
 			class="inspection-description inspection-creature-description"
 		>
-			<ClientWaypointText text={inspection.description} {onSetWaypoint} />
+			<ClientWaypointText
+				interactive
+				text={inspection.description}
+				{onSetWaypoint}
+			/>
 		</p>{/if}
 
 	<section class="inspection-vitals" aria-label="Creature vitals">

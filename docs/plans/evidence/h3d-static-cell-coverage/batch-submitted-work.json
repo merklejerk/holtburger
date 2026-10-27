@@ -1,0 +1,2032 @@
+{
+  "provenance": {
+    "date": "2026-10-27",
+    "baseCommit": "d64f31c7ef476805da4582d93ffca6eeb89bc270",
+    "workingTree": "Uncommitted batch-coverage correction; historical admission policies retained only in diagnostics.",
+    "archive": {
+      "path": "/home/cluracan/code/holtburger/dats/assets.hba",
+      "bytes": 634425693,
+      "sha256": "20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7"
+    }
+  },
+  "method": "Same browser and unchanged pose per three-policy comparison; production batch coverage, historical owner-only and island admission policies. No timing/profiling.",
+  "viewport": {
+    "cssHeight": 720,
+    "cssWidth": 1280,
+    "devicePixelRatio": 1,
+    "pixelHeight": 720,
+    "pixelWidth": 1280
+  },
+  "renderScale": 1,
+  "browserErrors": [],
+  "cases": [
+    {
+      "pose": "missing",
+      "projection": "harness",
+      "reportedQuaternion": [0.9997, 0.016, -0.0202, 0.0003],
+      "orientation": {
+        "yawDegrees": 2.3151290824215223,
+        "pitchDegrees": 1.8338585764566988,
+        "reconstructed": [
+          0.9996678939214372, 0.01599948614858757, -0.02019935126259181,
+          0.0003232866061833239
+        ],
+        "maximumComponentError": 2.3296238719375283e-5
+      },
+      "policies": {
+        "ownerOnly": {
+          "camera": {
+            "envCellId": "0x8a0201c8",
+            "fov": 90,
+            "near": 0.5,
+            "far": 2000,
+            "landblockId": "0x8a02ffff",
+            "pitchDegrees": 1.8338585764566988,
+            "policy": "explicit-env-cell",
+            "position": [26556.624, 2.634, -310.044],
+            "yawDegrees": 2.3151290824215223
+          },
+          "submittedWork": {
+            "submittedStaticObjectDrawCount": 27,
+            "submittedStaticObjectTriangleCount": 746,
+            "submittedEnvCellResidentDrawCount": 8,
+            "submittedEnvCellResidentTriangleCount": 580,
+            "submittedEnvCellShellDrawCount": 19,
+            "submittedEnvCellShellTriangleCount": 166,
+            "submittedDynamicDrawCount": 8,
+            "portalPropagationDrawCount": 1,
+            "objectDrawCalls": 35
+          },
+          "traversal": {
+            "root": "0x8a0201c8",
+            "status": "complete",
+            "depth": 7,
+            "cells": 11,
+            "crossings": 1,
+            "domains": 2,
+            "lostScopes": []
+          },
+          "staircaseOwnerAdmitted": false,
+          "additionalBatchOwners": [],
+          "additionalBatchSources": []
+        },
+        "island": {
+          "camera": {
+            "envCellId": "0x8a0201c8",
+            "fov": 90,
+            "near": 0.5,
+            "far": 2000,
+            "landblockId": "0x8a02ffff",
+            "pitchDegrees": 1.8338585764566988,
+            "policy": "explicit-env-cell",
+            "position": [26556.624, 2.634, -310.044],
+            "yawDegrees": 2.3151290824215223
+          },
+          "submittedWork": {
+            "submittedStaticObjectDrawCount": 119,
+            "submittedStaticObjectTriangleCount": 3682,
+            "submittedEnvCellResidentDrawCount": 100,
+            "submittedEnvCellResidentTriangleCount": 3516,
+            "submittedEnvCellShellDrawCount": 19,
+            "submittedEnvCellShellTriangleCount": 166,
+            "submittedDynamicDrawCount": 8,
+            "portalPropagationDrawCount": 1,
+            "objectDrawCalls": 127
+          },
+          "traversal": {
+            "root": "0x8a0201c8",
+            "status": "complete",
+            "depth": 7,
+            "cells": 11,
+            "crossings": 1,
+            "domains": 2,
+            "lostScopes": []
+          },
+          "staircaseOwnerAdmitted": true,
+          "additionalBatchOwners": [
+            "0x8a020100",
+            "0x8a020103",
+            "0x8a020107",
+            "0x8a020108",
+            "0x8a020109",
+            "0x8a02010b",
+            "0x8a02010c",
+            "0x8a02010d",
+            "0x8a02010e",
+            "0x8a02010f",
+            "0x8a020112",
+            "0x8a020114",
+            "0x8a020115",
+            "0x8a020119",
+            "0x8a02011b",
+            "0x8a02011c",
+            "0x8a02011d",
+            "0x8a02011f",
+            "0x8a020120",
+            "0x8a020122",
+            "0x8a020125",
+            "0x8a020196",
+            "0x8a02019d",
+            "0x8a0201a4",
+            "0x8a0201ad",
+            "0x8a0201af",
+            "0x8a0201ae",
+            "0x8a0201b9",
+            "0x8a0201bc",
+            "0x8a0201bd",
+            "0x8a0201c9",
+            "0x8a0201ca",
+            "0x8a0201cd",
+            "0x8a0201ce",
+            "0x8a0201d1",
+            "0x8a0201da",
+            "0x8a0201dc",
+            "0x8a0201db",
+            "0x8a0201e6",
+            "0x8a0201e9",
+            "0x8a0201ed",
+            "0x8a0201f4"
+          ],
+          "additionalBatchSources": [
+            {
+              "scope": "0x8a020100",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a020103",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020107",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a020108",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a020109",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02010b",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02010c",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02010d",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02010e",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a02010f",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 48
+            },
+            {
+              "scope": "0x8a020112",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020114",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 12
+            },
+            {
+              "scope": "0x8a020115",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020119",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02011b",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02011c",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02011d",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02011f",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020120",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a020122",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020125",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a020196",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a02019d",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201a4",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201ad",
+              "count": 1,
+              "drawRanges": 5,
+              "triangles": 72
+            },
+            {
+              "scope": "0x8a0201af",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201ae",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201b9",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201bc",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a0201bd",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201c9",
+              "count": 1,
+              "drawRanges": 4,
+              "triangles": 218
+            },
+            {
+              "scope": "0x8a0201ca",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201cd",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a0201ce",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201d1",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201da",
+              "count": 1,
+              "drawRanges": 5,
+              "triangles": 72
+            },
+            {
+              "scope": "0x8a0201dc",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201db",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201e6",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201e9",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a0201ed",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201f4",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 1
+            }
+          ]
+        },
+        "batch": {
+          "camera": {
+            "envCellId": "0x8a0201c8",
+            "fov": 90,
+            "near": 0.5,
+            "far": 2000,
+            "landblockId": "0x8a02ffff",
+            "pitchDegrees": 1.8338585764566988,
+            "policy": "explicit-env-cell",
+            "position": [26556.624, 2.634, -310.044],
+            "yawDegrees": 2.3151290824215223
+          },
+          "submittedWork": {
+            "submittedStaticObjectDrawCount": 28,
+            "submittedStaticObjectTriangleCount": 964,
+            "submittedEnvCellResidentDrawCount": 9,
+            "submittedEnvCellResidentTriangleCount": 798,
+            "submittedEnvCellShellDrawCount": 19,
+            "submittedEnvCellShellTriangleCount": 166,
+            "submittedDynamicDrawCount": 8,
+            "portalPropagationDrawCount": 1,
+            "objectDrawCalls": 36
+          },
+          "traversal": {
+            "root": "0x8a0201c8",
+            "status": "complete",
+            "depth": 7,
+            "cells": 11,
+            "crossings": 1,
+            "domains": 2,
+            "lostScopes": []
+          },
+          "staircaseOwnerAdmitted": true,
+          "additionalBatchOwners": ["0x8a0201c9"],
+          "additionalBatchSources": [
+            {
+              "scope": "0x8a0201c9",
+              "count": 1,
+              "drawRanges": 4,
+              "triangles": 218
+            }
+          ]
+        }
+      }
+    },
+    {
+      "pose": "visible",
+      "projection": "harness",
+      "reportedQuaternion": [0.9551, -0.2954, -0.0212, -0.0066],
+      "orientation": {
+        "yawDegrees": 2.543128675858857,
+        "pitchDegrees": -34.37231541353605,
+        "reconstructed": [
+          0.955114516547692, -0.2954044897792778, -0.021200322218418038,
+          -0.006556983753869427
+        ],
+        "maximumComponentError": 4.3114687332955655e-5
+      },
+      "policies": {
+        "ownerOnly": {
+          "camera": {
+            "envCellId": "0x8a0201c9",
+            "fov": 90,
+            "near": 0.5,
+            "far": 2000,
+            "landblockId": "0x8a02ffff",
+            "pitchDegrees": -34.37231541353605,
+            "policy": "explicit-env-cell",
+            "position": [26556.553, 5.208, -308.627],
+            "yawDegrees": 2.543128675858857
+          },
+          "submittedWork": {
+            "submittedStaticObjectDrawCount": 35,
+            "submittedStaticObjectTriangleCount": 928,
+            "submittedEnvCellResidentDrawCount": 8,
+            "submittedEnvCellResidentTriangleCount": 726,
+            "submittedEnvCellShellDrawCount": 27,
+            "submittedEnvCellShellTriangleCount": 202,
+            "submittedDynamicDrawCount": 8,
+            "portalPropagationDrawCount": 0,
+            "objectDrawCalls": 43
+          },
+          "traversal": {
+            "root": "0x8a0201c9",
+            "status": "complete",
+            "depth": 10,
+            "cells": 11,
+            "crossings": 0,
+            "domains": 1,
+            "lostScopes": []
+          },
+          "staircaseOwnerAdmitted": true,
+          "additionalBatchOwners": [],
+          "additionalBatchSources": []
+        },
+        "island": {
+          "camera": {
+            "envCellId": "0x8a0201c9",
+            "fov": 90,
+            "near": 0.5,
+            "far": 2000,
+            "landblockId": "0x8a02ffff",
+            "pitchDegrees": -34.37231541353605,
+            "policy": "explicit-env-cell",
+            "position": [26556.553, 5.208, -308.627],
+            "yawDegrees": 2.543128675858857
+          },
+          "submittedWork": {
+            "submittedStaticObjectDrawCount": 129,
+            "submittedStaticObjectTriangleCount": 3782,
+            "submittedEnvCellResidentDrawCount": 102,
+            "submittedEnvCellResidentTriangleCount": 3580,
+            "submittedEnvCellShellDrawCount": 27,
+            "submittedEnvCellShellTriangleCount": 202,
+            "submittedDynamicDrawCount": 8,
+            "portalPropagationDrawCount": 0,
+            "objectDrawCalls": 137
+          },
+          "traversal": {
+            "root": "0x8a0201c9",
+            "status": "complete",
+            "depth": 10,
+            "cells": 11,
+            "crossings": 0,
+            "domains": 1,
+            "lostScopes": []
+          },
+          "staircaseOwnerAdmitted": true,
+          "additionalBatchOwners": [
+            "0x8a020100",
+            "0x8a020103",
+            "0x8a020105",
+            "0x8a020107",
+            "0x8a020108",
+            "0x8a020109",
+            "0x8a02010b",
+            "0x8a02010c",
+            "0x8a02010d",
+            "0x8a02010e",
+            "0x8a02010f",
+            "0x8a020112",
+            "0x8a020114",
+            "0x8a020115",
+            "0x8a020119",
+            "0x8a02011b",
+            "0x8a02011c",
+            "0x8a02011d",
+            "0x8a02011f",
+            "0x8a020120",
+            "0x8a020122",
+            "0x8a020125",
+            "0x8a020196",
+            "0x8a02019d",
+            "0x8a0201a4",
+            "0x8a0201ad",
+            "0x8a0201af",
+            "0x8a0201ae",
+            "0x8a0201b9",
+            "0x8a0201bc",
+            "0x8a0201bd",
+            "0x8a0201c0",
+            "0x8a0201ca",
+            "0x8a0201cd",
+            "0x8a0201ce",
+            "0x8a0201d1",
+            "0x8a0201da",
+            "0x8a0201dc",
+            "0x8a0201db",
+            "0x8a0201e6",
+            "0x8a0201e9",
+            "0x8a0201ed",
+            "0x8a0201f4"
+          ],
+          "additionalBatchSources": [
+            {
+              "scope": "0x8a020100",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a020103",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020105",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a020107",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a020108",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a020109",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02010b",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02010c",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02010d",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02010e",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a02010f",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 48
+            },
+            {
+              "scope": "0x8a020112",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020114",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 12
+            },
+            {
+              "scope": "0x8a020115",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020119",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02011b",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02011c",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02011d",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02011f",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020120",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a020122",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020125",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a020196",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a02019d",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201a4",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201ad",
+              "count": 1,
+              "drawRanges": 5,
+              "triangles": 72
+            },
+            {
+              "scope": "0x8a0201af",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201ae",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201b9",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201bc",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a0201bd",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201c0",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 72
+            },
+            {
+              "scope": "0x8a0201ca",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201cd",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a0201ce",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201d1",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201da",
+              "count": 1,
+              "drawRanges": 5,
+              "triangles": 72
+            },
+            {
+              "scope": "0x8a0201dc",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201db",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201e6",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201e9",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a0201ed",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201f4",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 1
+            }
+          ]
+        },
+        "batch": {
+          "camera": {
+            "envCellId": "0x8a0201c9",
+            "fov": 90,
+            "near": 0.5,
+            "far": 2000,
+            "landblockId": "0x8a02ffff",
+            "pitchDegrees": -34.37231541353605,
+            "policy": "explicit-env-cell",
+            "position": [26556.553, 5.208, -308.627],
+            "yawDegrees": 2.543128675858857
+          },
+          "submittedWork": {
+            "submittedStaticObjectDrawCount": 35,
+            "submittedStaticObjectTriangleCount": 928,
+            "submittedEnvCellResidentDrawCount": 8,
+            "submittedEnvCellResidentTriangleCount": 726,
+            "submittedEnvCellShellDrawCount": 27,
+            "submittedEnvCellShellTriangleCount": 202,
+            "submittedDynamicDrawCount": 8,
+            "portalPropagationDrawCount": 0,
+            "objectDrawCalls": 43
+          },
+          "traversal": {
+            "root": "0x8a0201c9",
+            "status": "complete",
+            "depth": 10,
+            "cells": 11,
+            "crossings": 0,
+            "domains": 1,
+            "lostScopes": []
+          },
+          "staircaseOwnerAdmitted": true,
+          "additionalBatchOwners": [],
+          "additionalBatchSources": []
+        }
+      }
+    },
+    {
+      "pose": "missing",
+      "projection": "client-default",
+      "reportedQuaternion": [0.9997, 0.016, -0.0202, 0.0003],
+      "orientation": {
+        "yawDegrees": 2.3151290824215223,
+        "pitchDegrees": 1.8338585764566988,
+        "reconstructed": [
+          0.9996678939214372, 0.01599948614858757, -0.02019935126259181,
+          0.0003232866061833239
+        ],
+        "maximumComponentError": 2.3296238719375283e-5
+      },
+      "policies": {
+        "ownerOnly": {
+          "camera": {
+            "envCellId": "0x8a0201c8",
+            "fov": 75,
+            "near": 0.1,
+            "far": 2000,
+            "landblockId": "0x8a02ffff",
+            "pitchDegrees": 1.8338585764566988,
+            "policy": "explicit-env-cell",
+            "position": [26556.624, 2.634, -310.044],
+            "yawDegrees": 2.3151290824215223
+          },
+          "submittedWork": {
+            "submittedStaticObjectDrawCount": 26,
+            "submittedStaticObjectTriangleCount": 744,
+            "submittedEnvCellResidentDrawCount": 8,
+            "submittedEnvCellResidentTriangleCount": 580,
+            "submittedEnvCellShellDrawCount": 18,
+            "submittedEnvCellShellTriangleCount": 164,
+            "submittedDynamicDrawCount": 8,
+            "portalPropagationDrawCount": 0,
+            "objectDrawCalls": 34
+          },
+          "traversal": {
+            "root": "0x8a0201c8",
+            "status": "complete",
+            "depth": 7,
+            "cells": 10,
+            "crossings": 0,
+            "domains": 1,
+            "lostScopes": []
+          },
+          "staircaseOwnerAdmitted": false,
+          "additionalBatchOwners": [],
+          "additionalBatchSources": []
+        },
+        "island": {
+          "camera": {
+            "envCellId": "0x8a0201c8",
+            "fov": 75,
+            "near": 0.1,
+            "far": 2000,
+            "landblockId": "0x8a02ffff",
+            "pitchDegrees": 1.8338585764566988,
+            "policy": "explicit-env-cell",
+            "position": [26556.624, 2.634, -310.044],
+            "yawDegrees": 2.3151290824215223
+          },
+          "submittedWork": {
+            "submittedStaticObjectDrawCount": 100,
+            "submittedStaticObjectTriangleCount": 3150,
+            "submittedEnvCellResidentDrawCount": 82,
+            "submittedEnvCellResidentTriangleCount": 2986,
+            "submittedEnvCellShellDrawCount": 18,
+            "submittedEnvCellShellTriangleCount": 164,
+            "submittedDynamicDrawCount": 8,
+            "portalPropagationDrawCount": 0,
+            "objectDrawCalls": 108
+          },
+          "traversal": {
+            "root": "0x8a0201c8",
+            "status": "complete",
+            "depth": 7,
+            "cells": 10,
+            "crossings": 0,
+            "domains": 1,
+            "lostScopes": []
+          },
+          "staircaseOwnerAdmitted": true,
+          "additionalBatchOwners": [
+            "0x8a020103",
+            "0x8a020107",
+            "0x8a020108",
+            "0x8a020109",
+            "0x8a02010b",
+            "0x8a02010e",
+            "0x8a02010f",
+            "0x8a020112",
+            "0x8a020114",
+            "0x8a020115",
+            "0x8a020119",
+            "0x8a02011b",
+            "0x8a02011c",
+            "0x8a02011d",
+            "0x8a02011f",
+            "0x8a020120",
+            "0x8a020122",
+            "0x8a020125",
+            "0x8a02019d",
+            "0x8a0201a4",
+            "0x8a0201ad",
+            "0x8a0201af",
+            "0x8a0201b9",
+            "0x8a0201bc",
+            "0x8a0201c9",
+            "0x8a0201ca",
+            "0x8a0201cd",
+            "0x8a0201ce",
+            "0x8a0201d1",
+            "0x8a0201da",
+            "0x8a0201dc",
+            "0x8a0201db",
+            "0x8a0201e6",
+            "0x8a0201ed",
+            "0x8a0201f4"
+          ],
+          "additionalBatchSources": [
+            {
+              "scope": "0x8a020103",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020107",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a020108",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a020109",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02010b",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02010e",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a02010f",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 48
+            },
+            {
+              "scope": "0x8a020112",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020114",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 12
+            },
+            {
+              "scope": "0x8a020115",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020119",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02011b",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02011c",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02011d",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02011f",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020120",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a020122",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020125",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a02019d",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201a4",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201ad",
+              "count": 1,
+              "drawRanges": 5,
+              "triangles": 72
+            },
+            {
+              "scope": "0x8a0201af",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201b9",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201bc",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a0201c9",
+              "count": 1,
+              "drawRanges": 4,
+              "triangles": 218
+            },
+            {
+              "scope": "0x8a0201ca",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201cd",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a0201ce",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201d1",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201da",
+              "count": 1,
+              "drawRanges": 5,
+              "triangles": 72
+            },
+            {
+              "scope": "0x8a0201dc",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201db",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201e6",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201ed",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201f4",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 1
+            }
+          ]
+        },
+        "batch": {
+          "camera": {
+            "envCellId": "0x8a0201c8",
+            "fov": 75,
+            "near": 0.1,
+            "far": 2000,
+            "landblockId": "0x8a02ffff",
+            "pitchDegrees": 1.8338585764566988,
+            "policy": "explicit-env-cell",
+            "position": [26556.624, 2.634, -310.044],
+            "yawDegrees": 2.3151290824215223
+          },
+          "submittedWork": {
+            "submittedStaticObjectDrawCount": 27,
+            "submittedStaticObjectTriangleCount": 962,
+            "submittedEnvCellResidentDrawCount": 9,
+            "submittedEnvCellResidentTriangleCount": 798,
+            "submittedEnvCellShellDrawCount": 18,
+            "submittedEnvCellShellTriangleCount": 164,
+            "submittedDynamicDrawCount": 8,
+            "portalPropagationDrawCount": 0,
+            "objectDrawCalls": 35
+          },
+          "traversal": {
+            "root": "0x8a0201c8",
+            "status": "complete",
+            "depth": 7,
+            "cells": 10,
+            "crossings": 0,
+            "domains": 1,
+            "lostScopes": []
+          },
+          "staircaseOwnerAdmitted": true,
+          "additionalBatchOwners": ["0x8a0201c9"],
+          "additionalBatchSources": [
+            {
+              "scope": "0x8a0201c9",
+              "count": 1,
+              "drawRanges": 4,
+              "triangles": 218
+            }
+          ]
+        }
+      }
+    },
+    {
+      "pose": "visible",
+      "projection": "client-default",
+      "reportedQuaternion": [0.9551, -0.2954, -0.0212, -0.0066],
+      "orientation": {
+        "yawDegrees": 2.543128675858857,
+        "pitchDegrees": -34.37231541353605,
+        "reconstructed": [
+          0.955114516547692, -0.2954044897792778, -0.021200322218418038,
+          -0.006556983753869427
+        ],
+        "maximumComponentError": 4.3114687332955655e-5
+      },
+      "policies": {
+        "ownerOnly": {
+          "camera": {
+            "envCellId": "0x8a0201c9",
+            "fov": 75,
+            "near": 0.1,
+            "far": 2000,
+            "landblockId": "0x8a02ffff",
+            "pitchDegrees": -34.37231541353605,
+            "policy": "explicit-env-cell",
+            "position": [26556.553, 5.208, -308.627],
+            "yawDegrees": 2.543128675858857
+          },
+          "submittedWork": {
+            "submittedStaticObjectDrawCount": 33,
+            "submittedStaticObjectTriangleCount": 850,
+            "submittedEnvCellResidentDrawCount": 7,
+            "submittedEnvCellResidentTriangleCount": 654,
+            "submittedEnvCellShellDrawCount": 26,
+            "submittedEnvCellShellTriangleCount": 196,
+            "submittedDynamicDrawCount": 8,
+            "portalPropagationDrawCount": 0,
+            "objectDrawCalls": 41
+          },
+          "traversal": {
+            "root": "0x8a0201c9",
+            "status": "complete",
+            "depth": 10,
+            "cells": 10,
+            "crossings": 0,
+            "domains": 1,
+            "lostScopes": []
+          },
+          "staircaseOwnerAdmitted": true,
+          "additionalBatchOwners": [],
+          "additionalBatchSources": []
+        },
+        "island": {
+          "camera": {
+            "envCellId": "0x8a0201c9",
+            "fov": 75,
+            "near": 0.1,
+            "far": 2000,
+            "landblockId": "0x8a02ffff",
+            "pitchDegrees": -34.37231541353605,
+            "policy": "explicit-env-cell",
+            "position": [26556.553, 5.208, -308.627],
+            "yawDegrees": 2.543128675858857
+          },
+          "submittedWork": {
+            "submittedStaticObjectDrawCount": 119,
+            "submittedStaticObjectTriangleCount": 3455,
+            "submittedEnvCellResidentDrawCount": 93,
+            "submittedEnvCellResidentTriangleCount": 3259,
+            "submittedEnvCellShellDrawCount": 26,
+            "submittedEnvCellShellTriangleCount": 196,
+            "submittedDynamicDrawCount": 8,
+            "portalPropagationDrawCount": 0,
+            "objectDrawCalls": 127
+          },
+          "traversal": {
+            "root": "0x8a0201c9",
+            "status": "complete",
+            "depth": 10,
+            "cells": 10,
+            "crossings": 0,
+            "domains": 1,
+            "lostScopes": []
+          },
+          "staircaseOwnerAdmitted": true,
+          "additionalBatchOwners": [
+            "0x8a020100",
+            "0x8a020103",
+            "0x8a020105",
+            "0x8a020107",
+            "0x8a020108",
+            "0x8a020109",
+            "0x8a02010b",
+            "0x8a02010c",
+            "0x8a02010d",
+            "0x8a02010e",
+            "0x8a02010f",
+            "0x8a020112",
+            "0x8a020114",
+            "0x8a020115",
+            "0x8a020119",
+            "0x8a02011b",
+            "0x8a02011c",
+            "0x8a02011d",
+            "0x8a02011f",
+            "0x8a020120",
+            "0x8a020122",
+            "0x8a020125",
+            "0x8a02019d",
+            "0x8a0201a4",
+            "0x8a0201ad",
+            "0x8a0201af",
+            "0x8a0201b9",
+            "0x8a0201bc",
+            "0x8a0201bd",
+            "0x8a0201c0",
+            "0x8a0201ca",
+            "0x8a0201cd",
+            "0x8a0201ce",
+            "0x8a0201d1",
+            "0x8a0201da",
+            "0x8a0201dc",
+            "0x8a0201db",
+            "0x8a0201e6",
+            "0x8a0201ed"
+          ],
+          "additionalBatchSources": [
+            {
+              "scope": "0x8a020100",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a020103",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020105",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a020107",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a020108",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a020109",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02010b",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02010c",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02010d",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02010e",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a02010f",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 48
+            },
+            {
+              "scope": "0x8a020112",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020114",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 12
+            },
+            {
+              "scope": "0x8a020115",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020119",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02011b",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02011c",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a02011d",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a02011f",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020120",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a020122",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 24
+            },
+            {
+              "scope": "0x8a020125",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a02019d",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201a4",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201ad",
+              "count": 1,
+              "drawRanges": 5,
+              "triangles": 72
+            },
+            {
+              "scope": "0x8a0201af",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201b9",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201bc",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a0201bd",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201c0",
+              "count": 1,
+              "drawRanges": 1,
+              "triangles": 72
+            },
+            {
+              "scope": "0x8a0201ca",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201cd",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 64
+            },
+            {
+              "scope": "0x8a0201ce",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201d1",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201da",
+              "count": 1,
+              "drawRanges": 5,
+              "triangles": 72
+            },
+            {
+              "scope": "0x8a0201dc",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201db",
+              "count": 1,
+              "drawRanges": 2,
+              "triangles": 32
+            },
+            {
+              "scope": "0x8a0201e6",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            },
+            {
+              "scope": "0x8a0201ed",
+              "count": 1,
+              "drawRanges": 6,
+              "triangles": 153
+            }
+          ]
+        },
+        "batch": {
+          "camera": {
+            "envCellId": "0x8a0201c9",
+            "fov": 75,
+            "near": 0.1,
+            "far": 2000,
+            "landblockId": "0x8a02ffff",
+            "pitchDegrees": -34.37231541353605,
+            "policy": "explicit-env-cell",
+            "position": [26556.553, 5.208, -308.627],
+            "yawDegrees": 2.543128675858857
+          },
+          "submittedWork": {
+            "submittedStaticObjectDrawCount": 33,
+            "submittedStaticObjectTriangleCount": 850,
+            "submittedEnvCellResidentDrawCount": 7,
+            "submittedEnvCellResidentTriangleCount": 654,
+            "submittedEnvCellShellDrawCount": 26,
+            "submittedEnvCellShellTriangleCount": 196,
+            "submittedDynamicDrawCount": 8,
+            "portalPropagationDrawCount": 0,
+            "objectDrawCalls": 41
+          },
+          "traversal": {
+            "root": "0x8a0201c9",
+            "status": "complete",
+            "depth": 10,
+            "cells": 10,
+            "crossings": 0,
+            "domains": 1,
+            "lostScopes": []
+          },
+          "staircaseOwnerAdmitted": true,
+          "additionalBatchOwners": [],
+          "additionalBatchSources": []
+        }
+      }
+    }
+  ],
+  "transition": [
+    {
+      "fraction": 0,
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": 1.8338585764566988,
+        "policy": "explicit-env-cell",
+        "position": [26556.624, 2.634, -310.044],
+        "yawDegrees": 2.3151290824215223
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 27,
+        "submittedStaticObjectTriangleCount": 962,
+        "submittedEnvCellResidentDrawCount": 9,
+        "submittedEnvCellResidentTriangleCount": 798,
+        "submittedEnvCellShellDrawCount": 18,
+        "submittedEnvCellShellTriangleCount": 164,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0,
+        "objectDrawCalls": 35
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "status": "complete",
+        "depth": 7,
+        "cells": 10,
+        "crossings": 0,
+        "domains": 1,
+        "lostScopes": []
+      },
+      "staircaseOwnerAdmitted": true,
+      "additionalBatchOwners": ["0x8a0201c9"],
+      "additionalBatchSources": [
+        {
+          "scope": "0x8a0201c9",
+          "count": 1,
+          "drawRanges": 4,
+          "triangles": 218
+        }
+      ]
+    },
+    {
+      "fraction": 0.25,
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -7.217684921041489,
+        "policy": "explicit-env-cell",
+        "position": [26556.60625, 3.2775, -309.68975],
+        "yawDegrees": 2.372128980780856
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 43,
+        "submittedStaticObjectTriangleCount": 1040,
+        "submittedEnvCellResidentDrawCount": 9,
+        "submittedEnvCellResidentTriangleCount": 798,
+        "submittedEnvCellShellDrawCount": 34,
+        "submittedEnvCellShellTriangleCount": 242,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0,
+        "objectDrawCalls": 51
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "status": "complete",
+        "depth": 11,
+        "cells": 13,
+        "crossings": 0,
+        "domains": 1,
+        "lostScopes": []
+      },
+      "staircaseOwnerAdmitted": true,
+      "additionalBatchOwners": ["0x8a0201c9"],
+      "additionalBatchSources": [
+        {
+          "scope": "0x8a0201c9",
+          "count": 1,
+          "drawRanges": 4,
+          "triangles": 218
+        }
+      ]
+    },
+    {
+      "fraction": 0.5,
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -16.269228418539676,
+        "policy": "explicit-env-cell",
+        "position": [26556.588499999998, 3.9210000000000003, -309.3355],
+        "yawDegrees": 2.4291288791401895
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 43,
+        "submittedStaticObjectTriangleCount": 1040,
+        "submittedEnvCellResidentDrawCount": 9,
+        "submittedEnvCellResidentTriangleCount": 798,
+        "submittedEnvCellShellDrawCount": 34,
+        "submittedEnvCellShellTriangleCount": 242,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0,
+        "objectDrawCalls": 51
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "status": "complete",
+        "depth": 11,
+        "cells": 13,
+        "crossings": 0,
+        "domains": 1,
+        "lostScopes": []
+      },
+      "staircaseOwnerAdmitted": true,
+      "additionalBatchOwners": ["0x8a0201c9"],
+      "additionalBatchSources": [
+        {
+          "scope": "0x8a0201c9",
+          "count": 1,
+          "drawRanges": 4,
+          "triangles": 218
+        }
+      ]
+    },
+    {
+      "fraction": 0.75,
+      "camera": {
+        "envCellId": "0x8a0201c9",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -25.320771916037863,
+        "policy": "explicit-env-cell",
+        "position": [26556.57075, 4.564500000000001, -308.98125],
+        "yawDegrees": 2.4861287774995233
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 39,
+        "submittedStaticObjectTriangleCount": 958,
+        "submittedEnvCellResidentDrawCount": 8,
+        "submittedEnvCellResidentTriangleCount": 726,
+        "submittedEnvCellShellDrawCount": 31,
+        "submittedEnvCellShellTriangleCount": 232,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0,
+        "objectDrawCalls": 47
+      },
+      "traversal": {
+        "root": "0x8a0201c9",
+        "status": "complete",
+        "depth": 11,
+        "cells": 12,
+        "crossings": 0,
+        "domains": 1,
+        "lostScopes": []
+      },
+      "staircaseOwnerAdmitted": true,
+      "additionalBatchOwners": [],
+      "additionalBatchSources": []
+    },
+    {
+      "fraction": 1,
+      "camera": {
+        "envCellId": "0x8a0201c9",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -34.37231541353605,
+        "policy": "explicit-env-cell",
+        "position": [26556.553, 5.208, -308.627],
+        "yawDegrees": 2.543128675858857
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 33,
+        "submittedStaticObjectTriangleCount": 850,
+        "submittedEnvCellResidentDrawCount": 7,
+        "submittedEnvCellResidentTriangleCount": 654,
+        "submittedEnvCellShellDrawCount": 26,
+        "submittedEnvCellShellTriangleCount": 196,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0,
+        "objectDrawCalls": 41
+      },
+      "traversal": {
+        "root": "0x8a0201c9",
+        "status": "complete",
+        "depth": 10,
+        "cells": 10,
+        "crossings": 0,
+        "domains": 1,
+        "lostScopes": []
+      },
+      "staircaseOwnerAdmitted": true,
+      "additionalBatchOwners": [],
+      "additionalBatchSources": []
+    },
+    {
+      "fraction": 0.75,
+      "camera": {
+        "envCellId": "0x8a0201c9",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -25.320771916037863,
+        "policy": "explicit-env-cell",
+        "position": [26556.57075, 4.564500000000001, -308.98125],
+        "yawDegrees": 2.4861287774995233
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 39,
+        "submittedStaticObjectTriangleCount": 958,
+        "submittedEnvCellResidentDrawCount": 8,
+        "submittedEnvCellResidentTriangleCount": 726,
+        "submittedEnvCellShellDrawCount": 31,
+        "submittedEnvCellShellTriangleCount": 232,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0,
+        "objectDrawCalls": 47
+      },
+      "traversal": {
+        "root": "0x8a0201c9",
+        "status": "complete",
+        "depth": 11,
+        "cells": 12,
+        "crossings": 0,
+        "domains": 1,
+        "lostScopes": []
+      },
+      "staircaseOwnerAdmitted": true,
+      "additionalBatchOwners": [],
+      "additionalBatchSources": []
+    },
+    {
+      "fraction": 0.5,
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -16.269228418539676,
+        "policy": "explicit-env-cell",
+        "position": [26556.588499999998, 3.9210000000000003, -309.3355],
+        "yawDegrees": 2.4291288791401895
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 43,
+        "submittedStaticObjectTriangleCount": 1040,
+        "submittedEnvCellResidentDrawCount": 9,
+        "submittedEnvCellResidentTriangleCount": 798,
+        "submittedEnvCellShellDrawCount": 34,
+        "submittedEnvCellShellTriangleCount": 242,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0,
+        "objectDrawCalls": 51
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "status": "complete",
+        "depth": 11,
+        "cells": 13,
+        "crossings": 0,
+        "domains": 1,
+        "lostScopes": []
+      },
+      "staircaseOwnerAdmitted": true,
+      "additionalBatchOwners": ["0x8a0201c9"],
+      "additionalBatchSources": [
+        {
+          "scope": "0x8a0201c9",
+          "count": 1,
+          "drawRanges": 4,
+          "triangles": 218
+        }
+      ]
+    },
+    {
+      "fraction": 0.25,
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": -7.217684921041489,
+        "policy": "explicit-env-cell",
+        "position": [26556.60625, 3.2775, -309.68975],
+        "yawDegrees": 2.372128980780856
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 43,
+        "submittedStaticObjectTriangleCount": 1040,
+        "submittedEnvCellResidentDrawCount": 9,
+        "submittedEnvCellResidentTriangleCount": 798,
+        "submittedEnvCellShellDrawCount": 34,
+        "submittedEnvCellShellTriangleCount": 242,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0,
+        "objectDrawCalls": 51
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "status": "complete",
+        "depth": 11,
+        "cells": 13,
+        "crossings": 0,
+        "domains": 1,
+        "lostScopes": []
+      },
+      "staircaseOwnerAdmitted": true,
+      "additionalBatchOwners": ["0x8a0201c9"],
+      "additionalBatchSources": [
+        {
+          "scope": "0x8a0201c9",
+          "count": 1,
+          "drawRanges": 4,
+          "triangles": 218
+        }
+      ]
+    },
+    {
+      "fraction": 0,
+      "camera": {
+        "envCellId": "0x8a0201c8",
+        "fov": 75,
+        "near": 0.1,
+        "far": 2000,
+        "landblockId": "0x8a02ffff",
+        "pitchDegrees": 1.8338585764566988,
+        "policy": "explicit-env-cell",
+        "position": [26556.624, 2.634, -310.044],
+        "yawDegrees": 2.3151290824215223
+      },
+      "submittedWork": {
+        "submittedStaticObjectDrawCount": 27,
+        "submittedStaticObjectTriangleCount": 962,
+        "submittedEnvCellResidentDrawCount": 9,
+        "submittedEnvCellResidentTriangleCount": 798,
+        "submittedEnvCellShellDrawCount": 18,
+        "submittedEnvCellShellTriangleCount": 164,
+        "submittedDynamicDrawCount": 8,
+        "portalPropagationDrawCount": 0,
+        "objectDrawCalls": 35
+      },
+      "traversal": {
+        "root": "0x8a0201c8",
+        "status": "complete",
+        "depth": 7,
+        "cells": 10,
+        "crossings": 0,
+        "domains": 1,
+        "lostScopes": []
+      },
+      "staircaseOwnerAdmitted": true,
+      "additionalBatchOwners": ["0x8a0201c9"],
+      "additionalBatchSources": [
+        {
+          "scope": "0x8a0201c9",
+          "count": 1,
+          "drawRanges": 4,
+          "triangles": 218
+        }
+      ]
+    }
+  ]
+}

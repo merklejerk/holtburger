@@ -105,7 +105,7 @@ export const dynamicEntityMotionSchema = z
 		locomotionCommandActive: z.boolean(),
 		ordinary: dynamicEntityMotionLayerSchema.nullable(),
 		locomotion: dynamicEntityMotionLayerSchema.nullable(),
-		activity: z.enum(["locomotion", "gesture", "explicit"]),
+		activity: z.enum(["locomotion", "gesture", "reach", "explicit"]),
 	})
 	.refine((motion) => motion.ordinary !== null || motion.locomotion !== null, {
 		message: "Motion playback must contain at least one clip.",

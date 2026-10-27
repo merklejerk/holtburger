@@ -8,13 +8,27 @@ import {
 	type PortalScopeWindowFrameView,
 } from "../../lib/game/renderer/portal-scope-window-culler";
 import { cullPortalScopeWindowsReference } from "../../lib/game/renderer/portal-scope-window-reference";
+import { RenderWorld } from "../../lib/game/renderer/render-world";
+import type { SceneNodeId } from "../../lib/game/scene";
 import { scopeKey } from "../../lib/game/scene/scope";
 
 /** Borrowed current-view input; synchronous reference checks finish before the next frame. */
 type CullArguments = Parameters<PortalScopeWindowCuller["cull"]>;
 let latest: CullArguments | null = null;
 let frame: PortalScopeWindowFrameView | null = null;
+/** Borrow the last scene query; expand submitted-work evidence only on request. */
+const sceneQuery: {
+	world: RenderWorld | null;
+	entries: readonly SceneNodeId[];
+} = { world: null, entries: [] };
 let installed = false;
+/** Let camera publication reach a complete rendered frame before reading its counters. */
+export function settlePortalFrames(): Promise<void> {
+	return new Promise((resolve) => {
+		requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+	});
+}
+
 /** Instrument only the explicitly enabled browser harness. */
 export function installPortalTraversalInvestigation(): void {
 	if (installed) throw new Error("Portal traversal probe already installed.");
@@ -24,6 +38,18 @@ export function installPortalTraversalInvestigation(): void {
 		latest = args;
 		frame = original.apply(this, args);
 		return frame;
+	};
+	const originalQuery = RenderWorld.prototype.queryScopeSelectionScene;
+	RenderWorld.prototype.queryScopeSelectionScene = function (
+		frustum,
+		anchor,
+		scopes,
+		filter,
+	) {
+		const result = originalQuery.call(this, frustum, anchor, scopes, filter);
+		sceneQuery.world = this;
+		sceneQuery.entries = result.entries;
+		return result;
 	};
 }
 /** Scope retention against the independent exact reference; pixel equality is not the contract. */
@@ -43,11 +69,44 @@ export function runPortalTraversalInvestigation() {
 	const lostScopes = reference.selections
 		.map((s) => scopeKey(s.scope))
 		.filter((key) => !selected.has(key));
+	const { world, entries } = sceneQuery;
+	if (world === null) throw new Error("No portal scene query captured.");
+	const staticNodesByScope = new Map<
+		string,
+		{ count: number; drawRanges: number; triangles: number }
+	>();
+	for (const nodeId of entries) {
+		const contribution = world.readRenderContribution(nodeId);
+		if (contribution?.kind !== "static-object") continue;
+		const key = world.getRenderScopeKey(nodeId);
+		if (key === null) throw new Error("Queried static node lost its scope.");
+		let entry = staticNodesByScope.get(key);
+		if (entry === undefined) {
+			entry = { count: 0, drawRanges: 0, triangles: 0 };
+			staticNodesByScope.set(key, entry);
+		}
+		entry.count += 1;
+		entry.drawRanges += contribution.renderable.drawUnits.length;
+		entry.triangles += contribution.renderable.drawUnits.reduce(
+			(sum, draw) => sum + draw.indexCount / 3,
+			0,
+		);
+	}
 	return {
 		root: scopeKey(latest[1].rootScope),
 		status: frame.status,
 		depth: frame.completedDepth,
 		cells: frame.selectedScopeCount,
+		untraversedStaticOwners: [...staticNodesByScope.keys()].filter(
+			(key) => !selected.has(key),
+		),
+		queriedStaticNodesByScope: Array.from(
+			staticNodesByScope,
+			([scope, counts]) => ({
+				scope,
+				...counts,
+			}),
+		),
 		crossings: frame.selectedCrossingCount,
 		domains: frame.selectedRenderDomainCount,
 		referenceCells: reference.selections.length,

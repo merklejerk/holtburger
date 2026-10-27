@@ -22,7 +22,7 @@ use holtburger_core::{
 };
 use holtburger_world::motion::{
     BodyMotionRuntime, CharacterMotionPresentation, MotionOrder, MotionPlayback,
-    MotionRuntimeRegistry, observed_locomotion_order,
+    MotionRuntimeRegistry, ObservedCharacterMotion,
 };
 use holtburger_world::{
     CollisionReportOutcome, ContactState, DynamicPhysicalBodyConfiguration,
@@ -474,9 +474,6 @@ impl ExplorerMotionState {
         else {
             return Ok(());
         };
-        let Some(authored) = self.playback.state(guid) else {
-            return Ok(());
-        };
         let presentation = match self.active.as_ref().filter(|active| active.guid == guid) {
             Some(active) => {
                 let effective =
@@ -490,17 +487,17 @@ impl ExplorerMotionState {
             }
             None => CharacterMotionPresentation::resolve(solved.current.contact, false, false),
         };
-        let order = observed_locomotion_order(
+        self.playback.observe_locomotion(
             table,
-            authored.style,
-            solved.supported_motion,
-            solved.current.pose.rotation,
-            presentation,
-            definition.object_scale,
-        )?;
-        self.playback
-            .present_locomotion(table, guid, order, delta_seconds);
-        Ok(())
+            guid,
+            ObservedCharacterMotion {
+                motion: solved.supported_motion,
+                orientation: solved.current.pose.rotation,
+                presentation,
+                object_scale: definition.object_scale,
+            },
+            delta_seconds,
+        )
     }
 
     fn release(&mut self) -> Option<Guid> {
@@ -3486,7 +3483,7 @@ mod tests {
         assert_eq!(clip.animation_id, WALK_ANIM);
         let table = runtime.motion_catalog.table(WALK_TABLE).unwrap();
         let authored_rate = table.cycle(WALK_STYLE, WALK_FORWARD).unwrap().clips[0].framerate;
-        let supported_speed = tick.solved.supported_motion.velocity.length();
+        let supported_speed = tick.solved.supported_motion.accepted.velocity.length();
         assert!(supported_speed > holtburger_world::motion::OBSERVED_LINEAR_IDLE_SPEED_MPS);
         assert!(
             (clip.framerate
@@ -3499,10 +3496,10 @@ mod tests {
         let mut registry = runtime.registry.lock().unwrap();
         let definition = registry.entities.get(&guid).unwrap().definition.clone();
         let before = registry.motion.playback.get(guid).unwrap().clone();
-        // Keep the nonzero accepted body path, but describe its travel as positional correction.
-        // The observer must read the solver's supported-motion fact rather than body displacement.
+        // Keep the nonzero accepted path, but report no supported travel. A path may include
+        // airborne travel or lifts; the observer must consume the solver's supported-motion fact.
         assert!(tick.solved.current.pose.coords != tick.solved.previous.pose.coords);
-        tick.solved.supported_motion = holtburger_world::AcceptedBodyMotion::default();
+        tick.solved.supported_motion = holtburger_world::SupportedBodyMotion::default();
         registry
             .motion
             .observe_body(

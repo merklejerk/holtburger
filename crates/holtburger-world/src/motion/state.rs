@@ -155,6 +155,21 @@ impl MotionCommand {
 }
 
 impl MotionCommand {
+    /// Explicit walking, running, turning or sidestepping intent, including either direction.
+    /// Command identities are retail's dword_7C8190 (acclient.c:39406) and ACE MotionCommand.cs.
+    pub const fn is_locomotion_command(self) -> bool {
+        matches!(
+            self,
+            Self::WALK_FORWARD
+                | Self::WALK_BACKWARDS
+                | Self::RUN_FORWARD
+                | Self::TURN_RIGHT
+                | Self::TURN_LEFT
+                | Self::SIDESTEP
+                | Self::SIDESTEP_LEFT
+        )
+    }
+
     /// The motion-table command a server-reported interpreted command names.
     ///
     /// The wire carries only the low 16 bits; the table keys on the full 32-bit value whose high
@@ -194,6 +209,8 @@ impl MotionCommand {
     pub const TURN_LEFT: Self = Self(0x6500_000E);
     /// Sidestepping is likewise one modifier, stopped by naming `SideStepRight`.
     pub const SIDESTEP: Self = Self(0x6500_000F);
+    /// Leftward sidestep command; remote interpreted state may name either direction.
+    pub const SIDESTEP_LEFT: Self = Self(0x6500_0010);
 }
 
 impl From<u32> for MotionCommand {

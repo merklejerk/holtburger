@@ -21,6 +21,7 @@ use holtburger_content::MotionSequenceTable;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
+use super::observed::{ObservedCharacterMotion, observed_locomotion_order};
 use super::rates::{MotionRates, baseline_row, is_locomotion};
 use super::selection::{
     ActionSelectionOutcome, MotionSelectionOutcome, NativeSelection, select_action, select_motion,
@@ -265,8 +266,10 @@ pub enum MotionPresentation {
 pub enum OrdinaryMotionActivity {
     /// Standing or travelling playback that can be represented by independent locomotion.
     Locomotion,
-    /// Recognized spell, reach, and missile gesture, including entry and return transitions.
+    /// Recognized spell and missile gesture, including entry and return transitions.
     Gesture,
+    /// Inventory reach, including entry and return; independent of locomotion eligibility.
+    Reach,
     /// Other actions, explicit poses, or noncyclic transitions, including contact/death.
     Explicit,
 }
@@ -601,7 +604,11 @@ impl BodyMotionRuntime {
         if ordinary.is_none() && locomotion.is_none() {
             return None;
         }
-        let activity = if self.pending_gesture.is_some()
+        let activity = if self.pending_gesture.is_some_and(|command| {
+            command.movement_override_gesture() == Some(super::MotionGesture::Reach)
+        }) {
+            OrdinaryMotionActivity::Reach
+        } else if self.pending_gesture.is_some()
             || self
                 .active_action
                 .is_some_and(|action| action.command.movement_override_gesture().is_some())
@@ -1113,6 +1120,47 @@ impl MotionRuntimeRegistry {
         if let Some(runtime) = self.bodies.get_mut(&guid) {
             runtime.locomotion = None;
         }
+    }
+
+    /// Resolve and apply observed playback as one registry-owned transition. Ending external
+    /// work reveals the uninterrupted authored cursor while preserving manual control.
+    /// Observations are best-effort and never create missing authored playback or change physics.
+    pub fn observe_locomotion(
+        &mut self,
+        table: &MotionSequenceTable,
+        guid: Guid,
+        observation: ObservedCharacterMotion,
+        quantum: f32,
+    ) -> anyhow::Result<()> {
+        let Some(runtime) = self.bodies.get_mut(&guid) else {
+            return Ok(());
+        };
+        runtime.bind_table(table);
+        let commanded = runtime.state.substate.is_locomotion_command()
+            || runtime
+                .state
+                .modifiers()
+                .iter()
+                .any(|active| active.command.is_locomotion_command());
+        if observation.presentation == super::CharacterMotionPresentation::Grounded
+            && !commanded
+            && !observation.motion.externally_driven
+        {
+            if !runtime.has_manual_locomotion() {
+                runtime.locomotion = None;
+            }
+            return Ok(());
+        }
+        let order = observed_locomotion_order(
+            table,
+            runtime.state.style,
+            observation.motion.accepted,
+            observation.orientation,
+            observation.presentation,
+            observation.object_scale,
+        )?;
+        runtime.present_locomotion(table, order, quantum);
+        Ok(())
     }
 
     pub fn retain_bodies(&mut self, keep: impl Fn(Guid) -> bool) {

@@ -1,5 +1,5 @@
 import { selectedEntityNameColor } from "./client-selected-entity-color";
-import { canInteractEquipment } from "./client-action-item";
+import { canInteractItem } from "./client-action-item";
 import type { HexRgbaColor } from "../lib/frontend-color";
 import type { ItemStructure } from "../app/item-structure";
 import type { ClientEntitySelection } from "./client-entity-selection";
@@ -116,14 +116,7 @@ export class ClientSelectedEntityTracking {
 			structure: record.description.structure,
 			interactionLabel: record.canTrade ? "Trade" : "Interact",
 			canInteract:
-				(record.canTrade ||
-					record.canPickUp ||
-					(!unrestrictedUse && canInteractEquipment(record)) ||
-					record.description.useCapability === "salvage-tool" ||
-					record.description.useCapability === "direct" ||
-					record.description.useCapability === "targeted" ||
-					(unrestrictedUse &&
-						record.description.useCapability === "unsupported")) &&
+				canInteractItem(record, unrestrictedUse) &&
 				this.#lifecycle.state().lifecycle?.kind === "in-world",
 			health:
 				record.description.healthQuery === "ineligible"

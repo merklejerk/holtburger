@@ -53,7 +53,7 @@
 	let editor = $state<{
 		id: string;
 		pattern: string;
-		mode: "exact" | "glob";
+		mode: EntityAlertRule["match"]["mode"];
 		enabled: boolean;
 	} | null>(null);
 	const preview = $derived.by(() => {
@@ -384,7 +384,7 @@
 					editor = {
 						id: crypto.randomUUID(),
 						pattern: "",
-						mode: "glob",
+						mode: "substring",
 						enabled: true,
 					};
 					error = null;
@@ -418,8 +418,10 @@
 								>{rule.match.pattern}</span
 							>
 							<span class="ui-list-name ui-muted">
-								{rule.match.mode === "exact" ? "Exact" : "Glob"} · {#if view.ready}{view.rows.filter(
-										(row) => row.matchingRules.includes(rule.id),
+								{{ substring: "Substring", exact: "Exact", glob: "Glob" }[
+									rule.match.mode
+								]} · {#if view.ready}{view.rows.filter((row) =>
+										row.matchingRules.includes(rule.id),
 									).length} current matches{:else}Matches unavailable{/if}
 							</span>
 						</span>
@@ -480,19 +482,21 @@
 				>
 				<label
 					>Match <select class="ui-input" bind:value={editor.mode}>
-						<option value="exact">Exact name</option><option value="glob"
-							>Name glob</option
-						>
+						<option value="substring">Substring</option><option value="exact"
+							>Exact name</option
+						><option value="glob">Name glob</option>
 					</select></label
 				>
 				<p class="ui-muted">
-					Names ignore case.{#if editor.mode === "glob"}
+					Names ignore case.{#if editor.mode === "substring"}
+						Substrings match literal text anywhere in a name.
+					{:else if editor.mode === "glob"}
 						Globs match the whole name: * matches any text, ? matches one
 						character. Use \ to escape a literal *, ? or \.{/if}
 				</p>
 				<p role="status">
 					{#if !view.ready}Waiting for nearby entities…
-					{:else if previewCount === null}Enter a valid name or glob to preview
+					{:else if previewCount === null}Enter a valid pattern to preview
 						matches.
 					{:else}{previewCount} current matches{/if}
 				</p>

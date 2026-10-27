@@ -37,6 +37,7 @@
 		"preview": "vite preview --host 127.0.0.1 --port 0 --strictPort",
 		"test:ts": "vitest run",
 		"harness:browser": "node scripts/browser-harness.mjs",
+		"probe:static-cell-coverage": "node scripts/static-cell-coverage-census.mjs",
 		"check:terrain-shader": "node scripts/validate-terrain-shader.mjs",
 		"check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json && npm run check:tests && npm run check:electron",
 		"check:tests": "tsc -p tsconfig.test.json",

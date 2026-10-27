@@ -16,9 +16,20 @@ Composition changes only the rendered pose.
   requires a player, a compatible layout, enabled frontend tuning, and either active movement
   intent or unsupported physical contact (airborne/sliding).
 - `AnimationSystem` advances both tracks and keeps existing hook ownership. It composes only
-  a displayed gesture (including a locally finishing gesture) with an available locomotion track.
+  a displayed spell or missile gesture (including a locally finishing gesture) with an available
+  locomotion track.
 - The pure compositor receives complete sampled poses, the verified layout, and chest weight.
   It reads no input state, global tuning, assets, or effect state.
+
+Remote observed gait uses accepted supported travel only when the retained command requests
+walking, running, turning, or sidestepping, or the solver applies a return/facing drive or accepts
+a supported contact push. Authored root translation and rotation alone do not grant the observed
+track ownership: a standing or custom animation can move without becoming a walking command.
+When neither commanded locomotion nor external work requires an observed track, the shared motion
+registry retires that track and reveals the uninterrupted authored cursor. Selection and retirement
+are one registry-owned transition; client and Explorer adapters submit observations without
+reconstructing that lifecycle. Manual locomotion, support presentation, action clocks, and physical
+travel keep their existing owners.
 
 Unsupported topology retains ordinary presentation. Compatible topology with an incomplete
 sample is a contract error. A clip authoring fewer setup parts is supported by the existing
@@ -69,11 +80,17 @@ root-scale preparation rebuilds it.
 
 Hook dispatch follows the semantic selected track, not per-part blend weights. Composed legs
 therefore do not independently enable footstep hooks. Releasing movement immediately restores
-the full gesture on the ground; airborne/sliding contact keeps the support pose in the lower
-body even without directional input. There is no additional crossfade or foot-placement solver.
+the full spell or missile gesture on the ground; airborne/sliding contact keeps the support pose
+in the lower body even without directional input. There is no additional crossfade or foot-placement solver.
 
 Recognized spell, reach, and missile gestures keep their authored clocks through local and remote
-jump/fall transitions.
+jump/fall transitions. Inventory reach is published as a distinct `reach` activity: pickup/drop
+entry, hold, and return retain the authored whole-body pose even while movement continues or
+contact becomes airborne/sliding. This avoids replacing the pelvis and legs of a pickup bend.
+Physical movement, collision, hooks, and gesture clocks retain their existing owners. The character
+can therefore move across the ground while its whole-body reach finishes, without a walking pose.
+The frontend retains the displayed clip's activity when a host-reported successor arrives early,
+so a locally finishing reach cannot become a split-body gesture during retirement.
 The independent locomotion track selects the support pose, while the gesture retains action
 completion and body-hook ownership. Other actions keep existing contact interruption priority.
 Both the per-tick driver and committed contact edges preserve these gestures. Packet admission

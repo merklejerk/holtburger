@@ -61,6 +61,10 @@ export interface MapBlip {
 				readonly category: DynamicEntityMapBlipCategory;
 				/** Entity height minus map-anchor height in world metres. */
 				readonly heightOffsetMeters: number;
+		  }
+		| {
+				/** Uniform app-owned marker replacing category appearance for enabled alert matches. */
+				readonly category: "alert";
 		  };
 }
 
@@ -69,7 +73,8 @@ export interface MapBlip {
  *
  * Retail drew only objects whose `ShowableOnRadar` was one of the three show values, then applied
  * a fixed radius. Ordinary objects retain those visibility semantics; doors and switches
- * are explicit landmarks. All markers use the current map extent:
+ * are explicit landmarks. Enabled local alert matches replace ordinary markers and bypass
+ * radar visibility. All markers use the current map extent:
  *
  * RETAIL DIVERGENCE: retail limited blips to `CPlayerSystem::GetRadarRadius`, a flat 75 m outdoors
  * and 25 m indoors (acclient.c:378719-378725), tested as a horizontal distance compare
@@ -83,11 +88,13 @@ export function selectMapBlips(
 	entities: Iterable<MapEntity>,
 	projection: ProjectedMapView,
 	controlledEntityGuid: number | null,
+	alertGuids: ReadonlySet<number>,
 ): readonly MapBlip[] {
 	const { view, worldToClip } = projection;
 	const blips: MapBlip[] = [];
 	for (const { view: entity, placement, sidewaysSpan } of entities) {
 		const controlled = entity.identity.guid === controlledEntityGuid;
+		const alert = !controlled && alertGuids.has(entity.identity.guid);
 		const behavior = entity.presentation.radar.behavior;
 		const interactable = isInteractableMapCategory(
 			entity.presentation.radar.category,
@@ -98,8 +105,14 @@ export function selectMapBlips(
 		// accepted alongside ShowAlways; InqShowableOnRadar performs no state test
 		// (acclient.c:417954-417970). Gating either would hide authored objects retail shows. The
 		// 43,913-template catalog census found every defined value 0..4 in shipped content.
+		// RETAIL DIVERGENCE: InqShowableOnRadar applies authored visibility
+		// (acclient.c:417954-417970); enabled local alerts instead expose every realized match.
+		// Restoring that predicate would suppress user-requested alerts for ShowNever/unset
+		// entities. The affected population is the current local rule match set, with no authored
+		// content changes; map drawing cannot affect server content.
 		if (
 			!controlled &&
+			!alert &&
 			!interactable &&
 			behavior !== "ShowMovement" &&
 			behavior !== "ShowAttacking" &&
@@ -114,6 +127,7 @@ export function selectMapBlips(
 		// retail predicate would hide these landmarks. Map drawing cannot affect server content.
 		if (
 			!controlled &&
+			!alert &&
 			(entity.physics.hidden || (interactable && entity.physics.noDraw))
 		)
 			continue;
@@ -128,6 +142,7 @@ export function selectMapBlips(
 		let span: MapBlip["span"] = null;
 		if (
 			!controlled &&
+			!alert &&
 			(category === "door" || category === "door-no-direct-use") &&
 			sidewaysSpan !== null &&
 			sidewaysSpan.maxX > sidewaysSpan.minX
@@ -168,11 +183,13 @@ export function selectMapBlips(
 							mapHeadingFromSceneTransform(placement.localTransform) -
 							view.anchor.headingRadians,
 					}
-				: {
-						category: entity.presentation.radar.category,
-						heightOffsetMeters:
-							placement.localTransform.m42 - view.anchor.worldY,
-					},
+				: alert
+					? { category: "alert" }
+					: {
+							category: entity.presentation.radar.category,
+							heightOffsetMeters:
+								placement.localTransform.m42 - view.anchor.worldY,
+						},
 			clipX,
 			clipY,
 			guid: entity.identity.guid,

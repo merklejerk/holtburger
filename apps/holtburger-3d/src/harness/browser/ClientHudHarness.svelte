@@ -748,6 +748,8 @@
 		readonly viewport: { readonly height: number; readonly width: number };
 		/** Completed viewport click locations sent to entity acquisition. */
 		readonly viewportSelectionPoints: readonly {
+			/** Activation requested by the accepted second click. */
+			readonly interact: boolean;
 			readonly x: number;
 			readonly y: number;
 		}[];
@@ -1117,6 +1119,8 @@
 		readonly chat: {
 			readonly setPartyPresent: (present: boolean) => void;
 			readonly reset: () => void;
+			/** Focus a fresh entity tag for native browser keyboard activation checks. */
+			readonly prepareEntityKeyboard: () => Promise<void>;
 			/** Recreate the composer from synthetic saved user settings. */
 			readonly restart: () => Promise<void>;
 			readonly select: (target: ClientChatTellTarget | null) => void;
@@ -1127,6 +1131,7 @@
 			readonly professorPrompt: () => void;
 			readonly clearPrompt: () => void;
 			readonly read: () => {
+				readonly selectedEntity: number | null;
 				readonly requests: readonly ClientChatRequest[];
 				readonly destination: typeof chatComposer.destination;
 				readonly recentEmotes: readonly string[];
@@ -1245,6 +1250,8 @@
 		readonly setEnchantments: (resolved: ResolvedEnchantments) => void;
 		/** Inject coherent character facts and correlated quotes through session listeners. */
 		readonly setCharacterSheet: (sheet: unknown) => void;
+		/** Exercise portal admission through the production lifecycle listener. */
+		readonly setCharacterPortalSpace: (active: boolean) => void;
 		readonly replyProgression: (evaluation: unknown) => void;
 		readonly replyProgressionFeedback: (feedback: unknown) => void;
 		readonly retireCharacterSheet: (lateSheet: unknown) => boolean;
@@ -3694,7 +3701,8 @@
 	const orbitDeltas: { x: number; y: number }[] = [];
 	const zoomDeltas: number[] = [];
 	const selectionEvents: (number | null)[] = [];
-	const viewportSelectionPoints: { x: number; y: number }[] = [];
+	const viewportSelectionPoints: { x: number; y: number; interact: boolean }[] =
+		[];
 	const viewportHoverPoints: { x: number; y: number }[] = [];
 	const cameraController = {
 		pitch(deltaY: number): void {
@@ -3914,6 +3922,7 @@
 			...message,
 			id,
 			receivedAt: new Date(2026, 7, 27, 9, id),
+			generation: chatComposer.generation,
 		};
 	}
 
@@ -3977,6 +3986,14 @@
 						view: {
 							...second.view,
 							identity: { ...second.view.identity, guid: 8 },
+							presentation: {
+								...second.view.presentation,
+								radar: {
+									...second.view.presentation.radar,
+									category: "other",
+									behavior: "ShowNever",
+								},
+							},
 						},
 					},
 				];
@@ -4868,9 +4885,38 @@
 					commands: () => interactionCommands,
 					messages: () => messages,
 					waypoint: () => readMinimapFrame().waypoint?.target ?? null,
+					select: (guid) => selection.select(guid),
+					retireChat: () => chatComposer.reset(),
+					notice: () => toast?.message ?? null,
 				});
 			},
 			chat: {
+				prepareEntityKeyboard: async () => {
+					selection.select(null);
+					appendChat({
+						kind: "formatted-system",
+						rows: [
+							{
+								indented: false,
+								spans: [{ kind: "entity", guid: 7, text: "Keyboard entity" }],
+							},
+						],
+					});
+					await tick();
+					const historyToggle = document.querySelector<HTMLButtonElement>(
+						'[aria-label="Interact with chat history"]',
+					);
+					if (historyToggle === null)
+						throw new Error("Chat history toggle is missing");
+					historyToggle.click();
+					await tick();
+					const tag = document.querySelector<HTMLSpanElement>(
+						'[aria-label="Select entity: Keyboard entity"]',
+					);
+					if (tag === null) throw new Error("Keyboard entity tag is missing");
+					// Deliberate keyboard navigation admits native controls through the containing scope.
+					tag.focus();
+				},
 				setPartyPresent: (present) => {
 					chatComposer.inParty = present;
 				},
@@ -4913,6 +4959,7 @@
 						confirmation: null,
 					}),
 				read: () => ({
+					selectedEntity: selection.selectedGuid(),
 					requests: chatRequests.slice(),
 					destination: chatComposer.destination,
 					recentEmotes: [...chatComposer.recentEmotes],
@@ -5299,11 +5346,33 @@
 			setCharacterSheet: (sheet) => {
 				emitInteractionEvent("client-character-sheet-updated", sheet);
 			},
+			setCharacterPortalSpace: (active) => {
+				emitInteractionEvent(
+					"client-lifecycle-changed",
+					active
+						? {
+								kind: "portal-space",
+								cause: "teleport",
+								worldGeneration:
+									interactionLifecycle.state().worldGeneration + 1,
+							}
+						: { kind: "in-world" },
+				);
+			},
 			replyProgression: (evaluation) => {
 				emitInteractionEvent("client-progression-evaluated", evaluation);
 			},
 			replyProgressionFeedback: (feedback) => {
-				emitInteractionEvent("client-progression-feedback", feedback);
+				// Other probes own isolated toast centers; match app delivery only for this injection.
+				const unsubscribe = interactionLifecycle.subscribe((event) => {
+					if (event.type === "action-feedback")
+						inventoryToasts.publish(event.feedback);
+				});
+				try {
+					emitInteractionEvent("client-progression-feedback", feedback);
+				} finally {
+					unsubscribe();
+				}
 			},
 			retireCharacterSheet: (lateSheet) => {
 				emitInteractionEvent("client-lifecycle-changed", {
@@ -5784,7 +5853,7 @@
 					bind:this={gameplayView}
 					{emotesEnabled}
 					nearby={nearbyOwner}
-					onSelectNearbyEntity={(guid) => selection.selectKnownEntity(guid)}
+					onSelectKnownEntity={(guid) => selection.selectKnownEntity(guid)}
 					onClearWaypoint={clearWaypoint}
 					onSetWaypoint={setWaypoint}
 					{partyHudPresent}
@@ -5954,12 +6023,12 @@
 						else if (destination.isCurrent())
 							destination.commit(inventoryWorldResult);
 					}}
-					onViewportSelect={(x, y) => {
-						viewportSelectionPoints.push({ x, y });
+					onViewportSelect={(x, y, interact) => {
+						viewportSelectionPoints.push({ x, y, interact });
 						selectEntity(7);
 					}}
 					onViewportExamine={(x, y) => {
-						viewportSelectionPoints.push({ x, y });
+						viewportSelectionPoints.push({ x, y, interact: false });
 						selectEntity(7);
 						void objectInspectionOwner.examine(7);
 					}}
@@ -6053,6 +6122,9 @@
 							);
 						else
 							await interactionLifecycle.sendChat({ kind: "speech", message });
+					}}
+					onChatNotice={(message) => {
+						toast = { id: 1, message, tone: "warning" };
 					}}
 					onSendChatError={(message) => {
 						appendChat({ kind: "error", message });

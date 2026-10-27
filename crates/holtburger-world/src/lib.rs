@@ -110,10 +110,11 @@ pub use spatial::{
     SpatialSamplingConfig, SpatialSamplingState, SpatialScene, SphereSweep, StaticContact,
     StaticSphereSweepHit, StaticSphereSweepRequest, StaticSurfaceRayHit, StaticSurfaceRayRequest,
     StickyBodyTarget, SupportContact, SupportFeature, SupportRequest, SupportSource,
-    UncoveredCollisionQuery, admit_physical_duration, advance_body_contact_collection,
-    advance_body_contacts, advance_body_kinematics, gate_authored_offset,
-    physical_body_scene_residency, project_pose_forward_distance, resolve_mobile_contact,
-    resolve_physical_body_cell, settle_free_sphere, settle_free_sphere_with_policy,
+    SupportedBodyMotion, UncoveredCollisionQuery, admit_physical_duration,
+    advance_body_contact_collection, advance_body_contacts, advance_body_kinematics,
+    gate_authored_offset, physical_body_scene_residency, project_pose_forward_distance,
+    resolve_mobile_contact, resolve_physical_body_cell, settle_free_sphere,
+    settle_free_sphere_with_policy,
 };
 pub use state::{
     AuthoredBodyMotionTick, AuthoredMotionDriveError, BodyProjectionResolver,

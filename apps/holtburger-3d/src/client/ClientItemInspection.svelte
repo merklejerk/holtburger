@@ -228,6 +228,7 @@
 			{#if item.portalDestination !== null}
 				<p class="inspection-description" data-inspection-portal-destination>
 					Destination: <ClientWaypointText
+						interactive
 						text={item.portalDestination}
 						{onSetWaypoint}
 					/>
@@ -235,9 +236,17 @@
 			{/if}
 			{#if inspection.description !== null}<p class="inspection-description">
 					{#if collapsedDescription !== null && !descriptionExpanded}
-						<ClientWaypointText text={collapsedDescription} {onSetWaypoint} />…
+						<ClientWaypointText
+							interactive
+							text={collapsedDescription}
+							{onSetWaypoint}
+						/>…
 					{:else}
-						<ClientWaypointText text={inspection.description} {onSetWaypoint} />
+						<ClientWaypointText
+							interactive
+							text={inspection.description}
+							{onSetWaypoint}
+						/>
 					{/if}
 					{#if collapsedDescription !== null}
 						{" "}<button
@@ -563,7 +572,11 @@
 		<section>
 			<h3 class="ui-section-heading">Inscription</h3>
 			<blockquote>
-				<ClientWaypointText text={item.inscription.text} {onSetWaypoint} />
+				<ClientWaypointText
+					interactive
+					text={item.inscription.text}
+					{onSetWaypoint}
+				/>
 			</blockquote>
 			{#if item.inscription.scribe !== null && item.inscription.scribe.length > 0}<p
 					class="inspection-scribe"

@@ -82,10 +82,58 @@ function blips(
 		entities,
 		projectMapView(parameters, 256, 256),
 		controlledEntityGuid,
+		new Set(),
 	);
 }
 
 describe("selectMapBlips", () => {
+	it.each([
+		"mob",
+		"npc",
+		"player",
+		"portal",
+		"lifestone",
+		"door",
+		"door-no-direct-use",
+		"switch",
+		"other",
+	] as const)(
+		"replaces matched %s markers with one alert point regardless of radar visibility",
+		(mapCategory) => {
+			const result = selectMapBlips(
+				[
+					entity({
+						mapCategory,
+						behavior: "ShowNever",
+						hidden: true,
+						noDraw: true,
+					}),
+				],
+				projectMapView(view(), 256, 256),
+				null,
+				new Set([1]),
+			);
+			expect(result).toHaveLength(1);
+			expect(result[0]).toMatchObject({
+				guid: 1,
+				span: null,
+				appearance: { category: "alert" },
+			});
+		},
+	);
+	it("keeps alert markers within map extent and preserves the controlled arrow", () => {
+		const result = selectMapBlips(
+			[
+				entity({ guid: 1, behavior: "ShowNever" }),
+				entity({ guid: 2, localX: OUTDOOR_LANDBLOCK_WORLD_SIZE * 2 }),
+			],
+			projectMapView(view(), 256, 256),
+			1,
+			new Set([1, 2]),
+		);
+		expect(result).toHaveLength(1);
+		expect(result[0]?.appearance.category).toBe("controlled");
+	});
 	it("places an entity from its live scene placement", () => {
 		// Half a radius east and half a radius north of the landblock origin; north is -Z, so the
 		// blip lands up and to the right.

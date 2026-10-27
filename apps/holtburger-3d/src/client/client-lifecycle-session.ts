@@ -746,6 +746,11 @@ export class ClientLifecycleSession {
 					titleId,
 				});
 			},
+			(message) =>
+				this.#emit({
+					type: "action-feedback",
+					feedback: { message, tone: "warning" },
+				}),
 		);
 		this.mirror = mirror;
 		this.#dynamicSession = new DynamicEntitySession(
@@ -775,7 +780,7 @@ export class ClientLifecycleSession {
 		this.#state = emptyState();
 		this.#resetCharacterLists();
 		this.#connection = null;
-		this.characterSheet.reset(null);
+		this.characterSheet.reset(null, null);
 		this.#vendor = null;
 		this.#housing = emptyHousing();
 		this.#trade = { trade: null, pending_items: [] };
@@ -854,7 +859,7 @@ export class ClientLifecycleSession {
 			appearanceOptions: null,
 			gameplayPreferences: null,
 		};
-		this.characterSheet.reset(null);
+		this.characterSheet.reset(null, null);
 		this.#connection = null;
 		this.#housing = emptyHousing();
 		this.#emit({ type: "resyncing" });
@@ -1490,7 +1495,7 @@ export class ClientLifecycleSession {
 					};
 					this.entities.awaitSnapshot();
 					this.mirror.awaitSnapshot();
-					this.characterSheet.reset(null);
+					this.characterSheet.reset(null, null);
 					this.#connection = null;
 					this.#emit({ type: "resyncing" });
 				}),
@@ -1969,7 +1974,7 @@ export class ClientLifecycleSession {
 		);
 		this.#party = state.party;
 		this.#partyPreferences = state.partyPreferences;
-		this.characterSheet.reset(state.characterSheet);
+		this.characterSheet.reset(state.characterSheet, state.lifecycle.kind);
 		this.#housing = state.housing;
 		this.#trade = state.trade;
 		const semantic = this.entities.prepareSnapshot(
@@ -2060,7 +2065,7 @@ export class ClientLifecycleSession {
 					? lifecycle.worldGeneration
 					: this.#state.worldGeneration,
 		};
-		if (retiresCharacterDescription) this.characterSheet.reset(null);
+		if (retiresCharacterDescription) this.characterSheet.reset(null, null);
 		// Social packets can hydrate before PlayerCreate; portal revelation must retain them.
 		if (lifecycle.kind !== "in-world" && lifecycle.kind !== "portal-space") {
 			this.#resetCharacterLists();
@@ -2221,6 +2226,7 @@ export class ClientLifecycleSession {
 		this.appraisals.receive(event);
 		if (event.type === "resyncing") {
 			this.#partyUpdates.setActive(false, true);
+			this.characterSheet.setContext(null);
 			this.friends.setContext(this.#state.playerGuid, false);
 			this.contracts.setContext(this.#state.playerGuid, false);
 			this.squelch.setContext(this.#state.playerGuid, false);
@@ -2231,6 +2237,7 @@ export class ClientLifecycleSession {
 			event.type === "current-state" ||
 			event.type === "local-player-established"
 		) {
+			this.characterSheet.setContext(this.#state.lifecycle?.kind ?? null);
 			this.#updatePartyPresence();
 			this.#partyUpdates.setActive(
 				this.#state.playerGuid !== null &&

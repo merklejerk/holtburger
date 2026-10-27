@@ -454,6 +454,8 @@ pub struct ContactBodyUpdate {
     /// time for locomotion presentation only. Stair lifts, airborne travel, and angular sphere
     /// chords contribute zero; this observation must never become retained physical velocity.
     pub supported_velocity: Vector3,
+    /// A nonzero horizontal crowd separation was accepted while supported.
+    pub supported_push: bool,
     /// Final world or hard-entity support; free-flight and projectile response remain airborne.
     pub ground: GroundState,
     /// Final movement-sphere domains with primary committed-cell ownership.
@@ -508,6 +510,8 @@ struct WorkingBody<'a> {
     correction_limit: f32,
     /// Selected ordinary travel, shared by facing and publication without re-deriving it.
     observed_travel: ContactTravelObservation,
+    /// Retained across substeps so later ordinary travel cannot erase an accepted push.
+    supported_push: bool,
     /// Accepted travel and adjustments with explicit physical-time provenance.
     motion: Vec<ContactMotionSegment>,
     /// Local coverage failure preventing further movement or correction this tick.
@@ -562,6 +566,7 @@ impl<'a> WorkingBody<'a> {
             launch_admitted: false,
             correction_limit: radius * MOBILE_CONTACT_CORRECTION_TRAVEL_RADIUS_RATIO,
             observed_travel: ContactTravelObservation::default(),
+            supported_push: false,
             motion: Vec::new(),
             unavailable_owner: None,
         })
@@ -609,6 +614,7 @@ impl<'a> WorkingBody<'a> {
             ),
             accepted_motion,
             supported_velocity: self.observed_travel.supported / delta_seconds,
+            supported_push: self.supported_push,
             ground: self.ground(),
             membership: self.contact.membership,
             motion: self.motion,
@@ -989,6 +995,7 @@ fn advance_contacts(
             // while separation carries the body the other way. Observe only the final
             // hard-clipped correction; neither tentative motion nor stair lift is a gait.
             let accepted = body.root - correction_start;
+            body.supported_push |= accepted.x != 0.0 || accepted.y != 0.0;
             body.observed_travel.supported =
                 body.observed_travel.supported + Vector3::new(accepted.x, accepted.y, 0.0);
         }

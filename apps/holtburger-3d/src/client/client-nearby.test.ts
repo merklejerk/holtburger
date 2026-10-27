@@ -11,6 +11,8 @@ import {
 import { createDefaultClientCharacterSettings } from "./client-settings-defaults";
 import type { EntityAlertRule } from "./client-entity-alerts";
 import type { ClientChatEntry } from "./client-chat-policy";
+import { dynamicEntityWorldOrigin } from "../lib/game/runtime/dynamic-entity-presentation";
+import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
 import { filterNearbyRows, nearbyLocation } from "./client-nearby-policy";
 
 const timing = { absenceGraceMs: 100, notificationBatchMs: 10 };
@@ -82,14 +84,14 @@ describe("ClientNearby", () => {
 				{
 					indented: true,
 					spans: [
-						{ kind: "emphasis", text: "Diamond Golem" },
+						{ kind: "entity", guid: 7, text: "Diamond Golem" },
 						{ kind: "plain", text: expect.stringContaining("(5.0, 0.0, 0.0)") },
 					],
 				},
 				{
 					indented: true,
 					spans: [
-						{ kind: "emphasis", text: "Diamond Golem" },
+						{ kind: "entity", guid: 8, text: "Diamond Golem" },
 						{
 							kind: "plain",
 							text: expect.stringContaining("(10.0, 0.0, 0.0)"),
@@ -156,7 +158,7 @@ describe("ClientNearby", () => {
 				{
 					indented: false,
 					spans: [
-						{ kind: "emphasis", text: "Golem" },
+						{ kind: "entity", guid: 8, text: "Golem" },
 						{ kind: "plain", text: expect.stringContaining("10.0") },
 					],
 				},
@@ -390,11 +392,43 @@ describe("ClientNearby", () => {
 			}).map((row) => row.guid),
 		).toEqual([7, 9, 8]);
 	});
-	it("does not invent map waypoints for indoor cells", () => {
+	it("uses mixed-landblock surface coordinates for interior rows and detections", () => {
+		const { session, owner, scene, chat } = setup();
+		const entity = nearbyPose(7, 5);
+		const mixedEntity = {
+			...entity,
+			placement: {
+				...entity.placement,
+				pose: { ...entity.placement.pose, landblockId: cellId(0xda550100) },
+			},
+		};
+		const request = nearbySceneInterest("0xda55ffff", "outdoor");
+		scene.replace({
+			...request,
+			radii: { ...request.radii, envCellRadius: 0 },
+			ambientOutdoorEnvCellOwners: new Set(["0xda55ffff"]),
+		});
+		session.baseline([nearbyFacts(7, "Diamond Golem")], [mixedEntity]);
+		const origin = dynamicEntityWorldOrigin(mixedEntity.placement);
+		const text = formatWorldMapCoordinates(origin);
+		expect(owner.read().rows[0]?.location).toMatchObject({
+			text,
+			waypoint: { position: { x: origin.x, z: origin.z } },
+		});
+		expect(owner.trackedGuids().has(7)).toBe(true);
+		vi.advanceTimersByTime(timing.notificationBatchMs);
+		expect(JSON.stringify(chat)).toContain(text);
+		scene.replace(nearbySceneInterest("0xda55ffff", "dungeon"));
+		expect(owner.read().rows[0]?.location).toMatchObject({
+			waypoint: null,
+			text: expect.stringContaining("Cell 0xda550100"),
+		});
+	});
+	it("keeps dungeon-only locations cell-local without surface waypoints", () => {
 		const entity = nearbyPose(7, 5);
 		if (entity.placement.kind !== "world")
 			throw new Error("fixture requires world placement");
-		expect(nearbyLocation(entity.placement)).toMatchObject({
+		expect(nearbyLocation(entity.placement, false)).toMatchObject({
 			waypoint: null,
 			text: expect.stringContaining("Cell 0x"),
 		});

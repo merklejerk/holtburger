@@ -1135,6 +1135,58 @@ describe("ClientLifecycleSession", () => {
 		).toEqual([0x5000_0001]);
 	});
 
+	it("refreshes character purchases across portal lifecycle and snapshot recovery", async () => {
+		const transport = new FakeClientTransport();
+		const sheet = characterSheet(7);
+		const portalGeneration = currentState(7).worldGeneration + 1;
+		transport.setCurrentState({ ...currentState(7), characterSheet: sheet });
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const evaluations = () =>
+			transport.invocations.filter(
+				(call) => call.command === "evaluate_client_progression",
+			);
+		expect(evaluations()).toHaveLength(1);
+		transport.emit("client-lifecycle-changed", {
+			kind: "portal-space",
+			cause: "teleport",
+			worldGeneration: portalGeneration,
+		});
+		expect(session.characterSheet.read().sheet).toEqual(sheet);
+		expect(session.characterSheet.read().progressionUnavailable).toContain(
+			"portal travel",
+		);
+		transport.emit("client-lifecycle-changed", { kind: "in-world" });
+		transport.emit("client-character-sheet-updated", sheet);
+		expect(evaluations()).toHaveLength(2);
+		expect(session.characterSheet.read().progressionUnavailable).toBeNull();
+		transport.emit("client-current-state", {
+			...currentState(7),
+			characterSheet: sheet,
+			lifecycle: {
+				kind: "portal-space",
+				cause: "teleport",
+				worldGeneration: portalGeneration + 1,
+			},
+			worldGeneration: portalGeneration + 1,
+		});
+		expect(evaluations()).toHaveLength(2);
+		expect(session.characterSheet.read().progressionUnavailable).toContain(
+			"portal travel",
+		);
+		transport.emit("client-lifecycle-changed", { kind: "in-world" });
+		expect(evaluations()).toHaveLength(3);
+		transport.emit("client-state-resyncing", null);
+		expect(session.characterSheet.read().progressionUnavailable).not.toBeNull();
+		transport.emit("client-current-state", {
+			...currentState(7),
+			characterSheet: sheet,
+		});
+		expect(evaluations()).toHaveLength(4);
+		expect(session.characterSheet.read().progressionUnavailable).toBeNull();
+		session.stop();
+	});
+
 	it("restores a sheet from the snapshot and ignores retired character updates", async () => {
 		const transport = new FakeClientTransport();
 		const first = characterSheet(7);
@@ -1167,6 +1219,37 @@ describe("ClientLifecycleSession", () => {
 		expect(session.characterSheet.read().sheet?.character).toBe(8);
 		session.stop();
 		expect(session.characterSheet.read().sheet).toBeNull();
+	});
+
+	it("publishes character purchase rejections as readable action warnings", async () => {
+		const transport = new FakeClientTransport();
+		transport.setCurrentState({
+			...currentState(7),
+			characterSheet: characterSheet(7),
+		});
+		const session = new ClientLifecycleSession(transport);
+		const warnings: ClientLifecycleSessionEvent[] = [];
+		session.subscribe((event) => {
+			if (event.type === "action-feedback") warnings.push(event);
+		});
+		await session.start();
+		transport.emit("client-progression-feedback", {
+			Rejected: {
+				intent: { Raise: { target: { Attribute: "StrengthAttr" }, ranks: 1 } },
+				reason: "StaleQuote",
+			},
+		});
+		expect(warnings).toEqual([
+			{
+				type: "action-feedback",
+				feedback: {
+					tone: "warning",
+					message:
+						"Purchase was not sent: The purchase cost or character stats changed; please try again",
+				},
+			},
+		]);
+		session.stop();
 	});
 
 	it("accepts the completed character-entry baseline and subsequent inventory deltas", async () => {

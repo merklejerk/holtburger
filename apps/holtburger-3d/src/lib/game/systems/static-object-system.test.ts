@@ -1,12 +1,97 @@
 import { describe, expect, it } from "vitest";
 import type { StaticObjectLayerArtifact } from "../commit/artifacts";
 import type { GeometryManager } from "../geometry/geometry-manager";
-import type { SceneGraph, SceneNodeId } from "../scene";
+import {
+	SceneGraph,
+	INCLUDE_ALL_SCENE_CULLING_GROUPS,
+	type SceneNodeId,
+	type SceneScope,
+} from "../scene";
+import { AABB3, Mat4, Vec3 } from "../math/types";
 import { StaticObjectSystem } from "./static-object-system";
 import { LandblockLayerKind } from "../runtime/scene-interest";
 import type { SceneInterestRevision } from "../runtime/scene-availability";
 
 describe("StaticObjectSystem", () => {
+	it("indexes one covered batch in both cells and retires all memberships on replacement and eviction", () => {
+		const scene = new SceneGraph();
+		const geometry = new FixtureGeometry();
+		const owner = {
+			kind: "env-cell",
+			landblockId: "0x0001ffff",
+			envCellId: "0x00010100",
+		} as const;
+		const neighbor = { ...owner, envCellId: "0x00010101" } as const;
+		for (const scope of [owner, neighbor])
+			scene.upsertEnvCellScope({
+				scope,
+				landblockBounds: new AABB3(
+					new Vec3(-10, -10, -10),
+					new Vec3(10, 10, 10),
+				),
+				containmentPlanes: new Float32Array(),
+				structureToLandblock: Mat4.identity(),
+				visibilityIslandId: "env-cell-island:static",
+				potentiallyVisibleEnvCellIds: new Set(),
+				seenOutside: false,
+			});
+		const system = new StaticObjectSystem<"interior", string>(
+			scene,
+			geometry as unknown as GeometryManager<string>,
+			(_, rev) => `resource:${rev}`,
+		);
+		const batch = (
+			scopes: readonly SceneScope[],
+		): StaticObjectLayerArtifact => ({
+			...artifact("covered"),
+			objects: [
+				{
+					placement: {
+						landblockId: owner.landblockId,
+						envCellId: owner.envCellId,
+						localTransform: Mat4.identity(),
+						spatialMembership: { scopes },
+					},
+					localBounds: new AABB3(new Vec3(-1, -1, -5), new Vec3(1, 1, -3)),
+					renderable: { drawUnits: [], frameStreamedInstances: [] },
+				},
+			],
+		});
+		const query = (scopes: readonly SceneScope[]) =>
+			scene.queryScopesFrustum(
+				{ cameraPosition: Vec3.zero(), planes: [] },
+				owner.landblockId,
+				scopes,
+				INCLUDE_ALL_SCENE_CULLING_GROUPS,
+				null,
+			).entries;
+		system.replaceObjects(
+			"interior",
+			revision(1),
+			batch([owner, neighbor]),
+			"env-cell-static-residents",
+		);
+		const selected = [...query([neighbor])];
+		expect(selected).toHaveLength(1);
+		expect(query([owner, neighbor])).toEqual(selected);
+		expect(scene.getResolvedPlacement(selected[0]!)?.envCellId).toBe(
+			owner.envCellId,
+		);
+		expect(system.getDiagnostics().nodeCount).toBe(1);
+		system.replaceObjects(
+			"interior",
+			revision(2),
+			batch([owner]),
+			"env-cell-static-residents",
+		);
+		expect(query([neighbor])).toEqual([]);
+		expect(query([owner])).toHaveLength(1);
+		system.evict("interior", revision(1));
+		expect(query([owner])).toHaveLength(1);
+		system.removeExact("interior", revision(2));
+		expect(query([owner, neighbor])).toEqual([]);
+		expect(geometry.dropped).toEqual(["resource:1", "resource:2"]);
+	});
 	it("retains the visible revision when staging a replacement fails", () => {
 		const scene = new FixtureScene();
 		const geometry = new FixtureGeometry();

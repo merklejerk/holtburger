@@ -120,9 +120,9 @@ jobs:
             fi
           done
           sudo apt-get update
-          # Keep builder helpers and Xvfb authentication, without optional media stacks.
+          # Keep builder helpers, SVG decoding and Xvfb authentication without optional media stacks.
           sudo apt-get install --yes --no-install-recommends \
-            flatpak flatpak-builder appstream-compose desktop-file-utils elfutils ostree \
+            flatpak flatpak-builder appstream-compose desktop-file-utils elfutils ostree librsvg2-common \
             dbus-x11 xvfb xauth xdg-desktop-portal xdg-desktop-portal-gtk
           sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
           RUNTIME_VERSION=$(python -c 'import json; print(json.load(open(".github/flatpak/io.github.merklejerk.holtburger-alpha.json"))["runtime-version"])')

@@ -74,6 +74,8 @@ The provisioning step still downloads OS packages and SDK/runtime on a fresh run
 it uses the main Ubuntu archive in place of the previously stalled Azure mirror and explicitly
 installs required helpers without optional recommended media packages. Additional caching is
 justified only by measured setup cost after consolidation.
+The required `librsvg2-common` package supplies SVG decoding for the TUI's AppStream icon;
+keep it explicit when disabling recommended packages.
 
 Its recipe under `.github/flatpak/` builds only pinned Zypak to support Chromium's nested
 sandbox; the 26.08 runtime supplies the other linked libraries. Two small build patches track

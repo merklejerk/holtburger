@@ -3,6 +3,27 @@ import { ViewportInputGate } from "./viewport-input-gate";
 import { InputContext } from "./input-context";
 
 describe("ViewportInputGate", () => {
+	it("forwards modes and resets blocked attachments and outgoing participants", () => {
+		const gate = new ViewportInputGate();
+		const participant = vi.fn();
+		const detach = gate.attach(participant);
+		gate.cancel("release-held");
+		gate.cancel("reset");
+		const unblock = gate.block();
+		const mounted = vi.fn();
+		const detachMounted = gate.attach(mounted);
+		detach();
+		detachMounted();
+		unblock();
+		expect(participant.mock.calls).toEqual([
+			["release-held"],
+			["reset"],
+			["reset"],
+			["reset"],
+		]);
+		expect(mounted.mock.calls).toEqual([["reset"], ["reset"]]);
+	});
+
 	it("finishes sibling cancellation and rolls back an unreturned blocker on failure", () => {
 		const gate = new ViewportInputGate();
 		const failure = new Error("Broken participant");
@@ -24,7 +45,7 @@ describe("ViewportInputGate", () => {
 		});
 		expect(() => gate.attach(failed)).toThrow("Cannot attach");
 		release();
-		gate.cancel();
+		gate.cancel("reset");
 		expect(failed).toHaveBeenCalledOnce();
 	});
 	it("cancels all participants once on blocking and keeps independent blockers active", () => {
@@ -53,7 +74,7 @@ describe("ViewportInputGate", () => {
 		expect(outgoing).toHaveBeenCalledOnce();
 		detach();
 		detach();
-		gate.cancel();
+		gate.cancel("reset");
 		release();
 		expect(outgoing).toHaveBeenCalledTimes(2);
 	});
@@ -65,7 +86,7 @@ describe("ViewportInputGate", () => {
 		gate.attach(() => context.reset());
 		const event = { key: "x", code: "KeyX", shiftKey: false };
 		context.apply(event, true);
-		gate.cancel();
+		gate.cancel("release-held");
 		expect(gate.allowed).toBe(true);
 		context.apply({ ...event, repeat: true }, true);
 		context.apply(event, false);
@@ -79,7 +100,7 @@ describe("ViewportInputGate", () => {
 
 	it("unregisters the outgoing participant before cancelling it", () => {
 		const gate = new ViewportInputGate();
-		const cancel = vi.fn(() => gate.cancel());
+		const cancel = vi.fn(() => gate.cancel("reset"));
 		const detach = gate.attach(cancel);
 		detach();
 		expect(cancel).toHaveBeenCalledOnce();

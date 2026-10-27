@@ -190,7 +190,7 @@ export class ClientInputArbiter {
 		if (this.#autoRun) this.#ordinary.setPersistentForward(true, "synchronize");
 	}
 
-	/** Editor handoff drops physical controls and precise targeting while preserving autorun. */
+	/** Focus loss or editor handoff drops physical controls and precise targeting while preserving autorun. */
 	releaseHeldActions(): void {
 		this.#clearHeldActions();
 		this.#ordinary.releaseHeldActions(this.#autoRun);

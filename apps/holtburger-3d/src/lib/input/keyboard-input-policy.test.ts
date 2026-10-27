@@ -213,7 +213,7 @@ describe("game keyboard routing", () => {
 	it("accepts a fresh press when window focus hid an earlier key release", () => {
 		const { keyboard, viewport, game } = fixture();
 		keyboard.keydown(keyEvent("KeyW"));
-		viewport.cancel();
+		viewport.cancel("release-held");
 		keyboard.keydown(keyEvent("KeyW", true));
 		keyboard.keydown(keyEvent("KeyW"));
 		expect(game.keydown).toHaveBeenCalledTimes(2);
@@ -269,11 +269,17 @@ describe("game keyboard routing", () => {
 		expect(game.keydown).toHaveBeenCalledOnce();
 	});
 
-	it("retains the cancellation boundary without a game controller", () => {
-		const viewport = new ViewportInputGate();
-		const keyboard = new KeyboardInputPolicy(viewport);
-		const cancel = vi.spyOn(keyboard, "cancel");
-		viewport.cancel();
-		expect(cancel).toHaveBeenCalledOnce();
-	});
+	it.each(["release-held", "reset"] as const)(
+		"forwards %s cancellation and quarantines stale releases",
+		(mode) => {
+			const { keyboard, viewport, game } = fixture();
+			keyboard.keydown(keyEvent("KeyW"));
+			viewport.cancel(mode);
+			expect(game.cancel).toHaveBeenCalledExactlyOnceWith(mode);
+			keyboard.keydown(keyEvent("KeyW", true));
+			keyboard.keyup(keyEvent("KeyW"));
+			expect(game.keydown).toHaveBeenCalledOnce();
+			expect(game.keyup).not.toHaveBeenCalled();
+		},
+	);
 });

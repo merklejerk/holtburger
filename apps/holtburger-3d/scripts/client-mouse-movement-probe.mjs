@@ -203,6 +203,17 @@ export async function probeClientMouseMovement(client, evaluate) {
 		await forward(null);
 		await mouse("mouseReleased", "right", 0);
 		await read(`${fixture}.toggleAutoRun()`);
+		await mouse("mousePressed", "right", 2);
+		await waitForLock(true);
+		await read("window.dispatchEvent(new Event('blur'))");
+		await waitForLock(false);
+		await forward("forward");
+		assert.equal((await state()).autoRun, true);
+		const turnsAfterBlur = (await state()).turns.length;
+		await mouse("mouseMoved", "none", 2, point.x + 8);
+		assert.equal((await state()).turns.length, turnsAfterBlur);
+		await mouse("mouseReleased", "right", 0);
+		await forward("forward");
 		await mouse("mousePressed", "middle", 4);
 		assert.equal((await state()).autoRun, false);
 		await read(`globalThis.__releaseMouseBlock = ${fixture}.block()`);
@@ -486,6 +497,7 @@ export async function probeClientMouseMovement(client, evaluate) {
 			overlappingSources: true,
 			keyboardPrecedence: true,
 			autorun: true,
+			autorunSurvivesBlurDuringSteering: true,
 			preciseSuppression: true,
 			liveSettingsCancellation: true,
 			mouseMovementToggle: true,

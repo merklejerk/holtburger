@@ -106,7 +106,22 @@ describe("shared content arguments", () => {
 	});
 });
 
-describe("development launcher arguments", () => {
+describe("Electron launch arguments", () => {
+	it.each([
+		["--dev", "--debug", ["--remote-debugging-port=9222"]],
+		["--dev=true", "--debug=true", ["--remote-debugging-port=9222"]],
+		["--dev=false", "--debug=false", []],
+	])(
+		"aliases %s to renderer diagnostics",
+		(flag, normalized, electronSwitches) => {
+			const launch = extractElectronLaunchArguments([flag]);
+			expect(launch).toEqual({ args: [normalized], electronSwitches });
+			expect(collapseRendererArguments(launch.args)).toEqual([
+				`--query=debug=${flag === "--dev=false" ? "false" : "true"}`,
+			]);
+		},
+	);
+
 	it.each([[], ["--debug=false"]])(
 		"leaves DevTools closed without an opt-in: %j",
 		(...args) => {
@@ -140,6 +155,15 @@ describe("development launcher arguments", () => {
 		},
 	);
 
+	it("supports a bundled dev launch with an assigned port", () => {
+		expect(extractElectronLaunchArguments(["--dev", "--debug-port=0"])).toEqual(
+			{
+				args: ["--debug"],
+				electronSwitches: ["--remote-debugging-port=0"],
+			},
+		);
+	});
+
 	it("allows an assigned DevTools port without renderer instrumentation", () => {
 		expect(
 			extractElectronLaunchArguments(["--debug=false", "--debug-port=0"]),
@@ -154,6 +178,8 @@ describe("development launcher arguments", () => {
 		["--debug", "--debug=false"],
 		["--query=debug=false", "--debug"],
 		["--query=debug=true"],
+		["--dev", "--debug=false"],
+		["--debug=false", "--dev"],
 	])("matches the renderer's effective diagnostics query: %j", (...args) => {
 		const launch = extractElectronLaunchArguments(args);
 		const search = buildEntryPath("", launch.args);
@@ -276,11 +302,7 @@ describe("development launcher arguments", () => {
 				"--debug",
 			]),
 		).toEqual({
-			launchArguments: [
-				"--account=ash",
-				"--settings-file",
-				settingsPath,
-			],
+			launchArguments: ["--account=ash", "--settings-file", settingsPath],
 			rendererArguments: ["--debug"],
 		});
 	});

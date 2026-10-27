@@ -527,13 +527,18 @@ npm run dev:client:release -- --account YOUR_ACCOUNT --uncapped
 npm run dev:explorer:release -- --uncapped
 ```
 
-Pass `--debug` to enable renderer diagnostics and expose Chrome DevTools on port 9222.
+Pass `--dev` to enable renderer diagnostics and expose Chrome DevTools on port 9222,
+including in release bundles. This flag does not change the build or optimization mode.
+The development launchers also accept `--debug`; use `--dev` with bundles because Electron
+interprets `--debug` before the application can handle it.
 Use `--debug-port <port>` (or `--debug-port=<port>`) to override the port; `0` requests
 an assigned port. The port option also works on its own without enabling renderer diagnostics.
 
 ```bash
-npm run dev:client -- --debug
-npm run dev:explorer -- --debug --debug-port 9223
+npm run dev:client -- --account YOUR_ACCOUNT --dev
+npm run dev:explorer -- --dev --debug-port 9223
+# Pass the same flags to the executable in a release bundle:
+./holtburger-3d --account YOUR_ACCOUNT --dev --debug-port 9223
 ```
 
 Unfocused windows still use the app's 10 FPS background limit. Uncapping can increase CPU/GPU use.

@@ -1,4 +1,4 @@
-# Notices cover runtime and build dependencies across the alpha's four native targets.
+# Notices cover runtime and build dependencies across the alpha's three native targets.
 # SPDX alternatives are selected in this order; original attribution text is retained.
 accepted = [
   "Apache-2.0", "MIT", "BSD-3-Clause", "ISC", "Unicode-3.0", "Unicode-DFS-2016",
@@ -9,7 +9,7 @@ ignore-dev-dependencies = true
 workarounds = ["ring", "rustls", "rustix"]
 targets = [
   "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc",
-  "aarch64-apple-darwin", "x86_64-apple-darwin",
+  "aarch64-apple-darwin",
 ]
 
 # Original notice from Nugine/simd at 220c2e5f615d897b999aba46acdce3d281ef4ca4.

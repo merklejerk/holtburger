@@ -43,7 +43,7 @@ The non-SemVer tag namespace avoids triggering the separate cargo-dist release w
 The workflow checks that the tag prefix matches the source commit and that the commit belongs
 to `3d-next`. All native builds consume the same commit, version, and micro digest.
 
-Linux, Windows x86-64, and both macOS architectures build on native runners. Forge consumes
+Linux x86-64, Windows x86-64, and macOS Apple Silicon build on native runners. Forge consumes
 the explicitly targeted Rust host through `HOLTBURGER_PACKAGE_HOST`, avoiding an implicit
 native rebuild. CI validates the final suite after extraction and stages the complete matrix,
 TUI Flatpak, standalone micro ZIP, manifest, and checksums into one draft.
@@ -57,7 +57,7 @@ expects `appstream-compose`. Flatpak runtime requirements remain defined by the 
 
 The plan job installs the version of `cargo-about` named by
 `python3 .github/scripts/generate_notices.py tool-version`, then generates one
-`THIRD_PARTY_NOTICES.html` for all four target graphs. The same file is included in every
+`THIRD_PARTY_NOTICES.html` for all three target graphs. The same file is included in every
 suite and the Flatpak, and uploaded separately for review. Suite metadata and the final
 manifest pin its digest. Electron/Chromium and font notices remain inside h3d.
 

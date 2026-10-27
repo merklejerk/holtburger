@@ -34,7 +34,6 @@ TARGETS = (
     NativeTarget("x86_64-unknown-linux-gnu", "ubuntu-22.04", "linux", "x64"),
     NativeTarget("x86_64-pc-windows-msvc", "windows-2022", "win32", "x64"),
     NativeTarget("aarch64-apple-darwin", "macos-14", "darwin", "arm64"),
-    NativeTarget("x86_64-apple-darwin", "macos-15-intel", "darwin", "x64"),
 )
 SCRIPTS = ("fighter.js", "mage.js", "mage.data.json", "mage.data.bin")
 TOOLS = ("holtburger-cli", "dat2hba", "dat-tool")

@@ -11,6 +11,7 @@ const MAPPING_CASE_COUNT = 2_048;
 const UNIT_SAMPLES = [0, 0.25, 0.5, 1] as const;
 
 describe("portal scope-tile metadata", () => {
+	// Exhaustive seeded assertions exceed the default timeout on hosted Intel macOS.
 	it("maps screen, atlas, and instanced tile coordinates through one integer record", () => {
 		const random = deterministicRandom(0x5c0f_e71e);
 		const metadata = new Uint32Array(
@@ -85,7 +86,7 @@ describe("portal scope-tile metadata", () => {
 				}
 			}
 		}
-	});
+	}, 30_000);
 });
 
 function deterministicRandom(seed: number): () => number {

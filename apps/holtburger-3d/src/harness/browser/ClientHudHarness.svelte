@@ -5573,6 +5573,8 @@
 					if (!mounted) return;
 					seedShowcaseHud();
 					nearbyMapFixture = true;
+					waypointControls.enable();
+					setWaypoint(SHOWCASE_WAYPOINT);
 					waypointCameraHeading = Math.PI / 6;
 					selection.select(7);
 					warningVitals = SHOWCASE_VITAL_KINDS.map((kind) => ({

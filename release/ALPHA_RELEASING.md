@@ -30,8 +30,14 @@ Retail DATs and full HBAs must not be uploaded to public CI or the release.
 
 ## Candidate build
 
-The alpha workflow verifies pushes and pull requests on `3d-next` without publishing.
-Tagged candidates must be committed on that branch, version-consistent, and clean.
+`Alpha checks` validates pushes and pull requests on `3d-next` on Linux only, without release packaging.
+Prose-only changes outside shipped documentation skip compilation while still reporting the
+`Alpha validation` status. Configure that final status as the branch requirement rather than
+individual conditionally skipped matrix jobs.
+
+`Alpha Release Candidate` runs only for an explicitly pushed alpha tag. It calls the same
+validation workflow for that exact source, in parallel with production packaging. Tagged
+candidates must be committed on `3d-next`, version-consistent, and clean.
 Resolve the intended commit before creating a tag:
 
 ```sh
@@ -49,14 +55,25 @@ native rebuild. CI validates the final suite after extraction and stages the com
 TUI-only and full-suite Flatpaks, standalone micro ZIP, notices, manifest, and checksums into
 one draft. The complete inventory is nine assets.
 
-Portable Linux builds use Ubuntu 22.04. The separate Flatpak job uses Ubuntu 24.04's
+Portable Linux builds use Ubuntu 22.04. The combined Flatpak job uses Ubuntu 24.04's
 builder 1.4, which supports the SDK's `appstreamcli`; the older 22.04 builder
 expects `appstream-compose`. Flatpak runtime requirements remain defined by the declared
 26.08 runtime. Its installed production-bootstrap probe verifies binary compatibility.
 The full-suite recipe owns the alpha runtime selection; the generated TUI alpha recipe and
-both CI installation steps consume it. The main nightly keeps its independent TUI recipe.
+the single Flatpak provisioning step consume it. The main nightly keeps its independent TUI recipe.
 
-The full-suite Flatpak reuses the inspected Linux archive without rebuilding its executables.
+Both Flatpaks reuse the inspected Linux archive without rebuilding its executables.
+Their combined job waits only for Linux, independently of Windows/macOS, and installs tooling
+and runtime once. Separate builder state/repository directories keep the app inventories
+independent. Private bootstrap and compiled Electron probe imports come from the Linux job.
+The Flatpak job installs only locked production JavaScript dependencies for those imports
+(`npm ci --omit=dev --ignore-scripts`); it does not reinstall Electron/build tools or compile probes.
+The headless Ubuntu runner needs no desktop installation or alternate distribution.
+The provisioning step still downloads OS packages and SDK/runtime on a fresh runner;
+it uses the main Ubuntu archive in place of the previously stalled Azure mirror and explicitly
+installs required helpers without optional recommended media packages. Additional caching is
+justified only by measured setup cost after consolidation.
+
 Its recipe under `.github/flatpak/` builds only pinned Zypak to support Chromium's nested
 sandbox; the 26.08 runtime supplies the other linked libraries. Two small build patches track
 actual object targets with compiler-generated dependency files and correct an upstream
@@ -78,18 +95,16 @@ selection excludes unshipped diagnostic binaries. Content parity uses self-conta
 DAT/HBA fixtures. Release builds still explicitly name only
 the shipped executables and the private bootstrap probe.
 
-Windows and Apple Silicon use `.github/scripts/alpha_os_tests.py`: four Rust library targets
-(content mounting, catalog I/O, TUI script files, and host catalog/map caches) plus nine
-frontend files covering filesystem, native paths, launch arguments, settings, and themes.
-The four Rust library targets build in one Cargo invocation to resolve shared dependency
-features once. Every Rust selector must match tests and every frontend file must exist. These runners do
-not build the DAT/core unit-test targets; Cargo still builds their dependencies when needed.
-Cheap frontend checks run before Rust compilation for earlier failure feedback.
+Windows and Apple Silicon run only for explicitly requested candidates. Their jobs build
+and inspect the actual native packages and exercise startup, the private host, content
+recovery, and packaged assets; they do not repeat shared unit suites. Platform-specific
+investigations use targeted checks as needed, without a generic dispatch interface.
 
-Every target retains branding, bootstrap, package/architecture/resource inspection, private-host
-smoke, default-client/Explorer content recovery, and actual packaged font/image decoding.
-The exhaustive theme suite and packaged custom-theme reload run on Linux. Native Windows/macOS
-use the content probe's default `--theme-check assets`; Linux explicitly selects `full`.
+Candidate packaging on every target retains branding, bootstrap,
+package/architecture/resource inspection, private-host smoke, default-client/Explorer content
+recovery, and actual packaged font/image decoding. The exhaustive development theme suite
+runs in Linux validation. All native packages use the content probe's default
+`--theme-check assets`.
 Flatpak retains `--theme-check full` because custom-theme filesystem access crosses its sandbox.
 Automated install/startup and exact artifact checks remain release gates; manual native/visual
 acceptance remains the final publication gate.

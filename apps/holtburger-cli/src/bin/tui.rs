@@ -538,8 +538,9 @@ fn finalize_bootstrap_outcome(
 }
 
 async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapOutcome> {
-    let content = Arc::new(ContentRepository::discover(
+    let content = Arc::new(ContentRepository::discover_with_portable(
         args.dats.clone().map(std::path::PathBuf::from),
+        holtburger_cli::installation::bundled_resource_path("dats"),
     )?);
     let collision_service = Arc::new(ContentAssetService::new(
         Arc::clone(&content),

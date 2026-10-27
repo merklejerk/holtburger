@@ -4,6 +4,10 @@ const hostBinary =
 	process.platform === "win32"
 		? "holtburger-3d-host.exe"
 		: "holtburger-3d-host";
+// Release CI supplies the already-built target binary; ordinary local packaging builds natively.
+const hostPath = process.env.HOLTBURGER_PACKAGE_HOST
+	? resolve(process.env.HOLTBURGER_PACKAGE_HOST)
+	: resolve(__dirname, "../../target/release", hostBinary);
 const packagedDirectoryRoots = new Set([
 	"dist",
 	"dist-electron",
@@ -43,7 +47,7 @@ module.exports = {
 		icon: resolve(__dirname, "../../assets/branding/icon"),
 		extendInfo: { CFBundleIconFile: "holtburger.icns" },
 		extraResource: [
-			resolve(__dirname, "../../target/release", hostBinary),
+			hostPath,
 			resolve(__dirname, "../../LICENSE.md"),
 			resolve(__dirname, "../../assets/branding/icon.png"),
 		],

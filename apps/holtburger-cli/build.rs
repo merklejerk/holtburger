@@ -16,15 +16,49 @@ fn main() {
     let version = std::env::var("HOLTBURGER_BUILD_VERSION")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .or_else(|| short_hash_from_env("GITHUB_SHA"))
-        .or_else(|| short_hash_from_env("CI_COMMIT_SHA"))
-        .or_else(short_hash_from_git)
-        .unwrap_or_else(|| "unknown".to_string());
+        .unwrap_or_else(|| {
+            let revision = short_hash_from_env("HOLTBURGER_SOURCE_REVISION")
+                .or_else(short_hash_from_git)
+                .unwrap_or_else(|| "unknown".to_string());
+            format!(
+                "{} ({revision})",
+                std::env::var("CARGO_PKG_VERSION").expect("Cargo package version")
+            )
+        });
 
     println!("cargo:rustc-env=HOLTBURGER_BUILD_VERSION={version}");
     println!("cargo:rerun-if-env-changed=HOLTBURGER_BUILD_VERSION");
-    println!("cargo:rerun-if-env-changed=GITHUB_SHA");
-    println!("cargo:rerun-if-env-changed=CI_COMMIT_SHA");
+    println!("cargo:rerun-if-env-changed=HOLTBURGER_SOURCE_REVISION");
+    // HEAD may be a symbolic ref; watch both its target and packed refs for local commit changes.
+    for reference in ["HEAD", "packed-refs"] {
+        watch_git_path(reference);
+    }
+    if let Ok(output) = Command::new("git")
+        .args(["symbolic-ref", "-q", "HEAD"])
+        .output()
+        && output.status.success()
+    {
+        watch_git_path(
+            String::from_utf8(output.stdout)
+                .expect("Git ref encoding")
+                .trim(),
+        );
+    }
+}
+
+fn watch_git_path(reference: &str) {
+    if let Ok(output) = Command::new("git")
+        .args(["rev-parse", "--git-path", reference])
+        .output()
+        && output.status.success()
+    {
+        println!(
+            "cargo:rerun-if-changed={}",
+            String::from_utf8(output.stdout)
+                .expect("Git path encoding")
+                .trim()
+        );
+    }
 }
 
 fn short_hash_from_env(name: &str) -> Option<String> {
@@ -35,7 +69,7 @@ fn short_hash_from_env(name: &str) -> Option<String> {
 
 fn short_hash_from_git() -> Option<String> {
     let output = Command::new("git")
-        .args(["rev-parse", "--short=7", "HEAD"])
+        .args(["rev-parse", "--short=8", "HEAD"])
         .output()
         .ok()?;
 
@@ -55,6 +89,6 @@ fn shorten_hash(raw: &str) -> Option<String> {
         return None;
     }
 
-    let short = trimmed.get(..7).unwrap_or(trimmed);
+    let short = trimmed.get(..8).unwrap_or(trimmed);
     Some(short.to_string())
 }

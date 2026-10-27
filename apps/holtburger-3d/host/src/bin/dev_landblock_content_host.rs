@@ -730,13 +730,7 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
 fn discover_host_state(
     selection: holtburger_3d_host::host_mode::HostContentSelection,
 ) -> anyhow::Result<DevHostState> {
-    use holtburger_3d_host::host_mode::HostContentSelection;
-    let resolved = match selection {
-        HostContentSelection::Explicit(path) => holtburger_content::ResolvedContent::open(path)?,
-        HostContentSelection::Automatic(root) => {
-            holtburger_content::ResolvedContent::discover(root)?
-        }
-    };
+    let resolved = holtburger_3d_host::content_selection::resolve(selection)?;
     let repository = Arc::new(resolved.repository);
     let world_map = holtburger_3d_host::world_map::WorldMapService::new(
         Arc::clone(&repository),

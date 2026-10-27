@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { access, copyFile, mkdtemp, rm } from "node:fs/promises";
+import { access, copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,9 @@ import { SidecarHostClient } from "../dist-electron/electron/host-protocol.js";
 
 const EXIT_TIMEOUT_MS = 5_000;
 const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
+const expectedVersion = JSON.parse(
+	await readFile(join(appRoot, "package.json"), "utf8"),
+).version;
 const hostExecutable =
 	process.platform === "win32"
 		? "holtburger-3d-host.exe"
@@ -67,6 +70,10 @@ async function smokeMode(mode, family) {
 
 	try {
 		await client.connect();
+		if (client.hostVersion !== expectedVersion)
+			throw new Error(
+				`Host version ${client.hostVersion} differs from suite ${expectedVersion}`,
+			);
 		if (mode === "client") {
 			// Client startup needs a real DAT bootstrap and server; this smoke intentionally
 			// uses a synthetic palette archive, so verify mode admission without opening a socket.

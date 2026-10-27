@@ -19,8 +19,8 @@ mod tests;
 /// Selection failures remain distinguishable from resource failures after mounting.
 #[derive(Debug, Error)]
 pub enum ContentSelectionError {
-    /// Automatic candidates were absent or contained no archives.
-    #[error("No content archives found in discovery locations: {paths:?}")]
+    /// Automatic candidates were absent, empty, or rejected by the consumer's admission rule.
+    #[error("No suitable content archives found in discovery locations: {paths:?}")]
     NotDiscovered {
         /// Locations inspected in priority order.
         paths: Vec<PathBuf>,
@@ -89,22 +89,32 @@ impl ResolvedContent {
         })
     }
 
-    /// Tries the host-supplied portable root, then the shared platform-data location.
-    /// Only absence is skipped; an archive failure is never hidden by another installation.
-    pub fn discover(portable_root: PathBuf) -> Result<Self> {
+    /// Tries each mountable installation until the consuming application admits its content.
+    /// Rejection permits another candidate; malformed or unreadable archives remain errors.
+    pub fn discover(
+        portable_root: PathBuf,
+        accepts: impl Fn(&ContentRepository) -> bool,
+    ) -> Result<Self> {
         let mut paths = vec![portable_root];
         if let Some(platform) = super::platform_content_path()
             && !paths.contains(&platform)
         {
             paths.push(platform);
         }
-        Self::discover_candidates(paths)
+        Self::discover_candidates(paths, accepts)
     }
 
-    fn discover_candidates(paths: Vec<PathBuf>) -> Result<Self> {
+    fn discover_candidates(
+        paths: Vec<PathBuf>,
+        accepts: impl Fn(&ContentRepository) -> bool,
+    ) -> Result<Self> {
         for path in &paths {
             match Self::open(path) {
-                Ok(selection) => return Ok(selection),
+                Ok(selection) => {
+                    if accepts(&selection.repository) {
+                        return Ok(selection);
+                    }
+                }
                 Err(error) => match error.downcast_ref::<ContentSelectionError>() {
                     Some(ContentSelectionError::Empty { .. }) => continue,
                     Some(ContentSelectionError::Unavailable { source, .. })

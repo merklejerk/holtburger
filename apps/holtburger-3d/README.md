@@ -502,6 +502,11 @@ The screenshot fixture reads the active theme dimensions too.
 
 ## Development
 
+Packaged applications default to client mode and require CLI account/connection arguments.
+Use an explicit `explorer` argument for offline exploration. Both clients use `-p` for port
+and `-P` for password. See the [alpha quickstart](../../docs/ALPHA_QUICKSTART.md) for native
+paths, retail-content selection, and bundle layout.
+
 Install Node.js 22.12 or newer, a current stable Rust toolchain, and the frontend dependencies:
 
 ```bash
@@ -809,9 +814,11 @@ interactive Explorer verification. Do not advertise another platform as supporte
 packaged application has been exercised on that operating system.
 
 The branch-scoped `holtburger-3d-portability.yml` workflow is diagnostic only: it has read-only
-permissions, retains artifacts briefly, and cannot publish a GitHub release. The repository's
-canonical release workflow remains CLI-only until the 3D product is ready for an explicit publishing
-decision.
+permissions, retains artifacts briefly, and cannot publish a GitHub release. The cargo-dist
+release workflow remains CLI-only. The separate `alpha-release.yml` workflow builds suites
+from `3d-next` and stages draft GitHub prereleases for final user verification. See
+[alpha release preparation](../../docs/ALPHA_RELEASING.md); automated packaging checks do
+not replace the final native-bundle acceptance step.
 
 ## Security and dependency maintenance
 
@@ -824,11 +831,11 @@ Review Electron and Electron Forge updates at least monthly and before sharing a
 compatible updates through npm, inspect `npm audit` rather than using a forced downgrade or override,
 then run the full checks and package inspection above. Electron upgrades additionally require the
 branch portability probe and a fresh manual smoke check on available hardware. There is no automatic
-updater because there is no 3D release channel yet.
+updater in the alpha suite.
 
 The packaged resources contain Holtburger's AGPLv3 license alongside the Electron and Chromium
-notices supplied by Electron. Public distribution guidance, checksums, and reproducible build
-instructions remain part of the later 3D release roadmap.
+notices supplied by Electron. The alpha suite adds download checksums, build identity, and
+documented build/publication instructions in `docs/ALPHA_RELEASING.md`.
 
 The WebGL2 backend has one flat-frame schedule: opaque scene color and depth are
 rendered into a renderer-owned target, optionally receive near-field ambient

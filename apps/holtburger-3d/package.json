@@ -1,7 +1,7 @@
 {
 	"name": "holtburger-3d",
 	"private": true,
-	"version": "0.1.0",
+	"version": "0.1.0-alpha.1",
 	"license": "AGPL-3.0-only",
 	"type": "module",
 	"main": "dist-electron/electron/main.js",
@@ -20,6 +20,7 @@
 		"build:host": "cargo build --release -p holtburger-3d-host --bin holtburger-3d-host",
 		"build:electron:main": "node scripts/clean-electron-build.mjs && tsc -p tsconfig.electron-build.json && tsc -p tsconfig.electron-preload-build.json && node scripts/copy-electron-runtime.mjs && npm run check:electron:runtime",
 		"package": "npm run build && npm run build:electron:main && npm run build:host && electron-forge package",
+		"package:built": "electron-forge package",
 		"make": "npm run build && npm run build:electron:main && npm run build:host && electron-forge make",
 		"archive:package": "electron-forge make --skip-package",
 		"smoke:sidecar": "node scripts/sidecar-smoke.mjs",

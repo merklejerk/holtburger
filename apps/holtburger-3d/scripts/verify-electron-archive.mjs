@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFile as execFileCallback } from "node:child_process";
-import { mkdtemp, lstat, readdir, readlink, rm, stat } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -37,10 +37,6 @@ try {
 	await extractArchive(archivePath, extractionRoot);
 	const packageRoot = extractedPackageRoot(extractionRoot);
 	console.log(JSON.stringify(await verifyElectronPackage(packageRoot)));
-
-	if (process.platform === "darwin") {
-		await verifyMacFrameworkLinks(packageRoot);
-	}
 
 	const archiveMetadata = await stat(archivePath);
 	console.log(
@@ -89,33 +85,4 @@ async function extractArchive(archivePath, extractionRoot) {
 	}
 
 	await execFile("unzip", ["-q", archivePath, "-d", extractionRoot]);
-}
-
-async function verifyMacFrameworkLinks(packageRoot) {
-	const frameworkRoot = join(
-		packageRoot,
-		"holtburger-3d.app",
-		"Contents",
-		"Frameworks",
-		"Electron Framework.framework",
-	);
-	for (const [relativePath, expectedTarget] of [
-		["Versions/Current", "A"],
-		["Electron Framework", "Versions/Current/Electron Framework"],
-		["Helpers", "Versions/Current/Helpers"],
-		["Libraries", "Versions/Current/Libraries"],
-		["Resources", "Versions/Current/Resources"],
-	]) {
-		const linkPath = join(frameworkRoot, relativePath);
-		const metadata = await lstat(linkPath);
-		if (!metadata.isSymbolicLink()) {
-			throw new Error(`macOS framework path is not a symlink: ${linkPath}`);
-		}
-		const target = await readlink(linkPath);
-		if (target !== expectedTarget) {
-			throw new Error(
-				`macOS framework link ${linkPath} targets ${target}, expected ${expectedTarget}`,
-			);
-		}
-	}
 }

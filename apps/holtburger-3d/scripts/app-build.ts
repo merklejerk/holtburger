@@ -9,20 +9,34 @@ export function readAppBuild(appRoot: string, development: boolean): AppBuild {
 	const { version } = z
 		.object({ version: z.string().min(1) })
 		.parse(JSON.parse(readFileSync(resolve(appRoot, "package.json"), "utf8")));
-	const revision = execFileSync("git", ["rev-parse", "--short=8", "HEAD"], {
-		cwd: appRoot,
-		encoding: "utf8",
-	}).trim();
-	const status = execFileSync(
-		"git",
-		[
-			"--no-optional-locks",
-			"status",
-			"--porcelain",
-			"--untracked-files=normal",
-			"--ignore-submodules=none",
-		],
-		{ cwd: appRoot, encoding: "utf8" },
-	);
-	return { development, version, revision, modified: status.length > 0 };
+	const revision = (
+		process.env.HOLTBURGER_SOURCE_REVISION ??
+		execFileSync("git", ["rev-parse", "HEAD"], {
+			cwd: appRoot,
+			encoding: "utf8",
+		}).trim()
+	).slice(0, 8);
+	const modified = process.env.HOLTBURGER_SOURCE_MODIFIED;
+	if (modified !== undefined && modified !== "0" && modified !== "1")
+		throw new Error("HOLTBURGER_SOURCE_MODIFIED must be 0 or 1");
+	const status =
+		modified === undefined
+			? execFileSync(
+					"git",
+					[
+						"--no-optional-locks",
+						"status",
+						"--porcelain",
+						"--untracked-files=normal",
+						"--ignore-submodules=none",
+					],
+					{ cwd: appRoot, encoding: "utf8" },
+				)
+			: null;
+	return {
+		development,
+		version,
+		revision,
+		modified: status === null ? modified === "1" : status.length > 0,
+	};
 }

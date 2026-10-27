@@ -1089,6 +1089,10 @@ fn script_bundle_directory() -> Option<PathBuf> {
     std::env::var_os(SCRIPT_BUNDLE_DIR_ENV_VAR)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+        .or_else(|| {
+            let path = crate::installation::bundled_resource_path("scripts");
+            path.is_dir().then_some(path)
+        })
 }
 
 fn resolve_script_source_path_for_basename_in_dirs(
@@ -1323,7 +1327,7 @@ mod tests {
     }
 
     #[test]
-    fn script_resolution_prefers_local_roots_over_system_roots() {
+    fn script_resolution_prefers_local_files_and_finds_bundled_files_without_a_local_directory() {
         let local_dir = std::env::temp_dir().join(format!(
             "holtburger-local-script-resolution-{}",
             std::process::id()
@@ -1363,6 +1367,20 @@ mod tests {
         assert_eq!(data_path, local_dir.join("fighter.data.json"));
 
         fs::remove_dir_all(&local_dir).expect("clean up local test directory");
+        assert_eq!(
+            resolve_script_source_path_for_basename_in_dirs(
+                &local_dir,
+                Some(&system_dir),
+                "fighter"
+            )
+            .unwrap(),
+            system_dir.join("fighter.js")
+        );
+        assert_eq!(
+            resolve_script_data_path_for_name_in_dirs(&local_dir, Some(&system_dir), "fighter.js")
+                .unwrap(),
+            system_dir.join("fighter.data.json")
+        );
         fs::remove_dir_all(&system_dir).expect("clean up system test directory");
     }
 

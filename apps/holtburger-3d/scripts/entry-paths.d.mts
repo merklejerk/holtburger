@@ -3,6 +3,12 @@ export interface EntryPath {
 	readonly title: string;
 }
 
+/** Select the client unless the caller explicitly supplies an entry name. */
+export function extractEntryArguments(args: readonly string[]): {
+	readonly name: "client" | "explorer";
+	readonly args: readonly string[];
+};
+
 export function extractContentArguments(
 	args: readonly string[],
 	invocationDirectory: string,

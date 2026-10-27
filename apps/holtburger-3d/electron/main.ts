@@ -20,6 +20,7 @@ import {
 	buildEntryPath,
 	requireEntry,
 	extractContentArguments,
+	extractEntryArguments,
 } from "../scripts/entry-paths.mjs";
 import { applicationMenuTemplate } from "./application-menu.js";
 import {
@@ -132,13 +133,11 @@ function entryArguments(): {
 		app.getAppPath(),
 	);
 	const extracted = extractContentArguments(entryArguments, process.cwd());
-	const hasEntry =
-		extracted.args[0] !== undefined && !extracted.args[0].startsWith("--");
-	const entryName = hasEntry ? extracted.args[0] : "explorer";
-	const rawArgs = hasEntry ? extracted.args.slice(1) : extracted.args;
+	const selectedEntry = extractEntryArguments(extracted.args);
+	const rawArgs = selectedEntry.args;
 	const release = rawArgs.includes("--release");
 	const entryArgs = rawArgs.filter((arg) => arg !== "--release");
-	const selectedEntryName = entryName ?? "explorer";
+	const selectedEntryName = selectedEntry.name;
 	const entry = requireEntry(selectedEntryName);
 	const mode: HostMode = selectedEntryName === "client" ? "client" : "explorer";
 	let clientStartup: ClientLaunchConfiguration | undefined;

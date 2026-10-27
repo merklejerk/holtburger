@@ -775,14 +775,7 @@ pub async fn run_stdio(launch: crate::host_mode::HostLaunch) -> anyhow::Result<(
     });
     let event_sink = Arc::new(StdioEventSink::new(sender.clone()));
     let initialize = || -> anyhow::Result<_> {
-        let selection = match launch.content {
-            crate::host_mode::HostContentSelection::Explicit(path) => {
-                holtburger_content::ResolvedContent::open(path)?
-            }
-            crate::host_mode::HostContentSelection::Automatic(root) => {
-                holtburger_content::ResolvedContent::discover(root)?
-            }
-        };
+        let selection = crate::content_selection::resolve(launch.content)?;
         let mut content = crate::shared_host_content::SharedHostContent::from_repository(
             Arc::new(selection.repository),
         )?;

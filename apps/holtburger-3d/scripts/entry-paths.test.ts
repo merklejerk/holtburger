@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
 	extractContentArguments,
+	extractEntryArguments,
 	buildEntryPath,
 	collapseRendererArguments,
 	extractElectronLaunchArguments,
@@ -12,6 +13,26 @@ import {
 import { parseVitePort, resolveVitePort } from "./dev-port.mjs";
 import { clientDebugEnabled } from "../src/client/client-debug";
 import { resolve } from "node:path";
+
+describe("desktop entry selection", () => {
+	it.each([[], ["--account=ash"], ["-a", "ash", "-p", "9000", "-P", "secret"]])(
+		"defaults to client without consuming connection flags: %j",
+		(...args) => {
+			expect(extractEntryArguments(args)).toEqual({ name: "client", args });
+		},
+	);
+	it.each(["client", "explorer"])("accepts explicit %s", (name) => {
+		expect(extractEntryArguments([name, "--debug"])).toEqual({
+			name,
+			args: ["--debug"],
+		});
+	});
+	it("rejects an unknown positional entry", () => {
+		expect(() => extractEntryArguments(["unknown"])).toThrow(
+			"Unknown application entry",
+		);
+	});
+});
 
 describe("shared content arguments", () => {
 	it("consumes independent desktop controls before the entry and leaves explicit content intact", () => {
@@ -297,10 +318,10 @@ describe("development launcher arguments", () => {
 				"-s=world.example:9001",
 				"-h",
 				"localhost",
-				"-P",
+				"-p",
 				"9010",
 				"-a=ash",
-				"-p",
+				"-P",
 				"secret",
 				"-i",
 				"--debug",
@@ -310,10 +331,10 @@ describe("development launcher arguments", () => {
 				"-s=world.example:9001",
 				"-h",
 				"localhost",
-				"-P",
+				"-p",
 				"9010",
 				"-a=ash",
-				"-p",
+				"-P",
 				"secret",
 				"-i",
 			],

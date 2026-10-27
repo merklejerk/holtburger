@@ -1,6 +1,6 @@
 use crate::file_type::{
-    CharGen, ChatPoseTable, ContractTable, DatFileType, EnumMapper, SkillTable, SpellTable,
-    StringTable, XpTable,
+    CharGen, ChatPoseTable, ContractTable, DatFileType, EnumMapper, SecondaryAttributeTable,
+    SkillTable, SpellTable, StringTable, XpTable,
 };
 use crate::{EOR_LANGUAGE_NAMESPACE, EOR_PORTAL_NAMESPACE};
 
@@ -65,6 +65,7 @@ impl StripperManifest {
             CharGen::FILE_ID,
             ChatPoseTable::FILE_ID,
             ContractTable::FILE_ID,
+            SecondaryAttributeTable::FILE_ID,
             SkillTable::FILE_ID,
             SpellTable::FILE_ID,
             XpTable::FILE_ID,
@@ -177,6 +178,11 @@ mod tests {
         let manifest = StripperManifest::micro();
         assert!(manifest.should_keep_entry(
             EOR_PORTAL_NAMESPACE,
+            SecondaryAttributeTable::FILE_ID,
+            DatFileType::Table
+        ));
+        assert!(manifest.should_keep_entry(
+            EOR_PORTAL_NAMESPACE,
             ContractTable::FILE_ID,
             DatFileType::Table
         ));
@@ -261,6 +267,17 @@ mod tests {
             ));
             // Cell records share the motion-table id prefix and are not motion content.
             assert!(!manifest.should_keep_entry("eor/cell", 0x09050100, DatFileType::MotionTable));
+        }
+    }
+
+    #[test]
+    fn small_profiles_exclude_surface_textures() {
+        for manifest in [StripperManifest::micro(), StripperManifest::logic_only()] {
+            assert!(!manifest.should_keep_entry(
+                EOR_PORTAL_NAMESPACE,
+                0x0500_0001,
+                DatFileType::SurfaceTexture
+            ));
         }
     }
 

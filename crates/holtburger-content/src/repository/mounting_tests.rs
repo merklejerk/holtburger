@@ -27,13 +27,40 @@ fn discovery_skips_absence_but_stops_at_a_broken_installation() {
         false,
     );
     let candidates = vec![root.path().join("absent"), empty.clone(), valid.clone()];
-    let selection = ResolvedContent::discover_candidates(candidates.clone()).unwrap();
+    let selection = ResolvedContent::discover_candidates(candidates.clone(), |_| true).unwrap();
     assert_eq!(selection.location, fs::canonicalize(valid).unwrap());
     fs::write(empty.join("broken.hba"), b"broken").unwrap();
-    let error = ResolvedContent::discover_candidates(candidates).unwrap_err();
+    let error = ResolvedContent::discover_candidates(candidates, |_| true).unwrap_err();
     assert!(matches!(
         error.downcast_ref::<ContentSelectionError>(),
         Some(ContentSelectionError::Archive { .. })
+    ));
+}
+
+#[test]
+fn discovery_continues_after_application_rejection_and_reports_exhaustion() {
+    let root = tempdir().unwrap();
+    let rejected = root.path().join("small.hba");
+    let accepted = root.path().join("suitable.hba");
+    let key = ResourceKey::new(EOR_PORTAL_NAMESPACE, 0x0100_0001);
+    write_hba(
+        &rejected,
+        EOR_PORTAL_NAMESPACE,
+        key.file_id + 1,
+        b"small",
+        false,
+    );
+    write_hba(&accepted, key.namespace, key.file_id, b"suitable", false);
+    let selection = ResolvedContent::discover_candidates(
+        vec![rejected.clone(), accepted.clone()],
+        |repository| repository.resource_metadata(key).is_some(),
+    )
+    .unwrap();
+    assert_eq!(selection.location, fs::canonicalize(accepted).unwrap());
+    let error = ResolvedContent::discover_candidates(vec![rejected], |_| false).unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<ContentSelectionError>(),
+        Some(ContentSelectionError::NotDiscovered { .. })
     ));
 }
 

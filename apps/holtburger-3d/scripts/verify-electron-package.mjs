@@ -1,7 +1,14 @@
 #!/usr/bin/env node
 import { extractFile, listPackage } from "@electron/asar";
 import { constants } from "node:fs";
-import { access, readFile, readdir, stat } from "node:fs/promises";
+import {
+	access,
+	lstat,
+	readFile,
+	readdir,
+	readlink,
+	stat,
+} from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -43,6 +50,7 @@ export async function verifyElectronPackage(packageRoot) {
 			join(resourcesDirectory, "holtburger.icns"),
 			constants.R_OK,
 		);
+		await verifyMacFrameworkLinks(normalizedPackageRoot);
 	}
 	await requireNonEmptyFile(
 		join(electronNoticeRoot, "LICENSE"),
@@ -62,6 +70,7 @@ export async function verifyElectronPackage(packageRoot) {
 		"/dist/client/index.html",
 		"/dist/explorer/index.html",
 		"/dist/favicon.svg",
+		"/dist/build-info.json",
 		"/dist-electron/electron/host-protocol.js",
 		"/dist-electron/electron/main.js",
 		"/dist-electron/electron/preload.cjs",
@@ -75,6 +84,32 @@ export async function verifyElectronPackage(packageRoot) {
 			throw new Error(`packaged ASAR contains an empty file: ${requiredEntry}`);
 		}
 	}
+	const packageMetadata = JSON.parse(
+		extractFile(archivePath, "package.json").toString(),
+	);
+	const buildMetadata = JSON.parse(
+		extractFile(archivePath, "dist/build-info.json").toString(),
+	);
+	if (
+		buildMetadata.version !== packageMetadata.version ||
+		buildMetadata.development !== false
+	)
+		throw new Error(
+			"Packaged renderer identity does not match the Electron release version",
+		);
+	if (
+		process.env.HOLTBURGER_SOURCE_REVISION !== undefined &&
+		buildMetadata.revision !==
+			process.env.HOLTBURGER_SOURCE_REVISION.slice(0, 8)
+	)
+		throw new Error(
+			"Packaged renderer revision differs from the release source",
+		);
+	if (
+		process.env.HOLTBURGER_SOURCE_MODIFIED === "0" &&
+		buildMetadata.modified !== false
+	)
+		throw new Error("Packaged renderer was built from modified source");
 	// Compare the source tree, including notices, without maintaining a second font inventory.
 	const fontsRoot = join(appRoot, "public/fonts");
 	for (const entry of await readdir(fontsRoot, {
@@ -116,6 +151,9 @@ export async function verifyElectronPackage(packageRoot) {
 	return {
 		platform: process.platform,
 		architecture: process.arch,
+		version: buildMetadata.version,
+		revision: buildMetadata.revision,
+		modified: buildMetadata.modified,
 		packageRoot: normalizedPackageRoot,
 		hostExecutable,
 		hostBytes: hostMetadata.size,
@@ -130,6 +168,32 @@ async function requireNonEmptyFile(path, mode) {
 		throw new Error(`packaged resource is not a non-empty file: ${path}`);
 	}
 	return metadata;
+}
+
+async function verifyMacFrameworkLinks(packageRoot) {
+	const frameworkRoot = join(
+		packageRoot,
+		"holtburger-3d.app",
+		"Contents",
+		"Frameworks",
+		"Electron Framework.framework",
+	);
+	for (const [relativePath, expectedTarget] of [
+		["Versions/Current", "A"],
+		["Electron Framework", "Versions/Current/Electron Framework"],
+		["Helpers", "Versions/Current/Helpers"],
+		["Libraries", "Versions/Current/Libraries"],
+		["Resources", "Versions/Current/Resources"],
+	]) {
+		const linkPath = join(frameworkRoot, relativePath);
+		if (!(await lstat(linkPath)).isSymbolicLink())
+			throw new Error(`macOS framework path is not a symlink: ${linkPath}`);
+		const target = await readlink(linkPath);
+		if (target !== expectedTarget)
+			throw new Error(
+				`macOS framework link ${linkPath} targets ${target}, expected ${expectedTarget}`,
+			);
+	}
 }
 
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === scriptPath) {

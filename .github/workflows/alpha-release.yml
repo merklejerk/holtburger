@@ -113,12 +113,9 @@ jobs:
           path: .holtburger-local/alpha-linux-probes
       - name: Install Flatpak tooling and runtime
         run: |
-          # The Azure mirror repeatedly stalled in the measured candidate run.
-          for SOURCE in /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources; do
-            if [ -f "$SOURCE" ]; then
-              sudo sed -i -E 's#https?://azure.archive.ubuntu.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' "$SOURCE"
-            fi
-          done
+          # GitHub's Ubuntu sources use this mirror list; retain the official archive/security entries.
+          sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
+          cat /etc/apt/apt-mirrors.txt
           sudo apt-get update
           # Keep builder helpers, SVG decoding and Xvfb authentication without optional media stacks.
           sudo apt-get install --yes --no-install-recommends \

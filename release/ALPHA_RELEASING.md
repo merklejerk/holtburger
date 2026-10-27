@@ -71,7 +71,8 @@ compiled imports need zod/MessagePack and package inspection needs `@electron/as
 Skipping install scripts avoids downloading Electron; the job does not compile probes or the app.
 The headless Ubuntu runner needs no desktop installation or alternate distribution.
 The provisioning step still downloads OS packages and SDK/runtime on a fresh runner;
-it uses the main Ubuntu archive in place of the previously stalled Azure mirror and explicitly
+it removes the Azure preference from the runner's `/etc/apt/apt-mirrors.txt`, retaining the
+official Ubuntu archive/security mirrors, and explicitly
 installs required helpers without optional recommended media packages. Additional caching is
 justified only by measured setup cost after consolidation.
 The required `librsvg2-common` package supplies SVG decoding for the TUI's AppStream icon;

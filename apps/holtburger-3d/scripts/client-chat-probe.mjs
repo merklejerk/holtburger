@@ -63,6 +63,66 @@ export async function probeClientChat(client, evaluateExpression) {
 	const npc = { kind: "npc", guid: 0x80000001, name: "Professor of War Magic" };
 	try {
 		await invoke("reset");
+		for (const channel of ["general", "trade", "lfg", "roleplay"])
+			await invoke("receive", {
+				kind: "channel",
+				channel,
+				origin: { kind: "turbine", roomId: 2, typeId: 2 },
+				sender: "Prefix palette probe",
+				speakerKind: "player",
+				message: "Prefix theme check",
+			});
+		const prefixPalette = await evaluate(`(() => {
+			const prefix = channel => [...document.querySelectorAll('.chat-channel-prefix')]
+				.find(node => node.dataset.channel === channel && node.closest('p').textContent.includes('Prefix palette probe'));
+			const general = prefix('general');
+			const line = general.closest('p');
+			const bodyColor = getComputedStyle(line.querySelector('.chat-message')).color;
+			const colors = ['general', 'trade', 'lfg', 'roleplay'].map(channel => getComputedStyle(prefix(channel)).color);
+			const style = document.createElement('style');
+			style.textContent = '.chat-buffer { --ui-chat-general-prefix-text: #123456; --ui-chat-trade-text: #654321; --ui-color-muted: #abcdef; }';
+			document.head.append(style);
+			try {
+				return {
+					colors,
+					general: getComputedStyle(general).color,
+					trade: getComputedStyle(prefix('trade')).color,
+					meta: [...line.querySelectorAll('.chat-meta')].map(node => getComputedStyle(node).color),
+					bodyUnchanged: getComputedStyle(line.querySelector('.chat-message')).color === bodyColor,
+					prefixText: line.querySelector('strong').textContent,
+				};
+			} finally { style.remove(); }
+		})()`);
+		assert.equal(
+			new Set(prefixPalette.colors).size,
+			4,
+			"Public channel prefixes must be distinct",
+		);
+		assert.equal(
+			prefixPalette.general,
+			"rgb(18, 52, 86)",
+			"Theme overrides the General prefix independently",
+		);
+		assert.equal(
+			prefixPalette.trade,
+			"rgb(101, 67, 33)",
+			"Trade prefix follows its existing semantic theme token",
+		);
+		assert.deepEqual(
+			prefixPalette.meta,
+			["rgb(171, 205, 239)", "rgb(171, 205, 239)"],
+			"Timestamp and sender retain the muted theme color",
+		);
+		assert.equal(
+			prefixPalette.bodyUnchanged,
+			true,
+			"Prefix overrides leave ordinary message text alone",
+		);
+		assert.match(
+			prefixPalette.prefixText,
+			/^\[[^\]]+\] \[General\] Prefix palette probe:$/,
+			"Splitting the prefix preserves copied text spacing",
+		);
 		await invoke("setPartyPresent", false);
 		await click('button[aria-label="Chat destination"]');
 		assert.equal(
@@ -505,6 +565,7 @@ export async function probeClientChat(client, evaluateExpression) {
 		);
 		await evaluate("getSelection().removeAllRanges()");
 		return {
+			channelPrefixTheme: true,
 			picker: true,
 			commandOverrides: true,
 			selectedPlayersAndNpcs: true,

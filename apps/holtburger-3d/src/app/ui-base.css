@@ -64,6 +64,10 @@
 		--ui-chat-tell-text: #f0b1e5;
 		--ui-chat-guild-text: #9bdddc;
 		--ui-chat-society-text: #b1c3ff;
+		/* Public channels with neutral message bodies retain independent prefix colors. */
+		--ui-chat-general-prefix-text: #66aaff;
+		--ui-chat-lfg-prefix-text: #bfd398;
+		--ui-chat-roleplay-prefix-text: #b1c3ff;
 		--ui-color-health: #ff4444;
 		--ui-color-stamina: #dfbd63;
 		--ui-color-mana: #66aaff;

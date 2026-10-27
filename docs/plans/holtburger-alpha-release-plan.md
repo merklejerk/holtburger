@@ -583,3 +583,6 @@ These do not block writing the plan; resolve them at the named phase before depe
 
 - The target audit also found two DAT integration tests that silently succeed without untracked retail assets. Removed those targets and their unused shared wrapper under the project test policy. The retained synthetic DAT/HBA parity and mounting suite passed all ten tests. The explicit opt-in provider benchmark remains separate from release tests.
 - The alpha.3 tag workflow completed successfully. The separate CI-policy branch run is being validated; the nine candidate assets remain unchanged at source `e705767e4`.
+
+- Hosted source `a891f2a1b` passed the selected Rust/frontend suites and new packaged-asset/recovery probes on Windows and Apple Silicon, and the full Linux checks. Windows frontend OS tests took 3s. Its sequential per-package Rust gate took 6m48s, versus 6m17s in the earlier broad run; that measurement does not establish a Rust speedup.
+- Batch all four library test targets into a single Cargo build/list/run configuration so dependency features resolve once, while retaining every nonempty selector check and the same 40 tests. The combined runner passed all 40 locally. Native revalidation uses the final runner configuration; no change to release candidate source or bytes.

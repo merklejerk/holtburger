@@ -81,7 +81,8 @@ the shipped executables and the private bootstrap probe.
 Windows and Apple Silicon use `.github/scripts/alpha_os_tests.py`: four Rust library targets
 (content mounting, catalog I/O, TUI script files, and host catalog/map caches) plus nine
 frontend files covering filesystem, native paths, launch arguments, settings, and themes.
-Every Rust selector must match tests and every frontend file must exist. These runners do
+The four Rust library targets build in one Cargo invocation to resolve shared dependency
+features once. Every Rust selector must match tests and every frontend file must exist. These runners do
 not build the DAT/core unit-test targets; Cargo still builds their dependencies when needed.
 Cheap frontend checks run before Rust compilation for earlier failure feedback.
 

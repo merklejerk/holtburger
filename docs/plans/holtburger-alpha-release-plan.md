@@ -395,3 +395,9 @@ These do not block writing the plan; resolve them at the named phase before depe
 - Remaining gates: committed/pushed source for hosted matrix and Flatpak bootstrap evidence, complete staged application draft, then final user native acceptance and publication authorization. No application commit, push, tag, or published release has been created by this work.
 
 - **User authorization:** Commit and push the completed release implementation to `3d-next` for hosted verification. Final publication and native acceptance remain separate gates.
+
+### First hosted run and content access correction
+
+- Committed the implementation as `b11505d72819502e2703409231522c71bb211552` and pushed `3d-next`. Hosted run `40428975869` passed source/version identity, all 17 release-tool tests, formatting, and notice generation/upload.
+- Native/Flatpak consumers failed before compilation: GitHub returned HTTP 403 for the draft micro asset using read-only `GITHUB_TOKEN`. Local testing with a maintainer token had not proved CI's narrower access.
+- Published the already approved, bootstrap-verified micro ZIP as the non-latest, content-only prerelease `content-alpha-df24573f24e4ca46`. The asset ID and digest are unchanged. An anonymous API download retrieved 1,546,684 bytes and matched the pinned SHA-256. This avoids granting release-write permissions to build/PR jobs; application publication remains gated on final user native acceptance.

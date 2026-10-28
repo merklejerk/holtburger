@@ -531,7 +531,7 @@ impl PlayerState {
             let flags = EnchantmentTypeFlags::from_bits_truncate(e.stat_mod_type);
             // ACE EnchantmentManager.cs:358-377 and retail acclient.c:420555-420584
             // preserve cooldowns and permanent item effects during either death purge.
-            let is_cooldown = crate::enchantments::EnchantmentKind::of(e).is_none();
+            let is_cooldown = crate::enchantments::EnchantmentKind::from_wire(e).is_none();
             if is_cooldown || e.duration == -1.0 {
                 return true;
             }

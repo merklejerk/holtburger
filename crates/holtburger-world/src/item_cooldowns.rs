@@ -49,7 +49,7 @@ pub(crate) fn resolve_cooldowns(
 ) -> Vec<GroupCooldown> {
     let mut groups = BTreeMap::new();
     for observation in observations {
-        if EnchantmentKind::of(&observation.enchantment).is_some() {
+        if EnchantmentKind::from_wire(&observation.enchantment).is_some() {
             continue;
         }
         let Some(remaining_seconds) = observation.remaining_seconds(now) else {

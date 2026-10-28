@@ -4,7 +4,7 @@
 //! for each spell category. The same spell can therefore contribute under several
 //! headings, and several categories can contribute under one heading.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -19,6 +19,9 @@ use crate::stats::{AttributeType, SkillType, VitalType};
 /// The first spell ID ACE considers when building its set-spell membership from DAT tiers.
 /// ACE Server/Entity/SpellSet.cs:22.
 const FIRST_SET_SPELL_ID: u32 = 4730;
+
+/// SpellBase disposition used by retail's effects UI and enchantment tray totals.
+const BENEFICIAL_SPELL_FLAG: u32 = 0x4;
 
 /// Equal-power self auras preferred to their Other counterparts by ACE.
 /// ACE Entity/Models/PropertiesEnchantmentRegistryExtensions.cs:130.
@@ -308,8 +311,8 @@ pub enum EnchantmentKind {
 }
 
 impl EnchantmentKind {
-    /// Cooldown records are represented exclusively by the separate group timer collection.
-    pub fn of(enchantment: &Enchantment) -> Option<Self> {
+    /// Server classification used by purge rules and timers, independent of display categories.
+    pub(crate) fn from_wire(enchantment: &Enchantment) -> Option<Self> {
         let flags = Flags::from_bits_retain(enchantment.stat_mod_type);
         if flags.contains(Flags::VITAE) || enchantment.spell_id == 666 {
             Some(Self::Vitae)
@@ -363,14 +366,29 @@ pub struct ResolvedEnchantments {
     pub cooldowns: Vec<crate::item_cooldowns::GroupCooldown>,
 }
 
-/// Authored set-spell membership used by ACE's tie rule.
+/// Authored spell disposition and set membership used by presentation and ACE's tie rule.
 #[derive(Debug, Clone, Default)]
 pub struct EnchantmentRules {
+    /// DAT disposition for ordinary effects; live modifier flags remain unmodified.
+    spell_kinds: HashMap<u32, EnchantmentKind>,
+    /// Set-spell identities participating in ACE's equal-power tie rule.
     set_spells: HashSet<u16>,
 }
 
 impl EnchantmentRules {
     pub fn from_catalog(catalog: &SpellCatalog) -> Self {
+        let spell_kinds = catalog
+            .spells
+            .iter()
+            .map(|(&id, spell)| {
+                let kind = if spell.bitfield & BENEFICIAL_SPELL_FLAG != 0 {
+                    EnchantmentKind::Beneficial
+                } else {
+                    EnchantmentKind::Harmful
+                };
+                (id, kind)
+            })
+            .collect();
         let set_spells = catalog
             .spell_sets
             .values()
@@ -379,7 +397,32 @@ impl EnchantmentRules {
             .filter(|id| *id >= FIRST_SET_SPELL_ID)
             .filter_map(|id| u16::try_from(id).ok())
             .collect();
-        Self { set_spells }
+        Self {
+            spell_kinds,
+            set_spells,
+        }
+    }
+
+    /// Retail effects panels and tray totals use SpellBase bit 0x4, not StatModType.
+    /// acclient.c:225170-225171 and :425805-425808. A server may omit the wire bit.
+    fn kind(&self, enchantment: &Enchantment) -> Option<EnchantmentKind> {
+        match EnchantmentKind::from_wire(enchantment)? {
+            EnchantmentKind::Vitae => Some(EnchantmentKind::Vitae),
+            wire_kind => {
+                // RETAIL DIVERGENCE: acclient.c:225165-225178 hides unknown spell IDs.
+                // Retaining their wire classification keeps server-only effects inspectable;
+                // matching retail would hide them. Census: all 30 distinct IDs in the
+                // 2026-10-28 login capture exist in scripts/src/mage/spells.json (6,266
+                // definitions), so none need this fallback against that reference export.
+                // This does not establish coverage of other servers or installed DATs.
+                Some(
+                    self.spell_kinds
+                        .get(&u32::from(enchantment.spell_id))
+                        .copied()
+                        .unwrap_or(wire_kind),
+                )
+            }
+        }
     }
 
     /// Compare only gameplay priority. Complete ties retain the earlier registry entry.
@@ -424,34 +467,27 @@ pub fn resolve_enchantments(
     rules: &EnchantmentRules,
     now: Instant,
 ) -> ResolvedEnchantments {
-    let instances = observations
-        .iter()
-        .filter_map(|observation| {
-            let enchantment = &observation.enchantment;
-            let kind = EnchantmentKind::of(enchantment)?;
-            Some(ResolvedEnchantment {
-                key: enchantment.into(),
-                spell_category: enchantment.spell_category,
-                power_level: enchantment.power_level,
-                kind,
-                remaining_seconds: observation.remaining_seconds(now),
-                stat_mod_type: enchantment.stat_mod_type,
-                stat_mod_key: enchantment.stat_mod_key,
-                stat_mod_value: enchantment.stat_mod_value,
-            })
-        })
-        .collect();
-
+    let mut instances = Vec::new();
     let mut candidates: BTreeMap<
         (AffectedStat, EnchantmentOperation, EnchantmentChannel, u16),
         Vec<usize>,
     > = BTreeMap::new();
     for (index, observation) in observations.iter().enumerate() {
         let enchantment = &observation.enchantment;
-        if !matches!(
-            EnchantmentKind::of(enchantment),
-            Some(EnchantmentKind::Beneficial | EnchantmentKind::Harmful)
-        ) {
+        let Some(kind) = rules.kind(enchantment) else {
+            continue;
+        };
+        instances.push(ResolvedEnchantment {
+            key: enchantment.into(),
+            spell_category: enchantment.spell_category,
+            power_level: enchantment.power_level,
+            kind,
+            remaining_seconds: observation.remaining_seconds(now),
+            stat_mod_type: enchantment.stat_mod_type,
+            stat_mod_key: enchantment.stat_mod_key,
+            stat_mod_value: enchantment.stat_mod_value,
+        });
+        if kind == EnchantmentKind::Vitae {
             continue;
         }
         for operation in operations(enchantment.stat_mod_type) {
@@ -703,6 +739,7 @@ const DEFENSE_SKILLS: [SkillType; 4] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_dat::file_type::spell_table::{SpellBase, SpellTable};
 
     fn sample(spell_id: u16, category: u16, power: u32, flags: Flags, key: u32) -> Enchantment {
         Enchantment {
@@ -713,6 +750,68 @@ mod tests {
             stat_mod_key: key,
             duration: 60.0,
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn dat_disposition_classifies_effects_independently_of_server_flags() {
+        let beneficial_id = 1;
+        let harmful_id = 2;
+        let catalog = SpellCatalog::from(SpellTable {
+            id: SpellTable::FILE_ID,
+            spells: HashMap::from([
+                (
+                    u32::from(beneficial_id),
+                    SpellBase {
+                        bitfield: BENEFICIAL_SPELL_FLAG,
+                        ..Default::default()
+                    },
+                ),
+                (u32::from(harmful_id), SpellBase::default()),
+            ]),
+            spell_sets: HashMap::new(),
+        });
+        for wire_disposition in [Flags::empty(), Flags::BENEFICIAL] {
+            let flags = Flags::ATTRIBUTE | Flags::ADDITIVE | Flags::SINGLE_STAT | wire_disposition;
+            let records = [
+                sample(beneficial_id, 10, 100, flags, 1),
+                sample(harmful_id, 20, 100, flags, 1),
+            ];
+            let mut registry =
+                PlayerEnchantments::with_rules(EnchantmentRules::from_catalog(&catalog));
+            registry.replace(&records);
+            let resolved = registry.resolved(Instant::now());
+            assert_eq!(resolved.instances[0].kind, EnchantmentKind::Beneficial);
+            assert_eq!(resolved.instances[1].kind, EnchantmentKind::Harmful);
+            assert_eq!(resolved.groups.len(), records.len());
+            assert_eq!(registry.wire(), records);
+            for (instance, record) in resolved.instances.iter().zip(records) {
+                assert_eq!(instance.stat_mod_type, record.stat_mod_type);
+            }
+        }
+    }
+
+    #[test]
+    fn dat_disposition_preserves_vitae_cooldowns_and_unknown_server_spells() {
+        let rules = EnchantmentRules {
+            spell_kinds: HashMap::from([
+                (666, EnchantmentKind::Beneficial),
+                (0x8001, EnchantmentKind::Beneficial),
+                (1, EnchantmentKind::Beneficial),
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(
+            rules.kind(&sample(666, 0, 0, Flags::empty(), 0)),
+            Some(EnchantmentKind::Vitae)
+        );
+        assert_eq!(rules.kind(&sample(0x8001, 0, 0, Flags::empty(), 0)), None);
+        assert_eq!(rules.kind(&sample(1, 0, 0, Flags::COOLDOWN, 0)), None);
+        for (flags, expected) in [
+            (Flags::BENEFICIAL, EnchantmentKind::Beneficial),
+            (Flags::empty(), EnchantmentKind::Harmful),
+        ] {
+            assert_eq!(rules.kind(&sample(2, 0, 0, flags, 0)), Some(expected));
         }
     }
 
@@ -774,6 +873,7 @@ mod tests {
         ];
         let rules = EnchantmentRules {
             set_spells: HashSet::from([6330, 6331]),
+            ..Default::default()
         };
         let resolved = resolve_enchantments(&observations, &rules, now);
         assert_eq!(resolved.groups[0].effective.spell_id, 4395);

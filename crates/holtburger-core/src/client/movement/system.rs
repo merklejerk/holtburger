@@ -490,6 +490,7 @@ impl MovementSystem {
                 self.manual_input = ManualInputLifetime::None;
                 self.character_motion.release_input();
                 if had_manual_drive {
+                    self.navigation_progress.reset();
                     self.active_movement = None;
                     self.pending_manual_playback_stop = true;
                 }
@@ -590,6 +591,7 @@ impl MovementSystem {
         if matches!(self.manual_input, ManualInputLifetime::Pulse { until } if now >= until) {
             self.manual_input = ManualInputLifetime::None;
             if self.has_active_manual_drive() {
+                self.navigation_progress.reset();
                 self.active_movement = None;
                 self.pending_manual_playback_stop = true;
             }

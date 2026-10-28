@@ -97,3 +97,16 @@ retail corpus or enforce a content size limit.
 Generate with `cli-content generate --source FULL.hba --output NEW_DIRECTORY`; inspect with
 `cli-content info --content NEW_DIRECTORY/content`. The generator is developer tooling,
 separate from the two archive utilities shipped with the CLI product.
+
+After changing generation or scene projection, an explicit real-content check can compare
+room-shell doorway traversal and wall sliding against the regenerated pair:
+
+```sh
+cargo run -p holtburger-world --example room_shell_probe -- /path/to/content
+```
+
+This diagnostic uses owner `0x8602FFFF` from operator-supplied content. Ordinary automated
+regression coverage uses the synthetic prepared-room fixtures in core and requires no retail
+assets. `navigation_envelope_census` remains a separate explicit harness diagnostic for
+reviewing setup-sphere coverage when the source corpus or resolver changes. Neither diagnostic
+is shipped in the CLI or 3D bundle.

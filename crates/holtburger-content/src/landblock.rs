@@ -2,6 +2,7 @@ use anyhow::{Context, Result, ensure};
 use holtburger_common::math::{Quaternion, Vector3};
 use holtburger_dat::landblock::{CellLandblock, Frame, LandblockInfo};
 use holtburger_dat::{EOR_CELL_NAMESPACE, ResourceKey};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
 use crate::{ActiveRegionData, ContentDecodeCache, ContentRepository, TerrainCellDiagonals};
@@ -127,7 +128,7 @@ pub struct LandblockRestriction {
 }
 
 /// Authored placement in Asheron's Call landblock-local coordinates.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct LandblockPlacement {
     /// Local translation.
     pub origin: Vector3,

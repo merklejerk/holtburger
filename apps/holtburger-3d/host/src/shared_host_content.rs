@@ -30,6 +30,8 @@ pub struct SharedHostContent {
     pub service: Arc<ContentAssetService>,
     /// Motion-table projection shared by Explorer and client authorities.
     pub motion_catalog: Arc<holtburger_content::MotionSequenceCatalog>,
+    /// Setup dimensions prepared with the motion catalog, reused by client bootstrap.
+    setup_dimensions: Arc<holtburger_content::SetupDimensionCatalog>,
     /// Optional static entity catalog shared by both host modes.
     pub weenie_catalog: Arc<WeenieCatalogContent>,
     /// Lazy map-image service, independent of client authority and scene residency.
@@ -58,8 +60,8 @@ impl SharedHostContent {
         ));
         let service =
             ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
-        let motion_catalog = repository
-            .read_motion_sequence_catalog()
+        let motion_reference = repository
+            .read_motion_reference_data()
             .context("failed to project the motion contract from configured content")?;
         let world_map = Arc::new(crate::world_map::WorldMapService::new(
             Arc::clone(&repository),
@@ -73,7 +75,8 @@ impl SharedHostContent {
             repository,
             weenie_catalog,
             service: Arc::new(service),
-            motion_catalog: Arc::new(motion_catalog),
+            motion_catalog: Arc::new(motion_reference.motion_sequences),
+            setup_dimensions: Arc::new(motion_reference.setup_dimensions),
             client_bootstrap: Arc::new(Mutex::new(None)),
             spell_table: Arc::new(Mutex::new(None)),
             soul_emotes: Arc::new(Mutex::new(None)),
@@ -152,6 +155,7 @@ impl SharedHostContent {
             character_titles: Arc::new(character_titles),
             contracts: Arc::new(contracts),
             motion_sequences: Arc::new(motion_catalog),
+            setup_dimensions: Arc::clone(&self.setup_dimensions),
             soul_emote_catalog,
         };
         let bootstrap = Arc::new(bootstrap);

@@ -1577,7 +1577,7 @@ dependencies = [
 
 [[package]]
 name = "holtburger-3d-host"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "anyhow",
  "env_logger",
@@ -1605,13 +1605,12 @@ dependencies = [
 
 [[package]]
 name = "holtburger-cli"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "anyhow",
  "bitflags 2.11.0",
  "clap",
  "crossterm",
- "directories",
  "env_logger",
  "futures",
  "holtburger-common",
@@ -1627,6 +1626,7 @@ dependencies = [
  "ratatui-textarea",
  "reqwest",
  "serde_json",
+ "tempfile",
  "tokio",
  "unicode-width",
  "winresource",
@@ -1634,7 +1634,7 @@ dependencies = [
 
 [[package]]
 name = "holtburger-common"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "binrw",
  "bitflags 2.11.0",
@@ -1647,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "holtburger-content"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "anyhow",
  "binrw",
@@ -1656,14 +1656,16 @@ dependencies = [
  "holtburger-dat",
  "holtburger-weenie-catalog",
  "log",
+ "rmp-serde",
  "serde",
  "tempfile",
  "thiserror 2.0.18",
+ "zstd",
 ]
 
 [[package]]
 name = "holtburger-core"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1693,7 +1695,7 @@ dependencies = [
 
 [[package]]
 name = "holtburger-dat"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "binrw",
  "bitflags 2.11.0",
@@ -1711,7 +1713,7 @@ dependencies = [
 
 [[package]]
 name = "holtburger-debug-harness"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "anyhow",
  "clap",
@@ -1734,7 +1736,7 @@ dependencies = [
 
 [[package]]
 name = "holtburger-protocol"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "anyhow",
  "binrw",
@@ -1752,7 +1754,7 @@ dependencies = [
 
 [[package]]
 name = "holtburger-scripting"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "anyhow",
  "deno_core",
@@ -1767,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "holtburger-session"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1785,7 +1787,7 @@ dependencies = [
 
 [[package]]
 name = "holtburger-tools"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "anyhow",
  "binrw",
@@ -1810,7 +1812,7 @@ dependencies = [
 
 [[package]]
 name = "holtburger-weenie-catalog"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "tempfile",
  "thiserror 2.0.18",
@@ -1818,7 +1820,7 @@ dependencies = [
 
 [[package]]
 name = "holtburger-world"
-version = "0.1.0-alpha.5"
+version = "0.1.0-alpha.6"
 dependencies = [
  "anyhow",
  "async-trait",

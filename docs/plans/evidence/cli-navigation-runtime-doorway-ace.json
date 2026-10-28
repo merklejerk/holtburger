@@ -1,0 +1,83 @@
+{
+  "probe": "live_navigation_probe",
+  "composition": "Production ClientRuntime navigation composition using generated worldwide content; headless 50ms frontend pulses and ordinary publisher.",
+  "route": {
+    "root_height": 67.19999694824219,
+    "start": {
+      "coords": {
+        "x": 89.09291076660156,
+        "y": 137.04200744628906,
+        "z": 66.19999694824219
+      },
+      "landblockId": 2847146014,
+      "rotation": {
+        "w": 1.0,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    "target": {
+      "coords": {
+        "x": 89.09291076660156,
+        "y": 136.04200744628906,
+        "z": 67.19999694824219
+      },
+      "landblockId": 2847146242,
+      "rotation": {
+        "w": 1.0,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    "terrain_height": 66.0
+  },
+  "geometry": "Authored cell/outdoor aperture at A9B40102; outside root 0.2m above resolved terrain, inside root 0.2m above the aperture sill. Sill is 1m above outside terrain. Not an upper-storey opening.",
+  "arrival": {
+    "landblockId": 2847146242,
+    "coords": {
+      "x": 89.09291,
+      "y": 136.05035,
+      "z": 67.19324
+    },
+    "rotation": {
+      "w": 1.0,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    }
+  },
+  "server_arrival": {
+    "gameplay_cell": "A9B40102",
+    "physics_cell": "A9B40102",
+    "gameplay_coordinates": [
+      89.092911,
+      136.050354,
+      67.193237
+    ],
+    "physics_coordinates": [
+      89.09291,
+      136.05035,
+      67.19324
+    ]
+  },
+  "terrain_parity": {
+    "method": "Compared TerrainCollisionSurface equality from generated navigation and exact full-HBA NavigationContent projections.",
+    "owners": [
+      "EC0EFFFF",
+      "8602FFFF",
+      "A9B4FFFF"
+    ],
+    "all_equal": true
+  },
+  "passed": true,
+  "restored_and_disconnected": true,
+  "limitations": [
+    "Route tests local point commitment, not a local gravity/stair solver.",
+    "Arrival tolerance is 0.05m. Restore is authoritative teleloc within 0.05m, not bit-identical height.",
+    "Intermediate wire payloads were not captured; the synthetic session fixture covers committed-pose publication.",
+    "Does not exercise TUI approach/follow controller or a live rejection-induced correction."
+  ],
+  "log_sha256": "5390a1eb09a08e6878d066ebf3cbbc9347c7161683623b83459071c1b4d5e2d2"
+}

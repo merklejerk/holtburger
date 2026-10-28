@@ -3,6 +3,14 @@ use holtburger_common::position::WorldPosition;
 use holtburger_protocol::messages::movement::MotionStance;
 use std::time::Duration;
 
+/// Core-owned simulation choice selected explicitly at client composition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ClientMovementPolicy {
+    #[default]
+    Physical,
+    Navigation,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MotionStyle {
     #[default]
@@ -191,8 +199,8 @@ pub enum ClientDirectedCommand {
     AcquireFacing { heading: f32 },
     /// Supply displacement for one simulation tick without reacquiring control.
     Update(AutonomousDriveIntent),
-    /// Stop displacement, optionally settle the arrival pose, and retain controller ownership.
-    Settle { pose: Option<WorldPosition> },
+    /// Stop displacement at the committed position and retain controller ownership.
+    Settle,
     /// Finish the controller; cannot stop a different movement source.
     Release,
 }
@@ -202,7 +210,7 @@ impl ClientDirectedCommand {
     pub const fn acquires_control(self) -> bool {
         match self {
             Self::Acquire(_) | Self::AcquireFacing { .. } => true,
-            Self::Update(_) | Self::Settle { .. } | Self::Release => false,
+            Self::Update(_) | Self::Settle | Self::Release => false,
         }
     }
 }

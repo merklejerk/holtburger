@@ -1,7 +1,7 @@
 //! Shared combat request execution; world and existing operation owners retain state.
 use super::combat_engagement::CombatControlEffect;
 use super::movement_types::{
-    AutonomousDriveIntent, ClientDirectedCommand, Gait, PlayerDriveIntent,
+    AutonomousDriveIntent, ClientDirectedCommand, ClientMovementPolicy, Gait, PlayerDriveIntent,
 };
 use super::types::{
     ActionResultReason, ActionResultSource, ClientAttackProfile, ClientCommand, ClientViewEvent,
@@ -134,7 +134,7 @@ impl ClientRuntime {
         let Some(desired) = self.combat_engagement.status().desired else {
             return false;
         };
-        let physical_ready = match desired.profile {
+        let movement_ready = match desired.profile {
             ClientAttackProfile::Melee { .. }
                 if self
                     .combat_engagement
@@ -149,24 +149,30 @@ impl ClientRuntime {
             ClientAttackProfile::Melee { .. } => self
                 .melee_approach_state
                 .is_some_and(|state| state.request_admitted_for(desired.target)),
-            ClientAttackProfile::Missile { .. } => self.missile_request_grounded(),
+            ClientAttackProfile::Missile { .. } => self.missile_request_ready(),
         };
         self.world.player_combat_mode() == desired.profile.combat_mode()
             && self
                 .world
                 .combat_target_status(desired.target)
                 .is_available()
-            && physical_ready
+            && movement_ready
             && self.active_busy_operation.is_none()
             && !self.equipment_change_pending()
             && self.pack_exchange.is_none()
     }
 
-    /// ACE rejects a new missile request while jumping; unknown support cannot authorize it.
-    fn missile_request_grounded(&self) -> bool {
-        self.world
-            .runtime_body_view(SpatialBodyId::LocalPlayer(self.world.player.guid))
-            .is_some_and(|body| body.contact == ContactState::Grounded)
+    /// Physical prediction can gate jumping locally. Navigation has no local support solver,
+    /// so ACE owns that decision (Player_Missile.cs:64, Player.cs:49); unknown support must not
+    /// permanently prevent requests or become an invented grounded body.
+    fn missile_request_ready(&self) -> bool {
+        match self.movement.movement_policy() {
+            ClientMovementPolicy::Navigation => true,
+            ClientMovementPolicy::Physical => self
+                .world
+                .runtime_body_view(SpatialBodyId::LocalPlayer(self.world.player.guid))
+                .is_some_and(|body| body.contact == ContactState::Grounded),
+        }
     }
 
     fn combat_static_path(&self, target: Guid) -> CombatStaticPath {
@@ -247,7 +253,7 @@ impl ClientRuntime {
         }
         let distance = self
             .world
-            .physical_cylinder_distance(self.world.player.guid, desired.target);
+            .cylinder_distance(self.world.player.guid, desired.target);
         if distance
             .is_some_and(|distance| distance >= self.combat_tuning.melee_max_chase_distance())
         {
@@ -1543,7 +1549,7 @@ mod tests {
     }
 
     #[test]
-    fn missile_request_waits_for_grounded_runtime_contact() {
+    fn missile_request_admission_uses_the_selected_simulation_policy() {
         let mut client = client(0);
         client.world.seed_local_player_entity(
             Guid(1),
@@ -1553,18 +1559,29 @@ mod tests {
                 ..WorldPosition::default()
             },
         );
-        for (contact, expected) in [
-            (holtburger_world::ContactState::Airborne, false),
-            (holtburger_world::ContactState::Sliding, false),
-            (holtburger_world::ContactState::Grounded, true),
+        for policy in [
+            ClientMovementPolicy::Physical,
+            ClientMovementPolicy::Navigation,
         ] {
-            client.world.apply_spatial_body_event(
-                &holtburger_world::SpatialBodyEvent::ContactChanged {
-                    body_id: holtburger_world::SpatialBodyId::LocalPlayer(Guid(1)),
-                    contact,
-                },
-            );
-            assert_eq!(client.missile_request_grounded(), expected);
+            client.movement = crate::client::movement::MovementSystem::with_policy(policy);
+            for contact in [
+                ContactState::Unknown,
+                ContactState::Airborne,
+                ContactState::Sliding,
+                ContactState::Grounded,
+            ] {
+                client.world.apply_spatial_body_event(
+                    &holtburger_world::SpatialBodyEvent::ContactChanged {
+                        body_id: holtburger_world::SpatialBodyId::LocalPlayer(Guid(1)),
+                        contact,
+                    },
+                );
+                assert_eq!(
+                    client.missile_request_ready(),
+                    policy == ClientMovementPolicy::Navigation || contact == ContactState::Grounded,
+                    "{policy:?} / {contact:?}"
+                );
+            }
         }
     }
 

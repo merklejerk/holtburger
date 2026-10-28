@@ -32,6 +32,31 @@ impl StickyBodyTarget {
         reference: holtburger_common::position::WorldPosition,
         interval: f32,
     ) -> anyhow::Result<ResolvedAuthoredMotion> {
+        let displacement = self.displacement(reference, interval, false)?;
+        // Pursuit is ordinary reference-origin travel. Recomputing it from a blocked actual body
+        // would advance the reference indefinitely past its target.
+        Ok(ResolvedAuthoredMotion {
+            source_offset: RigidTransform::identity(),
+            velocity: displacement / interval,
+            heading: self.heading,
+        })
+    }
+
+    /// Full-XYZ proposal for a position-only consumer; no pose is committed or path swept here.
+    pub fn spatial_displacement(
+        self,
+        reference: holtburger_common::position::WorldPosition,
+        interval: f32,
+    ) -> anyhow::Result<Vector3> {
+        self.displacement(reference, interval, true)
+    }
+
+    fn displacement(
+        self,
+        reference: holtburger_common::position::WorldPosition,
+        interval: f32,
+        spatial: bool,
+    ) -> anyhow::Result<Vector3> {
         ensure!(
             self.clearance.is_finite() && self.clearance >= 0.0,
             "sticky clearance must be finite and nonnegative"
@@ -40,27 +65,26 @@ impl StickyBodyTarget {
             self.speed_mps.is_finite() && self.speed_mps > 0.0,
             "sticky speed must be finite and positive"
         );
+        ensure!(
+            interval.is_finite() && interval >= 0.0,
+            "sticky interval must be finite and nonnegative"
+        );
         let target = self
             .position
             .reanchor_to_landblock_owner(holtburger_common::Guid(
                 reference.landblock_id.0 | 0xffff,
             ))?;
         let mut difference = target.coords - reference.coords;
-        difference.z = 0.0;
+        if !spatial {
+            difference.z = 0.0;
+        }
         let distance = difference.length();
-        let displacement = if distance > 0.0 {
+        Ok(if distance > 0.0 {
             difference / distance
                 * (distance - self.clearance)
                     .clamp(-self.speed_mps * interval, self.speed_mps * interval)
         } else {
             Vector3::zero()
-        };
-        // Pursuit is ordinary reference-origin travel. Recomputing it from a blocked actual body
-        // would advance the reference indefinitely past its target.
-        Ok(ResolvedAuthoredMotion {
-            source_offset: RigidTransform::identity(),
-            velocity: displacement / interval,
-            heading: self.heading,
         })
     }
 }
@@ -245,6 +269,38 @@ mod tests {
             landblock_id: Guid(0x1234_0100),
             coords: Vector3::new(x, y, z),
             rotation: Quaternion::from_heading(0.7),
+        }
+    }
+
+    #[test]
+    fn sticky_spatial_projection_retains_height_and_rejects_invalid_intervals() {
+        let reference = position(0.0, 0.0, 0.0);
+        let target = StickyBodyTarget {
+            position: position(0.0, 0.0, 10.0),
+            clearance: 2.0,
+            speed_mps: 3.0,
+            heading: 0.0,
+        };
+        assert_eq!(
+            target.spatial_displacement(reference, 1.0).unwrap(),
+            Vector3::new(0.0, 0.0, 3.0)
+        );
+        assert_eq!(
+            target.project(reference, 1.0).unwrap().velocity,
+            Vector3::zero()
+        );
+        assert_eq!(
+            target.spatial_displacement(reference, 0.0).unwrap(),
+            Vector3::zero()
+        );
+        for interval in [-1.0, f32::NAN] {
+            assert_eq!(
+                target
+                    .spatial_displacement(reference, interval)
+                    .unwrap_err()
+                    .to_string(),
+                "sticky interval must be finite and nonnegative"
+            );
         }
     }
 

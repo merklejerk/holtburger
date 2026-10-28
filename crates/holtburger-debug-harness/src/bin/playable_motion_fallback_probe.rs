@@ -52,7 +52,8 @@ struct Sample {
 fn main() -> Result<()> {
     let args = Args::parse();
     let content = ContentRepository::discover(args.content)?;
-    let motions = Arc::new(content.read_motion_sequence_catalog()?);
+    let motion_reference = content.read_motion_reference_data()?;
+    let motions = Arc::new(motion_reference.motion_sequences);
     let bootstrap = WorldBootstrap {
         weenie_types: None,
         skill_table: Arc::new(content.read_asset("skills")?),
@@ -62,6 +63,7 @@ fn main() -> Result<()> {
         character_titles: Arc::new(content.read_character_title_catalog()?),
         contracts: Arc::new(content.read_contract_catalog()?),
         motion_sequences: Arc::clone(&motions),
+        setup_dimensions: Arc::new(motion_reference.setup_dimensions),
         soul_emote_catalog: Arc::new(SoulEmoteCatalog::default()),
     };
     let mut world = WorldState::new(Arc::new(bootstrap));

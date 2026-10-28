@@ -1,167 +1,177 @@
 # Preparing an alpha
 
-The alpha channel builds `3d-next` independently of the existing main nightly. Its workflow
-stages a draft GitHub prerelease; publishing it is a separate final action after user native
-verification. No stage creates commits or moves existing tags.
+The alpha channel builds `3d-next` and stages a draft GitHub prerelease. The release has
+separate CLI and 3D products, each on Linux x86-64, Windows x86-64, and macOS Apple Silicon,
+plus one Flatpak per product. Intel macOS is not supported. Both products share one app
+version and source commit. Publication promotes the frozen draft after final user acceptance;
+it does not build new artifacts.
 
-The release pipeline is ready for subsequent candidates. The verified `0.1.0-alpha.3`
-candidate at `7ab6645a6` is a historical packaging baseline, not the source selected for
-publication. Merge the pending development work first and cut a fresh candidate from the
-resulting source. Preserve earlier drafts/tags; do not publish or replace their assets as
-part of cleanup.
-
-The user has accepted broken TUI support with bundled micro for this alpha. Do not regenerate
-content, add a topology-only movement mode, or make TUI gameplay a publication blocker in this
-release task. Keep the limitation in the quickstart and release notes. Signing/notarizing macOS
-is also deferred; ship the documented app-specific quarantine workaround.
+The frozen `0.1.0-alpha.3` draft and published `0.1.0-alpha.4` are historical combined-package
+baselines. These split products require a fresh candidate. Preserve existing releases, tags,
+and drafts and their bytes.
+The new local packaging/workflow checks are not evidence that a new candidate has run.
 
 ## Version and content inputs
 
-From the repository root:
+From the repository root, select the next app version explicitly:
 
 ```sh
-python3 .github/scripts/release_version.py bump 0.1.0-alpha.4
+python3 .github/scripts/release_version.py bump NEXT_VERSION
 python3 .github/scripts/release_version.py check
 ```
 
-The bump command updates the workspace Cargo version, Electron manifest, and both lockfiles.
-Every workspace Rust package inherits that version. Protocol, archive, and settings schema
-versions have independent compatibility meanings and are not bumped by this command.
+The bump updates the workspace Cargo version, Electron manifest, and both lockfiles. Every
+workspace Rust package inherits that version. Navigation format, protocol, archive, and
+settings compatibility versions remain independent. A version bump alone does not require
+regenerating the navigation content. Replace `NEXT_VERSION` with the explicitly selected valid SemVer; this is not an instruction
+for an automatic bump. Integration retains the version already selected on `3d-next`.
 
-`.github/alpha-content.json` pins the approved micro ZIP by GitHub API asset URL and SHA-256.
-The initial micro input is stored in a public, non-latest content-only prerelease. Keep
-that release available: read-only CI tokens cannot fetch draft release assets. Do not
-replace the asset bytes or reuse the main nightly's moving micro input.
+`.github/cli-content.json` owns the approved generated ZIP SHA-256 and GitHub API asset URL.
+The current input contains exactly `bootstrap.hba` and `navigation.hnav`; the descriptor is
+the source of truth for its asset URL and digest. The production fetcher and headless
+bootstrap probe validate the downloaded input. HNAV has no runtime bootstrap digest binding.
+Older input assets and alpha.5's application assets remain frozen. The older `micro-hba.zip`
+remains available for legacy consumers; this CLI release path does not fetch it.
+For future updates, store approved bytes as a fresh asset
+on the repository's public, non-latest content prerelease. Read-only CI tokens cannot retrieve
+draft release assets. Keep existing input assets available and do not replace their bytes.
+The public client release bundles the companions; it does not add a separate content-only
+user download. Retail DATs and full HBAs are local generator inputs and must not enter CI or
+public release assets.
 
-Content repair is deferred for this alpha. For a future repair, update profile selection/pruning
-before using `dat2hba --profile micro` with local portal and English localization DATs. Validate
-the HBA with the noninteractive `content_bootstrap` harness and a probe exercising the complete
-`read_character_gen_catalog()` path. The existing bootstrap probe parses the main character-generation table but
-does not prove creation choices or world entry work; its successful result must not be
-described as full TUI validation. Any future content repair needs focused catalog and
-world-data checks before it can be called complete. Upload only the
-validated micro ZIP containing `assets.hba`, update the descriptor, and review the change.
-Retail DATs and full HBAs must not be uploaded to public CI or the release.
-
-## Candidate build
-
-`Alpha checks` validates pushes and pull requests on `3d-next` on Linux only, without release packaging.
-Prose-only changes outside shipped documentation skip compilation while still reporting the
-`Alpha validation` status. Configure that final status as the branch requirement rather than
-individual conditionally skipped matrix jobs.
-
-After committing and pushing the intended release inputs to `3d-next`, open GitHub
-**Actions → Alpha Release Candidate → Run workflow**, select **3d-next**, and run it.
-The workflow uses the commit selected when dispatching, checks the suite version and clean
-source identity, and creates `alpha-YYYYMMDD-COMMITPREFIX` using the commit's committer date
-and first nine commit characters. The source-owned date keeps the generated tag stable across
-reruns on later days. It then validates and packages that same source in the same run, finally
-staging a draft prerelease. It does not bump the version or publish the draft.
-
-GitHub requires the dispatch workflow definition on the repository's default branch (`main`)
-before exposing the button. Land the workflow definition there as well as on `3d-next`,
-then select `3d-next` in the branch dropdown. Other branches are rejected. See
-[GitHub's manual-run documentation](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
-
-The built-in token creates the tag without triggering a second tag-push workflow, so no
-personal token is required. A rerun can reuse an existing lightweight tag for the identical
-commit; a conflicting tag is rejected rather than moved. Candidate runs do not automatically
-cancel an in-progress candidate.
-
-An explicitly pushed alpha tag remains an alternative entry point. Resolve the intended
-commit before creating one:
+Generate and inspect locally when the data or format changes:
 
 ```sh
-# After merging development changes, bumping the version, reviewing notices if needed,
-# reviewing the diff, and committing/pushing the release inputs to 3d-next:
+cargo run --locked --release -p holtburger-tools --bin cli-content -- generate \
+  --source /path/to/full/assets.hba --output /path/to/new-output
+cargo run --locked --release -p holtburger-tools --bin cli-content -- info \
+  --content /path/to/new-output/content
+cargo run --locked -p holtburger-cli --bin content_bootstrap -- /path/to/new-output/content
+```
+
+The ZIP has exactly `bootstrap.hba` and `navigation.hnav` at its root. Generation prints
+statistics to the console; inspection reads the archives directly. Optional provenance can
+be recorded in the content-release notes. Inspect the complete creation catalog and a
+representative scene through the production probe before approving a new input.
+`cli-content` is developer tooling and is not shipped in either product.
+
+Fetch the approved input, or stage its exact local bytes before remote storage is ready:
+
+```sh
+python3 .github/scripts/fetch_cli_content.py .holtburger-local/cli-content
+# Local alternative: use the SHA-256 recorded in .github/cli-content.json.
+python3 .github/scripts/cli_content_input.py /path/to/cli-content.zip \
+  --sha256 APPROVED_SHA256 --output .holtburger-local/cli-content
+```
+
+Use a new staging directory. The ZIP digest, exact entry names, and archive headers
+are checked before staging. The assembler compares staged components
+with the retained input ZIP. Runtime uses the content crate's codec validation;
+it does not scan the full source corpus or apply a size gate.
+
+## Product assembly
+
+CLI includes `holtburger-cli`, `dat2hba`, `dat-tool`, fighter/mage scripts and sidecars,
+`content/`, metadata, license/notices, and its CLI quickstart. 3D includes `h3d/` with the
+packaged client/Explorer, private host/runtime/resources, metadata, license/notices, and its
+3D quickstart. Each assembler can run with the other product's inputs absent:
+
+```sh
+python3 .github/scripts/alpha_release.py assemble --product cli \
+  --target x86_64-unknown-linux-gnu --content .holtburger-local/cli-content \
+  --notices .github/licenses/THIRD_PARTY_NOTICES.html --output .holtburger-local/alpha-artifacts
+python3 .github/scripts/alpha_release.py assemble --product 3d \
+  --target x86_64-unknown-linux-gnu --package apps/holtburger-3d/out/holtburger-3d-linux-x64 \
+  --notices .github/licenses/THIRD_PARTY_NOTICES.html --output .holtburger-local/alpha-artifacts
+```
+
+These commands require the corresponding native target build outputs. Forge receives the
+explicit target host through `HOLTBURGER_PACKAGE_HOST`; it does not rebuild it implicitly.
+Assembly checks architecture, executable modes, notices/content identity, native linkage,
+and extracted layout. 3D also checks packaged host and renderer source identity. CLI needs
+no Node/Electron installation. 3D needs no compact CLI content.
+
+## Candidate builds and diagnostic selection
+
+`Alpha checks` validates pushes/PRs on `3d-next` on Linux. Prose-only changes outside shipped
+documentation skip compilation while retaining the final `Alpha validation` status. Use that
+final status as the branch requirement. Shared Rust correctness runs once on Linux; the
+selected frontend/host/tool tests and lint run alongside it. Selected 3D work includes
+frontend tests and the exhaustive development theme/font probe. Native target jobs build,
+package, and smoke their selected executables rather than repeat shared suites.
+
+Manual **Actions → Alpha Release Candidate → Run workflow** retains upstream's full
+candidate entry point. Select `3d-next` and `purpose=candidate` (the default), with
+`product=both` and `target=all`. The workflow checks clean/version-consistent source,
+derives `alpha-YYYYMMDD-COMMITPREFIX` from the selected commit's committer date and first
+nine hash characters, creates an immutable lightweight tag, and builds/stages its draft in
+the same run. Later-day retries reuse the same source-owned tag; conflicting tags are
+rejected. The built-in token does not trigger a second tag-push run. Candidate concurrency
+does not automatically cancel an existing run. Neither candidate entry point publishes
+a draft or bumps application versions.
+
+For a bounded diagnostic, explicitly select `purpose=diagnostic`, then choose
+`product=cli|3d|both` and one supported target or `all`. Diagnostic planning returns no
+candidate tag, so tag creation and draft staging are skipped even for a full diagnostic
+matrix. CLI-only work skips Node/Electron; 3D-only work skips CLI fetching/tools. A
+desktop-only diagnostic skips Linux/Flatpak. Use these runs to diagnose individual failures
+before another complete candidate; partial candidates are rejected before tagging.
+
+GitHub requires the workflow definition on the default branch before exposing its manual
+entry point. Full candidates are restricted to `3d-next` (or its explicit alpha tags);
+diagnostic branch runs do not receive a candidate tag. None of these workflow actions is
+performed by local implementation/testing; request explicit go-ahead before dispatching.
+
+An explicitly pushed `alpha-YYYYMMDD-COMMITPREFIX` tag requests both products on every
+supported target. It must identify clean, version-consistent source belonging to `3d-next`.
+After reviewing, committing, and pushing the selected release inputs:
+
+```sh
 python3 .github/scripts/release_version.py check
 git status --short
 git rev-parse HEAD
-# Use the reviewed commit's first nine hex digits and today's date:
 git tag alpha-YYYYMMDD-COMMITPREFIX FULL_COMMIT_SHA
 git push origin refs/tags/alpha-YYYYMMDD-COMMITPREFIX
 ```
 
-These are optional operator commands, not automatic cleanup steps. Resolve any uncommitted
-changes before preparing a candidate. A new source needs a new tag and candidate; never move
-an earlier alpha tag.
-Version `0.1.0-alpha.4` above is the next example after the alpha.3 baseline, not an automatic bump.
+These are operator actions requiring authorization, not automatic cleanup. Never move an
+existing alpha tag. The tag namespace avoids the separate cargo-dist release trigger. The existing `create-tag`
+command creates/reuses only the exact clean source and never moves a conflicting tag.
+The final aggregator requires CLI+3D native records on all targets, both Flatpaks, shared
+notices, one source/version, matching CLI companions, and exact archive checksums/names.
+It writes `release-manifest.json` and `SHA256SUMS`. No standalone micro download or combined
+third product remains. Diagnostic partial matrices cannot enter release staging.
 
-The non-SemVer tag namespace avoids triggering the separate cargo-dist release workflow.
-The workflow checks that the tag prefix matches the source commit and that the commit belongs
-to `3d-next`. All native builds consume the same commit, version, and micro digest.
+## Flatpak and CI cost
 
-Linux x86-64, Windows x86-64, and macOS Apple Silicon build on native runners. Forge consumes
-the explicitly targeted Rust host through `HOLTBURGER_PACKAGE_HOST`, avoiding an implicit
-native rebuild. CI validates the final suite after extraction and stages the complete matrix,
-TUI-only and full-suite Flatpaks, standalone micro ZIP, notices, manifest, and checksums into
-one draft. The complete inventory is nine assets.
+The Flatpaks reuse their already-built Linux native archives. One job shares tooling/runtime
+setup, with separate cached builder state per product. The CLI has networking but no graphical
+sockets or Electron. The 3D recipe retains graphics/audio/network and the pinned Zypak helper;
+it keeps `io.github.merklejerk.holtburger-alpha` and existing settings, while the download is
+named `holtburger-3d-VERSION-x86_64.flatpak`. CLI uses `io.github.merklejerk.holtburger-cli-alpha`.
+The alpha CLI appears as **Holtburger CLI Alpha** and has separate settings from main/nightly
+`io.github.merklejerk.holtburger-cli`. Nightly preparation explicitly selects `--nightly-cli`.
+Both alpha products use Freedesktop 26.08. The generated alpha recipe selects that runtime
+from the 3D recipe; the checked-in CLI recipe remains independently usable for staging.
 
-Portable Linux builds use Ubuntu 22.04. The combined Flatpak job uses Ubuntu 24.04's
-builder 1.4, which supports the SDK's `appstreamcli`; the older 22.04 builder
-expects `appstream-compose`. Flatpak runtime requirements remain defined by the declared
-26.08 runtime. Its installed production-bootstrap probe verifies binary compatibility.
-The full-suite recipe owns the alpha runtime selection; the generated TUI alpha recipe and
-the single Flatpak provisioning step consume it. The main nightly keeps its independent TUI recipe.
+Portable native Linux builds use Ubuntu 22.04; Flatpak builds use headless Ubuntu 24.04 and
+its newer builder. No desktop distribution or persistent runner fleet is required. A virtual
+display and portal services are installed only for selected 3D probes. Those probes exercise
+private-host startup, packaged assets/theme recovery, document-portal input, and explicit
+output permissions using synthetic content. CLI probes load production content and invoke
+utilities; they never launch the interactive TUI. Installed inventory/bytes are compared with
+the verified native product. Renderer inspection is not repeated for identical installed bytes.
 
-Both Flatpaks reuse the inspected Linux archive without rebuilding its executables.
-Their combined job waits only for Linux, independently of Windows/macOS, and installs tooling
-and runtime once. Separate builder state/repository directories keep the app inventories
-independent. Private bootstrap and compiled Electron probe imports come from the Linux job.
-The Flatpak job installs locked JavaScript dependencies with `npm ci --ignore-scripts`:
-compiled imports need zod/MessagePack and package inspection needs `@electron/asar`.
-Skipping install scripts avoids downloading Electron; the job does not compile probes or the app.
-The headless Ubuntu runner needs no desktop installation or alternate distribution.
-The provisioning step still downloads OS packages and SDK/runtime on a fresh runner;
-it removes the Azure preference from the runner's `/etc/apt/apt-mirrors.txt`, retaining the
-official Ubuntu archive/security mirrors, and explicitly
-installs required helpers without optional recommended media packages. Additional caching is
-justified only by measured setup cost after consolidation.
-The required `librsvg2-common` package supplies SVG decoding for the TUI's AppStream icon;
-keep it explicit when disabling recommended packages.
+Cargo, npm, and Flatpak builder caches remain enabled. Fresh hosted runners still install OS
+packages and the SDK/runtime. Measure actual job/setup duration before adding image or runner
+infrastructure. The Flatpak apt setup removes the Azure mirror preference while retaining the
+official Ubuntu archive/security mirrors. Required SVG/AppStream helpers are explicit with
+recommended packages disabled. Zypak/nickle original notices remain installed with the 3D app.
 
-Its recipe under `.github/flatpak/` builds only pinned Zypak to support Chromium's nested
-sandbox; the 26.08 runtime supplies the other linked libraries. Two small build patches track
-actual object targets with compiler-generated dependency files and correct an upstream
-copy-constructor member typo diagnosed by the 26.08 SDK. Original
-Zypak/nickle notices are pinned with the native notices and retained in the installed app.
-
-CI installs the full-suite artifact and verifies exact suite bytes, native architecture,
-wrapper/tool entry points, app ID/runtime, bootstrap, private-host protocol, and packaged
-recovery/theme/font behavior. Synthetic document-portal input and explicit output grants
-exercise real conversion/export without retail data. Probe executables/launchers remain CI
-tooling and are not public release binaries. Both Flatpaks contribute installed identity
-receipts; aggregation rejects missing assets, wrong source/content/notices, or changed bytes.
-
-## Validation scope
-
-Shared correctness runs once on Linux: the six affected library test targets, TUI CLI tests,
-the converter's library/CLI tests, full frontend tests, type checks, and lint. Unit-test
-selection excludes unshipped diagnostic binaries. Content parity uses self-contained synthetic
-DAT/HBA fixtures. Release builds still explicitly name only
-the shipped executables and the private bootstrap probe.
-
-Windows and Apple Silicon run only for explicitly requested candidates. Their jobs build
-and inspect the actual native packages and exercise startup, the private host, content
-recovery, and packaged assets; they do not repeat shared unit suites. Platform-specific
-investigations use targeted checks as needed, without a generic dispatch interface.
-
-The Windows job installs the pinned LIEF packaging dependency and runs synthetic PE tests.
-Forge adds NVIDIA/AMD high-performance GPU exports to the final unsigned Electron executable
-before archive creation. The patch verifies existing exports, section bytes, entry point,
-image base and non-export directories before replacing the executable. Package and extracted
-archive inspection require both vendor hints to contain one; the existing Windows startup
-probe then exercises the patched executable. This uses standard Electron binaries, not a
-custom Electron build. Local Windows packaging setup is described in the 3D app README.
-
-Candidate packaging on every target retains branding, bootstrap,
-package/architecture/resource inspection, private-host smoke, default-client/Explorer content
-recovery, and actual packaged font/image decoding. The exhaustive development theme suite
-runs in Linux validation. All native packages use the content probe's default
-`--theme-check assets`.
-Flatpak retains `--theme-check full` because custom-theme filesystem access crosses its sandbox.
-Automated install/startup and exact artifact checks remain release gates; manual native/visual
-acceptance remains the final publication gate.
+Main nightly consumers use the same CLI content/assembly contract after this branch reaches
+main. Their Flatpak job reuses the Linux native output rather than compiling the client a
+second time. They no longer publish separate micro assets. The older micro helper remains
+only for the existing main/dev DAT test fixture fetch, outside the CLI release content path.
 
 ## Dependency notices
 
@@ -172,12 +182,12 @@ Rust/native notices are generated locally and committed as
 accessing license sources. Failures emit a warning in both branch validation and candidate
 planning; they do not block CI or candidate creation. The local `check` command still exits
 nonzero to report stale inputs/output. Its whole-file fingerprints include Cargo versions,
-so a suite-only version bump may warn but does not require regeneration to release.
+so a shared application version bump may warn but does not require regeneration to release.
 Ordinary application source changes do not invalidate notices.
 
 The candidate job uploads that committed HTML for all three native target graphs.
-The same file is included in every suite and both Flatpaks, and uploaded separately for
-review. Suite metadata and the final manifest pin its digest. Electron/Chromium and font
+The same file is included in every native bundle and both Flatpaks, and uploaded separately for
+review. Product metadata and the final manifest pin its digest. Electron/Chromium and font
 notices remain inside h3d through the existing package checks.
 The checked-in HTML must exist for packaging. Missing HTML still fails artifact upload or
 assembly; existing byte/digest consistency checks remain required. CI never attempts generation.
@@ -197,7 +207,7 @@ year, and includes the original ICU data notice separately. A new version requir
 
 When third-party dependencies or license inputs change, refresh notices locally: install the
 pinned tool if needed, generate and review the output, and commit both generated files.
-Generation failures are local maintenance work, not a CI gate. A suite-only version bump
+Generation failures are local maintenance work, not a CI gate. A shared application version bump
 does not require this step:
 
 ```sh
@@ -214,29 +224,24 @@ This avoids repeating tool compilation and license collection in the release pat
 
 ## Final handoff and publication
 
-User native-bundle verification occurs only after the complete draft exists. Provide its
-link, source commit, checksums, known limitations, and this checklist:
+Manual native/visual acceptance happens after the complete draft exists. Provide its source,
+checksums, known limitations, and which automatic/manual checks actually ran:
 
-1. Download the matching suite and verify its checksum; extract it with native tools.
-2. Keep the accepted broken-TUI limitation explicit. TUI gameplay is not required for this alpha;
-   any optional full-HBA testing must be recorded separately from bundled-micro behavior.
-3. Launch h3d using CLI connection arguments and select the user's retail installation.
-4. Check basic gameplay, input, audio, window scaling, and OS launch behavior on available platforms.
-5. Launch explicit Explorer; report any failures with redacted commands and build identity.
-6. Install the full-suite Flatpak and repeat client/Explorer checks, including portal selection
-   across restarts, graphics/audio/input, and tool input/output permissions.
+1. Download and checksum the matching CLI and/or 3D archive; extract with native tools.
+2. CLI: use bundled content, check creation choices, entry, approach/follow, cell changes,
+   and authoritative repositioning. Local movement has no gravity/jumping/stair simulation.
+3. 3D: supply full retail data, launch the default client and explicit Explorer, and check
+   gameplay, graphics/audio/input, window scaling, and OS launch behavior.
+4. On Linux, install the two separate Flatpaks. Check CLI utility permissions and 3D portal
+   selection across restarts. The 3D app ID preserves prior alpha settings.
 
-Record actual manual results and unverified platforms in draft release notes. Prior candidate
-checks are evidence for the pipeline, not acceptance of the next candidate's application bytes.
-A defect outside the explicitly accepted limitations requires a fix or an explicit scope decision.
-A fix requires a newly identified candidate and repeated affected checks. Never replace accepted
-artifacts silently. Preserve experimental status for platforms unavailable to the user.
+Record unavailable native targets explicitly. Old alpha.3 acceptance does not establish the
+new split candidate's behavior. A fix requires a new identified candidate and affected checks;
+never silently replace frozen artifacts. macOS signing/notarization remains deferred, with
+the app-specific quarantine workaround in its quickstart.
 
 After final acceptance and explicit publication authorization, publish the existing draft
-without rebuilding or altering application assets. Verify the public asset list and re-download
-representative assets to compare SHA-256 values. Keep the existing `nightly` release intact.
-
-Use GitHub's existing release editor, or the equivalent CLI command after authorization:
+without rebuilding or altering application assets:
 
 ```sh
 gh release edit alpha-YYYYMMDD-COMMITPREFIX \
@@ -244,8 +249,5 @@ gh release edit alpha-YYYYMMDD-COMMITPREFIX \
   --draft=false --prerelease --latest=false
 ```
 
-Review the draft's source, nine assets, manifest/checksums, and final release notes before this
-command. It publishes the selected draft without invoking a build. Leave superseded experimental
-drafts unpublished; deleting them or their tags is separate housekeeping, not part of cutting the
-next release. Follow the same process for each later alpha rather than reopening the implementation
-plan or introducing another publication workflow.
+Verify the public asset list and representative downloaded checksums. Preserve the existing
+nightly release and superseded drafts/tags; cleanup of them is a separate action.

@@ -5551,6 +5551,83 @@ fn sticky_preparation_samples_scaled_setup_clearance_heading_and_target_loss() {
 }
 
 #[test]
+fn position_only_sticky_waits_for_dimensions_and_retires_missing_targets() {
+    use holtburger_common::properties::PropertyDataId;
+    use holtburger_content::{SetupDimensionCatalog, SetupDimensions};
+    let mut world = WorldState::synthetic();
+    let actor = Guid(0x5000_0001);
+    let target = Guid(0x7000_0001);
+    let setup = 0x0200_0001;
+    let pose = WorldPosition {
+        landblock_id: Guid(0x1234_0100),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    world.seed_local_player_entity(actor, "Player", pose);
+    world.add_entity(Entity::new(
+        target,
+        "Target".into(),
+        WorldPosition {
+            coords: Vector3::new(0.0, 0.0, 2.0),
+            ..pose
+        },
+    ));
+    for guid in [actor, target] {
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .properties
+            .set_did_prop(PropertyDataId::Setup, Guid(setup));
+    }
+    let catalog = test_motion_catalog(0x0900_0001);
+    let table = catalog.table(0x0900_0001).unwrap();
+    world
+        .motion_runtimes
+        .admit_sticky_target(table, actor, Some(target), Instant::now());
+    world.motion_runtimes.drive(
+        table,
+        actor,
+        crate::motion::MotionOrder::default(),
+        crate::MOBILE_CONTACT_TICK_SECONDS,
+    );
+    assert!(world.prepare_position_only_sticky_target(actor).is_none());
+    assert_eq!(
+        world.motion_runtimes.get(actor).unwrap().sticky_target(),
+        Some(target)
+    );
+    let radius = 0.25;
+    world.setup_dimensions = Arc::new(SetupDimensionCatalog::new([(
+        setup,
+        SetupDimensions {
+            radius,
+            height: 1.0,
+        },
+    )]));
+    world
+        .entities
+        .get_mut(actor)
+        .unwrap()
+        .scale
+        .reconcile(2.0)
+        .unwrap();
+    let sample = world.prepare_position_only_sticky_target(actor).unwrap();
+    assert_eq!(
+        sample.clearance,
+        radius * 2.0 + radius + super::motion_resolution::STICKY_TARGET_CLEARANCE_M
+    );
+    assert_eq!(sample.heading, pose.rotation.to_heading());
+    assert!(world.prepare_sticky_body_targets().is_empty());
+    assert!(world.scene.body_for_guid(actor).unwrap().physical.is_none());
+    world.scene.remove_body(SpatialBodyId::Entity(target));
+    assert!(world.prepare_position_only_sticky_target(actor).is_none());
+    assert_eq!(
+        world.motion_runtimes.get(actor).unwrap().sticky_target(),
+        None
+    );
+}
+
+#[test]
 fn pk_messages_refresh_installed_identity_without_changing_body_state() {
     use holtburger_common::properties::ObjectDescriptionFlag as Flags;
     use holtburger_protocol::messages::object::messages::properties::UpdatePropertyInt;
@@ -5780,7 +5857,9 @@ fn use_range_and_directed_approach_share_scaled_body_distance_and_pending_geomet
             state,
             MotionOrder::default(),
             pose,
-            MotionContact::RequiresSupport(ContactState::Grounded),
+            crate::motion::DirectedMotionSupport::Physical(MotionContact::RequiresSupport(
+                ContactState::Grounded,
+            )),
             world.server_directed_target(actor, target),
         )
     };

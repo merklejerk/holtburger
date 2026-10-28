@@ -128,7 +128,7 @@ impl RemoteMotionState {
             state,
             steady,
             pose,
-            input.contact,
+            crate::motion::DirectedMotionSupport::Physical(input.contact),
             input.target,
         ) {
             ServerDirectedMotionResolution::Active(step) => (Some(step.state), step.order),

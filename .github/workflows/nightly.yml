@@ -2,11 +2,16 @@ name: Nightly Build
 
 on:
   schedule:
-    - cron: '0 */8 * * *' # Every 8 hours
-  workflow_dispatch: # Manual trigger for the rizz
+    - cron: '0 */8 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  HOLTBURGER_SOURCE_REVISION: ${{ github.sha }}
+  HOLTBURGER_SOURCE_MODIFIED: '0'
 
 jobs:
   tag:
@@ -16,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Update Nightly Tag
         run: |
@@ -26,146 +31,117 @@ jobs:
           git push -f origin nightly
 
   dist-build:
-    name: Build Binaries
+    name: Build CLI binaries
     needs: tag
     if: github.ref == 'refs/heads/main'
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-22.04
           - target: x86_64-pc-windows-msvc
-            os: windows-latest
+            os: windows-2022
           - target: aarch64-apple-darwin
-            os: macos-latest
+            os: macos-14
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
         with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.95.0
           targets: ${{ matrix.target }}
-      
-      - name: Build Workspace
-        shell: bash
-        run: cargo build --release --workspace
-
-      - name: Fetch Micro HBA
-        shell: bash
+      - uses: Swatinem/rust-cache@v2
+      - name: Build shipped CLI executables
+        run: cargo build --locked --release --target '${{ matrix.target }}' -p holtburger-cli --bin tui -p holtburger-tools --bin dat2hba --bin dat-tool
+      - name: Fetch pinned CLI content
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/fetch_cli_content.py .holtburger-local/cli-content
+      - name: Assemble CLI bundle
         run: |
-          HBA_MICRO_LATEST_URL="${{ vars.HBA_MICRO_LATEST_URL }}" \
-            bash .github/scripts/fetch_micro_hba.sh
-
-      - name: Prepare Release Bundle
-        shell: bash
-        run: |
-          mkdir -p staging/dats
-          mkdir -p staging/scripts
-          EXT=""
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then EXT=".exe"; fi
-          cp target/release/tui$EXT staging/holtburger-cli$EXT
-          cp target/release/dat2hba$EXT staging/dat2hba$EXT
-          cp target/release/dat-tool$EXT staging/dat-tool$EXT || true
-          mkdir -p staging/branding
-          cp assets/branding/portal-static.svg assets/branding/icon.png staging/branding/
-          cp dats/assets.hba staging/dats/assets.hba
-          cp scripts/*.js scripts/*.data.json scripts/*.data.bin staging/scripts/
-          ARCHIVE_NAME="holtburger-nightly-${{ matrix.target }}"
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            7z a "$ARCHIVE_NAME.zip" ./staging/*
-            echo "ASSET_PATH=$ARCHIVE_NAME.zip" >> $GITHUB_ENV
-          else
-            tar -czf "$ARCHIVE_NAME.tar.gz" -C staging .
-            echo "ASSET_PATH=$ARCHIVE_NAME.tar.gz" >> $GITHUB_ENV
-          fi
-
-      - name: Upload Build Artifact
-        uses: actions/upload-artifact@v4
+          python .github/scripts/alpha_release.py assemble --product cli \
+            --target '${{ matrix.target }}' --content .holtburger-local/cli-content \
+            --notices .github/licenses/THIRD_PARTY_NOTICES.html \
+            --output .holtburger-local/nightly-artifacts
+      - uses: actions/upload-artifact@v4
         with:
           name: binary-${{ matrix.target }}
-          path: ${{ env.ASSET_PATH }}
+          path: .holtburger-local/nightly-artifacts/*
+          if-no-files-found: error
+          compression-level: 0
 
   flatpak-build:
-    name: Build Flatpak
-    needs: tag
+    name: Package CLI Flatpak from Linux output
+    needs: dist-build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: binary-x86_64-unknown-linux-gnu
+          path: .holtburger-local/nightly-linux
       - name: Install Flatpak dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
+          sudo apt-get install --yes --no-install-recommends flatpak flatpak-builder appstream-compose desktop-file-utils elfutils ostree librsvg2-common
           sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y flathub org.freedesktop.Platform/x86_64/24.08 org.freedesktop.Sdk/x86_64/24.08
-      - name: Build TUI Client
+          RUNTIME_VERSION=$(python -c 'import json; print(json.load(open(".github/flatpak/io.github.merklejerk.holtburger-alpha.json"))["runtime-version"])')
+          sudo flatpak install --noninteractive --assumeyes flathub "org.freedesktop.Platform/x86_64/$RUNTIME_VERSION" "org.freedesktop.Sdk/x86_64/$RUNTIME_VERSION"
+      - name: Materialize recipe from the native CLI archive
         run: |
-          cargo build --release --package holtburger-cli
-          mv target/release/tui target/release/holtburger-cli
-      - name: Fetch Micro HBA
-        shell: bash
-        run: |
-          HBA_MICRO_LATEST_URL="${{ vars.HBA_MICRO_LATEST_URL }}" \
-            bash .github/scripts/fetch_micro_hba.sh
+          python .github/scripts/alpha_release.py prepare-flatpak --product cli --nightly-cli \
+            --artifacts .holtburger-local/nightly-linux --output .holtburger-local/nightly-flatpak.json
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           bundle: holtburger-cli.flatpak
-          manifest-path: apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml
+          manifest-path: .holtburger-local/nightly-flatpak.json
           cache: true
-      - name: Upload Flatpak Artifact
-        uses: actions/upload-artifact@v4
+          upload-artifact: false
+      - uses: actions/upload-artifact@v4
         with:
           name: flatpak-bundle
           path: holtburger-cli.flatpak
-
-  micro-hba-assets:
-    name: Publish Micro HBA Assets
-    needs: tag
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Fetch Micro HBA Bundle
-        shell: bash
-        run: |
-          HBA_MICRO_LATEST_URL="${{ vars.HBA_MICRO_LATEST_URL }}" \
-          HBA_MICRO_KEEP_ARCHIVE=1 \
-            bash .github/scripts/fetch_micro_hba.sh
-      - name: Upload Micro HBA Release Assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: micro-hba-assets
-          path: |
-            micro-hba.zip
-            dats/assets.hba
+          if-no-files-found: error
 
   publish:
     name: Publish Nightly Release
-    needs: [dist-build, flatpak-build, micro-hba-assets]
+    needs: [dist-build, flatpak-build]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true # This puts all files into the 'artifacts' dir
-
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v2
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly
-          files: artifacts/*
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
+            artifacts/*.flatpak
           prerelease: true
-          name: "Holtburger Nightly"
+          name: Holtburger CLI Nightly
           body: |
-            <img src="https://raw.githubusercontent.com/${{ github.repository }}/nightly/assets/branding/portal-static.svg" width="96" height="96" alt="Holtburger portal logo" />
-
-            This is an automated nightly build of the Holtburger TUI client.
-            
-            **Warning:** These builds are highly experimental!
+            This automated CLI build includes the terminal client, archive utilities,
+            bundled scripts, and prepared navigation content. These builds are experimental.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

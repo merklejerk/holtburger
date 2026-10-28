@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [3d-next]
   workflow_call:
+    inputs:
+      product:
+        type: string
+        default: both
 
 permissions:
   contents: read
@@ -60,6 +64,7 @@ jobs:
         with:
           python-version: '3.12'
       - uses: actions/setup-node@v4
+        if: inputs.product != 'cli'
         with:
           node-version: 24.13.1
           cache: npm
@@ -70,31 +75,48 @@ jobs:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Install frontend dependencies
+        if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: npm ci
       - name: Check Rust formatting
         run: cargo fmt --all --check
       - name: Check shared frontend and Electron logic once
+        if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: |
           npm run check
           npm run lint:ts
           npm run test:ts
       - name: Check native branding generation
+        if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: npm run check:branding
-      - name: Test shared Rust libraries and shipped CLI behavior once
+      - name: Test shared Rust libraries once
+        run: cargo test --locked -p holtburger-dat -p holtburger-content -p holtburger-world -p holtburger-core -p holtburger-weenie-catalog --lib
+      - name: Test CLI and content tooling
+        if: inputs.product != '3d'
         run: |
-          cargo test --locked -p holtburger-dat -p holtburger-content -p holtburger-core -p holtburger-cli -p holtburger-3d-host -p holtburger-weenie-catalog --lib
-          cargo test --locked -p holtburger-cli --bin tui
+          cargo test --locked -p holtburger-cli --lib --bin tui
           cargo test --locked -p holtburger-tools --lib dat2hba::tests::
+          cargo test --locked -p holtburger-tools --lib cli_content::tests::
           cargo test --locked -p holtburger-tools --bin dat2hba
-      - name: Deny Rust lint warnings
+      - name: Test 3D host behavior
+        if: inputs.product != 'cli'
+        run: cargo test --locked -p holtburger-3d-host --lib
+      - name: Deny shared Rust lint warnings
+        run: cargo clippy --locked -p holtburger-dat -p holtburger-content -p holtburger-world -p holtburger-core -p holtburger-weenie-catalog --lib --tests -- -D warnings
+      - name: Deny CLI and tooling lint warnings
+        if: inputs.product != '3d'
         run: |
-          cargo clippy --locked -p holtburger-dat -p holtburger-content -p holtburger-cli -p holtburger-3d-host -p holtburger-weenie-catalog --all-targets -- -D warnings
-          cargo clippy --locked -p holtburger-debug-harness --bin content_bootstrap -- -D warnings
+          cargo clippy --locked -p holtburger-cli --lib --bin tui --tests -- -D warnings
+          cargo clippy --locked -p holtburger-tools --lib --bin dat2hba --bin dat-tool --bin cli-content -- -D warnings
+          cargo clippy --locked -p holtburger-cli --bin content_bootstrap -- -D warnings
+      - name: Deny 3D host lint warnings
+        if: inputs.product != 'cli'
+        run: cargo clippy --locked -p holtburger-3d-host --lib --tests -- -D warnings
 
       - name: Exercise exhaustive theme and font behavior once
+        if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: |
           npm run build

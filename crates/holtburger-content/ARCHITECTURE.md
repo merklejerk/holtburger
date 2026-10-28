@@ -21,7 +21,8 @@ canonical DAT-derived queries.
   graphs.
 - **One resource contract across archive formats**: explicit selections mount namespaced HBA
   bundles or retail DATs through the same `holtburger-dat` source composition. Directories prefer
-  HBA content; retail DATs are mounted when no HBA is present. Required assets are resolved when
+  HBA content by default. Consumer admission can select retail DATs instead when readable
+  HBAs are unsuitable; corrupt archives remain errors and families never mix. Required assets are resolved when
   consumed rather than through an exhaustive startup audit.
 
 ## Key Components
@@ -34,10 +35,13 @@ policy; shared orchestration receives an already constructed repository.
 
 `ResolvedContent::open` opens an exact archive or selected directory without environment overrides
 or sibling-extension probing, returning a repository and canonical selection identity together.
-`ResolvedContent::discover` tries an app-supplied portable directory followed by the shared platform
+`ResolvedContent::open_preferred` applies a frontend admission predicate to the preferred HBA
+installation before trying the same directory's DAT installation; the frontend still validates
+the returned repository and reports its missing resource. Exact files never switch sources.
+`ResolvedContent::discover` uses this preference when trying an app-supplied portable directory followed by the shared platform
 data directory. Missing locations and directories without archives are skipped; invalid selected
 archives fail explicitly. Legacy `ContentRepository::discover` retains HBA/environment discovery
-for existing TUI and tooling consumers; h3d uses the explicit selection APIs.
+for tooling consumers; h3d uses the explicit selection APIs and TUI owns its HBA/HNAV selection in the frontend.
 
 Retail role identification uses header dataset/subset, allowing one base portal, optional highres
 portal, cell, and language archive per installation. Highres shares `eor/portal` and takes precedence
@@ -226,6 +230,39 @@ the shallow foundation by normalized landblock ID, and exposes generated and int
 that reacquire that exact foundation. Region-independent asset requests remain available without
 RegionDesc. Generated and interior results are not separately cached without measurements
 demonstrating a need.
+
+## Prepared navigation content
+
+TUI selection lives in its frontend. The content layer exposes `SceneContentSource` for owner classification/collision products
+and `SetupContentSource` for authored setup facts. Scene sourcing is independent of movement
+and body preparation policy.
+`PreparedNavigationSource` composes an already opened reference repository and
+`NavigationSceneSource`; it neither discovers paths nor chooses a storage/profile fallback.
+The HBA may be reduced or full, while scene geometry always comes from HNAV.
+
+Bootstrap reads expose parsed catalogs and authored setup dimensions without model preparation.
+`read_motion_reference_data` returns `MotionReferenceData`, projecting motion defaults and
+interaction dimensions from one setup decode pass. Frontends retain those parsed facts for
+their own content lifetime; client bootstrap does not scan setups again.
+The same indexed repository supplies complete character-generation choices and motion data.
+`SetupDimensionCatalog` carries authored radius/height; world applies current entity scale and
+canonical placement when deriving interaction ranges.
+
+`NavigationSceneSource` reads independently compressed owner blocks and shared Environment
+structures, then projects the existing cell/terrain/collision products. It retains immutable
+shared geometry through `Arc`. Generation uses `LandblockRoomShellAssembler` over the same
+shallow foundation/interior products used by physical assembly; the TUI does not perform that
+projection at runtime. Prepared navigation does not read furniture, scenery, or visual models.
+
+The output contains room containment planes, physics shells, portal apertures/connections,
+resolved terrain, and building transition metadata. These are static products: movement intent,
+simulation policy, authoritative placement, and packet timing belong to core/world. The prepared
+format does not select how a client traverses cells. h3d retains its full-content asset service.
+
+See [navigation format](../../docs/navigation_format.md) for framing and version ownership.
+`cli-content` in `holtburger-tools` generates and inspects the approved distributable pair locally;
+release tooling validates its pinned ZIP and component identities. Runtime performs focused
+codec validation rather than bootstrap hashing or a source-corpus census.
 
 ## Dependencies
 

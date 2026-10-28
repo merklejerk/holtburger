@@ -1,0 +1,92 @@
+{
+  "probe": "live_navigation_probe",
+  "composition": "Production navigation client with generated worldwide content; nominal 50ms frontend command pulses; normal core simulation and publisher.",
+  "route": {
+    "diagnostic_gap_samples": 58,
+    "distance_m": 14.142135620117188,
+    "start": {
+      "coords": {
+        "x": 150.0,
+        "y": -240.0,
+        "z": -11.800000190734863
+      },
+      "landblockId": 2248278273,
+      "rotation": {
+        "w": 1.0,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    "target": {
+      "coords": {
+        "x": 160.0,
+        "y": -250.0,
+        "z": -11.800000190734863
+      },
+      "landblockId": 2248278276,
+      "rotation": {
+        "w": 1.0,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    }
+  },
+  "before_fix": {
+    "reached_destination": false,
+    "last_position": [
+      150.28285,
+      -240.28284,
+      -11.795141
+    ],
+    "failure": "Faster simulation ticks consumed a frontend pulse then reset NavigationProgress on ClientDirected(None), preventing progress through the known void.",
+    "log_sha256": "93e2485542130b8db056756ddf5dca11cb52c301f811984383710f2c63b4d8fd"
+  },
+  "fix": "Preserve navigation progress on a client-directed tick with no new pulse; no travel budget is reused. Explicit intent/authority lifecycle resets remain unchanged.",
+  "after_fix": {
+    "passed": true,
+    "canonical_cell_sequence": [
+      "86020101",
+      "86020104"
+    ],
+    "arrival": {
+      "landblockId": 2248278276,
+      "coords": {
+        "x": 159.9991,
+        "y": -250.0,
+        "z": -11.8
+      },
+      "rotation": {
+        "w": 1.0,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    "server_gameplay_cell": "86020104",
+    "server_physics_cell": "86020104",
+    "server_gameplay_coordinates": [
+      159.9991,
+      -250.0,
+      -11.8
+    ],
+    "server_physics_coordinates": [
+      159.9991,
+      -250.0,
+      -11.8
+    ],
+    "restored_and_disconnected": true,
+    "log_sha256": "6d6b402ccb68ce4bbe2b22ec68cdd3f508b8629e552c03e335e5d2d653812b1f"
+  },
+  "regressions": [
+    "simulation_ticks_between_frontend_pulses_preserve_gap_progress_without_reusing_travel",
+    "authoritative_correction_packet_discards_runtime_gap_progress_even_at_the_same_pose"
+  ],
+  "limitations": [
+    "Live run observes canonical cell changes and server endpoint; intermediate wire publication validity is covered by the existing synthetic session-capture fixture.",
+    "Diagnostic route geometry sampled at approximately 0.2m has 58 outside-cell samples; that is not an instrumented count of actual runtime samples.",
+    "Restore uses ACE teleloc with <0.05m tolerance, not bit-identical height.",
+    "Ground-level exterior doorway remains unverified."
+  ]
+}

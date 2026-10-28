@@ -4,6 +4,26 @@ This crate is the primary interactive interface for Holtburger. It is a Terminal
 
 ## 🏗️ Project Structure
 
+The TUI owns content selection in `installation.rs`: explicit `--content`, then
+`HOLTBURGER_CONTENT`, then working-directory `dats/`, then executable-adjacent `content/`.
+Both overrides accept directories only. A directory selects `bootstrap.hba` when present,
+otherwise `assets.hba`, and always requires `navigation.hnav`. There is no archive
+profile inference, runtime HBA geometry projection, platform search, or automatic format fallback.
+The frontend opens the HBA repository and navigation archive independently, loads bootstrap/
+creation facts, and passes a `PreparedNavigationSource` through core's storage-independent
+`SceneContentSource` and `SetupContentSource` contracts. It explicitly selects reduced
+movement behavior independently of these providers. The content layer owns decoding, not path precedence.
+
+Local approach/follow/scoot policy remains in `navigation.rs`, which submits bounded full-XYZ
+intent pulses toward known destinations. Core validates and commits positions, retains progress
+through known gaps, and reports accepted cell changes. The frontend does not assign a target
+cell to an unrelated position or snap Z at arrival. Local gravity/jumping/stairs are unsupported;
+remote prediction uses shared room-shell/terrain solving without furniture or peer collision.
+
+Gameplay requests whose physical eligibility cannot be evaluated in this reduced composition
+are delegated to ACE. This allows missile requests without inventing local ground contact;
+known target/range/ownership/busy checks remain shared. h3d retains its physical composition.
+
 - **`src/bin/tui.rs`**: The main executable entry point. Orchestrates terminal lifecycle, logging, and the core event loop.
 - **`src/lib.rs`**: The crate surface. Re-exports the top-level modules used by the binary and by tests: `components`, `navigation`, `pages`, `scripting`, `state`, `theme`, `types`, `update`, `utils`, and `version`.
 - **`src/state.rs`**: Core application state management. Defines `AppState`, `RenderContext`, and the top-level shell/event plumbing.

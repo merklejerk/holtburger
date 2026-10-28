@@ -32,9 +32,10 @@ pub use client::character_motion::{
     JumpChargeProfile, JumpExtent, JumpExtentError, SequencedCharacterMotionEvent,
 };
 pub use client::collision::{
-    CLIENT_COLLISION_OWNER_RADIUS, ClientBodyReadiness, ClientCollisionCoordinator,
-    ClientCollisionSource, ClientEntityBodyFacts, ClientEntityBodyFactsError, ClientPlayerIdentity,
-    ContentClientCollisionSource, client_entity_body_facts, client_player_body_facts,
+    CLIENT_COLLISION_OWNER_RADIUS, ClientBodyReadiness, ClientBodySource,
+    ClientCollisionCoordinator, ClientEntityBodyFacts, ClientEntityBodyFactsError,
+    ClientPlayerIdentity, ContentClientPhysicsSource, client_entity_body_facts,
+    client_player_body_facts,
 };
 pub use client::combat_feedback::combat_feedback_message;
 pub use client::combat_tuning::{

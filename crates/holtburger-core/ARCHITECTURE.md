@@ -231,9 +231,9 @@ Manages the multi-stage handshake with GLS (Global Login Service) and the World 
 
 The `MovementSystem` runs on the shared fixed 30ms client physics cadence. It ingests resolved movement commands, supplies local ordinary actuation, and pushes reliable synchronization with the server's authoritative position.
 
-Today, this module owns resolved motion expiry, edge-based movement packet emission, stop-pulse obligations, snap-facing execution, and server-directed `MoveTo`/`TurnTo` command lifecycle. A classified `ServerControlledMotion` retains command ownership and its target; it does not retain contact or physical velocity. Each tick samples the world-owned runtime body: heading remains eligible while unsupported, MoveTo translation and distance completion require `Grounded`, and TurnTo completes from normalized heading agreement. This matches retail's separate turn/translation nodes and contact-gated MoveTo progress (`acclient.c:331901-332108`, `325850-325904`) while leaving the ballistic vector in `SpatialBody::retained` untouched.
+Today, this module owns resolved motion expiry, edge-based movement packet emission, stop-pulse obligations, snap-facing execution, and server-directed `MoveTo`/`TurnTo` command lifecycle. A classified `ServerDirectedMotionState` retains command ownership and its target; it does not retain contact or physical velocity. Physical composition samples the world-owned runtime body: heading remains eligible while unsupported, MoveTo translation and distance completion require `Grounded`, and TurnTo completes from normalized heading agreement. Navigation composition selects `DirectedMotionSupport::PositionOnly`, using admitted full-XYZ travel and containment instead of a grounded-body prerequisite. This matches retail's separate turn/translation nodes and contact-gated MoveTo progress (`acclient.c:331901-332108`, `325850-325904`) while leaving the ballistic vector in `SpatialBody::retained` untouched.
 
-Packet-scoped self authority policy separately selects a world-owned position confirmation or explicit reset. Local authored input advances the same world-owned `MotionRuntimeRegistry` cursor consumed by presentation and root actuation. `SpatialBody` reconciliation composes with that ordinary drive inside the shared spatial tick. Reusable approach behavior lives in [src/client/controllers/approach_target.rs](src/client/controllers/approach_target.rs), and navigation translates those controller outputs into resolved `MovementCommand` values before crossing into the movement executor.
+Packet-scoped self authority policy separately selects a world-owned position confirmation or explicit reset. Local authored input advances the same world-owned `MotionRuntimeRegistry` cursor consumed by presentation and root actuation. `SpatialBody` reconciliation composes with that ordinary drive inside the shared spatial tick. Frontend steering translates approach/follow/scoot decisions into `PlayerDriveIntent::ClientDirected` commands; `ClientDirectedCommand` makes acquisition, updates, settlement, and release explicit. Settlement stops at the committed pose and carries no replacement position.
 
 The client admits physical elapsed time before authored advancement and hook consumption. One
 producer sample feeds each body's ordinary actuation and independent reference for the admitted
@@ -260,45 +260,63 @@ Client-authored command-list actions enter that same registry when `MovementSyst
 outbound pulse. The predicted edge and wire item share one command, speed, and 15-bit stamp; the
 world's existing local autonomous-echo policy rejects the later echo so playback cannot duplicate.
 
-Combat automation now follows the same pattern from [src/client/controllers/combat.rs](src/client/controllers/combat.rs): frontends own a controller, feed it world-derived snapshots, and translate emitted facing or targeted-attack intents into their preferred execution path. Sticky melee range maintenance now does the same through [src/client/controllers/maintain_range.rs](src/client/controllers/maintain_range.rs), which owns the repeat latch and pursuit reissue cadence while leaving activation policy in the frontend.
+Reusable combat execution lives in [src/client/combat_runtime.rs](src/client/combat_runtime.rs)
+and [src/client/combat_engagement.rs](src/client/combat_engagement.rs). Core owns attack request
+eligibility, busy state, feedback, and combat pursuit; frontends select the desired engagement.
+Both combat pursuit and frontend steering use the same movement executor and canonical world pose.
+World-owned sticky targeting supplies authored clearance and rate-limited pursuit without becoming
+a second translation owner.
 
 ## Movement Model
 
-Movement in `holtburger-core` should converge on three distinct layers:
+The ownership boundaries are explicit:
 
-1. **Protocol and authority plumbing**
-   - Format and send movement-related game actions.
-   - Handle server-driven movement and forced reposition.
-   - Maintain prediction and synchronization with the authoritative server state.
-   - Cache server-authored motion-style state needed to build correct outbound movement packets.
-   - Decide when locomotion intent actually implies a new server-visible movement edge or clear.
-2. **Primitive client actions**
-   - Set heading through a one-shot snap-facing command when a frontend wants an immediate observer-visible reorientation.
-   - Start, pulse, or stop locomotion through resolved `MovementCommand` values backed by one composite `MotionState`.
-   - Express longitudinal, lateral, and turning axes together in one coherent actuator state while still allowing turn-only motion.
-   - Interpret ordered jump lifecycle edges without owning keyboard state, a charge clock, actor capabilities, or body physics.
-3. **Optional reusable controllers**
-   - Approach target until arrival distance.
-   - Follow or maintain range.
-   - Combat-facing assist.
-   - Shared retry cadence and cancellation rules.
+1. Frontends own input mapping and steering policy. The TUI's approach/follow/scoot state lives
+   in `apps/holtburger-cli/src/navigation.rs`; 3D control policy stays in its app.
+2. Core accepts typed `PlayerDriveIntent` values. `CharacterDrive` combines manual axes;
+   `ClientDirectedCommand` scopes target-directed control. Core owns their lifecycle, admitted
+   motion timing, packet construction/publication, and server-directed command handling.
+3. World owns canonical runtime poses, authored motion selection, physical collision,
+   containment, and reconciliation. The composition selected by the runtime builder chooses
+   which existing world products execute a tick; it does not create a second world.
 
-This structure keeps the core crate powerful without baking one frontend's control policy directly into the engine loop.
-
-## Current State and Intended Direction
-
-The current ownership model is explicit:
-
-1. A frontend owns reusable controllers such as `ApproachTargetController` or `MaintainRangeController`.
-2. The frontend feeds those controllers with world-derived inputs on ticks and relevant events, including forced reposition.
-3. Navigation or frontend orchestration translates resulting pursuit plans and stop/facing decisions into resolved `MovementCommand` values.
-4. `MovementSystem` executes those commands and continues to own local prediction plus server-authoritative movement handling.
-
-This keeps controller state out of hidden engine-owned special cases while preserving a single movement executor for protocol traffic and prediction.
-
-The important boundary is that the core preserves protocol fidelity for motion-style fields and motion-session lifecycle, but it does not own the frontend's movement policy and it does not own canonical runtime body advancement. A 3D client may drive locomotion directly, supply explicit motion-style choices when needed, and provide richer local prediction hints without surrendering steering authority to `NavigationAutomation`.
+Jump input interpretation remains independent of keyboard state, a frontend charge clock,
+actor capabilities, and body physics. Physical composition resolves supported jump attempts;
+navigation composition reports them as unsupported. Protocol motion styles and authoritative
+sequences remain shared by both compositions.
 
 ## Internal Data Flow
+
+### Movement composition and reduced clients
+
+The frontend owns steering: approach/follow targets, arrival distances, and input mapping.
+The frontend selects movement/body behavior through `ClientRuntimeBuilder`
+`physical_movement_source` or `navigation_movement_source`, independently supplying a
+`SceneContentSource` for environment geometry. Full body preparation uses `ClientBodySource`;
+reduced body preparation reads `SetupContentSource`. The coordinator uses one scene query and
+residency path regardless of body behavior. The frontend owns HBA/HNAV selection.
+`MovementSystem` executes the selected behavior
+inside the same runtime, authoritative world, motion lifecycle, and packet publisher.
+
+Physical composition retains full local/remote collision behavior. Navigation composition uses
+point-valid local commitment and room-shell/terrain remote prediction. Core-owned
+`NavigationProgress` holds uncommitted intent progress across known voids; it never supplies world
+queries or packet positions. World receives only valid committed endpoints. Missing/ambiguous
+coverage waits without banking travel. An input pulse is consumed once; simulation ticks between
+pulses preserve progress. Intent cancellation, source replacement, correction, and world epochs
+retire/rebase that progress. Accepted cell changes retain the normal immediate publication trigger.
+
+For gameplay requests, a reduced client delegates eligibility decisions it cannot simulate to
+ACE rather than permanently rejecting requests for missing local physical results. Missile
+requests in navigation mode therefore reach ACE without a solved grounded-body requirement;
+physical mode retains its grounded gate. Existing target, busy, ownership, range, and available
+scene checks remain meaningful. This rule does not authorize invalid position reports, treat
+unavailable content as open space, or invent local capabilities: navigation still reports local
+jumping as unsupported because it cannot produce that movement.
+
+The content layer provides static products; world owns canonical bodies, containment queries,
+reconciliation, and interaction semantics. The execution policy does not fork those owners or
+weaken the physical composition to satisfy TUI presentation requirements.
 
 ```mermaid
 sequenceDiagram

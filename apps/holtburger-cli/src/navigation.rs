@@ -44,16 +44,6 @@ impl NavigationSyncInput {
     fn authoritative_target_position(&self) -> Option<WorldPosition> {
         self.target_sample().map(|target| target.authoritative_pose)
     }
-
-    fn arrival_pose(&self) -> Option<WorldPosition> {
-        let mut arrival_pose = self.player_position?;
-        let target_pose = self.authoritative_target_position()?;
-
-        arrival_pose.coords.z = target_pose.coords.z;
-        arrival_pose.landblock_id = target_pose.landblock_id;
-
-        Some(arrival_pose.normalize_outdoor_cell())
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -518,7 +508,7 @@ impl TuiNavigation {
             self.active = ActiveNavigation::Idle;
             if self.drive_active {
                 self.clear_drive_active();
-                return Some(self.arrival_drive_command(input));
+                return Some(Self::settle_drive_command());
             }
         }
 
@@ -548,7 +538,7 @@ impl TuiNavigation {
 
         if !pursuing && was_pursuing && self.drive_active {
             self.clear_drive_active();
-            return Some(self.arrival_drive_command(input));
+            return Some(Self::settle_drive_command());
         }
 
         None
@@ -570,9 +560,7 @@ impl TuiNavigation {
             if self.drive_active {
                 self.clear_drive_active();
                 return Some(PlayerDriveIntent::ClientDirected(
-                    ClientDirectedCommand::Settle {
-                        pose: Some(target_pose),
-                    },
+                    ClientDirectedCommand::Settle,
                 ));
             }
         }
@@ -642,14 +630,12 @@ impl TuiNavigation {
 
         self.clear_drive_active();
         Some(PlayerDriveIntent::ClientDirected(
-            ClientDirectedCommand::Settle { pose: None },
+            ClientDirectedCommand::Settle,
         ))
     }
 
-    fn arrival_drive_command(&self, input: &NavigationSyncInput) -> PlayerDriveIntent {
-        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle {
-            pose: input.arrival_pose(),
-        })
+    fn settle_drive_command() -> PlayerDriveIntent {
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle)
     }
 
     fn clear_finished_interaction(
@@ -676,16 +662,7 @@ impl TuiNavigation {
             input.authoritative_target_position(),
         )?;
 
-        let player_global = player_position.global_coords();
-        let target_global = target_position.global_coords();
-        Some(
-            Vector3::new(
-                target_global.x - player_global.x,
-                target_global.y - player_global.y,
-                0.0,
-            )
-            .length(),
-        )
+        Some(player_position.distance_to(&target_position))
     }
 
     fn automation_target_position_with_limit(
@@ -740,18 +717,11 @@ fn navigation_drive_delta(
         return Err(NavigationDriveBlockReason::ZeroDistanceToTarget);
     }
 
-    let planar_delta = Vector3::new(delta.x, delta.y, 0.0);
-    let planar_distance = planar_delta.length();
-    let planar_budget = world_speed_mps.max(0.0) * dt_secs;
-    if planar_budget <= f32::EPSILON {
+    let travel_budget = world_speed_mps.max(0.0) * dt_secs;
+    if travel_budget <= f32::EPSILON {
         return Err(NavigationDriveBlockReason::ZeroWorldSpeedBudget);
     }
-
-    let step_scale = if planar_distance <= f32::EPSILON {
-        (planar_budget / distance).min(1.0)
-    } else {
-        (planar_budget / planar_distance).min(1.0)
-    };
+    let step_scale = (travel_budget / distance).min(1.0);
 
     Ok(delta * step_scale)
 }
@@ -772,6 +742,27 @@ mod tests {
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_world::SpatialSampleMode;
     use std::time::Duration;
+
+    #[test]
+    fn vertical_and_near_vertical_steps_obey_the_full_distance_budget() {
+        let start = world_position(0.0, 0.0, 0.0);
+        let speed = 3.0;
+        let dt = Duration::from_millis(100);
+        for x in [0.0, 0.1] {
+            let target = world_position(x, 0.0, 12.0);
+            let delta = navigation_drive_delta(start, target, speed, dt).unwrap();
+            assert!((delta.length() - speed * dt.as_secs_f32()).abs() < 1e-5);
+            assert!(delta.z > 0.0);
+        }
+    }
+
+    #[test]
+    fn final_step_stops_at_the_destination_without_overshoot() {
+        let start = world_position(0.0, 0.0, 0.0);
+        let target = world_position(0.0, 0.0, 0.1);
+        let delta = navigation_drive_delta(start, target, 3.0, Duration::from_secs(1)).unwrap();
+        assert_eq!(delta, target.coords - start.coords);
+    }
 
     #[test]
     fn active_drive_intent_uses_shared_resolved_autonomous_run_speed_budget() {
@@ -1073,9 +1064,9 @@ mod tests {
     }
 
     #[test]
-    fn tick_emits_arrival_pose_when_drive_goes_idle() {
+    fn tick_settles_when_arrived_in_three_dimensions() {
         let now = Instant::now();
-        let player_position = world_position(0.0, 0.0, 0.0);
+        let player_position = world_position(0.0, 0.0, 4.5);
         let far_target_position = world_position(6.0, 0.0, 4.5);
         let arrived_target_position = world_position(0.2, 0.0, 4.5);
         let target_guid = Guid(0x5000_0004);
@@ -1110,9 +1101,7 @@ mod tests {
         assert_eq!(
             update.drive_command,
             Some(PlayerDriveIntent::ClientDirected(
-                ClientDirectedCommand::Settle {
-                    pose: Some(world_position(0.0, 0.0, 4.5))
-                }
+                ClientDirectedCommand::Settle
             ))
         );
         assert!(!navigation.drive_active);
@@ -1121,7 +1110,7 @@ mod tests {
     #[test]
     fn approach_uses_authoritative_target_pose_when_projected_pose_drifted() {
         let now = Instant::now();
-        let player_position = world_position(0.0, 0.0, 0.0);
+        let player_position = world_position(0.0, 0.0, 4.5);
         let far_authoritative_target_position = world_position(6.0, 0.0, 4.5);
         let near_authoritative_target_position = world_position(0.2, 0.0, 4.5);
         let projected_target_position = world_position(120.0, 0.0, 99.0);
@@ -1166,9 +1155,7 @@ mod tests {
         assert_eq!(
             update.drive_command,
             Some(PlayerDriveIntent::ClientDirected(
-                ClientDirectedCommand::Settle {
-                    pose: Some(world_position(0.0, 0.0, 4.5))
-                }
+                ClientDirectedCommand::Settle
             ))
         );
         assert!(!navigation.drive_active);
@@ -1176,7 +1163,7 @@ mod tests {
     }
 
     #[test]
-    fn scoot_completion_emits_arrival_pose_and_stops_drive() {
+    fn scoot_completion_settles_and_stops_drive() {
         let now = Instant::now();
         let player_position = world_position(12.0, -4.0, 1.5);
         let target_pose = project_pose_forward_distance(player_position, 2.0);
@@ -1204,9 +1191,7 @@ mod tests {
         assert_eq!(
             update.drive_command,
             Some(PlayerDriveIntent::ClientDirected(
-                ClientDirectedCommand::Settle {
-                    pose: Some(target_pose)
-                }
+                ClientDirectedCommand::Settle
             ))
         );
         assert!(!navigation.drive_active);
@@ -1214,9 +1199,9 @@ mod tests {
     }
 
     #[test]
-    fn follow_arrival_emits_single_arrival_pose() {
+    fn follow_arrival_settles_once() {
         let now = Instant::now();
-        let player_position = world_position_with_heading(0.0, 0.0, 1.0, 180.0_f32.to_radians());
+        let player_position = world_position_with_heading(0.0, 0.0, 7.0, 180.0_f32.to_radians());
         let far_target_position = world_position(6.0, 0.0, 7.0);
         let near_target_position = world_position(0.05, 0.0, 7.0);
         let target_guid = Guid(0x5000_0009);
@@ -1246,14 +1231,7 @@ mod tests {
         assert_eq!(
             update.drive_command,
             Some(PlayerDriveIntent::ClientDirected(
-                ClientDirectedCommand::Settle {
-                    pose: Some(world_position_with_heading(
-                        0.0,
-                        0.0,
-                        7.0,
-                        180.0_f32.to_radians()
-                    ))
-                }
+                ClientDirectedCommand::Settle
             ))
         );
         assert!(matches!(
@@ -1285,7 +1263,7 @@ mod tests {
     }
 
     #[test]
-    fn follow_arrival_normalizes_outdoor_cell_after_landblock_crossing() {
+    fn follow_keeps_driving_when_only_planar_distance_is_within_arrival_range() {
         let now = Instant::now();
         let player_position = WorldPosition {
             landblock_id: Guid(0x3519_0039),
@@ -1321,18 +1299,16 @@ mod tests {
             ),
         });
 
-        assert_eq!(
+        assert!(matches!(
             update.drive_command,
             Some(PlayerDriveIntent::ClientDirected(
-                ClientDirectedCommand::Settle {
-                    pose: Some(WorldPosition {
-                        landblock_id: Guid(0x3419_0003),
-                        coords: Vector3::new(0.05, 58.299316, 13.145146),
-                        rotation: Quaternion::from_heading(180.0_f32.to_radians()),
-                    })
-                }
+                ClientDirectedCommand::Acquire(_) | ClientDirectedCommand::Update(_)
             ))
-        );
+        ));
+        assert!(matches!(
+            navigation.active,
+            ActiveNavigation::Follow { pursuing: true, .. }
+        ));
     }
 
     #[test]

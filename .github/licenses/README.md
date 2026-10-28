@@ -13,4 +13,4 @@ notices, is owned by `../about.toml` and cargo-about.
 
 When either named package changes, inspect its pinned source tree/submodules, retrieve their
 original notices, and update the descriptor's versions, source URLs, encoding, and hashes.
-The generated HTML is an ignored build output shared across every alpha bundle.
+The generated HTML and its freshness record are checked in and shared across both products; regenerate them locally when notice inputs change. CI reviews freshness without generation.

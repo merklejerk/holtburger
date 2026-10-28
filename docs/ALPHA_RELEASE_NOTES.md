@@ -1,29 +1,30 @@
-Experimental Holtburger alpha suite built from `3d-next`.
+Experimental Holtburger alpha built from `3d-next`, with separate CLI and 3D products.
 
-Includes TUI, h3d with explicit Explorer mode, `dat2hba`, `dat-tool`, bundled scripts and
-their derived data, and incomplete micro content for TUI. h3d requires a user-supplied retail DAT
-installation or full HBA. No full retail archives are distributed.
+CLI includes the terminal client, `dat2hba`, `dat-tool`, fighter/mage scripts and derived
+sidecars, and prepared bootstrap/navigation content. 3D includes the h3d client/Explorer and
+private runtime; it requires user-supplied retail DATs or a full HBA. Full retail archives
+are not distributed.
 
-Linux x86-64 offers a complete-suite Flatpak as well as the native archive. The separate
-TUI-only Flatpak remains available. Both alpha Flatpaks use freedesktop 26.08. The full-suite Flatpak defaults to h3d client; use
-`--command=holtburger-cli`, `--command=dat-tool`, or `--command=dat2hba` for the other binaries.
-Read the quickstart for retail-data portal access and explicit tool input/output grants.
+Both products have native Linux x86-64, Windows x86-64, and macOS Apple Silicon archives,
+and separate Linux x86-64 Flatpaks using Freedesktop 26.08. The 3D Flatpak retains the alpha
+app ID and saved settings: `io.github.merklejerk.holtburger-alpha`. Its download is named
+`holtburger-3d`; CLI uses `io.github.merklejerk.holtburger-cli-alpha`. Archive utilities belong to
+CLI, including its Flatpak's `--command=dat-tool` and `--command=dat2hba` entries.
 
-Read `QUICKSTART.md` inside the suite. Client mode is h3d's default and requires CLI
-connection/account arguments. Both clients use `-p` for port and `-P` for password.
+Read `QUICKSTART.md` inside each product. h3d defaults to client mode and accepts explicit
+`explorer` mode. Both clients use `-p` for port and `-P` for password; there is no login UI.
 
-Archives are unsigned and experimental. CI inspects native architecture, linkage, package
-resources, content bootstrap, sidecar behavior, and extracted suite layouts. Those checks
-do not establish GPU, audio, input, display-scaling, Gatekeeper, or SmartScreen acceptance.
+CLI local movement follows destination X/Y/Z with valid committed cell reports. It omits
+local gravity, jumping, falling, and stairs; it can skip portal paths across known gaps.
+Remote prediction uses empty-room shells and terrain without furniture/peer collision.
+ACE remains authoritative, including missile ground eligibility that the reduced client cannot
+solve locally. Reduced movement and this request policy are specific to the CLI composition.
 
-Known limitations accepted for this alpha:
+Packages are unsigned. macOS is not Developer ID signed or notarized; its quickstart has
+the app-specific quarantine workaround. Automated build/resource/identity/startup checks do
+not establish GPU, audio, input, scaling, Gatekeeper, or SmartScreen acceptance.
 
-- TUI is known broken with bundled micro: character creation lacks clothing tables, and world
-  entry/movement requires additional world/physics data. TUI fixes and topology-only movement
-  are deferred. A full HBA supplies missing data, but working TUI gameplay is not claimed.
-- macOS h3d is not Developer ID signed or notarized. Downloaded apps may report “damaged and
-  can't be opened.” The app-specific quarantine command is in `QUICKSTART.md`.
-
-This draft is awaiting final user native-bundle verification. Record the platforms tested
-and any remaining limitations here before publication. Publication must promote these same
-artifact bytes, without rebuilding. `release-manifest.json` and `SHA256SUMS` identify them.
+This draft awaits final user acceptance. Record actual tested targets and remaining
+limitations before publication; earlier alpha.3 testing does not verify these new bytes.
+Publish the frozen draft without rebuilding. `release-manifest.json` and `SHA256SUMS`
+identify the candidate's products and checksums.

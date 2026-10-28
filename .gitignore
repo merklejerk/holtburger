@@ -41,3 +41,4 @@ node_modules/
 
 # CEF distribution cache; see .cargo/config.toml
 .cef-cache/
+/docs/plans/evidence

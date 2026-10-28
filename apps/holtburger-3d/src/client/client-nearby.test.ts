@@ -62,6 +62,31 @@ describe("ClientNearby", () => {
 		if (ready) accept([rule("one")]);
 		return { session, owner, chat, accept, save, scene };
 	}
+	it("matches authored names while formatting unnamed alert text", () => {
+		const { session, owner, chat, accept } = setup();
+		accept([rule("generated", "*Unnamed*")]);
+		session.baseline([nearbyFacts(7, "")], [nearbyPose(7, 5)]);
+		expect([...owner.trackedGuids()]).toEqual([]);
+		expect(owner.read().rows[0].facts.name).toBe("");
+		accept([rule("all", "*")]);
+		session.baseline(
+			[nearbyFacts(7, ""), nearbyFacts(8, "")],
+			[nearbyPose(7, 5), nearbyPose(8, 10)],
+		);
+		vi.advanceTimersByTime(timing.notificationBatchMs);
+		expect(
+			chat.flatMap((entry) =>
+				entry.kind === "formatted-system"
+					? entry.rows.flatMap((row) => row.spans)
+					: [],
+			),
+		).toContainEqual({
+			kind: "entity",
+			guid: 8,
+			text: "[Unnamed · 0x00000008]",
+		});
+	});
+
 	it("batches multiple identities and overlapping rules without losing initial coordinates", () => {
 		const { session, owner, chat, accept } = setup();
 		accept([rule("one"), rule("two", "Diamond*")]);

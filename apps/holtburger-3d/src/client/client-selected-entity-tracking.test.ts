@@ -153,6 +153,24 @@ async function fixture() {
 }
 
 describe("ClientSelectedEntityTracking", () => {
+	it("uses a presentation fallback for an unnamed selection", async () => {
+		const f = await fixture();
+		const item = entityFacts(11);
+		if (item.description.kind !== "known")
+			throw new Error("Expected known item");
+		const unnamed = { ...item, description: { ...item.description, name: "" } };
+		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
+			salvage: null,
+			worldContainer: null,
+			upserts: [unnamed],
+			removed: [],
+		});
+		f.selection.select(11);
+		expect(f.interactions.display(false).name).toBe("[Unnamed · 0x0000000B]");
+		expect(unnamed.description.name).toBe("");
+		f.destroy();
+	});
 	it("keeps ordinary equipment interaction available across equip and unequip confirmations", async () => {
 		const f = await fixture();
 		const item = entityFacts(11);

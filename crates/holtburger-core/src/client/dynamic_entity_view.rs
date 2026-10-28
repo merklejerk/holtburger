@@ -67,9 +67,10 @@ pub fn project_client_dynamic_entity(
     let wcid = entity
         .wcid
         .ok_or(ClientDynamicEntityViewError::MissingWcid { guid: guid.0 })?;
+    // ACE serializes unnamed objects as an empty string (WorldObject_Networking.cs:77).
+    // Authored display text does not determine whether an entity can enter the scene.
     let name = entity
         .get_string_prop(PropertyString::Name)
-        .filter(|name| !name.is_empty())
         .ok_or(ClientDynamicEntityViewError::MissingName { guid: guid.0 })?
         .to_owned();
     let visual = entity_visual_facts(entity).map_err(|cause| match cause {
@@ -993,6 +994,47 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn unnamed_wire_entity_is_published_and_retained_in_tick_baseline() {
+        use holtburger_common::properties::PhysicsDescriptionFlag;
+        use holtburger_protocol::messages::{GameMessage, ObjectDescriptionData};
+        use holtburger_protocol::traits::ProtocolPack;
+
+        let guid = Guid(0x7C5A_9007);
+        let mut description = ObjectDescriptionData::with_guid(guid);
+        description.public_weenie_desc.name = Some(String::new());
+        description.public_weenie_desc.wcid = 42;
+        description.csetup_id = Some(0x0200_0001);
+        description.pos = Some(WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            ..WorldPosition::default()
+        });
+        description.physics_flags =
+            PhysicsDescriptionFlag::CSETUP | PhysicsDescriptionFlag::POSITION;
+        let mut bytes = Vec::new();
+        GameMessage::ObjectCreate(Box::new(description)).pack(&mut bytes);
+
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let mut events = client.subscribe_client_view_events();
+        client.handle_message(&bytes).await.unwrap();
+
+        let published = std::iter::from_fn(|| events.try_recv().ok())
+            .find_map(|event| match event {
+                ClientViewEvent::DynamicEntity(DynamicEntityEvent::Upserted { entity })
+                    if entity.identity.guid == guid =>
+                {
+                    Some(entity)
+                }
+                _ => None,
+            })
+            .expect("unnamed entity must reach the frontend");
+        assert_eq!(published.display.name, "");
+        assert_eq!(
+            client.capture_dynamic_entity_tick_baseline().views,
+            vec![*published]
+        );
+    }
+
     #[test]
     fn client_projection_rejections_each_have_a_reachable_source_shape() {
         let pose = WorldPosition {
@@ -1017,6 +1059,11 @@ mod tests {
         let mut world = WorldState::synthetic();
         let mut missing_name = Entity::new(Guid(3), String::new(), pose);
         missing_name.wcid = Some(42);
+        missing_name
+            .properties
+            .strings
+            .0
+            .remove(&PropertyString::Name);
         world.add_entity(missing_name);
         assert_eq!(
             project_client_dynamic_entity(&world, Guid(3)),

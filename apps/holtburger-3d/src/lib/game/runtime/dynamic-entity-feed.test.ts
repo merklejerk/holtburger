@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
 	cellId,
 	decodeDynamicEntityEvent,
+	decodeDynamicEntitySnapshot,
+	decodeDynamicEntityTickBatch,
 	decodeDynamicEntityView,
 	DynamicEntityMirror,
 	type DynamicEntityEvent,
@@ -141,6 +143,55 @@ function worldPlacement(value: DynamicEntityView): DynamicEntityWorldPlacement {
 }
 
 describe("dynamic-entity view contract", () => {
+	it.each(["", " \t\n"])(
+		"normalizes unnamed display text at every delivery boundary for %j",
+		(name) => {
+			const source = entity(0x7c5a9007, 1);
+			source.display.name = name;
+			const expected = {
+				...source,
+				display: { ...source.display, name: "[Unnamed · 0x7C5A9007]" },
+			};
+			expect(decodeDynamicEntityView(source)).toEqual(expected);
+			expect(
+				decodeDynamicEntitySnapshot({
+					hostTime: { seconds: 1 },
+					entities: [source],
+				}).entities,
+			).toEqual([expected]);
+			expect(decodeDynamicEntityEvent(upserted(source))).toEqual(
+				upserted(expected),
+			);
+			expect(decodeDynamicEntityEvent(snapshot(source))).toEqual(
+				snapshot(expected),
+			);
+			const advance = ticked(source, 2);
+			expect(decodeDynamicEntityEvent(advance)).toEqual(ticked(expected, 2));
+			expect(decodeDynamicEntityTickBatch(advance.batch)).toEqual(
+				ticked(expected, 2).batch,
+			);
+			const update = updated(source, 3);
+			expect(decodeDynamicEntityEvent(update)).toEqual(updated(expected, 3));
+			expect(decodeDynamicEntityTickBatch(update.batch)).toEqual(
+				updated(expected, 3).batch,
+			);
+			expect(source.display.name).toBe(name);
+		},
+	);
+
+	it("preserves authored display text and already-normalized labels", () => {
+		for (const name of [
+			"Drudge",
+			"Unnamed entity",
+			"  Drudge  ",
+			"[Unnamed · 0x7C5A9007]",
+		]) {
+			const source = entity(0x7c5a9007, 1);
+			source.display.name = name;
+			expect(decodeDynamicEntityView(source)).toEqual(source);
+		}
+	});
+
 	it("requires a finite unit-interval object translucency level", () => {
 		for (const translucency of [0, 0.5, 1]) {
 			const view = entity(1, 1);

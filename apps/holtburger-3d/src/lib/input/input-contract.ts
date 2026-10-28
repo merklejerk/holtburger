@@ -157,11 +157,23 @@ export type ClientKeyboardConfiguration = Pick<
 	| "actionBars"
 >;
 
-/** Persisted client input policy, including keyboard bindings and fixed mouse gestures. */
-export type ClientInputConfiguration = ClientKeyboardConfiguration & {
+/** Client-owned fixed mouse gestures and independent orbit/steering axis preferences. */
+export interface ClientMouseConfiguration {
 	/** Enable held mouse steering and forward movement; clicks and left-drag orbit remain available. */
 	readonly mouseMovement: boolean;
-};
+	/** Reverse horizontal left-drag camera rotation. */
+	readonly invertCameraHorizontal: boolean;
+	/** Reverse vertical left-drag camera rotation. */
+	readonly invertCameraVertical: boolean;
+	/** Reverse character turning during mouse steering. */
+	readonly invertSteeringHorizontal: boolean;
+	/** Reverse camera tilt during mouse steering. */
+	readonly invertSteeringVertical: boolean;
+}
+
+/** Persisted client input policy, including keyboard bindings and fixed mouse gestures. */
+export type ClientInputConfiguration = ClientKeyboardConfiguration &
+	ClientMouseConfiguration;
 
 /** Zero-based positions of the ten numbered bars and cells. */
 export type InputDigitIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;

@@ -231,6 +231,15 @@
 		/* Shared panel content inset and stacked editor-label spacing. */
 		--ui-body-padding: 8px;
 		--ui-label-gap: 4px;
+		/* Shared always-visible fieldset headings and control layout. */
+		--ui-fieldset-heading-font-size: 1em;
+		--ui-fieldset-heading-font-weight: 600;
+		--ui-fieldset-heading-padding-bottom: 4px;
+		--ui-fieldset-heading-gap: 8px;
+		--ui-fieldset-control-gap: 12px;
+		--ui-fieldset-control-indent: 8px;
+		/* Optional --ui-fieldset-heading-color and --ui-fieldset-heading-border
+		   resolve from the local palette at use; a border of none removes the underline. */
 		/* Horizontal gap between a HUD window's close button and its inner right edge. */
 		--ui-hud-window-close-inset: 4px;
 		/* Outward frame paint; floating-window resize targets cover the same extent. */
@@ -938,6 +947,25 @@
 		margin: 0;
 		padding: 0;
 		min-width: 0;
+	}
+	/* Always-visible fieldset sections use compact headings and indented control bodies. */
+	.ui-theme .ui-fieldset-section > legend {
+		box-sizing: border-box;
+		width: 100%;
+		font-size: var(--ui-fieldset-heading-font-size);
+		font-weight: var(--ui-fieldset-heading-font-weight);
+		color: var(--ui-fieldset-heading-color, var(--ui-color-text));
+		padding: 0 0 var(--ui-fieldset-heading-padding-bottom);
+		margin-bottom: var(--ui-fieldset-heading-gap);
+		border-bottom: var(
+			--ui-fieldset-heading-border,
+			1px solid color-mix(in srgb, var(--ui-color-border) 55%, transparent)
+		);
+	}
+	.ui-theme .ui-fieldset-body {
+		display: grid;
+		gap: var(--ui-fieldset-control-gap);
+		padding-inline-start: var(--ui-fieldset-control-indent);
 	}
 	.ui-theme .ui-tabs {
 		display: flex;

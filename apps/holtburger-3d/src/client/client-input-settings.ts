@@ -1,3 +1,4 @@
+import equal from "fast-deep-equal";
 import { z } from "zod";
 import { INPUT_DEFAULTS } from "../lib/input/input-defaults.js";
 import {
@@ -126,6 +127,10 @@ export const CLIENT_KEYBOARD_DEFAULTS: ClientKeyboardConfiguration = {
 export const CLIENT_INPUT_DEFAULTS: ClientInputConfiguration = {
 	...CLIENT_KEYBOARD_DEFAULTS,
 	mouseMovement: true,
+	invertCameraHorizontal: false,
+	invertCameraVertical: false,
+	invertSteeringHorizontal: false,
+	invertSteeringVertical: false,
 };
 
 /** User-scoped input; retiring the old mouse block must not discard saved keyboard bindings. */
@@ -141,6 +146,18 @@ export const clientInputSettingsSchema = z.preprocess(
 		.unwrap()
 		.extend({
 			mouseMovement: z.boolean().default(CLIENT_INPUT_DEFAULTS.mouseMovement),
+			invertCameraHorizontal: z
+				.boolean()
+				.default(CLIENT_INPUT_DEFAULTS.invertCameraHorizontal),
+			invertCameraVertical: z
+				.boolean()
+				.default(CLIENT_INPUT_DEFAULTS.invertCameraVertical),
+			invertSteeringHorizontal: z
+				.boolean()
+				.default(CLIENT_INPUT_DEFAULTS.invertSteeringHorizontal),
+			invertSteeringVertical: z
+				.boolean()
+				.default(CLIENT_INPUT_DEFAULTS.invertSteeringVertical),
 		})
 		.strict()
 		.readonly(),
@@ -154,4 +171,15 @@ export function clientInputConfiguration(
 		...INPUT_DEFAULTS,
 		...keyboard,
 	};
+}
+
+/** Axis preferences do not change physical key ownership; only binding edits require cancellation. */
+export function clientKeyboardSettingsEqual(
+	left: ClientKeyboardConfiguration,
+	right: ClientKeyboardConfiguration,
+): boolean {
+	const groups = Object.keys(
+		CLIENT_KEYBOARD_DEFAULTS,
+	) as (keyof ClientKeyboardConfiguration)[];
+	return groups.every((group) => equal(left[group], right[group]));
 }

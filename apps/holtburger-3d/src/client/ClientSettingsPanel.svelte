@@ -521,19 +521,75 @@
 					onclick={() => onInputChange(structuredClone(CLIENT_INPUT_DEFAULTS))}
 					>Restore default input settings</button
 				>
-				<details class="binding-group" open>
+				<details class="ui-disclosure ui-disclosure-section" open>
 					<summary>Mouse</summary>
-					<label class="ui-checkbox"
-						><input
-							type="checkbox"
-							checked={input.mouseMovement}
-							onchange={(event) =>
-								onInputChange({
-									...input,
-									mouseMovement: event.currentTarget.checked,
-								})}
-						/>Use mouse movement/steering</label
-					>
+					<div class="settings-section">
+						<label class="ui-checkbox"
+							><input
+								type="checkbox"
+								checked={input.mouseMovement}
+								onchange={(event) =>
+									onInputChange({
+										...input,
+										mouseMovement: event.currentTarget.checked,
+									})}
+							/>Use mouse movement/steering</label
+						>
+						<fieldset class="ui-fieldset ui-fieldset-section">
+							<legend>Camera rotation (left drag)</legend>
+							<div class="ui-fieldset-body">
+								<label class="ui-checkbox"
+									><input
+										type="checkbox"
+										checked={input.invertCameraHorizontal}
+										onchange={(event) =>
+											onInputChange({
+												...input,
+												invertCameraHorizontal: event.currentTarget.checked,
+											})}
+									/>Invert horizontal axis</label
+								>
+								<label class="ui-checkbox"
+									><input
+										type="checkbox"
+										checked={input.invertCameraVertical}
+										onchange={(event) =>
+											onInputChange({
+												...input,
+												invertCameraVertical: event.currentTarget.checked,
+											})}
+									/>Invert vertical axis</label
+								>
+							</div>
+						</fieldset>
+						<fieldset class="ui-fieldset ui-fieldset-section">
+							<legend>Mouse steering (right drag)</legend>
+							<div class="ui-fieldset-body">
+								<label class="ui-checkbox"
+									><input
+										type="checkbox"
+										checked={input.invertSteeringHorizontal}
+										onchange={(event) =>
+											onInputChange({
+												...input,
+												invertSteeringHorizontal: event.currentTarget.checked,
+											})}
+									/>Invert turning direction</label
+								>
+								<label class="ui-checkbox"
+									><input
+										type="checkbox"
+										checked={input.invertSteeringVertical}
+										onchange={(event) =>
+											onInputChange({
+												...input,
+												invertSteeringVertical: event.currentTarget.checked,
+											})}
+									/>Invert camera tilt</label
+								>
+							</div>
+						</fieldset>
+					</div>
 				</details>
 				{#each CLIENT_BINDING_GROUPS as group}
 					<details class="binding-group" open={group.title === "Movement"}>

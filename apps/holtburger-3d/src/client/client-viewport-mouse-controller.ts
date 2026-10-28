@@ -1,3 +1,4 @@
+import type { ClientMouseConfiguration } from "../lib/input/input-contract";
 import type { ViewportInputGate } from "../lib/input/viewport-input-gate";
 import type { ClientForwardSource } from "./client-input-arbiter";
 import {
@@ -28,7 +29,7 @@ interface ClientViewportMouseOptions {
 	/** Shared admission and cancellation boundary. */
 	readonly gate: ViewportInputGate;
 	/** Cold policy read at event time, without reconstructing the owner. */
-	readonly movementEnabled: () => boolean;
+	readonly input: () => ClientMouseConfiguration;
 	/** Current presentation camera, absent while presentation is unavailable. */
 	readonly camera: () => ClientViewportCameraController | null;
 	/** Precise targeting retains click activation and suppresses forward in the arbiter. */
@@ -129,7 +130,7 @@ export class ClientViewportMouseController {
 	#update(): void {
 		// Pointer unlock can leave Chromium's :active latched; cursor feedback follows owned buttons.
 		this.#options.canvas.toggleAttribute("data-mouse-active", this.active);
-		const movementEnabled = this.#options.movementEnabled();
+		const movementEnabled = this.#options.input().mouseMovement;
 		const middle = movementEnabled && (this.#buttons & MIDDLE) !== 0;
 		const both =
 			movementEnabled && (this.#buttons & (LEFT | RIGHT)) === (LEFT | RIGHT);
@@ -209,16 +210,30 @@ export class ClientViewportMouseController {
 		if (this.#mode === "steer") {
 			this.#steer(advance.dragDelta.x, advance.dragDelta.y);
 		} else if (this.#mode === "orbit") {
+			const input = this.#options.input();
+			// CameraLook subtracts horizontal deltas; browser-right must increase look yaw.
 			this.#options
 				.camera()
-				?.orbit(advance.dragDelta.x, -advance.dragDelta.y, performance.now());
+				?.orbit(
+					advance.dragDelta.x * (input.invertCameraHorizontal ? 1 : -1),
+					advance.dragDelta.y * (input.invertCameraVertical ? 1 : -1),
+					performance.now(),
+				);
 		}
 	}
 
 	#steer(deltaX: number, deltaY: number): void {
+		const input = this.#options.input();
 		if (deltaX !== 0)
-			this.#options.movement.onTurn(deltaX * this.#options.yawRadiansPerPixel);
-		if (deltaY !== 0) this.#options.camera()?.pitch(-deltaY);
+			this.#options.movement.onTurn(
+				deltaX *
+					this.#options.yawRadiansPerPixel *
+					(input.invertSteeringHorizontal ? -1 : 1),
+			);
+		if (deltaY !== 0)
+			this.#options
+				.camera()
+				?.pitch(deltaY * (input.invertSteeringVertical ? 1 : -1));
 	}
 
 	readonly #up = (event: MouseEvent): void => {

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { CameraLookController } from "../../lib/game/controls/camera-look-controller";
+	import { createCameraAxesRadians } from "../../lib/game/math/camera-orientation";
 	import gameplayPreferencesFixture from "./fixtures/gameplay-preferences.json";
 	import type { ClientUserSettings } from "../../client/client-settings-contract";
 	import { createFixtureThemeSettings } from "./ui-showcase-themes";
@@ -94,8 +96,11 @@
 	import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
 	import { entityFacts } from "../../client/client-entity-mirror.test-support";
 	import { probeClientBindings } from "./client-binding-probe";
-	import { clientInputSettingsSchema } from "../../client/client-input-settings";
-	import { clientInputConfiguration } from "../../client/client-input-settings";
+	import {
+		clientKeyboardSettingsEqual,
+		clientInputSettingsSchema,
+		clientInputConfiguration,
+	} from "../../client/client-input-settings";
 	import { AppInput } from "../../lib/input/app-input";
 	import { provideClientInput } from "../../client/client-input-context";
 	import {
@@ -312,9 +317,11 @@
 	const characterInput = clientInput.characterContext(() => {});
 	function changeInput(input: ClientInputConfiguration) {
 		const accepted = clientInputSettingsSchema.parse(input);
-		keyboard.cancel();
-		characterInput.replaceBindings(accepted.character);
-		clientInput.replaceConfiguration(clientInputConfiguration(accepted));
+		if (!clientKeyboardSettingsEqual(userSettings.input, accepted)) {
+			keyboard.cancel();
+			characterInput.replaceBindings(accepted.character);
+			clientInput.replaceConfiguration(clientInputConfiguration(accepted));
+		}
 		userSettings = { ...userSettings, input: accepted };
 		return accepted;
 	}
@@ -1232,6 +1239,9 @@
 		/** Production arbiter and semantic mouse port for real DOM movement probes. */
 		readonly mouseMovement: {
 			fixture: typeof mouseFixture;
+			/** Production camera math resolves pointer deltas to a direction for input assertions. */
+			lookDirection: typeof mouseLookDirection;
+			resetLook: () => void;
 			rearFollowEntries: () => number;
 		};
 		/** Accepted settings seam for focused browser remapping scenarios. */
@@ -3708,15 +3718,35 @@
 	const viewportSelectionPoints: { x: number; y: number; interact: boolean }[] =
 		[];
 	const viewportHoverPoints: { x: number; y: number }[] = [];
+	const mouseLook = new CameraLookController({
+		yawRadians: 0,
+		pitchRadians: 0,
+	});
+	function rotateMouseLook(deltaX: number, deltaY: number): void {
+		const orbit = CLIENT_TUNING.camera.orbit;
+		mouseLook.rotate(
+			deltaX,
+			deltaY,
+			orbit.yawRadiansPerPixel,
+			orbit.pitchRadiansPerPixel,
+			orbit.maximumPitchRadians,
+		);
+	}
+	function mouseLookDirection() {
+		const look = mouseLook.snapshot();
+		return createCameraAxesRadians(look.yawRadians, look.pitchRadians).forward;
+	}
 	const cameraController = {
 		pitch(deltaY: number): void {
 			orbitDeltas.push({ x: 0, y: deltaY });
+			rotateMouseLook(0, deltaY);
 		},
 		followRear(): void {
 			rearFollowEntries += 1;
 		},
 		orbit(deltaX: number, deltaY: number): void {
 			orbitDeltas.push({ x: deltaX, y: deltaY });
+			rotateMouseLook(deltaX, deltaY);
 		},
 		zoom(delta: number): void {
 			zoomDeltas.push(delta);
@@ -5271,6 +5301,10 @@
 			},
 			mouseMovement: {
 				fixture: mouseFixture,
+				lookDirection: mouseLookDirection,
+				resetLook: () => {
+					mouseLook.replace({ yawRadians: 0, pitchRadians: 0 });
+				},
 				rearFollowEntries: () => rearFollowEntries,
 			},
 			bindingSettings: { read: () => userSettings.input, replace: changeInput },

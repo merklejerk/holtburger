@@ -879,8 +879,10 @@
 		if (activePanel !== "inventory") requestedInventorySplit = null;
 	});
 
+	// Isolate the cancellation dependency from unrelated input preference replacements.
+	const mouseMovementEnabled = $derived(input.mouseMovement);
 	$effect(() => {
-		input.mouseMovement;
+		mouseMovementEnabled;
 		untrack(cancelMouseInput);
 	});
 
@@ -989,7 +991,7 @@
 		const owner = new ClientViewportMouseController({
 			canvas,
 			gate: inputGate,
-			movementEnabled: () => input.mouseMovement,
+			input: () => input,
 			camera: () => cameraController,
 			precise: () => preciseJumpActive,
 			yawRadiansPerPixel: CLIENT_TUNING.camera.orbit.yawRadiansPerPixel,

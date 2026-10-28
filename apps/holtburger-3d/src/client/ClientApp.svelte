@@ -95,6 +95,7 @@
 	import {
 		clientInputConfiguration,
 		clientInputSettingsSchema,
+		clientKeyboardSettingsEqual,
 	} from "./client-input-settings";
 	import { clientFailureDiagnostic } from "./client-close-contract";
 	import { onMount, untrack } from "svelte";
@@ -739,11 +740,13 @@
 	}
 	function changeInput(input: ClientInputConfiguration): void {
 		const accepted = clientInputSettingsSchema.parse(input);
-		gameplayView?.cancelMouseInput();
-		keyboard.cancel();
-		characterInput.replaceBindings(accepted.character);
-		inputArbiter?.replacePowerBindings(accepted.preciseJump);
-		clientInput.replaceConfiguration(clientInputConfiguration(accepted));
+		if (!clientKeyboardSettingsEqual(userSettings.input, accepted)) {
+			gameplayView?.cancelMouseInput();
+			keyboard.cancel();
+			characterInput.replaceBindings(accepted.character);
+			inputArbiter?.replacePowerBindings(accepted.preciseJump);
+			clientInput.replaceConfiguration(clientInputConfiguration(accepted));
+		}
 		changeUserSection("input", accepted);
 	}
 	function fontCss(family: ClientFontFamily): string | undefined {

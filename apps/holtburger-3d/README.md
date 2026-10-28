@@ -211,22 +211,24 @@ visibility loss preserve autorun; modal/scene blocking and lifecycle resets reti
 cancelled press cannot activate the replacement owner. Precise jump remains a client-owned
 interaction within the viewport. Host movement contracts do not contain browser bindings.
 
-Settings → Input → Mouse exposes one **Use mouse movement/steering** switch. When enabled,
+Settings → Input → Mouse includes **Use mouse movement/steering**. When enabled,
 right-button holds steer the character and adjust camera pitch; middle-button or left-and-right
 holds also run forward. Left-button drags orbit the camera independently of that switch. Camera
 holds capture the pointer and hide the cursor until release, retaining capture when switching
 between steering and orbit. The viewport input owner applies the ordinary click/drag threshold
-to captured movement. **Restore default input settings** resets both keyboard bindings and mouse
-movement policy.
+to captured movement. Independent horizontal and vertical inversion toggles are available for
+left-drag camera rotation and mouse steering. Steering's vertical axis tilts the camera; its
+horizontal axis turns the character. Axis edits apply on the next mouse sample without releasing
+capture. **Restore default input settings** resets keyboard bindings and all mouse preferences.
 
 The asset-free `npm run harness:browser -- --client-hud` suite drives real browser keyboard and
 pointer events through the policy, production Explorer controls, chat, and modal integration.
 
-An `AppInput` accepts a complete `InputConfiguration`, allowing future installation settings to
-resolve defaults and overrides at startup. Persistence, live rebinding, and a binding editor are
-not implemented. Camera rates and sensitivity remain in the existing tuning files. Tests should
-use explicit test bindings or derive expectations from defaults, so editing a default does not
-require updating tests.
+An `AppInput` accepts a complete `InputConfiguration`. The client resolves saved keyboard bindings
+at startup and supports live rebinding through its settings editor; Explorer uses the default
+configuration. Camera rates and sensitivity remain in the existing tuning files. Tests should use
+explicit test bindings or derive expectations from defaults, so editing a default does not require
+updating tests.
 
 ## Client UI defaults
 
@@ -236,7 +238,13 @@ require updating tests.
 and three heading sizes). Feature styles belong to `@layer components`; themes and user stylesheet
 overrides follow them in the `theme` and `overrides` layers. Keep feature layout local and reuse
 shared control recipes. Common panel insets and stacked editor-label gaps use `--ui-body-padding`
-and `--ui-label-gap`. Different controls retain their own appearance contracts: for example,
+and `--ui-label-gap`. Always-visible control groups use `ui-fieldset ui-fieldset-section` with a
+`legend` and `ui-fieldset-body`. The `--ui-fieldset-heading-*` tokens control heading size, weight,
+color, underline, and spacing; `--ui-fieldset-control-gap` and `--ui-fieldset-control-indent` control
+the body layout. Set `--ui-fieldset-heading-border: none` to remove the underline. Palette defaults
+resolve at the consuming element so locally scoped themes apply.
+
+Different controls retain their own appearance contracts: for example,
 `--ui-button-background-color` styles buttons, while a theme can style tabs through `.ui-tab` and
 its state selectors.
 

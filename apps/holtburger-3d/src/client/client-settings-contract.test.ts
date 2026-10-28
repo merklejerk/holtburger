@@ -18,6 +18,7 @@ import {
 	clientInputSettingsSchema,
 	CLIENT_INPUT_DEFAULTS,
 	clientKeyboardSettingsSchema,
+	clientKeyboardSettingsEqual,
 } from "./client-input-settings";
 
 import {
@@ -352,7 +353,7 @@ describe("current client settings values", () => {
 	});
 });
 
-it("preserves keyboard preferences and round-trips the mouse movement switch", () => {
+it("preserves keyboard preferences and round-trips mouse settings", () => {
 	const keyboard = {
 		...CLIENT_KEYBOARD_DEFAULTS,
 		character: {
@@ -361,7 +362,7 @@ it("preserves keyboard preferences and round-trips the mouse movement switch", (
 		},
 	};
 	const migrated = clientInputSettingsSchema.parse(keyboard);
-	expect(migrated.mouseMovement).toBe(CLIENT_INPUT_DEFAULTS.mouseMovement);
+	expect(migrated).toEqual({ ...CLIENT_INPUT_DEFAULTS, ...keyboard });
 	expect(clientInputSettingsSchema.parse({ ...keyboard, mouse: {} })).toEqual(
 		migrated,
 	);
@@ -369,6 +370,10 @@ it("preserves keyboard preferences and round-trips the mouse movement switch", (
 	const changed = {
 		...migrated,
 		mouseMovement: false,
+		invertCameraHorizontal: true,
+		invertCameraVertical: true,
+		invertSteeringHorizontal: true,
+		invertSteeringVertical: true,
 	};
 	expect(
 		clientInputSettingsSchema.parse(JSON.parse(JSON.stringify(changed))),
@@ -379,4 +384,48 @@ it("preserves keyboard preferences and round-trips the mouse movement switch", (
 			mouseMovement: "yes",
 		}),
 	).toThrow();
+});
+
+it.each([
+	"invertCameraHorizontal",
+	"invertCameraVertical",
+	"invertSteeringHorizontal",
+	"invertSteeringVertical",
+])("rejects non-boolean %s", (field) => {
+	expect(() =>
+		clientInputSettingsSchema.parse({
+			...CLIENT_INPUT_DEFAULTS,
+			[field]: "yes",
+		}),
+	).toThrow();
+});
+
+it("preserves physical key ownership for mouse edits but detects binding changes", () => {
+	const changed = {
+		...CLIENT_INPUT_DEFAULTS,
+		mouseMovement: !CLIENT_INPUT_DEFAULTS.mouseMovement,
+		invertCameraHorizontal: !CLIENT_INPUT_DEFAULTS.invertCameraHorizontal,
+		invertCameraVertical: !CLIENT_INPUT_DEFAULTS.invertCameraVertical,
+		invertSteeringHorizontal: !CLIENT_INPUT_DEFAULTS.invertSteeringHorizontal,
+		invertSteeringVertical: !CLIENT_INPUT_DEFAULTS.invertSteeringVertical,
+	};
+	expect(clientKeyboardSettingsEqual(CLIENT_INPUT_DEFAULTS, changed)).toBe(
+		true,
+	);
+	const rebound = {
+		...changed,
+		character: { ...changed.character, forward: [{ key: "F8" }] },
+	};
+	expect(clientKeyboardSettingsEqual(CLIENT_INPUT_DEFAULTS, rebound)).toBe(
+		false,
+	);
+});
+
+it("does not treat settings normalization as a keyboard edit", () => {
+	expect(
+		clientKeyboardSettingsEqual(
+			CLIENT_INPUT_DEFAULTS,
+			clientInputSettingsSchema.parse(CLIENT_INPUT_DEFAULTS),
+		),
+	).toBe(true);
 });

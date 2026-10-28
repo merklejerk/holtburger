@@ -89,6 +89,22 @@ export async function probeClientMouseMovement(client, evaluate) {
 		await read(`${api}.bindingSettings.read().mouseMovement`),
 		initial.mouseMovement,
 	);
+	// Exercise each checkbox through the retained Settings UI.
+	for (const [label, field] of [
+		["Invert horizontal axis", "invertCameraHorizontal"],
+		["Invert vertical axis", "invertCameraVertical"],
+		["Invert turning direction", "invertSteeringHorizontal"],
+		["Invert camera tilt", "invertSteeringVertical"],
+	]) {
+		const toggle = `[...document.querySelectorAll('#settings-section-input label')].find(label => label.textContent.includes(${JSON.stringify(label)})).querySelector('input')`;
+		await read(`${toggle}.click()`);
+		await settle();
+		assert.equal(
+			await read(`${api}.bindingSettings.read().${field}`),
+			!initial[field],
+			label,
+		);
+	}
 	const defaults = await read(
 		`import('/src/client/client-input-settings.ts').then(module => module.CLIENT_INPUT_DEFAULTS)`,
 	);
@@ -110,6 +126,73 @@ export async function probeClientMouseMovement(client, evaluate) {
 		const panPixels = await read(
 			`import('/src/client/client-viewport-pointer-gesture.ts').then(module => module.CLIENT_VIEWPORT_DRAG_THRESHOLD_PIXELS + 1)`,
 		);
+		// The same production owner must read live preferences while pointer lock remains held.
+		for (const [button, mask, horizontal, vertical] of [
+			["left", 1, "invertCameraHorizontal", "invertCameraVertical"],
+			["right", 2, "invertSteeringHorizontal", "invertSteeringVertical"],
+		]) {
+			await mouse("mouseMoved", "none", 0);
+			await mouse("mousePressed", button, mask);
+			await waitForLock(true);
+			for (const invertX of [false, true])
+				for (const invertY of [false, true]) {
+					// Opposite settings for the other gesture expose accidental coupling.
+					const preferences = {
+						invertCameraHorizontal: !invertX,
+						invertCameraVertical: !invertY,
+						invertSteeringHorizontal: !invertX,
+						invertSteeringVertical: !invertY,
+						[horizontal]: invertX,
+						[vertical]: invertY,
+					};
+					await read(
+						`${api}.bindingSettings.replace({...${api}.bindingSettings.read(), ...${JSON.stringify(preferences)}})`,
+					);
+					await settle();
+					assert.equal(
+						await read("document.pointerLockElement !== null"),
+						true,
+					);
+					await read(`${api}.mouseMovement.resetLook()`);
+					const turnsBefore = (await state()).turns.length;
+					await mouse(
+						"mouseMoved",
+						"none",
+						mask,
+						point.x + panPixels,
+						point.y - panPixels,
+					);
+					await settle();
+					const direction = await read(`${api}.mouseMovement.lookDirection()`);
+					assert.equal(
+						direction.y > 0,
+						!invertY,
+						`${button} vertical look direction`,
+					);
+					if (button === "left") {
+						assert.equal(
+							direction.x > 0,
+							!invertX,
+							"Orbit horizontal look direction",
+						);
+						assert.equal((await state()).turns.length, 0);
+					} else {
+						const turns = (await state()).turns.slice(turnsBefore);
+						assert.ok(turns.length > 0);
+						assert.equal(
+							turns.reduce((sum, delta) => sum + delta, 0) > 0,
+							!invertX,
+							"Steering direction",
+						);
+					}
+					await mouse("mouseMoved", "none", mask, point.x, point.y);
+				}
+			await mouse("mouseReleased", button, 0);
+			await waitForLock(false);
+		}
+		await read(`${api}.bindingSettings.replace(${JSON.stringify(initial)})`);
+		await settle();
+		await read(`${fixture}.reset()`);
 		for (const cursorJump of [false, true]) {
 			await mouse("mouseMoved", "none", 0);
 			await mouse("mousePressed", "right", 2);
@@ -150,7 +233,7 @@ export async function probeClientMouseMovement(client, evaluate) {
 			await waitForLock(false);
 			assert.deepEqual(
 				await read(`${api}.capture().orbitDeltas.slice(${handoffOrbits})`),
-				[{ x: panPixels, y: 0 }],
+				[{ x: -panPixels, y: 0 }],
 			);
 			assert.equal(
 				await read(`${api}.capture().viewportSelectionPoints.length`),
@@ -549,6 +632,9 @@ export async function probeClientMouseMovement(client, evaluate) {
 		);
 		return {
 			mouseSettingsUi: true,
+			independentAxisInversion: true,
+			liveAxisInversion: true,
+			cameraLookDirection: true,
 			restoreAllInputSettings: true,
 			chordOrders: 2,
 			overlappingSources: true,

@@ -223,6 +223,12 @@ was refreshed locally after the unused dependency removal; HTML is byte-identica
 only its input record changed. Prior inputs and all 11 frozen alpha.5 assets are preserved.
 No source commit/push, candidate dispatch, or publication was performed for this follow-up.
 
+Alpha.6 preparation: the two-file cleanup is committed as `2e06c7e4d`; review corrections
+are in its ancestor `dfc7d0f83`. The version script selected `0.1.0-alpha.6` across Cargo,
+Electron, and lockfiles. Local notices were refreshed; HTML differs only in workspace version
+labels. Version consistency and all 46 release-tool tests pass. The user authorized pushing
+these commits and dispatching one complete draft candidate. No publication is authorized.
+
 ### Remaining work for this steer
 
 - [x] Obtain explicit approval to publicly upload `cli-content-bc8933cd905326fa.zip` to the

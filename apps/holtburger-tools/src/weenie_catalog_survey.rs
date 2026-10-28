@@ -960,8 +960,9 @@ fn survey_content(
     }
 
     let motion_contract = content
-        .read_motion_sequence_catalog()
-        .context("could not project the motion contract for the survey")?;
+        .read_motion_reference_data()
+        .context("could not project the motion contract for the survey")?
+        .motion_sequences;
     let physics_bsp_default_behavior_setups = survey_physics_bsp_default_behavior_setups(
         templates,
         &setup_facts,

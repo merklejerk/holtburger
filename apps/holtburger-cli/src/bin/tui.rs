@@ -8,12 +8,12 @@ use crossterm::{
 use holtburger_cli::pages;
 use holtburger_cli::state::{AppState, NetStats, QueuedScriptStartup};
 use holtburger_cli::types::{AppEvent, ChatMessageTags, Page, RedrawPriority, UpdateResult};
-use holtburger_content::{ContentDecodeCache, ContentRepository};
+use holtburger_content::CharacterGenCatalog;
 use holtburger_core::errors::format_action_result_message;
 use holtburger_core::errors::is_actually_weenie_error;
 use holtburger_core::{
     ActionResultReason, ClientCommand, ClientRuntime, ClientRuntimeBuilder, ClientState,
-    ClientViewEvent, ContentAssetService, ContentClientCollisionSource,
+    ClientViewEvent,
 };
 use holtburger_dat::file_type::SkillTable;
 use holtburger_protocol::errors::CharacterError;
@@ -37,7 +37,7 @@ struct BootstrappedClient {
     server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
     client_task_handle: tokio::task::JoinHandle<Result<()>>,
     initial_events: Vec<ClientViewEvent>,
-    content: Arc<ContentRepository>,
+    character_gen_catalog: Arc<CharacterGenCatalog>,
     spell_catalog: Arc<SpellCatalog>,
     skill_table: Arc<SkillTable>,
 }
@@ -206,8 +206,12 @@ struct Args {
     verbose: u8,
     #[arg(short = 'V', long = "debug-verbose", action = clap::ArgAction::Count, requires = "debug_log", help = "Increase log messages written to --debug-log (-V warn, -VV info, -VVV debug, -VVVV trace)")]
     debug_verbosity: u8,
-    #[arg(short, long)]
-    dats: Option<String>,
+    #[arg(
+        long,
+        value_name = "DIR",
+        help = "Content directory containing bootstrap.hba or assets.hba, plus navigation.hnav (overrides HOLTBURGER_CONTENT)"
+    )]
+    content: Option<std::path::PathBuf>,
     #[arg(
         short = 'Q',
         long = "auto-quit",
@@ -516,7 +520,7 @@ fn finalize_bootstrap_outcome(
     server_cmd_tx: mpsc::UnboundedSender<ClientCommand>,
     server_event_rx: tokio::sync::broadcast::Receiver<ClientViewEvent>,
     client_task_handle: tokio::task::JoinHandle<Result<()>>,
-    content: Arc<ContentRepository>,
+    character_gen_catalog: Arc<CharacterGenCatalog>,
     spell_catalog: Arc<SpellCatalog>,
     skill_table: Arc<SkillTable>,
 ) -> BootstrapOutcome {
@@ -527,7 +531,7 @@ fn finalize_bootstrap_outcome(
                 server_event_rx,
                 client_task_handle,
                 initial_events,
-                content,
+                character_gen_catalog,
                 spell_catalog,
                 skill_table,
             })
@@ -538,21 +542,12 @@ fn finalize_bootstrap_outcome(
 }
 
 async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapOutcome> {
-    let content = Arc::new(ContentRepository::discover_with_portable(
-        args.dats.clone().map(std::path::PathBuf::from),
-        holtburger_cli::installation::bundled_resource_path("dats"),
-    )?);
-    let collision_service = Arc::new(ContentAssetService::new(
-        Arc::clone(&content),
-        Arc::new(ContentDecodeCache::new()),
-    ));
+    let content = holtburger_cli::installation::content(args.content.clone())?;
     let mut builder = ClientRuntimeBuilder::new(args.account.clone())
         .server(host.to_string(), port)
-        .collision_source(Arc::new(ContentClientCollisionSource::new(
-            collision_service,
-            Arc::clone(&content),
-        )));
-    builder.load_assets(content.as_ref())?;
+        .navigation_movement_source(content.navigation.clone(), content.navigation.clone());
+    builder.load_assets(&content.bootstrap)?;
+    let character_gen_catalog = Arc::new(content.bootstrap.read_character_gen_catalog()?);
 
     let mut client = builder.connect().await?;
     let spell_catalog = Arc::clone(&client.world.spell_catalog);
@@ -593,7 +588,7 @@ async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapO
                             server_cmd_tx,
                             server_event_rx,
                             client_task_handle,
-                            Arc::clone(&content),
+                            Arc::clone(&character_gen_catalog),
                             Arc::clone(&spell_catalog),
                             Arc::clone(&skill_table),
                         ));
@@ -624,7 +619,7 @@ async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapO
                                 server_cmd_tx,
                                 server_event_rx,
                                 client_task_handle,
-                                Arc::clone(&content),
+                                Arc::clone(&character_gen_catalog),
                                 Arc::clone(&spell_catalog),
                                 Arc::clone(&skill_table),
                             ));
@@ -756,7 +751,7 @@ async fn run() -> Result<()> {
         mut server_event_rx,
         client_task_handle,
         initial_events,
-        content,
+        character_gen_catalog,
         spell_catalog,
         skill_table,
     } = match bootstrap_client(&args, &host, port, &mut local_log_rx).await {
@@ -784,7 +779,7 @@ async fn run() -> Result<()> {
         net_stats: NetStats::default(),
         world_name: String::new(),
         server_time: None,
-        content: Some(content),
+        character_gen_catalog: Some(character_gen_catalog),
         spell_catalog: Some(spell_catalog),
         skill_table: Some(skill_table),
         quit_on_disconnect: args.quit_on_disconnect,
@@ -1007,6 +1002,22 @@ mod tests {
     use clap::Parser;
     use clap::error::ErrorKind;
     use holtburger_core::client::types::ActionResultSource;
+
+    #[test]
+    fn explicit_content_path_accepts_a_prepared_directory_or_hba_location() {
+        let args = Args::try_parse_from([
+            "tui",
+            "--account",
+            "fixture",
+            "--content",
+            "my content/full.hba",
+        ])
+        .unwrap();
+        assert_eq!(
+            args.content,
+            Some(std::path::PathBuf::from("my content/full.hba"))
+        );
+    }
 
     #[test]
     fn debug_verbosity_requires_debug_log() {

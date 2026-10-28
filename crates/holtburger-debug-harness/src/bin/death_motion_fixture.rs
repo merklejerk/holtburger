@@ -111,6 +111,7 @@ fn capture(
 fn main() -> Result<()> {
     let args = Args::parse();
     let content = ContentRepository::discover(args.content)?;
+    let motion_reference = content.read_motion_reference_data()?;
     let bootstrap = WorldBootstrap {
         weenie_types: None,
         skill_table: Arc::new(content.read_asset("skills")?),
@@ -119,7 +120,8 @@ fn main() -> Result<()> {
         xp_table: Arc::new(content.read_asset("xp")?),
         character_titles: Arc::new(content.read_character_title_catalog()?),
         contracts: Arc::new(content.read_contract_catalog()?),
-        motion_sequences: Arc::new(content.read_motion_sequence_catalog()?),
+        motion_sequences: Arc::new(motion_reference.motion_sequences),
+        setup_dimensions: Arc::new(motion_reference.setup_dimensions),
         soul_emote_catalog: Arc::new(SoulEmoteCatalog::default()),
     };
     let mut world = WorldState::new(Arc::new(bootstrap));

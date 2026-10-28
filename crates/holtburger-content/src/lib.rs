@@ -10,11 +10,16 @@ pub mod landblock;
 pub mod material_capabilities;
 pub mod material_graph;
 pub mod motion_sequence;
+pub mod navigation_bundle;
+pub mod navigation_scene;
+pub mod navigation_source;
 pub mod object_collision;
 pub mod render_surface_pixels;
 pub mod repository;
 mod resource_error;
+pub mod scene_source;
 pub mod selection_envelope;
+pub mod setup_dimensions;
 pub mod soul_emote;
 mod source_reader;
 pub mod spells;
@@ -65,18 +70,25 @@ pub use motion_sequence::{
     MotionHookEffect, MotionHookTrack, MotionSequence, MotionSequenceCatalog, MotionSequenceTable,
     RootMotionTrack,
 };
+pub use navigation_scene::NavigationSceneSource;
+pub use navigation_source::{PreparedNavigationSource, SetupContentSource};
 pub use object_collision::{
     BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
     CollisionBall, CollisionBox, CollisionCylinder, CollisionPolygon, CollisionShape,
     LandblockColliderAssembler, LandblockColliders, LandblockCollisionAsset,
-    OutdoorBuildingTransit, PlacedCollider, PlacedCollisionShape, StaticColliderPlacement,
-    resolve_gfx_obj_collision_shape, resolve_setup_volume_collision_shapes,
+    LandblockRoomShellAssembler, OutdoorBuildingTransit, PlacedCollider, PlacedCollisionShape,
+    StaticColliderPlacement, resolve_gfx_obj_collision_shape,
+    resolve_setup_volume_collision_shapes,
 };
-pub use repository::{ContentRepository, ContentSelectionError, ResolvedContent};
+pub use repository::{
+    ContentRepository, ContentSelectionError, MotionReferenceData, ResolvedContent,
+};
 pub use resource_error::{ContentResourceError, ContentResourceErrorKind};
+pub use scene_source::SceneContentSource;
 pub use selection_envelope::{
     SelectionEnvelopeProfile, compute_selection_envelope_radius, resolve_selection_envelope_profile,
 };
+pub use setup_dimensions::{SetupDimensionCatalog, SetupDimensions};
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};
 pub use terrain_collision::{
     TERRAIN_WATER_COLLISION_DEPTH, TerrainCollisionCell, TerrainCollisionSurface,

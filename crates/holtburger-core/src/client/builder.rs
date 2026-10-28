@@ -1,5 +1,8 @@
+use super::collision::{ClientBodyPolicy, ClientSpatialSources};
+use super::movement_types::ClientMovementPolicy;
+use super::navigation_body::NavigationBodySource;
 use anyhow::{Context, Result, anyhow};
-use holtburger_content::ContentRepository;
+use holtburger_content::{ContentRepository, SceneContentSource, SetupContentSource};
 use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, SpellTable, XpTable};
 use holtburger_session::Session;
 use holtburger_world::{WorldBootstrap, WorldState};
@@ -25,7 +28,7 @@ pub struct ClientRuntimeBuilder {
     account_name: String,
     server_endpoint: Option<ServerEndpoint>,
     world_bootstrap: Option<Arc<WorldBootstrap>>,
-    collision_source: Option<Arc<dyn super::collision::ClientCollisionSource>>,
+    spatial_sources: Option<ClientSpatialSources>,
     dynamic_script_source: Option<Arc<dyn super::dynamic_script::ClientDynamicScriptSource>>,
     selection_envelope_source:
         Option<Arc<dyn super::selection_envelope::ClientSelectionEnvelopeSource>>,
@@ -42,7 +45,7 @@ impl ClientRuntimeBuilder {
             account_name: account_name.into(),
             server_endpoint: None,
             world_bootstrap: None,
-            collision_source: None,
+            spatial_sources: None,
             dynamic_script_source: None,
             selection_envelope_source: None,
             combat_tuning: ClientCombatTuning::default(),
@@ -83,8 +86,8 @@ impl ClientRuntimeBuilder {
         let contracts = content
             .read_contract_catalog()
             .context("failed to load contract catalog for client runtime")?;
-        let motion_sequences = content
-            .read_motion_sequence_catalog()
+        let motion_reference = content
+            .read_motion_reference_data()
             .context("failed to build the motion contract for client runtime")?;
         let soul_emote_catalog = content
             .read_soul_emote_catalog()
@@ -98,19 +101,39 @@ impl ClientRuntimeBuilder {
             xp_table: Arc::new(xp_table),
             character_titles: Arc::new(character_titles),
             contracts: Arc::new(contracts),
-            motion_sequences: Arc::new(motion_sequences),
+            motion_sequences: Arc::new(motion_reference.motion_sequences),
+            setup_dimensions: Arc::new(motion_reference.setup_dimensions),
             soul_emote_catalog: Arc::new(soul_emote_catalog),
         }));
 
         Ok(())
     }
 
-    /// Injects the content-backed source used to stage client collision and player-body products.
-    pub fn collision_source(
+    /// Selects physical body behavior with independently supplied environment geometry.
+    pub fn physical_movement_source(
         mut self,
-        source: Arc<dyn super::collision::ClientCollisionSource>,
+        scenes: Arc<dyn SceneContentSource>,
+        source: Arc<dyn super::collision::ClientBodySource>,
     ) -> Self {
-        self.collision_source = Some(source);
+        self.spatial_sources = Some(ClientSpatialSources {
+            scenes,
+            bodies: ClientBodyPolicy::Physical(source),
+        });
+        self
+    }
+
+    /// Selects point-validated local motion and reduced remote bodies.
+    /// Environment geometry is supplied independently of this behavior.
+    /// The frontend independently supplies bootstrap facts and chooses its static-data provider.
+    pub fn navigation_movement_source(
+        mut self,
+        scenes: Arc<dyn SceneContentSource>,
+        content: Arc<dyn SetupContentSource>,
+    ) -> Self {
+        self.spatial_sources = Some(ClientSpatialSources {
+            scenes,
+            bodies: ClientBodyPolicy::Navigation(Arc::new(NavigationBodySource::new(content))),
+        });
         self
     }
 
@@ -205,6 +228,12 @@ impl ClientRuntimeBuilder {
         })?;
         let (client_view_event_tx, _) = broadcast::channel(4096);
 
+        let movement_policy = self
+            .spatial_sources
+            .as_ref()
+            .map_or(ClientMovementPolicy::Physical, |sources| {
+                sources.bodies.movement_policy()
+            });
         Ok(ClientRuntime {
             #[cfg(feature = "runtime-fixture")]
             runtime_fixture: None,
@@ -247,15 +276,18 @@ impl ClientRuntimeBuilder {
             command_rx: None,
             message_dump_dir: self.message_dump_dir,
             message_counter: 0,
-            movement: MovementSystem::new(),
+            movement: MovementSystem::with_policy(movement_policy),
             combat_engagement: Default::default(),
             combat_attribution: Default::default(),
             combat_tuning: self.combat_tuning,
             combat_approach_drive_active: false,
             melee_approach_state: None,
-            collision_coordinator: self
-                .collision_source
-                .map(super::collision::ClientCollisionCoordinator::new),
+            collision_coordinator: self.spatial_sources.map(|sources| {
+                super::collision::ClientCollisionCoordinator::with_policy(
+                    sources.scenes,
+                    sources.bodies,
+                )
+            }),
             dynamic_script_coordinator: self
                 .dynamic_script_source
                 .map(super::dynamic_script::ClientDynamicScriptCoordinator::new),

@@ -9,7 +9,7 @@ use holtburger_core::client::runtime_fixture::RuntimeFixture;
 use holtburger_core::client::runtime_fixture::RuntimeFixtureReport;
 use holtburger_core::{
     ClientCommand, ClientLifecycleState, ClientRuntimeBuilder, ClientViewEvent,
-    ContentAssetService, ContentClientCollisionSource, ContentClientDynamicScriptSource,
+    ContentAssetService, ContentClientDynamicScriptSource, ContentClientPhysicsSource,
 };
 use serde::Serialize;
 use std::{
@@ -149,11 +149,12 @@ async fn main() -> Result<()> {
         Arc::new(ContentDecodeCache::new()),
     ));
     let builder = |account: String| -> Result<ClientRuntimeBuilder> {
+        let physical_source = Arc::new(ContentClientPhysicsSource::new(
+            Arc::clone(&service),
+            Arc::clone(&repository),
+        ));
         let mut builder = ClientRuntimeBuilder::new(account)
-            .collision_source(Arc::new(ContentClientCollisionSource::new(
-                Arc::clone(&service),
-                Arc::clone(&repository),
-            )))
+            .physical_movement_source(physical_source.clone(), physical_source.clone())
             .dynamic_script_source(Arc::new(ContentClientDynamicScriptSource::new(Arc::clone(
                 &service,
             ))));
@@ -261,6 +262,7 @@ async fn enter_world(
     let characters = loop {
         if let ClientViewEvent::LifecycleChanged(ClientLifecycleState::CharacterSelection {
             characters,
+            ..
         }) = receive(events, deadline).await?
         {
             break characters;

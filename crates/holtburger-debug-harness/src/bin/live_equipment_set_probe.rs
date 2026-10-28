@@ -7,7 +7,7 @@ use holtburger_common::{Guid, properties::EquipMask};
 use holtburger_content::{ContentDecodeCache, ContentRepository};
 use holtburger_core::{
     ClientApplicationSnapshot, ClientCommand, ClientLifecycleState, ClientRuntimeBuilder,
-    ClientViewEvent, ContentAssetService, ContentClientCollisionSource,
+    ClientViewEvent, ContentAssetService, ContentClientPhysicsSource,
     client::equipment_set::EquipmentBinding,
 };
 use holtburger_protocol::messages::combat::CombatMode;
@@ -140,12 +140,13 @@ async fn main() -> Result<()> {
         Arc::clone(&repository),
         Arc::new(ContentDecodeCache::new()),
     ));
+    let physical_source = Arc::new(ContentClientPhysicsSource::new(
+        service,
+        Arc::clone(&repository),
+    ));
     let mut builder = ClientRuntimeBuilder::new(account)
         .server(args.host.clone(), args.port)
-        .collision_source(Arc::new(ContentClientCollisionSource::new(
-            service,
-            Arc::clone(&repository),
-        )));
+        .physical_movement_source(physical_source.clone(), physical_source.clone());
     builder.load_assets(repository.as_ref())?;
     let mut client = builder.connect().await?;
     let mut events = client.subscribe_client_view_events();

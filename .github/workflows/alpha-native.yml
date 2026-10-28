@@ -9,6 +9,9 @@ on:
       matrix:
         type: string
         required: true
+      product:
+        type: string
+        default: both
 
 permissions:
   contents: read
@@ -28,6 +31,7 @@ jobs:
       PYTHONDONTWRITEBYTECODE: '1'
       HOLTBURGER_SOURCE_REVISION: ${{ inputs.commit }}
       HOLTBURGER_SOURCE_MODIFIED: '0'
+      HOLTBURGER_PRODUCT: ${{ inputs.product }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,6 +41,7 @@ jobs:
         with:
           python-version: '3.12'
       - uses: actions/setup-node@v4
+        if: inputs.product != 'cli'
         with:
           node-version: 24.13.1
           cache: npm
@@ -50,35 +55,64 @@ jobs:
         with:
           name: alpha-notices
           path: .holtburger-local/alpha-notices
-      - name: Fetch pinned alpha micro content
+      - name: Fetch pinned CLI content
+        if: inputs.product != '3d'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python .github/scripts/fetch_alpha_content.py .holtburger-local/alpha-content
+        run: python .github/scripts/fetch_cli_content.py .holtburger-local/cli-content
+      - name: Build selected executables together
+        run: |
+          PACKAGES=()
+          if [[ "$HOLTBURGER_PRODUCT" != '3d' ]]; then
+            PACKAGES+=(-p holtburger-cli --bin tui --bin content_bootstrap -p holtburger-tools --bin dat2hba --bin dat-tool)
+          fi
+          if [[ "$HOLTBURGER_PRODUCT" != 'cli' ]]; then
+            PACKAGES+=(-p holtburger-3d-host --bin holtburger-3d-host)
+          fi
+          cargo build --locked --release --target '${{ matrix.triple }}' "${PACKAGES[@]}"
+          SUFFIX=''
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then SUFFIX='.exe'; fi
+          echo "HOLTBURGER_HOST_BIN=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
+          echo "HOLTBURGER_PACKAGE_HOST=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
+      - name: Verify CLI content and assemble its native archive
+        if: inputs.product != '3d'
+        run: |
+          SUFFIX=''
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then SUFFIX='.exe'; fi
+          "target/${{ matrix.triple }}/release/content_bootstrap$SUFFIX" .holtburger-local/cli-content
+          python .github/scripts/alpha_release.py assemble --product cli \
+            --target '${{ matrix.triple }}' --content .holtburger-local/cli-content \
+            --notices .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html \
+            --output .holtburger-local/alpha-artifacts/cli
+      - uses: actions/upload-artifact@v4
+        if: inputs.product != '3d'
+        with:
+          name: alpha-cli-${{ matrix.triple }}
+          path: .holtburger-local/alpha-artifacts/cli/*
+          if-no-files-found: error
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux' && inputs.product != '3d'
+        with:
+          name: verification-linux-bootstrap
+          path: target/x86_64-unknown-linux-gnu/release/content_bootstrap
+          if-no-files-found: error
       - name: Install frontend dependencies
+        if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: npm ci
       - name: Install and test Windows executable packaging tools
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && inputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: |
           npm run setup:windows-packaging
           npm run test:windows-packaging
       - name: Check native branding generation
+        if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: npm run check:branding
-      - name: Build only suite executables and the bootstrap probe
-        run: |
-          cargo build --locked --release --target '${{ matrix.triple }}' \
-            -p holtburger-cli --bin tui \
-            -p holtburger-tools --bin dat2hba --bin dat-tool \
-            -p holtburger-3d-host --bin holtburger-3d-host \
-            -p holtburger-debug-harness --bin content_bootstrap
-          SUFFIX=''
-          if [[ "$RUNNER_OS" == 'Windows' ]]; then SUFFIX='.exe'; fi
-          echo "HOLTBURGER_HOST_BIN=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
-          echo "HOLTBURGER_PACKAGE_HOST=$GITHUB_WORKSPACE/target/${{ matrix.triple }}/release/holtburger-3d-host$SUFFIX" >> "$GITHUB_ENV"
-          "target/${{ matrix.triple }}/release/content_bootstrap$SUFFIX" .holtburger-local/alpha-content/assets.hba
-      - name: Build application output and package the inspected target host
+      - name: Build and inspect the 3D application
+        if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: |
           npm run build
@@ -87,13 +121,14 @@ jobs:
           npm run check:package
           npm run smoke:sidecar
       - name: Install Linux virtual display
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && inputs.product != 'cli'
         run: |
           if ! command -v Xvfb >/dev/null || ! command -v xauth >/dev/null; then
             sudo apt-get update
             sudo apt-get install --yes --no-install-recommends xvfb xauth
           fi
-      - name: Check packaged font/image assets and default-client content recovery
+      - name: Check packaged renderer assets and content recovery
+        if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: |
           PACKAGE="$GITHUB_WORKSPACE/apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}"
@@ -108,32 +143,24 @@ jobs:
           else
             node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
           fi
-      - name: Assemble and inspect the extracted suite
+      - name: Assemble the 3D native archive
+        if: inputs.product != 'cli'
         run: |
-          python .github/scripts/alpha_release.py assemble \
+          python .github/scripts/alpha_release.py assemble --product 3d \
             --target '${{ matrix.triple }}' \
             --package 'apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}' \
-            --content .holtburger-local/alpha-content \
             --notices .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html \
-            --output .holtburger-local/alpha-artifacts
+            --output .holtburger-local/alpha-artifacts/3d
       - uses: actions/upload-artifact@v4
+        if: inputs.product != 'cli'
         with:
-          name: alpha-${{ matrix.triple }}
-          path: .holtburger-local/alpha-artifacts/*
+          name: alpha-3d-${{ matrix.triple }}
+          path: .holtburger-local/alpha-artifacts/3d/*
           if-no-files-found: error
           compression-level: 0
-
       - uses: actions/upload-artifact@v4
-        if: runner.os == 'Linux'
-        with:
-          name: verification-linux-bootstrap
-          path: target/x86_64-unknown-linux-gnu/release/content_bootstrap
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@v4
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && inputs.product != 'cli'
         with:
           name: verification-linux-electron
           path: apps/holtburger-3d/dist-electron/
           if-no-files-found: error
-

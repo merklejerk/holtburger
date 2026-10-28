@@ -78,9 +78,9 @@ pub use collision::{
     HardSphereSweepHit, MotionWaypoint, MotionWaypointPlacement, MovementObstructionRequest,
     MovementRestrictionRequest, PlacedMotionLeg, PlacedMotionPath, PlacedMotionPathRequest,
     PlacedMotionPoint, PlacementRecovery, PlacementRequest, PlacementRestrictionRequest,
-    SpatialMembership, SphereSweep, StaticContact, StaticSphereSweepHit, StaticSphereSweepRequest,
-    StaticSurfaceRayHit, StaticSurfaceRayRequest, SupportContact, SupportFeature, SupportRequest,
-    SupportSource, UncoveredCollisionQuery,
+    PointPlacement, SpatialMembership, SphereSweep, StaticContact, StaticSphereSweepHit,
+    StaticSphereSweepRequest, StaticSurfaceRayHit, StaticSurfaceRayRequest, SupportContact,
+    SupportFeature, SupportRequest, SupportSource, UncoveredCollisionQuery,
 };
 pub use collision_report::{
     CollisionReportClassification, CollisionReportContact, CollisionReportOutcome,

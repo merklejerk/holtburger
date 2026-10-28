@@ -89,6 +89,94 @@ fn write_sectors(bytes: &mut [u8], offset: usize, block_size: usize, payload: &[
     }
 }
 
+#[test]
+fn consumer_admission_selects_one_suitable_family_with_hba_precedence() {
+    let key = ResourceKey::new(EOR_PORTAL_NAMESPACE, 0x0500_000c);
+    // Bootstrap is always present; its readable inventory cannot satisfy the consumer.
+    for (full_hba, retail, expected) in [
+        (false, false, None),
+        (false, true, Some(b"retail".as_slice())),
+        (true, false, Some(b"full".as_slice())),
+        (true, true, Some(b"full".as_slice())),
+    ] {
+        let root = tempdir().unwrap();
+        write_hba(
+            &root.path().join("bootstrap.hba"),
+            key.namespace,
+            0x0100_0001,
+            b"bootstrap",
+            false,
+        );
+        if full_hba {
+            write_hba(
+                &root.path().join("assets.hba"),
+                key.namespace,
+                key.file_id,
+                b"full",
+                false,
+            );
+        }
+        if retail {
+            write_dat(
+                &root.path().join("client_portal.dat"),
+                1,
+                key.file_id,
+                b"retail",
+            );
+        }
+        let admits = |repository: &ContentRepository| repository.resource_metadata(key).is_some();
+        let selected = ResolvedContent::open_preferred(root.path(), admits).unwrap();
+        assert_eq!(admits(&selected.repository), expected.is_some());
+        if let Some(payload) = expected {
+            assert_eq!(
+                selected.repository.read_resource(key).unwrap().bytes,
+                payload
+            );
+            // Mounting only one family means no bootstrap resource leaks into the DAT selection.
+            assert_eq!(
+                selected
+                    .repository
+                    .resource_metadata(ResourceKey::new(key.namespace, 0x0100_0001))
+                    .is_some(),
+                full_hba
+            );
+        }
+        let discovered =
+            ResolvedContent::discover_candidates(vec![root.path().to_path_buf()], admits);
+        assert_eq!(discovered.is_ok(), expected.is_some());
+    }
+}
+
+#[test]
+fn admission_keeps_exact_files_and_archive_failures_visible() {
+    let root = tempdir().unwrap();
+    let key = ResourceKey::new(EOR_PORTAL_NAMESPACE, 0x0500_000c);
+    let bootstrap = root.path().join("bootstrap.hba");
+    write_hba(&bootstrap, key.namespace, 0x0100_0001, b"bootstrap", false);
+    write_dat(
+        &root.path().join("client_portal.dat"),
+        1,
+        key.file_id,
+        b"retail",
+    );
+    let admits = |repository: &ContentRepository| repository.resource_metadata(key).is_some();
+    let exact = ResolvedContent::open_preferred(&bootstrap, admits).unwrap();
+    assert!(!admits(&exact.repository));
+    // DAT-only directories remain suitable.
+    fs::remove_file(&bootstrap).unwrap();
+    assert!(admits(
+        &ResolvedContent::open_preferred(root.path(), admits)
+            .unwrap()
+            .repository
+    ));
+    fs::write(&bootstrap, b"broken").unwrap();
+    let error = ResolvedContent::open_preferred(root.path(), admits).unwrap_err();
+    assert!(matches!(
+        error.downcast_ref::<ContentSelectionError>(),
+        Some(ContentSelectionError::Archive { .. })
+    ));
+}
+
 /// Encodes the header fields and one leaf exactly as `DatDatabase` reads them.
 fn write_dat(path: &Path, dataset: u32, id: u32, payload: &[u8]) {
     write_dat_subset(path, dataset, 0, id, payload);

@@ -100,8 +100,9 @@ fn main() -> Result<()> {
 
     let started = Instant::now();
     let catalog = content
-        .read_motion_sequence_catalog()
-        .context("motion contract projection failed")?;
+        .read_motion_reference_data()
+        .context("motion contract projection failed")?
+        .motion_sequences;
     let build = started.elapsed();
 
     let mut tables = 0usize;

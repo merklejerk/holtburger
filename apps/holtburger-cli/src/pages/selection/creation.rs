@@ -1,11 +1,11 @@
 use crate::components::text_input::SingleLineTextInput;
 use crate::types::{AppAction, AppUiAction, Verb};
 use holtburger_common::stats::AttributeType;
+use holtburger_content::CharacterGenCatalog;
 use holtburger_content::character_gen::{
     CharacterGenGenderDefinition, CharacterGenHeritageGroup, CharacterGenSkillDefinition,
     CharacterGenStarterArea, CharacterGenTemplate, is_unavailable_character_gen_skill_cost,
 };
-use holtburger_content::{CharacterGenCatalog, ContentRepository};
 use holtburger_core::character_gen::{
     CHARACTER_GEN_MAX_ATTRIBUTE, CHARACTER_GEN_MIN_ATTRIBUTE, custom_template_for_heritage,
     minimum_skill_advancement_for_heritage,
@@ -77,19 +77,6 @@ impl Default for CharacterCreationState {
 }
 
 impl CharacterCreationState {
-    pub fn from_repository(repository: Option<&Arc<ContentRepository>>) -> Self {
-        let Some(repository) = repository else {
-            return Self::default();
-        };
-
-        match repository.read_character_gen_catalog() {
-            Ok(catalog) => Self::from_catalog(Arc::new(catalog)),
-            Err(error) => Self::Unavailable {
-                message: format!("Could not load character creation choices: {error}"),
-            },
-        }
-    }
-
     pub fn from_catalog(catalog: Arc<CharacterGenCatalog>) -> Self {
         Self::Ready(Box::new(CharacterCreationFormState::new(catalog)))
     }

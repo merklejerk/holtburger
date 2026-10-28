@@ -6,6 +6,7 @@ use crate::types::{Page, UpdateResult};
 use holtburger_core::errors::format_action_result_message;
 use holtburger_core::{ActionResultReason, ClientCommand, ClientState, ClientViewEvent};
 use holtburger_protocol::errors::CharacterError;
+use std::sync::Arc;
 
 impl AppState {
     fn handle_setup_event(&mut self, event: &ClientViewEvent, result: &mut UpdateResult) {
@@ -75,7 +76,12 @@ impl AppState {
                     character_preference: self.character_preference.take(),
                     account_name: self.account_name.clone(),
                     screen: Default::default(),
-                    creation: CharacterCreationState::from_repository(self.content.as_ref()),
+                    creation: self
+                        .character_gen_catalog
+                        .as_ref()
+                        .map_or_else(CharacterCreationState::default, |catalog| {
+                            CharacterCreationState::from_catalog(Arc::clone(catalog))
+                        }),
                     delete_confirmation: None,
                 }));
             }
@@ -268,7 +274,7 @@ mod tests {
             net_stats: NetStats::default(),
             world_name: "World".to_string(),
             server_time: None,
-            content: None,
+            character_gen_catalog: None,
             spell_catalog: None,
             skill_table: None,
             verbosity: 0,

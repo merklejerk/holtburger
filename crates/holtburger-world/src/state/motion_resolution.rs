@@ -259,40 +259,82 @@ impl WorldState {
             else {
                 continue;
             };
-            let Some(target_dynamic) = target_body
+            if target_body
                 .physical
                 .as_ref()
                 .and_then(|physical| physical.dynamic.as_ref())
-            else {
+                .is_none()
+            {
                 continue;
-            };
+            }
             if actor_dynamic.demand.integration != LocalIntegrationDemand::Eligible
                 || actor_dynamic.activity == DynamicBodyActivity::Suspended
             {
                 continue;
             }
-            let bearing = target_body.pose.global_coords() - actor.pose.global_coords();
-            let heading = if bearing.x != 0.0 || bearing.y != 0.0 {
-                actor.pose.heading_to(&target_body.pose)
-            } else {
-                actor.pose.rotation.to_heading()
-            };
-            let target = crate::spatial::StickyBodyTarget {
-                position: target_body.pose,
-                clearance: actor_dynamic.collision.target_geometry.setup_radius
-                    * actor_dynamic.object_scale
-                    + target_dynamic.collision.target_geometry.setup_radius
-                        * target_dynamic.object_scale
-                    + STICKY_TARGET_CLEARANCE_M,
-                speed_mps,
-                heading,
+            let Some(target) = self.sample_sticky_target(guid, target_guid, speed_mps) else {
+                continue;
             };
             let body_id = actor.id;
-            self.motion_runtimes.retain_sticky_heading(guid, heading);
+            self.motion_runtimes
+                .retain_sticky_heading(guid, target.heading);
             self.scene.wake_dynamic_body(body_id);
             targets.insert(guid, target);
         }
         targets
+    }
+
+    /// Samples an admitted local sticky command without requiring a physical actor or claiming
+    /// support. The caller owns position-only integration and containment of the proposed move.
+    pub fn prepare_position_only_sticky_target(
+        &mut self,
+        guid: Guid,
+    ) -> Option<crate::StickyBodyTarget> {
+        let runtime = self.motion_runtimes.get(guid)?;
+        if runtime.manual_displacement() {
+            return None;
+        }
+        let target_guid = runtime.sticky_target()?;
+        let speed_mps = runtime.sticky_speed_mps();
+        if self.scene.body_for_guid(target_guid).is_none() {
+            self.motion_runtimes.cancel_sticky_target(guid);
+            return None;
+        }
+        let physics = self.entities.get(guid)?.physics.effective();
+        if !physics.supports_local_simulation()
+            || physics.integration_eligibility != crate::EntityIntegrationEligibility::Eligible
+        {
+            return None;
+        }
+        let target = self.sample_sticky_target(guid, target_guid, speed_mps)?;
+        self.motion_runtimes
+            .retain_sticky_heading(guid, target.heading);
+        Some(target)
+    }
+
+    /// Shared target facts; each consumer separately admits its physical or position-only role.
+    fn sample_sticky_target(
+        &self,
+        guid: Guid,
+        target_guid: Guid,
+        speed_mps: f32,
+    ) -> Option<crate::StickyBodyTarget> {
+        let (actor, actor_dimensions) = self.interaction_cylinder(guid)?;
+        let (target, target_dimensions) = self.interaction_cylinder(target_guid)?;
+        let bearing = target.global_coords() - actor.global_coords();
+        let heading = if bearing.x != 0.0 || bearing.y != 0.0 {
+            actor.heading_to(&target)
+        } else {
+            actor.rotation.to_heading()
+        };
+        Some(crate::StickyBodyTarget {
+            position: target,
+            clearance: actor_dimensions.radius
+                + target_dimensions.radius
+                + STICKY_TARGET_CLEARANCE_M,
+            speed_mps,
+            heading,
+        })
     }
 
     /// Retains locomotion only while this authority can simulate local character motion.
@@ -1119,7 +1161,7 @@ impl WorldState {
             .runtime_body_id_for_guid(target)
             .and_then(|body_id| self.scene.body(body_id))
             .map_or(entity.position, |body| body.pose);
-        ServerDirectedTarget::new(pose, self.physical_cylinder_distance(actor, target))
+        ServerDirectedTarget::new(pose, self.cylinder_distance(actor, target))
     }
 
     /// Resolves the motion table every playback and presentation consumer must use for an entity.

@@ -50,7 +50,7 @@ fn main() -> Result<()> {
     for asset in neighborhood.assets {
         scene.insert(asset)?;
     }
-    let catalog = repository.read_motion_sequence_catalog()?;
+    let catalog = repository.read_motion_reference_data()?.motion_sequences;
     let table = catalog
         .table(TABLE)
         .context("standard character table is absent")?;

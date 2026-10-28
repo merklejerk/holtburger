@@ -27,8 +27,12 @@ regenerating the navigation content. Replace `NEXT_VERSION` with the explicitly 
 for an automatic bump. Integration retains the version already selected on `3d-next`.
 
 `.github/cli-content.json` owns the approved generated ZIP SHA-256 and GitHub API asset URL.
-**The digest is prepared locally; the asset URL still needs to be pinned before CLI CI can run.**
-The fetcher fails explicitly while that URL is absent. Store approved bytes as a fresh asset
+The current pin selects `cli-content-08167e0347ccd19f.zip` on the existing
+`content-alpha-df24573f24e4ca46` prerelease (GitHub asset `685438455`). It contains both the
+regenerated `bootstrap.hba` and `navigation.hnav`, plus their provenance. The production
+fetcher and headless bootstrap probe pass on the downloaded bytes. The older `micro-hba.zip`
+remains available for legacy consumers; the new CLI release path does not fetch it.
+For future updates, store approved bytes as a fresh asset
 on the repository's public, non-latest content prerelease. Read-only CI tokens cannot retrieve
 draft release assets. Keep existing input assets available and do not replace their bytes.
 The public client release bundles the companions; it does not add a separate content-only

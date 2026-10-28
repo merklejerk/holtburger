@@ -336,6 +336,62 @@ fn server_gesture_retires_gap_progress_before_authoritative_authored_motion() {
 }
 
 #[test]
+fn manual_release_and_pulse_expiry_retire_gap_progress_before_authored_motion() {
+    use crate::client::movement::MovementSystem;
+    use crate::client::movement_types::{CharacterDrive, ClientMovementPolicy, PlayerDriveIntent};
+    use holtburger_world::WorldState;
+    use std::time::{Duration, Instant};
+
+    let scene = scene(&[(FIRST, 0.0), (LAST, 10.0)]);
+    let start = pose(FIRST, 0.0);
+    let duration = Duration::from_millis(100);
+    let drive = CharacterDrive::builder().forward().build();
+    for source in [
+        PlayerDriveIntent::ManualHeld(drive),
+        PlayerDriveIntent::ManualPulse {
+            state: drive,
+            duration,
+        },
+    ] {
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(Guid(0x5000_0001), "Player", start);
+        let mut movement = MovementSystem::with_policy(ClientMovementPolicy::Navigation);
+        let now = Instant::now();
+        movement.enqueue_drive_intent(source, now);
+        let _prepared = movement.prepare_tick(now, &mut world);
+        let input = || LocalNavigationInput {
+            admitted_fraction: 1.0,
+            interval: Duration::from_millis(20),
+            facing_rotation: None,
+            authored_offset: Some(RigidTransform {
+                translation: Vector3::new(2.0, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            }),
+            sticky_target: None,
+        };
+        for _ in 0..4 {
+            movement
+                .advance_navigation(&mut world, &scene, input())
+                .unwrap();
+        }
+        assert_eq!(world.local_player_runtime_pose(), Some(start));
+        if matches!(source, PlayerDriveIntent::ManualHeld(_)) {
+            movement.enqueue_drive_intent(PlayerDriveIntent::ReleaseManual, now + duration);
+        }
+        let _prepared = movement.prepare_tick(now + duration, &mut world);
+        assert!(!movement.has_active_manual_drive());
+        movement
+            .advance_navigation(&mut world, &scene, input())
+            .unwrap();
+        assert_eq!(
+            world.local_player_runtime_pose(),
+            Some(start),
+            "replacement authored motion must begin at the committed pose after {source:?}"
+        );
+    }
+}
+
+#[test]
 fn overlap_prefers_retained_cell_then_destination_and_otherwise_waits() {
     let scene = scene(&[(FIRST, 0.0), (LAST, 0.0)]);
     let target = pose(LAST, 0.0);

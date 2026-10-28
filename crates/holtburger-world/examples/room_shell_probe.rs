@@ -1,4 +1,4 @@
-//! Temporary real-content experiment: room shells and portals without object obstacles.
+//! Real-content diagnostic for regenerated room shells and portals without object obstacles.
 //! Run explicitly with an HBA path or prepared content directory; this is not an asset-dependent automated test.
 
 use std::{path::Path, sync::Arc, time::Instant};

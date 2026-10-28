@@ -743,7 +743,7 @@ fn discover_host_state(
     let content = ContentAssetRuntime::new(service.clone());
     let collision_source: Arc<dyn CollisionSource> = Arc::new(service);
     let simulation = Arc::new(HostSimulationRuntime::new(collision_source));
-    let motion_catalog = Arc::new(repository.read_motion_sequence_catalog()?);
+    let motion_catalog = Arc::new(repository.read_motion_reference_data()?.motion_sequences);
     let runtime = Arc::new(ExplorerEntityRuntime::new(
         Arc::clone(&simulation),
         Arc::clone(&motion_catalog),

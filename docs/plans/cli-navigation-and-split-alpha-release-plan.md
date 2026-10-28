@@ -158,6 +158,44 @@ location. Corrected the release operator guide's stale probe package and bootstr
 claim. No further source changes were identified in these seams. This audit does not prove
 new candidate packaging or manual acceptance; those remain below.
 
+### Formal code-quality review corrections
+
+The accumulated feature (`09f8cc2d6` through `34831913e`) received a formal review before
+another candidate. Earlier implementation checks and bounded seam audits were not a substitute
+for that review. The user requested all four findings be addressed and committed; pushing and
+candidate dispatch are not included in that instruction.
+
+- [x] Restore ACE to the original `95ef426d412459ff619a12cc18f82bcf72c1c2a8` reference.
+  The feature had unintentionally rolled it back by 98 upstream commits. Its checkout was
+  clean before restoration; no server process was restarted.
+- [x] Centralize terminal movement retirement. Character reset, server clear/completion/failure,
+  release, expiry, and epoch retirement use the same operation to discard hidden gap progress.
+  Acquisition/settlement retain their distinct meanings; no-budget ticks in the same active
+  engagement preserve progress. A regression exercises four previously missing boundaries.
+- [x] Project `MotionReferenceData` once in content, producing motion sequences and setup
+  dimensions from one setup pass. TUI/core bootstrap, h3d's content owner, and diagnostics
+  consume the prepared catalogs. The old independent scan APIs are removed. A counting-source
+  regression verifies exactly one read per setup and both projections, including a setup
+  without a default motion table.
+- [x] Exercise the actual `prepare_owner`/`prepare_terrain` geometry producers through archive
+  writing and `NavigationSceneSource`. The synthetic fixture covers shared structures,
+  negative/rotated placements, portal direction/apertures, physics shells, and terrain without
+  retail assets. This is focused geometry-export coverage, not a full character-bootstrap fixture.
+- [x] Complete affected regression/lint/bootstrap checks and re-review the changed callers.
+- [x] Commit the corrections with their validation record; do not push or start a candidate.
+
+Review-correction evidence: 159 content, 762 core, 393 host, and four generator tests pass
+(1,318 total). The new retirement regression fails against committed pre-fix movement code:
+a manual reset incorrectly reuses the hidden gap candidate to reach the next room. All four
+terminal cases pass after the fix, and the existing same-engagement pulse tests remain green.
+Warnings-denied clippy passes across all targets of content/core/CLI/host/tools/harness,
+including feature-gated runtime fixtures. Pinned reduced-content and full-reference-directory
+bootstrap probes each report 13 heritage groups and 568 cells/shells. Formatting, diff checks,
+and notice freshness pass. Re-review confirms a single terminal retirement owner and a single
+setup projection owner; frontend selection/cache lifetimes and solver policy are unchanged.
+The restored ACE pin matches the pre-feature baseline exactly. Content format/pin and existing
+release assets are unchanged; no new data generation, push, build dispatch, or publication.
+
 ### Remaining work for this steer
 
 - [x] Obtain explicit approval to publicly upload `cli-content-bc8933cd905326fa.zip` to the

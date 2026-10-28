@@ -14,6 +14,14 @@ use crate::material_capabilities::{MaterialArchiveCapabilityReport, RepositoryRe
 use crate::motion_sequence::MotionSequenceCatalog;
 use crate::{ContentResourceError, ContentResourceErrorKind, SoulEmoteCatalog};
 
+/// Parsed bootstrap facts projected together so each authored setup is decoded once.
+pub struct MotionReferenceData {
+    /// Tables, animation facts, and setup-owned default motion-table selections.
+    pub motion_sequences: MotionSequenceCatalog,
+    /// Setup-owned interaction geometry for bodies without prepared collision targets.
+    pub setup_dimensions: crate::SetupDimensionCatalog,
+}
+
 mod mounting;
 
 pub use mounting::{ContentSelectionError, ResolvedContent};
@@ -296,41 +304,33 @@ impl ContentRepository {
         MaterialArchiveCapabilityReport::build(self, &self.resource_index)
     }
 
-    /// Builds the runtime motion contract from every motion table, animation, and setup model the
-    /// repository carries.
-    ///
-    /// Every archive profile carries the complete motion representation, so a referenced animation
-    /// that is absent is an integrity failure rather than a profile that legitimately omits it.
-    pub fn read_motion_sequence_catalog(&self) -> Result<MotionSequenceCatalog> {
+    /// Projects motion and interaction reference facts from one setup pass.
+    /// Linked visual resources are never loaded; missing referenced animations remain errors.
+    pub fn read_motion_reference_data(&self) -> Result<MotionReferenceData> {
         let tables = self.decode_portal_records(DatFileType::MotionTable, MotionTable::read)?;
-        // The projection keeps root frames and simulation hooks and drops articulated part frames,
-        // so it reads with the seeking decode rather than materialising 52 MB it would discard.
+        // Seek past articulated part frames: bootstrap needs root motion and simulation hooks.
         let animations =
             self.decode_portal_records(DatFileType::Animation, Animation::read_simulation_facts)?;
-        let setup_default_tables = self
-            .decode_portal_records(DatFileType::SetupModel, SetupModel::read)?
-            .into_iter()
-            .filter_map(|setup| Some((setup.id, setup.default_motion_table?)))
-            .collect::<Vec<_>>();
-
-        MotionSequenceCatalog::assemble(tables, animations, setup_default_tables)
-            .context("failed to project raw motion content into the runtime motion contract")
-    }
-
-    /// Reads setup-owned gameplay dimensions without preparing collision or following links.
-    pub fn read_setup_dimension_catalog(&self) -> Result<crate::SetupDimensionCatalog> {
         let setups = self.decode_portal_records(DatFileType::SetupModel, SetupModel::read)?;
-        Ok(crate::SetupDimensionCatalog::new(setups.into_iter().map(
-            |setup| {
-                (
-                    setup.id,
-                    crate::SetupDimensions {
-                        radius: setup.radius,
-                        height: setup.height,
-                    },
-                )
-            },
-        )))
+        let setup_default_tables = setups
+            .iter()
+            .filter_map(|setup| Some((setup.id, setup.default_motion_table?)));
+        let motion_sequences =
+            MotionSequenceCatalog::assemble(tables, animations, setup_default_tables)
+                .context("failed to project raw motion content into the runtime motion contract")?;
+        let setup_dimensions = crate::SetupDimensionCatalog::new(setups.into_iter().map(|setup| {
+            (
+                setup.id,
+                crate::SetupDimensions {
+                    radius: setup.radius,
+                    height: setup.height,
+                },
+            )
+        }));
+        Ok(MotionReferenceData {
+            motion_sequences,
+            setup_dimensions,
+        })
     }
 
     /// Decodes each resolved portal resource once, in deterministic index order.
@@ -427,6 +427,59 @@ mod tests {
     };
     use std::path::Path;
     use tempfile::tempdir;
+
+    #[test]
+    fn motion_reference_projects_each_setup_once_for_both_consumers() {
+        use crate::test_support::CountingSource;
+        let setup_ids = [0x0200_0001, 0x0200_0002];
+        let default_table = 0x0900_0001;
+        let mut files = HashMap::new();
+        let mut entries = Vec::new();
+        for (index, id) in setup_ids.into_iter().enumerate() {
+            let mut setup = test_setup_model(id, &[]);
+            setup.radius = 0.5 + index as f32;
+            setup.height = 2.0 + index as f32;
+            setup.default_motion_table = (index == 0).then_some(default_table);
+            let mut bytes = Cursor::new(Vec::new());
+            setup.pack(&mut bytes).unwrap();
+            let bytes = bytes.into_inner();
+            entries.push(RepositoryResourceIndexEntry {
+                namespace: EOR_PORTAL_NAMESPACE.into(),
+                file_id: id,
+                type_id: DatFileType::SetupModel as u32,
+                size: bytes.len() as u32,
+                is_pruned: false,
+                source_description: "counted setup fixture".into(),
+            });
+            files.insert((EOR_PORTAL_NAMESPACE.into(), id), bytes);
+        }
+        let source = Arc::new(CountingSource::new(files));
+        let mut repository = ContentRepository::from_mounts(vec![source.clone()]);
+        repository.resource_index = entries;
+        let reference = repository.read_motion_reference_data().unwrap();
+        assert_eq!(
+            reference
+                .motion_sequences
+                .default_motion_table_for_setup(setup_ids[0]),
+            Some(default_table)
+        );
+        assert_eq!(
+            reference
+                .motion_sequences
+                .default_motion_table_for_setup(setup_ids[1]),
+            None
+        );
+        for (index, id) in setup_ids.into_iter().enumerate() {
+            assert_eq!(
+                reference.setup_dimensions.get(id),
+                Some(crate::SetupDimensions {
+                    radius: 0.5 + index as f32,
+                    height: 2.0 + index as f32
+                })
+            );
+            assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, id), 1);
+        }
+    }
 
     fn repo_assets_hba_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../dats/assets.hba")

@@ -351,8 +351,7 @@ impl MovementSystem {
         if !self.has_active_manual_drive() {
             // The gesture retires the automatic source. Its replacement authored motion must
             // start at the committed pose, not inherit a cancelled approach's gap candidate.
-            self.navigation_progress.reset();
-            self.active_movement = None;
+            self.retire_active_movement();
             if self.manual_input != ManualInputLifetime::None
                 && !self.character_motion.effective_drive().is_stationary()
             {
@@ -380,9 +379,16 @@ impl MovementSystem {
         self.pending_manual_playback_stop = false;
     }
 
+    /// A terminal movement boundary retires its uncommitted gap samples as one operation.
+    /// Budget-free ticks within an active client-directed engagement do not call this.
+    fn retire_active_movement(&mut self) {
+        self.navigation_progress.reset();
+        self.active_movement = None;
+    }
+
     pub(crate) fn clear_server_controlled_motion(&mut self) {
         if self.has_server_controlled_motion() {
-            self.active_movement = None;
+            self.retire_active_movement();
         }
     }
 
@@ -393,7 +399,6 @@ impl MovementSystem {
     /// after that rejection boundary. Protocol sequence diagnostics intentionally survive because
     /// the connected session and its server-authored ordering epochs remain continuous.
     pub(crate) fn retire_movement_epoch(&mut self) {
-        self.navigation_progress.reset();
         self.queued_control_commands.clear();
         self.character_motion.clear();
         self.manual_input = ManualInputLifetime::None;
@@ -402,11 +407,10 @@ impl MovementSystem {
         self.authored_motion_rejections.clear();
         self.pending_authored_commands.clear();
         self.pending_facing = PendingFacing::default();
-        self.active_movement = None;
+        self.retire_active_movement();
         self.pending_manual_playback_stop = false;
         self.published_motion = None;
         self.movement_publication_required = false;
-        self.clear_server_controlled_motion();
         self.position_publication = PositionPublication::default();
     }
 
@@ -490,8 +494,7 @@ impl MovementSystem {
                 self.manual_input = ManualInputLifetime::None;
                 self.character_motion.release_input();
                 if had_manual_drive {
-                    self.navigation_progress.reset();
-                    self.active_movement = None;
+                    self.retire_active_movement();
                     self.pending_manual_playback_stop = true;
                 }
             }
@@ -526,7 +529,6 @@ impl MovementSystem {
                 };
             }
             PlayerDriveIntent::Stop => {
-                self.navigation_progress.reset();
                 self.manual_input = ManualInputLifetime::None;
                 let had_server_directive = self.has_server_controlled_motion();
                 self.movement_publication_required |= had_server_directive;
@@ -535,7 +537,7 @@ impl MovementSystem {
                 self.character_motion.release_input();
                 self.pending_jump_attempt = None;
                 self.pending_facing = PendingFacing::default();
-                self.active_movement = None;
+                self.retire_active_movement();
                 self.pending_manual_playback_stop |= had_manual_drive;
             }
         }
@@ -573,8 +575,7 @@ impl MovementSystem {
                 self.movement_publication_required |= self.published_motion.is_some();
             }
             ClientDirectedCommand::Release => {
-                self.navigation_progress.reset();
-                self.active_movement = None;
+                self.retire_active_movement();
                 self.pending_facing = PendingFacing::default();
                 self.movement_publication_required |= self.published_motion.is_some();
             }
@@ -591,8 +592,7 @@ impl MovementSystem {
         if matches!(self.manual_input, ManualInputLifetime::Pulse { until } if now >= until) {
             self.manual_input = ManualInputLifetime::None;
             if self.has_active_manual_drive() {
-                self.navigation_progress.reset();
-                self.active_movement = None;
+                self.retire_active_movement();
                 self.pending_manual_playback_stop = true;
             }
         }
@@ -825,7 +825,7 @@ impl MovementSystem {
             self.manual_input = ManualInputLifetime::None;
             let had_manual_drive = matches!(self.active_movement, Some(ActiveMovement::Manual));
             if had_manual_drive {
-                self.active_movement = None;
+                self.retire_active_movement();
                 self.pending_manual_playback_stop = true;
             }
             self.pending_jump_attempt = None;
@@ -1110,12 +1110,12 @@ impl MovementSystem {
                         world.admit_entity_sticky_target(guid, Some(target));
                     }
                     log::info!("movement: completed server-directed motion");
-                    self.active_movement = None;
+                    self.retire_active_movement();
                     terminal_order
                 }
                 ServerDirectedMotionResolution::Failed(failure) => {
                     log::warn!("movement: server-directed motion failed: {failure:?}");
-                    self.active_movement = None;
+                    self.retire_active_movement();
                     terminal_order
                 }
             };

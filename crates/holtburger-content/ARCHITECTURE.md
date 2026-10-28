@@ -241,6 +241,9 @@ and body preparation policy.
 The HBA may be reduced or full, while scene geometry always comes from HNAV.
 
 Bootstrap reads expose parsed catalogs and authored setup dimensions without model preparation.
+`read_motion_reference_data` returns `MotionReferenceData`, projecting motion defaults and
+interaction dimensions from one setup decode pass. Frontends retain those parsed facts for
+their own content lifetime; client bootstrap does not scan setups again.
 The same indexed repository supplies complete character-generation choices and motion data.
 `SetupDimensionCatalog` carries authored radius/height; world applies current entity scale and
 canonical placement when deriving interaction ranges.

@@ -1,7 +1,7 @@
 use super::types::{MockTransport, Session};
 use anyhow::Result;
 use socket2::SockRef;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 const UDP_RECV_BUFFER_SIZE_BYTES: usize = 2 * 1024 * 1024;
 
@@ -15,46 +15,15 @@ impl Session {
                 err
             );
         }
-        Ok(Self {
-            transport: Box::new(socket),
-            server_addr,
-            server_source_addr: server_addr,
-            pending_server_source_addr: None,
-            isaac_c2s: None,
-            isaac_s2c: None,
-            packet_sequence: 0,
-            fragment_sequence: 1,
-            fragment_id: 1,
-            connection_cookie: 0,
-            client_id: 0,
-            last_server_seq: 1,
-            has_server_seq: false,
-            fragment_reassembler: HashMap::new(),
-            pending_server_packets: BTreeMap::new(),
-            rejected_server_sequences: Default::default(),
-            pending_control_packets: Vec::new(),
-            last_request_retransmit_time: None,
-            cached_packets: BTreeMap::new(),
-            capture: None,
-            game_action_sequence: 0,
-            received_packets: Default::default(),
-            sent_packets: Default::default(),
-            bytes_in: 0,
-            bytes_out: 0,
-            last_recv_time: std::time::Instant::now(),
-            last_send_time: std::time::Instant::now(),
-        })
+        Ok(Self::with_transport(server_addr, Box::new(socket), 0))
     }
 
-    /// Read delivery observations; pending packets expose an unresolved ordered receive gap.
+    /// Recovery facts come from the same accepted span used by control scheduling.
     pub fn reliability(&self) -> super::TransportReliability {
         super::TransportReliability {
             received: self.received_packets,
             sent: self.sent_packets,
-            receive_gap: !self.pending_server_packets.is_empty()
-                && !self
-                    .pending_server_packets
-                    .contains_key(&self.next_expected_server_sequence()),
+            receive_gap: !self.receive_progress().missing.is_empty(),
         }
     }
 
@@ -64,14 +33,26 @@ impl Session {
     }
 
     pub fn new_test() -> Self {
+        Self::with_transport(
+            "127.0.0.1:9000".parse().unwrap(),
+            Box::new(MockTransport),
+            1,
+        )
+    }
+
+    fn with_transport(
+        server_addr: std::net::SocketAddr,
+        transport: Box<dyn super::Transport>,
+        packet_sequence: u32,
+    ) -> Self {
         Self {
-            transport: Box::new(MockTransport),
-            server_addr: "127.0.0.1:9000".parse().unwrap(),
-            server_source_addr: "127.0.0.1:9000".parse().unwrap(),
+            transport,
+            server_addr,
+            server_source_addr: server_addr,
             pending_server_source_addr: None,
             isaac_c2s: None,
             isaac_s2c: None,
-            packet_sequence: 1,
+            packet_sequence,
             fragment_sequence: 1,
             fragment_id: 1,
             connection_cookie: 0,
@@ -81,8 +62,10 @@ impl Session {
             fragment_reassembler: HashMap::new(),
             pending_server_packets: BTreeMap::new(),
             rejected_server_sequences: Default::default(),
-            pending_control_packets: Vec::new(),
-            last_request_retransmit_time: None,
+            pending_packets: VecDeque::new(),
+            last_control_scheduled: None,
+            last_sent_client_sequence: 0,
+            pending_transport_events: VecDeque::new(),
             cached_packets: BTreeMap::new(),
             capture: None,
             game_action_sequence: 0,

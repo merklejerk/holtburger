@@ -1772,6 +1772,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "byteorder",
+ "futures",
  "hex",
  "holtburger-common",
  "holtburger-protocol",

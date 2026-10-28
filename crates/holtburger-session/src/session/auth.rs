@@ -4,7 +4,8 @@ use holtburger_protocol::crypto::Isaac;
 use holtburger_protocol::messages::transport::{self, packet_flags};
 use holtburger_protocol::messages::utils::build_login_payload;
 use holtburger_protocol::messages::*;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use tokio::time::Instant;
 
 impl Session {
     pub async fn send_login_request(&mut self, account_name: &str, password: &str) -> Result<()> {
@@ -26,17 +27,29 @@ impl Session {
             ..Default::default()
         };
         let payload = build_login_payload(account_name, password, sequence, client_version);
-        self.packet_sequence += 1;
-        self.send_packet(header, &payload).await
+        self.send_login_packet(header, &payload).await
     }
 
-    pub fn handle_handshake_request(&mut self, crd: ConnectRequestData) -> Result<f64> {
+    pub(crate) fn handle_handshake_request(
+        &mut self,
+        crd: ConnectRequestData,
+    ) -> Result<Option<f64>> {
         log::debug!("<<< Handshake Request (Incoming): {:?}", crd);
-        self.connection_cookie = crd.cookie;
-        self.client_id = crd.client_id;
-        self.isaac_c2s = Some(Isaac::new(crd.client_seed));
-        self.isaac_s2c = Some(Isaac::new(crd.server_seed));
-        self.packet_sequence = 2;
+        let first = self.last_control_scheduled.is_none();
+        if first {
+            self.connection_cookie = crd.cookie;
+            self.client_id = crd.client_id;
+            self.isaac_c2s = Some(Isaac::new(crd.client_seed));
+            self.isaac_s2c = Some(Isaac::new(crd.server_seed));
+            self.packet_sequence = 2;
+            self.has_server_seq = true;
+            // Retail SharedInit (acclient.c:360237) starts pacing with connection setup.
+            self.last_control_scheduled = Some(Instant::now());
+        } else if self.connection_cookie != crd.cookie {
+            return Err(anyhow!(
+                "Connect request changed cookie on an active session"
+            ));
+        }
 
         let activation_port =
             self.server_addr.port().checked_add(1).ok_or_else(|| {
@@ -44,7 +57,9 @@ impl Session {
             })?;
         let mut activation_addr = self.server_addr;
         activation_addr.set_port(activation_port);
-        self.pending_server_source_addr = Some(activation_addr);
+        if first {
+            self.pending_server_source_addr = Some(activation_addr);
+        }
 
         let resp_header = PacketHeader {
             flags: packet_flags::CONNECT_RESPONSE,
@@ -55,14 +70,14 @@ impl Session {
         };
         let payload = self.connection_cookie.to_le_bytes();
 
-        self.queue_packet_to_addr(
+        self.queue_handshake(
             resp_header,
             &payload,
             activation_addr,
             Instant::now() + Duration::from_millis(transport::ACE_HANDSHAKE_RACE_DELAY_MS),
         )?;
 
-        Ok(crd.time)
+        Ok(first.then_some(crd.time))
     }
 
     pub fn handle_handshake_response(&mut self, cookie: u64, client_id: u16) {

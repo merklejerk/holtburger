@@ -561,7 +561,13 @@ mod tests {
         client.session = holtburger_session::Session::new(server.local_addr().unwrap())
             .await
             .unwrap();
-        client.session.send_ack(0).await.unwrap();
+        client
+            .session
+            .send_action(GameAction::PingRequest(Box::new(
+                holtburger_protocol::messages::misc::actions::PingRequestActionData,
+            )))
+            .await
+            .unwrap();
         let mut bytes = [0; 128];
         let (_, client_addr) = server.recv_from(&mut bytes).await.unwrap();
         (client, server, client_addr)

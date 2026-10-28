@@ -1,7 +1,9 @@
 # Asheron's Call Protocol: Transport & Encryption
 
 ## 1. UDP Framing
-Standard packets have a maximum size of **1024 bytes**.
+The session accepts datagrams up to the protocol crate's **1024-byte** limit. ACE normally
+assembles server payloads within `ServerPacket.MaxPacketSize = 464` bytes, plus the 20-byte
+transport header (`ACE/Source/ACE.Server/Network/ServerPacket.cs`).
 
 ## 2. Packet Header (20 bytes)
 
@@ -13,7 +15,7 @@ Standard packets have a maximum size of **1024 bytes**.
 | 12 | uint16 | Id | Session ID (Client ID). Assigned by server in `ConnectRequest`. |
 | 14 | uint16 | Time | Rolling timestamp (Portal Year Ticks). |
 | 16 | uint16 | Size | Total size of the payload following the header. |
-| 18 | uint16 | Iteration | Hardcoded to `0x0001`. |
+| 18 | uint16 | Iteration | Connection iteration stamp. ACE versions/forks differ; it is not universally `0x0001`. |
 
 ### 2.1 Header Flags
 
@@ -81,23 +83,56 @@ When `EncryptedChecksum` (0x02) is set, the Payload Hash part of the addition is
 
 Asheron's Call uses two independent sequence-tracking systems. 
 
-### 4.1 Packet Sequence (Reliability)
-Located in the `PacketHeader.Sequence`.
-- Used exclusively for tracking which packets have arrived and which need to be acknowledged.
-- Every packet sent increments this number.
-- Peers respond with an `AckSequence` (0x4000) containing the highest received sequence.
-- **Keep-Alive:** If a client stops sending ACKs or packets, the server will time out the connection. To prevent this during idle periods, the client must send an "Empty ACK" packet (Flags: `0x4000`, matching `Sequence`).
+### 5.1 Packet Sequence and Recovery
 
-### 4.2 Fragment Sequence (Ordering/Reassembly)
+`PacketHeader.Sequence` identifies reliable originals and their repairs. A retransmission keeps
+its original sequence and checksum key. Disposable standalone ACK/NAK controls reuse the current
+successfully sent stamp and do not advance the reliable sequence or ISAAC stream. ACE may assign
+new sequence numbers to the rejection packets it sends to a client, so an incoming rejection is
+not automatically an unsequenced packet.
+
+Reception and ordered delivery are separate. The client buffers accepted out-of-order packets,
+tracks unresolved holes, and delivers available messages in order. It reads an available bounded
+batch before deciding which controls are due. Retail's normal control policy uses one clock
+initialized with connection setup (`acclient.c:360215`, `:355374`, `:355416`):
+
+- While holes remain, request their current IDs after **more than 600 ms** since the previous
+  normal control was scheduled. Retail emits at most **114 IDs**; the parser accepts the existing
+  **115-ID** wire capacity. Idle retry wakes account for Tokio's millisecond timer granularity.
+- With no holes, acknowledge the safe accepted boundary after **at least two seconds** on the
+  same clock. A game action does not independently generate another ACK. A due ACK may piggyback
+  on compatible content, or go out alone when the client is otherwise idle.
+- An original arriving before an unsent request is serialized removes its ID; an empty request
+  is cancelled. A previously scheduled safe ACK is not upgraded across a later hole.
+- A rejected resend removes only the confirmed unavailable hole. An original already received
+  wins over a rejection that crossed it. Rejection does not itself mean disconnect.
+
+ACK eviction retains the boundary packet and uses wrap-aware serial order
+(`acclient.c:362149`). Disposable optional controls are stripped before retaining reliable content
+for repair (`acclient.c:362032`, `:360673`). The session bounds retained/reserved originals and fails
+admission before exhausting capacity instead of dropping unacknowledged content.
+
+ACE handles cleartext NAKs before its normal ordered game-data path and returns from that branch.
+Keep requests standalone: encrypted NAKs are not handled there, and attaching game fragments to a
+cleartext request would cause those fragments to be ignored. Client rejection responses use the
+retail disposable control convention; local ACE parses them but has no consumer that releases a
+missing C2S original. Do not interpret sending a rejection as successful server-side recovery.
+
+Repeated encrypted originals/repairs already accepted are dropped before key search. A checksum
+or structural failure cannot close a hole or acknowledge content. Pending writes and accepted
+read-ahead live in `Session`, allowing core to cancel receive futures without losing progress.
+See [session architecture](../crates/holtburger-session/ARCHITECTURE.md) for the ownership contract.
+
+### 5.2 Fragment Sequence (Ordering/Reassembly)
 Located in the `FragmentHeader.Sequence`.
 - Used for identifying and reassembling multi-packet messages.
 - All fragments of a single large message **must share the same Sequence**.
 - The `FragmentHeader.Id` is a message identifier, but is often a generic value (e.g., `0x80000000`) and should **not** be used for grouping fragments.
 
-## 5. Message Fragments
+## 6. Message Fragments
 When `BlobFragments` is set, the data portion consists of one or more fragments. Large messages (like detailed player spawns) are split into chunks of up to 448 bytes of data (464 bytes including the fragment header).
 
-### 5.1 Fragment Header (16 bytes)
+### 6.1 Fragment Header (16 bytes)
 
 | Offset | Type | Name | Description |
 | :--- | :--- | :--- | :--- |
@@ -108,25 +143,21 @@ When `BlobFragments` is set, the data portion consists of one or more fragments.
 | 12 | uint16 | Index | 0-based index of this fragment within the message. |
 | 14 | uint16 | Queue | Destination queue (0x01 = Login, 0x02 = Game, 0x10 = World). |
 
-### 5.2 Fragment Alignment
-Fragments MUST be aligned to 4-byte boundaries within the UDP payload.
-- Padded with zeros.
-- `FragmentHeader.Size` does **not** include padding.
-- `PacketHeader.Size` **does** include all bytes, including intra-fragment padding.
+### 6.2 Fragment Extents and Checksums
 
-### 5.3 The Checksum "Padding Trap"
-When calculating the `payload_hash` for the ISAAC checksum, **DO NOT include the alignment padding.**
+ACE writes each fragment header followed immediately by exactly its declared data bytes.
+`FragmentHeader.Size` includes its 16-byte header. Do not round each fragment's extent up to a
+four-byte boundary: the next header can be unaligned. This follows
+`ACE/Source/ACE.Server/Network/ServerPacketFragment.cs::PackAndReturnHash32` and the retained
+multi-fragment wire fixture in the session tests.
 
-The hash should be the sum of:
-- All Optional Headers.
-- All Fragment Headers.
-- All Fragment Data.
+Hash optional-header bytes together, then each fragment header and its data separately. Reject
+truncated optional headers, incomplete fragment headers/data, zero fragment counts, and indices
+outside the declared count before applying control metadata or consuming a checksum key.
 
-If a packet contains multiple fragments, you must sum them individually. **Skip over the padding bytes** when calculating the hash. If your hash includes those zero-bytes between fragments, the ISAAC verification will fail as "Corrupt Checksum" on the server.
+## 7. Checksum and ISAAC
 
-## 6. Checksum and ISAAC
-
-### 6.1 Hash32 Algorithm
+### 7.1 Hash32 Algorithm
 ```csharp
 uint checksum = (uint)length << 16;
 for (int i = 0; i < length && i + 4 <= length; i += 4)
@@ -138,13 +169,13 @@ while (j < length)
     checksum += (uint)(data[j++] << (8 * shift--));
 ```
 
-### 6.2 Packet Checksum (Unencrypted)
+### 7.2 Packet Checksum (Unencrypted)
 If `EncryptedChecksum` is **not** set:
 1. `header_hash = Hash32(header)` (with `checksum` field set to `0xBADD70DD`).
-2. `payload_hash = Hash32(optional_headers + fragments)`.
+2. `payload_hash = Hash32(optional_headers) + sum(Hash32(fragment_header) + Hash32(fragment_data))`.
 3. `packet.Checksum = header_hash + payload_hash`. (Wrapping 32-bit sum).
 
-### 6.3 Packet Checksum (Encrypted)
+### 7.3 Packet Checksum (Encrypted)
 If `EncryptedChecksum` **is** set:
 
 1.  **Header Hash:** `header_hash = Hash32(header)` (computed with the `checksum` field set to `0xBADD70DD`).
@@ -155,9 +186,11 @@ If `EncryptedChecksum` **is** set:
 4.  **Final Checksum:** `packet.Checksum = header_hash.wrapping_add(payload_hash ^ key)`.
 
 **Note on Composite Hashing:**
-ACE handles the 4-byte alignment of fragments by hashing each component separately. Padding bytes between fragments are NOT included in the hashing process.
+ACE hashes each component separately. Fragment extents are contiguous; no alignment padding is
+inserted between them.
 
 **ACE Verification logic:**
 The server verifies a packet by reversing this:
 `key = (Header.Checksum.wrapping_sub(header_hash)) ^ payload_hash`.
-If the resulting `key` matches the expected next word in the server's S2C ISAAC stream, the packet is valid.
+For an incoming client packet, ACE searches its bounded C2S ISAAC key window for the resulting
+`key` (`ACE/Source/ACE.Common/Cryptography/CryptoSystem.cs`). A match validates the checksum.

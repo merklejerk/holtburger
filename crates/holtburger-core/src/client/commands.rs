@@ -13,7 +13,6 @@ use holtburger_common::CharacterOption;
 use holtburger_common::Guid;
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::GameMessage;
-use holtburger_protocol::messages::transport::packet_flags;
 use holtburger_protocol::messages::*;
 use holtburger_world::interaction::EntityUseRejection;
 use holtburger_world::progression::{ProgressionIntent, StatTarget};
@@ -379,16 +378,7 @@ impl ClientRuntime {
     pub(super) async fn disconnect_with_cause(&mut self, cause: ClientExitCause) -> Result<()> {
         self.reset_camera();
         self.set_exit_cause(cause);
-        let header = PacketHeader {
-            flags: packet_flags::DISCONNECT,
-            sequence: self.session.packet_sequence,
-            id: self.session.client_id,
-            ..Default::default()
-        };
-        self.session.packet_sequence += 1;
-        self.session
-            .send_packet_to_addr(header, &[], self.session.server_addr)
-            .await?;
+        self.session.send_disconnect().await?;
 
         self.state = ClientState::Disconnected;
         self.send_status_event();

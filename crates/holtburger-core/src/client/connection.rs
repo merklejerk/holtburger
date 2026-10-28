@@ -35,7 +35,7 @@ pub struct ConnectionReliability {
     pub receive_repair_share: Option<f64>,
     /// Retransmitted outgoing sequenced datagram share; absent without recent outgoing samples.
     pub send_repair_share: Option<f64>,
-    /// Ordered reception currently awaits a missing packet before buffered traffic can be delivered.
+    /// A known transport hole precedes accepted later traffic, even while earlier data is ready.
     pub receive_gap: bool,
 }
 

@@ -7,14 +7,14 @@ it does not create partially populated retail Environment or CellLandblock recor
 
 The reader/writer in
 [`navigation_bundle.rs`](../crates/holtburger-content/src/navigation_bundle.rs) owns framing.
-Version-one typed records are defined in
+Typed records are defined in
 [`payload.rs`](../crates/holtburger-content/src/navigation_bundle/payload.rs).
 Their field/variant ordering is part of the wire contract. Changes to those serialized shapes
 require a format compatibility review independently of the application's SemVer.
 
 ## File framing
 
-The current format version is 1. Framing integers are unsigned little-endian. Offsets are
+The current format version is 2. Framing integers are unsigned little-endian. Offsets are
 absolute byte offsets from the start of `navigation.hnav`.
 
 | Header offset | Bytes | Meaning |
@@ -23,9 +23,8 @@ absolute byte offsets from the start of `navigation.hnav`.
 | 8 | 4 | Format version |
 | 12 | 4 | Directory entry count |
 | 16 | 8 | Directory offset |
-| 24 | 32 | SHA-256 of the exact companion `bootstrap.hba` bytes |
 
-The header is 56 bytes. Independently encoded payload blocks follow it. The directory
+The header is 24 bytes. Independently encoded payload blocks follow it. The directory
 occupies the end of the file, with exactly 28 bytes per entry:
 
 | Entry offset | Bytes | Meaning |
@@ -44,13 +43,14 @@ length. Unknown versions, kinds, and encodings fail explicitly. The writer uses 
 level 3 only when smaller than raw; the compression level is not a reader compatibility rule.
 
 The reader uses positioned I/O so content workers can share an open archive. It does not
-decode the entire world at startup. The bootstrap hash prevents accidentally combining
-companions from different generations.
+decode the entire world at startup. Navigation has no runtime dependency on the identity
+of a bootstrap HBA. Format 2 removes the former 32-byte bootstrap digest; payload schemas
+remain unchanged. Readers reject unsupported framing versions.
 
 ## Block products
 
 Payloads use MessagePack through `rmp-serde`'s compact serialization. Struct fields follow
-the declared version-one schema order; keyed collections use ordered maps. Geometry values
+the declared schema order; keyed collections use ordered maps. Geometry values
 retain `f32` precision rather than quantizing coordinates.
 
 | Kind | Identity | Product |
@@ -67,7 +67,7 @@ target cell selector, and reciprocal portal index.
 Shared room geometry contains convex containment planes, an optional physics shell, and
 resolved portal planes/vertices keyed by polygon ID. A shell retains the BSP tree, sphere/box
 bounds, and ordered collision polygons. BSP wire variants preserve portal, leaf, and internal
-node facts; see `TreeWire`, `SolidWire`, and `PolygonWire` in the version-one schema. Cells
+node facts; see `TreeWire`, `SolidWire`, and `PolygonWire` in the payload schema. Cells
 reuse Environment structures instead of storing transformed copies of the same room shell.
 
 Terrain retains scene classification, grid size/tile size, source height indices, resolved
@@ -75,7 +75,7 @@ heights, material/water samples, canonical diagonal choices, building entrance r
 and restriction lookups. No RegionDesc read is needed to resolve these facts at runtime.
 Building registrations retain placement and linked portal/cell identities without building
 model geometry. The adapter reconstructs the same terrain collision surface used by the
-full-HBA navigation projection, including collision-only water immersion.
+generation-time HBA projection, including collision-only water immersion.
 
 Physics shell geometry is retained for constrained remote prediction. Local movement uses
 point containment under core's selected policy. The file does not encode local input,
@@ -89,7 +89,7 @@ This metadata is for generation, inspection, and release verification. App versi
 alone do not invalidate an otherwise compatible pair.
 
 The approved ZIP contains exactly the three named files at its root. Release tooling pins
-the ZIP digest, verifies companion binding and component identities before staging, and
+the ZIP digest and component identities before staging, and
 compares staged bytes with the pinned archive before assembly. The ZIP remains a CI input;
 the client bundle contains the three extracted companions. Runtime does not scan the source
 retail corpus or enforce a content size limit.
@@ -98,15 +98,9 @@ Generate with `cli-content generate --source FULL.hba --output NEW_DIRECTORY`; i
 `cli-content info --content NEW_DIRECTORY/content`. The generator is developer tooling,
 separate from the two archive utilities shipped with the CLI product.
 
-After changing generation or scene projection, an explicit real-content check can compare
-room-shell doorway traversal and wall sliding against the regenerated pair:
-
-```sh
-cargo run -p holtburger-world --example room_shell_probe -- /path/to/content
-```
-
-This diagnostic uses owner `0x8602FFFF` from operator-supplied content. Ordinary automated
-regression coverage uses the synthetic prepared-room fixtures in core and requires no retail
-assets. `navigation_envelope_census` remains a separate explicit harness diagnostic for
-reviewing setup-sphere coverage when the source corpus or resolver changes. Neither diagnostic
-is shipped in the CLI or 3D bundle.
+The TUI can use either generated `bootstrap.hba` or a full `assets.hba` for reference facts,
+always alongside `navigation.hnav`. Its frontend selects those inputs; shared core consumes
+`SceneContentSource` and `SetupContentSource` queries rather than filenames or a storage-mode switch. Ordinary
+automated topology regressions use synthetic prepared-room fixtures and require no retail
+assets. The explicit `navigation_envelope_census` harness checks setup-sphere coverage when
+the source corpus or resolver changes; it is not shipped.

@@ -8,7 +8,7 @@ use holtburger_common::{
     Guid,
     properties::{PropertyDataId, PropertyFloat},
 };
-use holtburger_content::{ColliderScale, ContentDecodeCache, NavigationContent};
+use holtburger_content::{ColliderScale, SetupContentSource};
 use holtburger_world::{
     DynamicBodyCollisionDefinition, DynamicPhysicalBodyDefinition, EffectiveEntityPhysicsState,
     EntityCollisionParticipation, EntityCollisionReportPolicy, EntityContactResponse,
@@ -95,18 +95,14 @@ impl NavigationBodyFacts {
     }
 }
 
-/// One selected scene/bootstrap source and a shared cache of decoded setup facts only.
-pub(super) struct NavigationClientSource {
-    pub content: Arc<NavigationContent>,
-    setups: ContentDecodeCache,
+/// Reduced body preparation over frontend-supplied static content queries.
+pub(super) struct NavigationBodySource {
+    pub content: Arc<dyn SetupContentSource>,
 }
 
-impl NavigationClientSource {
-    pub fn new(content: Arc<NavigationContent>) -> Self {
-        Self {
-            content,
-            setups: ContentDecodeCache::new(),
-        }
+impl NavigationBodySource {
+    pub fn new(content: Arc<dyn SetupContentSource>) -> Self {
+        Self { content }
     }
 
     /// Reuses retail's authored sphere/dummy resolution without following model or script links.
@@ -117,9 +113,7 @@ impl NavigationClientSource {
         let setup_id = facts
             .setup_did
             .context("remote navigation body has no setup DID")?;
-        let setup = self
-            .setups
-            .setup_model(self.content.bootstrap(), setup_id)?;
+        let setup = self.content.load_setup(setup_id)?;
         let spheres = crate::resolve_setup_physical_spheres(&setup, 1.0)?;
         let friction = facts
             .friction

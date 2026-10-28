@@ -1,17 +1,27 @@
 This folder is the development content discovery location. h3d supports:
 
-- HBA content such as `assets.hba`, or a retail DAT installation when no HBA is present.
+- Full HBA content such as `assets.hba`, or a retail DAT installation.
 - Optional Explorer weenie catalog: `weenies.hwc`.
 
 h3d can use an existing retail folder directly with `--content <path>` or its startup folder picker.
 The usual files are `client_portal.dat`, optional `client_highres.dat`, `client_cell_1.dat`, and
 `client_local_English.dat`. Header metadata identifies their roles. Highres and base portal share
-the portal namespace; other duplicate roles are rejected. HBA directories never silently mount DATs
-underneath missing HBA content.
+the portal namespace; other duplicate roles are rejected. h3d checks the visual sentinel in the HBA installation before retaining that family. If
+readable HBAs lack it, h3d can select the directory's DAT installation instead. Corrupt HBAs
+remain errors; families never mix.
 
-The TUI Flatpak recipe still installs a namespaced `assets.hba` and selects its packaged location
-using `HOLTBURGER_DATS`. h3d uses its own CLI/saved-location/startup contract instead. Motion facts
-are projected from raw records at runtime; there is no required baked `holtburger/core` asset.
+TUI development also uses this directory by default. It requires `navigation.hnav` for
+geometry, plus `bootstrap.hba` (preferred when present) or `assets.hba` for reference facts.
+The HBA may be reduced or full; it never replaces HNAV or changes the reduced TUI simulation.
+`--content` and `HOLTBURGER_CONTENT` select a directory, never an individual file.
+To use the full HBA for reference facts, select a directory containing `assets.hba` and
+`navigation.hnav`, without `bootstrap.hba`.
+Generated metadata is for tooling; it does not impose a runtime bootstrap checksum binding.
+
+Native CLI bundles keep these files under executable-adjacent `content/`. The CLI Flatpak
+selects `/app/lib/holtburger/content` through `HOLTBURGER_CONTENT`. h3d keeps its own
+full-content CLI/saved-location/startup contract. Motion facts are projected from raw records
+at runtime; there is no required baked `holtburger/core` asset.
 
 To generate a full archive for 3D rendering:
 

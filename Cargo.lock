@@ -1611,7 +1611,6 @@ dependencies = [
  "bitflags 2.11.0",
  "clap",
  "crossterm",
- "directories",
  "env_logger",
  "futures",
  "holtburger-common",

@@ -245,43 +245,29 @@ done
 
 ## Data File Configuration
 
-The TUI client requires a namespaced HBA bundle that carries retail data under `eor/portal` and the derived runtime asset under `holtburger/core`. Optional richer world data may also be present under `eor/cell`.
+The TUI uses an HBA for bootstrap/reference facts and `navigation.hnav` for geometry. An HBA
+may contain reduced bootstrap data or full retail resources; either uses the same reduced
+TUI simulation. There is no baked `holtburger/core` asset and no runtime full-HBA geometry path.
 
-- Release archives already include the bundled `assets.hba` archive for the current runtime path.
-- Flatpak builds also include that bundled `assets.hba`.
-- Source builds and local development setups require you to provide the archive yourself.
+For development, put the files in `dats/`:
 
-If you are setting up local data, you have two practical options:
-
-1. Download the latest HBA bundle from the [Releases](https://github.com/merklejerk/holtburger/releases) page and extract it into `./dats/` so `assets.hba` is present.
-2. Repack retail DAT files such as `client_portal.dat` and `client_cell_1.dat` into a namespaced HBA v2 bundle with `dat2hba`.
-
-### Repacking DATs Into HBA v2
-
-Runtime bootstrap is HBA-only now. The supported path for retail DAT inputs is to emit a combined namespaced archive instead of pointing the client at raw `.dat` files directly:
-
-```bash
-cargo run -p holtburger-tools --bin dat2hba -- \
-    --profile micro \
-    eor/portal=client_portal.dat \
-    eor/cell=client_cell_1.dat \
-    dats/assets.hba
+```text
+dats/
+  bootstrap.hba      # generated bootstrap, preferred when present
+  assets.hba         # optional full HBA, usable instead of bootstrap.hba
+  navigation.hnav   # required with either HBA
 ```
 
-`dat2hba` defaults to `--profile full`. Use `--profile micro` if you want the release-oriented minimal bundle; it contains the required portal tables plus the derived `holtburger/core:MotionKinematics` asset.
+Selection order is `--content DIR`, `HOLTBURGER_CONTENT`, working-directory `dats/`, then
+executable-adjacent `content/`. A directory uses `bootstrap.hba` when present, otherwise
+`assets.hba`. Both the flag and environment variable accept directories only;
+`navigation.hnav` must be in the same directory. Existing malformed selections fail clearly.
 
-At runtime, the frontend constructs a `holtburger-content::ContentRepository` from that HBA source, requests a parsed `WorldBootstrap` for `holtburger-core`, and may retain the repository for static reference-data lookups.
-
-**Search Priority:**
-1.  `--dats <PATH>` command-line argument.
-2.  `HOLTBURGER_DATS` environment variable.
-3.  Local `./dats/` directory relative to the binary.
-4.  Standard OS Data Directory:
-    *   **Linux**: `~/.local/share/holtburger/dats/`
-    *   **MacOS**: `~/Library/Application Support/io.github.merklejerk.holtburger/dats/`
-    *   **Windows**: `%APPDATA%\merklejerk\holtburger\data\dats\`
-
-> **Note:** Official DAT files no longer need to be renamed when passed to tooling. Runtime startup no longer scans raw DAT files; use `dat2hba` to produce a namespaced `assets.hba` bundle first.
+CLI native/Flatpak bundles include the generated reference and navigation data. Source builds
+need generated data compatible with the current navigation format; see the
+[CLI quickstart](docs/ALPHA_CLI_QUICKSTART.md) and [navigation format](docs/navigation_format.md).
+A full HBA alone does not replace navigation data. h3d separately supports full retail DATs or
+HBAs through its own content selection; see the [3D quickstart](docs/ALPHA_3D_QUICKSTART.md).
 
 ## License
 

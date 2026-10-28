@@ -1,8 +1,8 @@
-use super::collision::ClientSpatialPolicy;
+use super::collision::{ClientBodyPolicy, ClientSpatialSources};
 use super::movement_types::ClientMovementPolicy;
-use super::navigation_body::NavigationClientSource;
+use super::navigation_body::NavigationBodySource;
 use anyhow::{Context, Result, anyhow};
-use holtburger_content::{ContentRepository, NavigationContent};
+use holtburger_content::{ContentRepository, SceneContentSource, SetupContentSource};
 use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, SpellTable, XpTable};
 use holtburger_session::Session;
 use holtburger_world::{WorldBootstrap, WorldState};
@@ -28,7 +28,7 @@ pub struct ClientRuntimeBuilder {
     account_name: String,
     server_endpoint: Option<ServerEndpoint>,
     world_bootstrap: Option<Arc<WorldBootstrap>>,
-    spatial_policy: Option<ClientSpatialPolicy>,
+    spatial_sources: Option<ClientSpatialSources>,
     dynamic_script_source: Option<Arc<dyn super::dynamic_script::ClientDynamicScriptSource>>,
     selection_envelope_source:
         Option<Arc<dyn super::selection_envelope::ClientSelectionEnvelopeSource>>,
@@ -45,7 +45,7 @@ impl ClientRuntimeBuilder {
             account_name: account_name.into(),
             server_endpoint: None,
             world_bootstrap: None,
-            spatial_policy: None,
+            spatial_sources: None,
             dynamic_script_source: None,
             selection_envelope_source: None,
             combat_tuning: ClientCombatTuning::default(),
@@ -109,21 +109,31 @@ impl ClientRuntimeBuilder {
         Ok(())
     }
 
-    /// Selects full physical simulation and its content-backed scene/body preparation source.
+    /// Selects physical body behavior with independently supplied environment geometry.
     pub fn physical_movement_source(
         mut self,
-        source: Arc<dyn super::collision::ClientCollisionSource>,
+        scenes: Arc<dyn SceneContentSource>,
+        source: Arc<dyn super::collision::ClientBodySource>,
     ) -> Self {
-        self.spatial_policy = Some(ClientSpatialPolicy::Physical(source));
+        self.spatial_sources = Some(ClientSpatialSources {
+            scenes,
+            bodies: ClientBodyPolicy::Physical(source),
+        });
         self
     }
 
-    /// Selects point-validated local motion and room-shell-constrained remote prediction.
-    /// The caller loads bootstrap from this selection's exact indexed repository.
-    pub fn navigation_content(mut self, content: Arc<NavigationContent>) -> Self {
-        self.spatial_policy = Some(ClientSpatialPolicy::Navigation(Arc::new(
-            NavigationClientSource::new(content),
-        )));
+    /// Selects point-validated local motion and reduced remote bodies.
+    /// Environment geometry is supplied independently of this behavior.
+    /// The frontend independently supplies bootstrap facts and chooses its static-data provider.
+    pub fn navigation_movement_source(
+        mut self,
+        scenes: Arc<dyn SceneContentSource>,
+        content: Arc<dyn SetupContentSource>,
+    ) -> Self {
+        self.spatial_sources = Some(ClientSpatialSources {
+            scenes,
+            bodies: ClientBodyPolicy::Navigation(Arc::new(NavigationBodySource::new(content))),
+        });
         self
     }
 
@@ -218,10 +228,12 @@ impl ClientRuntimeBuilder {
         })?;
         let (client_view_event_tx, _) = broadcast::channel(4096);
 
-        let movement_policy = self.spatial_policy.as_ref().map_or(
-            ClientMovementPolicy::Physical,
-            ClientSpatialPolicy::movement_policy,
-        );
+        let movement_policy = self
+            .spatial_sources
+            .as_ref()
+            .map_or(ClientMovementPolicy::Physical, |sources| {
+                sources.bodies.movement_policy()
+            });
         Ok(ClientRuntime {
             #[cfg(feature = "runtime-fixture")]
             runtime_fixture: None,
@@ -270,9 +282,12 @@ impl ClientRuntimeBuilder {
             combat_tuning: self.combat_tuning,
             combat_approach_drive_active: false,
             melee_approach_state: None,
-            collision_coordinator: self
-                .spatial_policy
-                .map(super::collision::ClientCollisionCoordinator::with_policy),
+            collision_coordinator: self.spatial_sources.map(|sources| {
+                super::collision::ClientCollisionCoordinator::with_policy(
+                    sources.scenes,
+                    sources.bodies,
+                )
+            }),
             dynamic_script_coordinator: self
                 .dynamic_script_source
                 .map(super::dynamic_script::ClientDynamicScriptCoordinator::new),

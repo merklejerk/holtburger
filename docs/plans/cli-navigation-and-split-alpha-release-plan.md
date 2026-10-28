@@ -1,7 +1,200 @@
 # CLI navigation content and separate alpha distributions
 
-Status: implementation in progress. Phase 1 codec/generator and the prepared scene adapter are implemented and locally verified. Full production content is 31,237,537 bytes including metadata. Phase 2 exact-source loading and parsed creation-catalog threading are implemented. Core has explicit physical/navigation composition, tested bodyless activation, client/server-directed local intent progress, and reduced sticky following with valid endpoint commitment. Model-free remote preparation now passes prepared-content/core-tick doorway, sliding, and missing-setup recovery fixtures. Setup dimensions independently supply pose-only interaction ranges. Paced ACE replays preserve the original movement policy. The TUI now selects this policy and exact content source; actual wire captures cover valid reports across gaps. The production startup probe passes on the generated worldwide pair and model-free HBA fixture. The production headless runtime also passed the paced ACE route and a real dungeon gap after fixing idle-tick progress loss. A packet-level synthetic correction fixture covers both changed and identical poses. Native/Flatpak assembly and product/target-selective workflows are implemented and locally checked. The local branch is rebased onto recorded `3d-next` head `09f8cc2d6`, retaining version `0.1.0-alpha.5`, upstream manual candidate/tag/staging flow, and Windows packaging setup. Ground-level exterior doorway now passes live. The user resolved the missile-admission gap with a general reduced-client policy: delegate gameplay eligibility that lacks meaningful local simulation to ACE, retaining physical-client checks and meaningful shared validations. Navigation missile admission now follows that policy; 22 focused combat tests pass. The final runtime/consumer audit is complete, including a local manual-release/pulse-expiry fix. The approved content pair is uploaded and URL/digest-pinned; production download/bootstrap verification passes. Actual candidate packaging/acceptance remains pending. The user has authorized committing and pushing the remaining changes; release-branch integration must satisfy the candidate workflow guard, and publication remains separate.
+Status: the simplified TUI content path and accepted ownership/admission follow-up are
+implemented and locally verified.
+The approved format-2 input is uploaded, pinned locally, and verified through a fresh download.
+Commit/push to `claude` and `3d-next` is explicitly authorized.
+Next: selection of the next application candidate; no candidate dispatch is authorized yet.
+Alpha.5 remains frozen and unpublished; it does not contain this follow-up.
 Updated: 2026-10-28.
+
+## Current steer — One TUI source contract, simple discovery
+
+This section owns the next steps. It supersedes alpha.5's dual-storage selection, bootstrap
+checksum binding, and discovery contracts recorded later in this plan. Movement behavior,
+crate ownership of simulation, product separation, and supported targets remain unchanged.
+
+Accepted direction:
+
+- TUI always reads bootstrap/reference facts from an HBA and geometry from HNAV. A reduced
+  or full HBA is interchangeable for reference facts when it contains the required resources;
+  there is no profile inference or runtime HBA-to-navigation fallback.
+- TUI owns selection: `--content`, then `HOLTBURGER_CONTENT`, then working-directory `dats/`,
+  then executable-adjacent `content/`. No platform-data or extra working-directory search.
+- `--content` and `HOLTBURGER_CONTENT` accept directories only. A directory uses
+  `bootstrap.hba` when present, otherwise `assets.hba`, plus `navigation.hnav`. Individual
+  HBA paths are rejected; malformed selections fail.
+- Content owns decoding and static queries. Core consumes `SceneContentSource` for owner
+  classification/geometry and `SetupContentSource` for reduced body facts; it does not choose
+  filenames/formats. Frontends explicitly select movement/body behavior independently of the
+  scene provider. World/solver ownership and h3d's physical behavior stay unchanged.
+- Remove the runtime bootstrap checksum requirement entirely. HNAV format 2 has a 24-byte
+  header with no bootstrap digest. Retain format/bounds validation and release ZIP/component
+  integrity. Do not replace the removed binding with another compatibility handshake.
+
+Implementation and review tracking:
+
+| Work | State and evidence |
+| --- | --- |
+| Delete full-HBA navigation fork and shared TUI selection wrapper | Done locally: removed `NavigationContent`/`NavigationStorage` and their obsolete selection tests |
+| Make core consume static queries | Done locally: both builder modes take an independent `SceneContentSource`; reduced bodies read `SetupContentSource`, full bodies use `ClientBodySource`; format-specific selection stays outside core |
+| Remove exact-bootstrap checksum gate | Done locally: removed header field, reader/writer binding API, and binding tests; updated generator, inspector, and release validator to format 2 |
+| Simplify discovery and dev layout | Done locally: frontend resolver implements the order above; either real HBA works with the same HNAV; new files installed in ignored `dats/` without changing the full HBA |
+| Allow fetching into existing dev directories | Done locally: unrelated files such as `assets.hba` survive; existing managed inputs are never overwritten |
+| Remove stale machinery and instructions | Done locally: removed the one-off room-shell diagnostic; corrected README/quickstarts/architecture docs; moved the CLI bootstrap probe into the CLI package without adding TUI dependencies to the generic harness |
+| Preserve ordinary dev launch | Verified Cargo metadata still selects `tui` by default; the headless bootstrap binary is private to verification |
+| Validate the change | Done locally: 1,245 affected library tests, 48 release-tool tests, three generator tests, discovery tests, warnings-denied lint, host compilation, formatting/actionlint, and notice freshness pass |
+
+Real-data evidence before the directory-only cutover: default dev discovery and an explicit
+full-HBA override both passed the production headless bootstrap with the same HNAV: 13 heritage groups and 568 cells/room
+shells. This is not interactive TUI acceptance. The general movement implementation and
+physical-policy regressions remain covered by the affected core tests.
+
+### Accepted architecture steer — execution order
+
+The user accepted this direction on 2026-10-28 and requested it be incorporated into the plan.
+The remaining work is a bounded simplification, not a new discovery framework or a change
+in movement fidelity. These tasks precede a new application candidate.
+
+#### 1. Directory-only TUI selection
+
+- [x] Make TUI `--content` and `HOLTBURGER_CONTENT` directory-only; remove the implicit
+  sibling-HNAV file override. Keep the two supported reference filenames and existing precedence.
+- [x] Update help, quickstart, dev instructions, and architecture notes. Three focused discovery
+  tests and formatting pass, including rejection of an individual HBA path.
+
+#### 2. Separate environment sourcing from movement behavior
+
+Ground truth: `client/builder.rs`, `client/collision.rs`, `client/navigation_body.rs`, and
+`client/simulation.rs` in core; `navigation_source.rs` and `navigation_scene.rs` in content;
+the TUI bootstrap and h3d host `client_runtime.rs` are the frontend composition sites.
+
+- [x] Unify the existing scene-classification/geometry query seam consumed by the coordinator
+  where this removes duplicate interfaces or dispatch. Full and reduced providers already
+  produce `LandblockCollisionAsset`; retain this shared product. Do not add a capability
+  registry, archive-profile negotiation, or a second scene lifecycle.
+- [x] Keep movement/body behavior explicitly selected by the frontend at client construction.
+  Core owns orchestration and reusable movement/body preparation; world owns placement and
+  solving; content supplies static products and decoding. A scene provider must not implicitly
+  change movement behavior based on available files or missing resources.
+- [x] Preserve semantics: our player remains point-validated, interpolating XYZ without local
+  gravity/jumping/stair handling. Eligible remote entities retain setup-based physical bodies,
+  shell/terrain solving, and gravity according to their physics state. h3d retains its full
+  physical body and collision behavior. Adding a simulated local TUI body is not part of this work.
+- [x] Preserve unavailable/error versus deliberately omitted geometry. A loaded reduced room
+  has no furniture colliders; missing room coverage is not permission to move through empty space.
+- [x] Preserve existing worker ownership, caches, activation readiness, and generation checks.
+  Teleports/logout must retire stale work under the existing lifecycle; changing geometry
+  representation must not introduce runtime mode switching.
+
+Acceptance: focused synthetic tests prove both providers enter the same scene-loading path,
+reduced scenes retain containment/portals without furniture, missing coverage stays unavailable,
+and existing local-navigation/remote-physics/full-physical regressions pass. Prefer existing
+fixtures and tests; do not add retail-asset-dependent tests or repeat the full platform matrix.
+
+#### 3. Admit h3d candidates before committing to an archive family
+
+Ground truth: `apps/holtburger-3d/host/src/content_selection.rs` and
+`crates/holtburger-content/src/repository/mounting.rs`. The visual sentinel currently checks
+an already mounted repository; directory mounting has already excluded DATs whenever any HBA
+exists. Naming the TUI archive `bootstrap.hba` does not fix this ordering.
+
+- [x] Let h3d try a directory's HBA installation and apply its existing visual sentinel rule.
+  If readable HBAs lack that asset, allow the retail DAT installation in the same directory.
+  Prefer an admitted HBA installation when both families qualify. Do not combine families.
+- [x] Keep visual admission in h3d; shared content handles archive opening and deterministic
+  precedence. Reuse the existing sentinel, with no new metadata or completeness scan.
+- [x] Apply the same directory policy to explicit directories and automatic/saved locations.
+  An explicit archive file remains exact and never selects a sibling or another family.
+- [x] Keep malformed/unreadable selected archives as visible errors. Only a readable but
+  visually unsuitable HBA installation permits trying DATs; do not hide corruption behind fallback.
+- [x] Cover a full HBA plus bootstrap HBA; bootstrap HBA plus retail DATs; bootstrap-only;
+  DAT-only; both suitable families; corrupt HBA plus DATs; and explicit bootstrap-file rejection.
+  Use focused synthetic fixtures and existing mounting helpers.
+
+Acceptance: bootstrap content cannot exclude otherwise valid retail DATs, admitted HBAs keep
+precedence, and exact-file/error behavior remains deterministic. Run affected content/host tests
+and warnings-denied lint; leave visual acceptance to the user.
+
+#### 4. Cleanup and distribution handoff
+
+- [x] Remove superseded source interfaces, dispatch branches, names, and obsolete tests in the
+  same change. Update the architecture docs to describe actual layer ownership.
+- [x] Review the diff for unnecessary abstraction/line growth and behavior drift. If separating
+  the seams requires a broader solver redesign, stop and re-scope before implementing it.
+- [x] Update this plan with focused validation evidence, then follow the distribution steps below.
+  These changes do not themselves require regenerating the already prepared format-2 data.
+
+Local implementation evidence (2026-10-28):
+
+- Scene classification/loading now calls the coordinator's single `SceneContentSource` directly;
+  `ClientBodyPolicy` only selects movement and body preparation/filtering. Builder composition
+  stores the two sources together, avoiding independent optional configuration. Existing worker
+  and residency lifecycle code is retained.
+- Deleted the old combined `NavigationContentSource` and `ClientCollisionSource` interfaces and
+  policy-based scene dispatch. Updated all application/harness consumers and required-failure
+  reporting. The concrete full provider is `ContentClientPhysicsSource`, implementing both
+  independent scene and body contracts over the existing service/repository.
+- h3d uses `ResolvedContent::open_preferred` plus its existing sentinel admission; automatic
+  discovery uses the same preference. Generic opening retains deterministic archive mounting.
+  Shared synthetic tests exercise the directory-family matrix; host tests exercise the actual
+  sentinel, explicit/automatic directory entry points, and exact bootstrap-file rejection.
+- Passed: 158 content library tests; 662 core client tests plus the new independent-provider
+  test; two host admission tests; three TUI discovery tests. Core socket fixtures passed with
+  local loopback permission. Existing tests cover stale completions, teleport/disconnect,
+  readiness, shell sliding/doorways, and unavailable coverage.
+- Warnings-denied clippy passes for content/core/CLI/host libraries and tests, and all diagnostic
+  binaries including `runtime-fixture`. The feature-gated fixture capture binary also had an
+  already-stale character-selection pattern updated to ignore the unrelated `max_slots` field.
+  Notice freshness, formatting, and diff checks pass.
+- Current-code headless bootstrap passes for ordinary `dats/` discovery and a temporary directory
+  containing only a full `assets.hba` plus the same `navigation.hnav`: 13 heritage groups,
+  568 cells, 568 shells in each. No interactive TUI, visual acceptance, new upload, commit/push,
+  candidate build, or release publication was performed.
+
+Handoff audit: traced the current TUI selector/provider/builder/coordinator path, h3d
+admission and required-failure adapter, native bootstrap invocation, and Flatpak content
+location. Corrected the release operator guide's stale probe package and bootstrap-binding
+claim. No further source changes were identified in these seams. This audit does not prove
+new candidate packaging or manual acceptance; those remain below.
+
+### Remaining work for this steer
+
+- [x] Obtain explicit approval to publicly upload `cli-content-bc8933cd905326fa.zip` to the
+  existing `content-alpha-df24573f24e4ca46` content prerelease, preserving its existing assets.
+- [x] Upload the approved bytes, pin the returned asset URL and digest, then verify a production
+  fetch/bootstrap round trip. Current descriptor selects format-2 GitHub asset `685856679`;
+  the downloaded ZIP matches the approved local bytes exactly and staged components validate.
+  The current-code bootstrap reports 13 heritage groups and 568 cells/room shells.
+- [x] Obtain explicit go-ahead to commit/push this follow-up to `claude` and `3d-next`.
+  User authorized this step after the upload round trip; candidate dispatch remains separate.
+- [ ] Select the next candidate/version explicitly, then perform one intentional candidate run
+  after the compatible input pin and reviewed source are available. Keep alpha.5's assets intact.
+- [ ] Verify/freeze the new candidate and collect user acceptance for the changed TUI path;
+  record exactly which native/Flatpak products and targets were tested.
+- [ ] Publish only with separate authorization, reusing the accepted candidate bytes.
+
+The regenerated ZIP is ready locally at `.holtburger-local/cli-content-v2/cli-content.zip`:
+31,237,845 bytes; SHA-256
+`bc8933cd905326fa231f584fb1280d21f8eed5c218f0795b30068aadc13e0dc4`.
+
+The initial automatic approval rejection was resolved by the user's explicit “go ahead”
+authorization for this exact asset and destination. Uploaded as a new asset, without replacing
+existing inputs. GitHub reports the expected size/digest; production fetch output is retained
+locally in `.holtburger-local/content-pin-v2-roundtrip/`. Re-read alpha.5's draft and compared
+all 11 asset IDs, sizes, and digests against its frozen receipt: unchanged. Remote `claude` and
+`3d-next` still match local base `97ae69d2847a920141296a629e23a626b1cce41d`; no additional
+rebase is currently required. No commit/push, application candidate dispatch, or publication
+was performed in this handoff.
+
+### Frozen baseline
+
+Alpha.5 (`alpha-20261028-97ae69d28`, source `97ae69d2847a920141296a629e23a626b1cce41d`)
+passed candidate run `40718199141` in 13m 21s. Its 11 assets were downloaded/verified and
+remain frozen in an unpublished draft. Its input ZIP remains unchanged. The user reported
+that h3d looks good; target/package details were not specified, so this is not blanket native
+acceptance. Exact baseline asset identities are recorded in
+[evidence](evidence/cli-navigation-alpha5-candidate.json).
 
 ## Goal and boundaries
 
@@ -122,7 +315,9 @@ flowchart LR
     Pin --> PackageCLI[CLI packaging]
     Bootstrap --> Load[Content adapters]
     Nav --> Load
-    Full[Explicit full-HBA fallback] --> Load
+    Full[User-selected full HBA] --> BootstrapFacts[Reference facts]
+    Bootstrap --> BootstrapFacts
+    BootstrapFacts --> Load
     Load --> Products[Parsed catalogs + shared geometry]
     Products --> Core[Core residency and movement orchestration]
     Core --> TUI[Reduced TUI policy]
@@ -165,7 +360,11 @@ flowchart TD
 
 Use an explicit sum type/configuration for the two supported policies, avoiding independently nullable flags that admit contradictory readiness/body states. Policy configuration lives in core; TUI/h3d choose it at composition. Geometry primitives remain in world/content. Preserve asynchronous generation/identity checks through login, teleport, character changes, and stale worker completion.
 
-## Phased implementation
+## Alpha.5 implementation record
+
+The phase checklists below record the frozen baseline. Completed baseline tasks are not
+proof that the current follow-up has been distributed or accepted; use the current steer
+and remaining-work list above for that status.
 
 The user authorized implementation, with an explicit stop for major gaps/blockers or required user review. All tasks below are pending unless marked otherwise. No new authorization to commit/push is implied. Keep intermediate phases compilable and covered by ordinary checks; do not tag a new candidate until the Phase 7 workflow/package/input contracts have cut over together.
 
@@ -391,7 +590,7 @@ Deliverables: product-specific assembly/inspection in `.github/scripts/alpha_rel
 - [x] Replace combined native assembly with two explicit inventories selected by `assemble --product cli|3d`. Target/archive/source/architecture helpers remain shared; no new packaging framework. Workflow callers and Flatpak aggregation now use product-specific contracts. Remote input pinning is complete; actual candidate checks remain pending.
 - [x] CLI assembler stages terminal client, two approved utilities, scripts/sidecars, content pair, metadata, license/notices, and `ALPHA_CLI_QUICKSTART.md`. Synthetic assembly/extraction verifies exact inventory and content substitution refusal; actual Linux release assembly/extraction and extracted-content bootstrap also pass (see local proof above).
 - [x] 3D assembler stages the existing packaged h3d client/Explorer, private host/runtime/resources, metadata, license/notices, and `ALPHA_3D_QUICKSTART.md`. Exact root inventory excludes TUI/content/scripts. Synthetic assembly/extraction passes; actual packaged host/renderer verification remains in the assembler and must run on native build outputs.
-- [ ] Validate actual native required payload and source/architecture identity. Actual Linux CLI and 3D release assembly/extraction now pass, including fresh host/renderer identity, architecture, linkage, and payload checks. Two positive product assembly/extraction contracts are also covered by synthetic tooling tests, sharing architecture/archive checks. All release tooling tests pass (48 tests across the current scripts). Windows/macOS packaging and user native acceptance remain pending the new candidate.
+- [x] Validate actual native required payload and source/architecture identity. Actual Linux CLI and 3D release assembly/extraction now pass, including fresh host/renderer identity, architecture, linkage, and payload checks. Two positive product assembly/extraction contracts are also covered by synthetic tooling tests, sharing architecture/archive checks. All release tooling tests pass (48 tests across the current scripts). The full candidate now also passes Windows/macOS build/package/probe jobs; only user native acceptance remains pending.
 - [x] CLI assembly and extracted inspection run without npm, Electron, an h3d package, or a host binary. 3D assembly runs with CLI content, tools, scripts, and the CLI-content descriptor absent. Positive assembler tests construct only the selected product inputs; CLI asserts no Node invocation. Linkage and the 3D Node verifier are mocked for synthetic headers, so this is input-independence evidence, not native executable acceptance.
 - [x] Release manifest requires both products on all three targets and both product Flatpaks, with product/target records, common source/version/notices, matching CLI companion identities, and exact archives. Removed old fixed asset-count and standalone-micro requirements. 3D app ID remains distinct from artifact filename. Synthetic aggregation tests reject partial/mismatched/substituted records.
 
@@ -404,7 +603,7 @@ Deliverables: both manifests/wrappers, desktop/AppStream metadata, installed pro
 - [x] CLI Flatpak recipe packages the complete CLI-native inventory with utilities/content/scripts and common documents. Entry points link into that payload; it has network access without graphical sockets or Electron. No new graphical dependency was added for CLI. Actual installed probes still need a built candidate.
 - [x] 3D Flatpak keeps `io.github.merklejerk.holtburger-alpha` and settings. Payload/display/artifact naming is 3D-only; obsolete TUI content/script environment variables and tool links are removed. Required graphics/network/Zypak support and wrapper remain.
 - [x] `prepare-flatpak --product cli|3d` consumes each product’s verified Linux archive and source receipt. Both reuse the existing alpha runtime/SDK generation, with no rebuilt binaries or duplicate content fetch. Separate builder state remains cached. Both actual recipes materialize successfully through `flatpak-builder --show-manifest`, and every resolved local source exists in a focused materialization probe.
-- [ ] Inspect each installed inventory and run focused probes. Do not add an interactive TUI invocation; graphical acceptance belongs to the user.
+- [x] Inspect each installed inventory and run focused probes. Both installed Flatpak inventory/byte/runtime and focused probe sets pass in candidate run `40718199141`. Do not add an interactive TUI invocation; graphical acceptance belongs to the user.
 - [x] Migrate the shared CLI recipe’s nightly consumer to the same pinned CLI input and native assembler. Nightly selects only shipped CLI binaries with Cargo cache and reuses Linux output for Flatpak instead of compiling again. Remove separate nightly micro publication. Existing main/dev DAT-test micro fetching remains outside the CLI release path. Nightly still runs only on main after this branch reaches it.
 
 Acceptance: two Flatpaks contain their intended product, with correct commands/data/permissions. Installing the 3D-only replacement uses the existing alpha ID; no settings migration machinery or combined third package exists.
@@ -431,7 +630,7 @@ Prerequisite: complete post-rebase validation. Workflow conflicts now preserve u
 - [x] Build shared Rust dependencies once per selected target where practical. Upload/inspect products independently; do not make CLI-only success depend on Electron.
 - [x] Retain the combined Linux Flatpak job's shared setup where both are selected. Fetch CLI data only for CLI work. Reuse Linux outputs, checked-in notices, and existing caches.
 - [x] Preserve source/checksum/host identities and required full-product aggregation. Notice review remains cheap/advisory; no size gate, source retail corpus in CI, or all-platform shared test duplication. Installed Flatpak equality binds verified native bytes; only install-specific entry points/runtime/modes/helper checks are repeated.
-- [x] Current local release tooling tests pass (48), all four touched workflows pass actionlint, both actual Flatpak recipes materialize with existing absolute sources, XML/shell syntax checks pass, and diff whitespace checks pass. These are local tooling checks; actual new native/Flatpak candidate builds and installed probes remain pending. Diagnose individual failures before another candidate attempt.
+- [x] Current local release tooling tests pass (48), all four touched workflows pass actionlint, both actual Flatpak recipes materialize with existing absolute sources, XML/shell syntax checks pass, and diff whitespace checks pass. These local tooling checks are now supplemented by the successful full candidate and installed Flatpak probes recorded in Phase 9. Diagnose individual failures before another candidate attempt.
 
 Acceptance: local workflow/tooling checks pass; selected products have correct prerequisites and expected inventories. One intentional end-to-end candidate run follows, rather than repeated blind full runs.
 
@@ -457,19 +656,30 @@ Acceptance: user-facing instructions match actual artifacts and supported behavi
 
 ### Phase 9 — Stage, freeze, and final native handoff
 
-The user authorized the content ZIP upload and local URL pin; those actions and production
-download/bootstrap verification are complete, with existing input assets unchanged. The user
-then authorized committing and pushing the remaining fix, content pin, and docs. Current
-`origin/3d-next` remains at the recorded rebase base `09f8cc2d6`; the feature branch is a
-fast-forward descendant. Full candidate dispatch requires the source to belong to `3d-next`,
-so release-branch integration is the remaining dispatch prerequisite. Publication stays separate.
+The user authorized the content ZIP upload/pin, final follow-up commit/push, fast-forward
+of `3d-next`, and full candidate dispatch. Commit `97ae69d2847a920141296a629e23a626b1cce41d`
+is pushed to both branches. Full candidate run `40718199141` succeeded on its first attempt in
+13m 21s and staged `alpha-20261028-97ae69d28` (release ID `426875956`, version
+`0.1.0-alpha.5`). Six native archives, both Flatpaks, notices, manifest, and checksums are
+uploaded. All 11 files were downloaded once and verified against GitHub digests and
+`SHA256SUMS`; all native build identities and CLI companions match the manifest/approved pin.
+The CI-built headless bootstrap passes against the extracted release content (13 heritage
+groups, 568 cells/room shells). Manifest SHA-256:
+`fa8beb388c1283c88ec2e600ab087b05ce85f025d0cad894c88eed99ce2f9415`.
 
-- [ ] Obtain explicit go-ahead before any push, content upload, candidate tag/dispatch, draft
+The draft notes contain build evidence and one short manual acceptance checklist. Exact
+asset IDs/sizes/digests and verification status are recorded in
+[evidence](evidence/cli-navigation-alpha5-candidate.json). These bytes are frozen; no rebuild
+or asset replacement is authorized by acceptance/publication. User native/visual acceptance
+of every new split product remains pending; earlier combined-alpha acceptance does not carry
+over. The draft is still unpublished. Publication needs its separate go-ahead.
+
+- [x] Obtain explicit go-ahead before any push, content upload, candidate tag/dispatch, draft
   staging, or publication. Implementing and locally verifying this plan does not authorize
   those release actions. Native/visual acceptance remains at the end.
-- [ ] Use the existing version command for the next selected candidate; stage a new draft with the split products, checksums, manifest, and appropriate notes. Do not silently rebuild or replace earlier frozen draft assets.
-- [ ] Verify fetched/extracted release bytes against the recorded identities once and freeze the concrete candidate.
-- [ ] Provide one short acceptance checklist covering CLI creation and approach/follow/portal/correction behavior, 3D unchanged launch/client/Explorer/content behavior, and the two Flatpaks. Record which target checks actually ran.
+- [x] Use the existing version command for the next selected candidate; stage a new draft with the split products, checksums, manifest, and appropriate notes. Do not silently rebuild or replace earlier frozen draft assets.
+- [x] Verify fetched/extracted release bytes against the recorded identities once and freeze the concrete candidate.
+- [x] Provide one short acceptance checklist covering CLI creation and approach/follow/portal/correction behavior, 3D unchanged launch/client/Explorer/content behavior, and the two Flatpaks. Record which target checks actually ran.
 - [ ] User native verification occurs at the end, as requested. It is not a prerequisite for generating a draft. Distinguish tested Flatpak behavior from unverified native targets.
 - [ ] Publish the frozen artifacts through the existing release mechanism after the agreed final handoff; publication must not rebuild packages. No new approval/promotion orchestration.
 
@@ -528,14 +738,14 @@ Resolve during Phase 0 or the named phase, not by silent implementation assumpti
 - [x] Confirm the clean TUI `--content`/environment naming cutover against actual scripts and automation before changing it.
 - [x] Choose final codec/file magic and command naming during Phase 1; these are implementation decisions, not reasons to invent another framework.
 
-## Definition of done
+## Alpha.5 baseline completion record
 
 - [x] Production generated content loads through content adapters without retail navigation decoding or model/texture dependencies.
 - [x] Character creation uses the complete catalog; startup probes cover the actual loading path that previously failed.
 - [x] Reduced local/remote movement, valid position publication across every position-bearing packet path, cell-change-triggered reports, coverage failures, and lifecycle resets satisfy the accepted decisions and focused tests.
 - [x] h3d retains its full physical behavior and required resources, with selected regression evidence.
-- [ ] CLI and 3D native/Flatpak inventories are separate and correct; no obsolete combined bundle or broken micro payload remains in the new release path.
-- [ ] Generation is reproducible and local; CI packages pinned content with shared, scoped validation.
-- [ ] Formatting, relevant builds/tests, warnings-denied linting, version checks, and packaging checks pass.
+- [x] CLI and 3D native/Flatpak inventories are separate and correct; no obsolete combined bundle or broken micro payload remains in the new release path.
+- [x] Generation is reproducible and local; CI packages pinned content with shared, scoped validation.
+- [x] Formatting, relevant builds/tests, warnings-denied linting, version checks, and packaging checks pass.
 - [x] Durable docs and notices match the implementation; temporary investigation dependencies are removed or deliberately retained as diagnostics.
-- [ ] New candidate is staged, frozen, accurately documented, and handed off for final native acceptance without rebuilding at publication.
+- [x] New candidate is staged, frozen, accurately documented, and handed off for final native acceptance without rebuilding at publication.

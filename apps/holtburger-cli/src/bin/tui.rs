@@ -208,8 +208,8 @@ struct Args {
     debug_verbosity: u8,
     #[arg(
         long,
-        value_name = "PATH",
-        help = "Prepared content directory or full HBA file (overrides HOLTBURGER_CONTENT)"
+        value_name = "DIR",
+        help = "Content directory containing bootstrap.hba or assets.hba, plus navigation.hnav (overrides HOLTBURGER_CONTENT)"
     )]
     content: Option<std::path::PathBuf>,
     #[arg(
@@ -542,14 +542,12 @@ fn finalize_bootstrap_outcome(
 }
 
 async fn bootstrap_once(args: &Args, host: &str, port: u16) -> Result<BootstrapOutcome> {
-    let content = Arc::new(holtburger_cli::installation::navigation_content(
-        args.content.clone(),
-    )?);
+    let content = holtburger_cli::installation::content(args.content.clone())?;
     let mut builder = ClientRuntimeBuilder::new(args.account.clone())
         .server(host.to_string(), port)
-        .navigation_content(Arc::clone(&content));
-    builder.load_assets(content.bootstrap())?;
-    let character_gen_catalog = Arc::new(content.bootstrap().read_character_gen_catalog()?);
+        .navigation_movement_source(content.navigation.clone(), content.navigation.clone());
+    builder.load_assets(&content.bootstrap)?;
+    let character_gen_catalog = Arc::new(content.bootstrap.read_character_gen_catalog()?);
 
     let mut client = builder.connect().await?;
     let spell_catalog = Arc::clone(&client.world.spell_catalog);

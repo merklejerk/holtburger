@@ -23,7 +23,6 @@ clap.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 futures.workspace = true
-directories.workspace = true
 unicode-width.workspace = true
 ratatui-textarea.workspace = true
 holtburger-world.workspace = true

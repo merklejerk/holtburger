@@ -10,7 +10,6 @@ const GEOMETRY: NavigationBlockKey = NavigationBlockKey {
     kind: NavigationBlockKind::SharedGeometry,
     id: 0x0d00_0001,
 };
-const BOOTSTRAP_DIGEST: [u8; 32] = [7; 32];
 
 /// Serializes wire input independently of the validated writer, allowing malformed fixtures.
 fn fixture(payload: &[u8], entries: &[WireEntry]) -> NamedTempFile {
@@ -20,7 +19,6 @@ fn fixture(payload: &[u8], entries: &[WireEntry]) -> NamedTempFile {
         version: NAVIGATION_FORMAT_VERSION,
         entry_count: entries.len() as u32,
         directory_offset: HEADER_BYTES + payload.len() as u64,
-        bootstrap_sha256: BOOTSTRAP_DIGEST,
     }
     .write(file.as_file_mut())
     .unwrap();
@@ -61,12 +59,11 @@ fn compressed_and_raw_products_roundtrip_with_companion_identity() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("navigation.hnav");
     let cells = b"shared room geometry".repeat(256);
-    let mut writer = NavigationArchiveWriter::create(&path, BOOTSTRAP_DIGEST).unwrap();
+    let mut writer = NavigationArchiveWriter::create(&path).unwrap();
     writer.add_block(CELLS, &cells).unwrap();
     writer.add_block(GEOMETRY, b"abc").unwrap();
     writer.finish().unwrap();
     let archive = NavigationArchive::open(&path).unwrap();
-    assert_eq!(archive.bootstrap_sha256(), &BOOTSTRAP_DIGEST);
     assert_eq!(archive.keys().collect::<Vec<_>>(), vec![CELLS, GEOMETRY]);
     assert_eq!(archive.read_block(CELLS).unwrap(), Some(cells));
     assert_eq!(archive.read_block(GEOMETRY).unwrap(), Some(b"abc".to_vec()));
@@ -87,7 +84,7 @@ fn compressed_and_raw_products_roundtrip_with_companion_identity() {
 fn readers_can_load_distinct_blocks_concurrently() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("navigation.hnav");
-    let mut writer = NavigationArchiveWriter::create(&path, BOOTSTRAP_DIGEST).unwrap();
+    let mut writer = NavigationArchiveWriter::create(&path).unwrap();
     writer.add_block(CELLS, b"cells").unwrap();
     writer.add_block(GEOMETRY, b"geometry").unwrap();
     writer.finish().unwrap();
@@ -112,7 +109,7 @@ fn readers_can_load_distinct_blocks_concurrently() {
 fn duplicate_write_preserves_the_first_block() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("navigation.hnav");
-    let mut writer = NavigationArchiveWriter::create(&path, BOOTSTRAP_DIGEST).unwrap();
+    let mut writer = NavigationArchiveWriter::create(&path).unwrap();
     writer.add_block(CELLS, b"first").unwrap();
     assert!(matches!(
         writer.add_block(CELLS, b"second"),
@@ -128,7 +125,7 @@ fn duplicate_write_preserves_the_first_block() {
         b"first"
     );
     assert!(matches!(
-        NavigationArchiveWriter::create(&path, BOOTSTRAP_DIGEST),
+        NavigationArchiveWriter::create(&path),
         Err(NavigationArchiveError::Io(_))
     ));
 }
@@ -139,7 +136,7 @@ fn fixed_input_generates_identical_files() {
     let mut bytes = Vec::new();
     for name in ["first.hnav", "second.hnav"] {
         let path = dir.path().join(name);
-        let mut writer = NavigationArchiveWriter::create(&path, BOOTSTRAP_DIGEST).unwrap();
+        let mut writer = NavigationArchiveWriter::create(&path).unwrap();
         writer
             .add_block(GEOMETRY, &b"structure".repeat(32))
             .unwrap();
@@ -262,23 +259,4 @@ fn compressed_length_mismatch_is_checked_on_read() {
             Err(NavigationArchiveError::DecodedLength(CELLS))
         ));
     }
-}
-
-#[test]
-fn selecting_a_pair_rejects_a_different_bootstrap_generation() {
-    let dir = TempDir::new().unwrap();
-    let bootstrap = dir.path().join("bootstrap.hba");
-    let navigation = dir.path().join("navigation.hnav");
-    std::fs::write(&bootstrap, b"first bootstrap generation").unwrap();
-    let digest = sha256_file(&bootstrap).unwrap();
-    NavigationArchiveWriter::create(&navigation, digest)
-        .unwrap()
-        .finish()
-        .unwrap();
-    NavigationArchive::open_for_bootstrap(&navigation, &bootstrap).unwrap();
-    std::fs::write(&bootstrap, b"second bootstrap generation").unwrap();
-    assert!(matches!(
-        NavigationArchive::open_for_bootstrap(&navigation, &bootstrap),
-        Err(NavigationArchiveError::BootstrapMismatch)
-    ));
 }

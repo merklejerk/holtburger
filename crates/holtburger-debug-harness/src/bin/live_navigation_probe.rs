@@ -4,7 +4,8 @@
 use anyhow::{Context, Result, bail, ensure};
 use clap::Parser;
 use holtburger_common::{Guid, position::WorldPosition};
-use holtburger_content::NavigationContent;
+use holtburger_content::navigation_bundle::{BOOTSTRAP_FILE, NAVIGATION_FILE, NavigationArchive};
+use holtburger_content::{ContentRepository, NavigationSceneSource, PreparedNavigationSource};
 use holtburger_core::client::movement_types::{
     AutonomousDriveIntent, ClientDirectedCommand, Gait, PlayerDriveIntent,
 };
@@ -22,9 +23,12 @@ use tokio::{
 /// Explicit diagnostic inputs; never selects an arbitrary account character.
 #[derive(Parser)]
 struct Arguments {
-    /// Prepared CLI content directory or exact full HBA.
+    /// Prepared CLI directory, always supplying navigation.hnav.
     #[arg(long)]
     content: PathBuf,
+    /// Optional reference HBA override; otherwise use bootstrap.hba from the prepared directory.
+    #[arg(long)]
+    bootstrap: Option<PathBuf>,
     /// JSON containing start and target WorldPositions. Movement stays within one owner.
     #[arg(long)]
     route: PathBuf,
@@ -222,11 +226,20 @@ async fn main() -> Result<()> {
     );
     let account = std::env::var("HOLTBURGER_PROBE_ACCOUNT").context("missing probe account")?;
     let password = std::env::var("HOLTBURGER_PROBE_PASSWORD").context("missing probe password")?;
-    let content = Arc::new(NavigationContent::open(arguments.content)?);
+    let bootstrap_path = arguments
+        .bootstrap
+        .unwrap_or_else(|| arguments.content.join(BOOTSTRAP_FILE));
+    let bootstrap = Arc::new(ContentRepository::from_hba_path(bootstrap_path)?);
+    let navigation = Arc::new(PreparedNavigationSource::new(
+        Arc::clone(&bootstrap),
+        NavigationSceneSource::new(NavigationArchive::open(
+            arguments.content.join(NAVIGATION_FILE),
+        )?),
+    ));
     let mut builder = ClientRuntimeBuilder::new(account)
         .server("127.0.0.1", 9000)
-        .navigation_content(content.clone());
-    builder.load_assets(content.bootstrap())?;
+        .navigation_movement_source(navigation.clone(), navigation);
+    builder.load_assets(&bootstrap)?;
     let mut client = builder.connect().await?;
     let mut events = client.subscribe_client_view_events();
     let (commands, rx) = mpsc::unbounded_channel();

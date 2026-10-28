@@ -149,7 +149,7 @@ fn cells_keep_negative_placement_and_portal_identity_without_retail_decoding() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("navigation.hnav");
     let source = vec![cell()];
-    let mut writer = NavigationArchiveWriter::create(&path, [0; 32]).unwrap();
+    let mut writer = NavigationArchiveWriter::create(&path).unwrap();
     writer.add_cells(OWNER, &source).unwrap();
     writer.finish().unwrap();
     let decoded = NavigationArchive::open(&path)
@@ -169,7 +169,7 @@ fn shared_geometry_preserves_every_physics_node_and_resolved_polygon() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("navigation.hnav");
     let source = BTreeMap::from([(2, geometry())]);
-    let mut writer = NavigationArchiveWriter::create(&path, [0; 32]).unwrap();
+    let mut writer = NavigationArchiveWriter::create(&path).unwrap();
     writer.add_room_geometry(ENVIRONMENT, &source).unwrap();
     writer.finish().unwrap();
     let decoded = NavigationArchive::open(&path)
@@ -224,7 +224,7 @@ fn terrain_and_entrance_metadata_are_ready_without_a_region_archive() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("navigation.hnav");
     let source = terrain();
-    let mut writer = NavigationArchiveWriter::create(&path, [0; 32]).unwrap();
+    let mut writer = NavigationArchiveWriter::create(&path).unwrap();
     writer.add_terrain(OWNER, &source).unwrap();
     writer.finish().unwrap();
     let decoded = NavigationArchive::open(&path)
@@ -259,7 +259,7 @@ fn duplicate_cell_selectors_fail_on_generation_and_loading() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("navigation.hnav");
     let cells = vec![cell(), cell()];
-    let mut writer = NavigationArchiveWriter::create(&path, [0; 32]).unwrap();
+    let mut writer = NavigationArchiveWriter::create(&path).unwrap();
     assert!(matches!(
         writer.add_cells(OWNER, &cells),
         Err(NavigationArchiveError::Product(_))
@@ -284,7 +284,7 @@ fn duplicate_cell_selectors_fail_on_generation_and_loading() {
 fn malformed_payload_and_non_bsp_shell_fail_clearly() {
     let dir = TempDir::new().unwrap();
     let path = dir.path().join("navigation.hnav");
-    let mut writer = NavigationArchiveWriter::create(&path, [0; 32]).unwrap();
+    let mut writer = NavigationArchiveWriter::create(&path).unwrap();
     let mut room = geometry();
     room.shell = Some(Arc::new(CollisionShape::Ball(crate::CollisionBall {
         center: Vector3::zero(),

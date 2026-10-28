@@ -64,7 +64,7 @@ jobs:
         run: |
           PACKAGES=()
           if [[ "$HOLTBURGER_PRODUCT" != '3d' ]]; then
-            PACKAGES+=(-p holtburger-cli --bin tui -p holtburger-tools --bin dat2hba --bin dat-tool -p holtburger-debug-harness --bin content_bootstrap)
+            PACKAGES+=(-p holtburger-cli --bin tui --bin content_bootstrap -p holtburger-tools --bin dat2hba --bin dat-tool)
           fi
           if [[ "$HOLTBURGER_PRODUCT" != 'cli' ]]; then
             PACKAGES+=(-p holtburger-3d-host --bin holtburger-3d-host)

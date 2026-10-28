@@ -290,8 +290,12 @@ sequences remain shared by both compositions.
 ### Movement composition and reduced clients
 
 The frontend owns steering: approach/follow targets, arrival distances, and input mapping.
-`ClientRuntimeBuilder` chooses the compatible simulation composition through
-`physical_movement_source` or `navigation_content`. `MovementSystem` executes that composition
+The frontend selects movement/body behavior through `ClientRuntimeBuilder`
+`physical_movement_source` or `navigation_movement_source`, independently supplying a
+`SceneContentSource` for environment geometry. Full body preparation uses `ClientBodySource`;
+reduced body preparation reads `SetupContentSource`. The coordinator uses one scene query and
+residency path regardless of body behavior. The frontend owns HBA/HNAV selection.
+`MovementSystem` executes the selected behavior
 inside the same runtime, authoritative world, motion lifecycle, and packet publisher.
 
 Physical composition retains full local/remote collision behavior. Navigation composition uses

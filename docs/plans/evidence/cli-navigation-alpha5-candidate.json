@@ -1,0 +1,86 @@
+{
+  "release_id": 426875956,
+  "tag": "alpha-20261028-97ae69d28",
+  "url": "https://github.com/merklejerk/holtburger/releases/tag/untagged-c9c17ca6b4aa8ea35cd1",
+  "draft": true,
+  "commit": "97ae69d2847a920141296a629e23a626b1cce41d",
+  "version": "0.1.0-alpha.5",
+  "workflow_run": 40718199141,
+  "workflow_url": "https://github.com/merklejerk/holtburger/actions/runs/40718199141",
+  "workflow_conclusion": "success",
+  "workflow_duration_seconds": 801,
+  "cli_content_zip_sha256": "08167e0347ccd19ff708b13fe65b0f7186e514d68b8306e77d642b08a7103f61",
+  "verification": {
+    "downloaded_assets": 11,
+    "github_digests": "match",
+    "sha256sums": "match",
+    "native_identities": "six match manifest",
+    "cli_companions": "all native products match approved input",
+    "release_bootstrap": {
+      "heritage_groups": 13,
+      "cells": 568,
+      "room_shells": 568
+    },
+    "native_jobs": "all three passed",
+    "shared_validation": "passed",
+    "installed_flatpak_probes": "both passed"
+  },
+  "manual_acceptance": "pending for every new split product/target; no agent visual acceptance",
+  "assets": {
+    "holtburger-3d-0.1.0-alpha.5-aarch64-apple-darwin.zip": {
+      "id": 685498339,
+      "bytes": 142295993,
+      "sha256": "99dcdc5e548eb51c074a42576d650be809208f6f432c8f55c87a2ff3aa2d3ab3"
+    },
+    "holtburger-3d-0.1.0-alpha.5-x86_64-pc-windows-msvc.zip": {
+      "id": 685498083,
+      "bytes": 169027607,
+      "sha256": "7cf205cbc2849438ef347d4d7e97a17d2105108e78b43aaaca6c79830f137981"
+    },
+    "holtburger-3d-0.1.0-alpha.5-x86_64-unknown-linux-gnu.tar.gz": {
+      "id": 685497752,
+      "bytes": 134596262,
+      "sha256": "d138de7036c25bc31d2ed10b5226d9bda4126f4bbf71579275dff44492087b77"
+    },
+    "holtburger-3d-0.1.0-alpha.5-x86_64.flatpak": {
+      "id": 685498692,
+      "bytes": 97419360,
+      "sha256": "6a482ac6ed170e7d0d2c6963c841bf0c632d05c3a789fd375c35764119c0fd2d"
+    },
+    "holtburger-cli-0.1.0-alpha.5-aarch64-apple-darwin.zip": {
+      "id": 685497640,
+      "bytes": 50981985,
+      "sha256": "e48f9b77a25ac56a10491640e5021e3a5b6b43e753c76981ce340e95123bd2b6"
+    },
+    "holtburger-cli-0.1.0-alpha.5-x86_64-pc-windows-msvc.zip": {
+      "id": 685497476,
+      "bytes": 49253643,
+      "sha256": "32e8054a02ef6f7e70caf8716aab1bccaf4c138c96fcc3c86fd424e1e7011887"
+    },
+    "holtburger-cli-0.1.0-alpha.5-x86_64-unknown-linux-gnu.tar.gz": {
+      "id": 685497361,
+      "bytes": 53740957,
+      "sha256": "cd8160a2795db6ad96d944809ce46fc62d531f038be64126a8b176dc425f4062"
+    },
+    "holtburger-cli-0.1.0-alpha.5-x86_64.flatpak": {
+      "id": 685498568,
+      "bytes": 42337920,
+      "sha256": "0ecdadb1ce6069c83cccd97b54dca2aac57a4a7d524099086dcf87a7dba1914a"
+    },
+    "release-manifest.json": {
+      "id": 685498927,
+      "bytes": 420034,
+      "sha256": "fa8beb388c1283c88ec2e600ab087b05ce85f025d0cad894c88eed99ce2f9415"
+    },
+    "SHA256SUMS": {
+      "id": 685498969,
+      "bytes": 1133,
+      "sha256": "990fcea4009c47085f495ce6105825e71cc024b1f64e97cbb2ad4c11950ed132"
+    },
+    "THIRD_PARTY_NOTICES.html": {
+      "id": 685497303,
+      "bytes": 941017,
+      "sha256": "ab2f89ea4f04d3968748eba1576a4eba52ad65e78bff751a8b1b55f61aa9ee8a"
+    }
+  }
+}

@@ -86,8 +86,8 @@ impl ClientRuntimeBuilder {
         let contracts = content
             .read_contract_catalog()
             .context("failed to load contract catalog for client runtime")?;
-        let motion_sequences = content
-            .read_motion_sequence_catalog()
+        let motion_reference = content
+            .read_motion_reference_data()
             .context("failed to build the motion contract for client runtime")?;
         let soul_emote_catalog = content
             .read_soul_emote_catalog()
@@ -101,8 +101,8 @@ impl ClientRuntimeBuilder {
             xp_table: Arc::new(xp_table),
             character_titles: Arc::new(character_titles),
             contracts: Arc::new(contracts),
-            motion_sequences: Arc::new(motion_sequences),
-            setup_dimensions: Arc::new(content.read_setup_dimension_catalog()?),
+            motion_sequences: Arc::new(motion_reference.motion_sequences),
+            setup_dimensions: Arc::new(motion_reference.setup_dimensions),
             soul_emote_catalog: Arc::new(soul_emote_catalog),
         }));
 

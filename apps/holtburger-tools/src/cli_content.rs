@@ -113,7 +113,7 @@ pub fn generate(source: &Path, output: &Path) -> Result<CliContentInfo> {
         .read_character_gen_catalog()
         .context("validate complete character-creation catalog")?;
     parsed
-        .read_motion_sequence_catalog()
+        .read_motion_reference_data()
         .context("validate bootstrap motion closure")?;
 
     let cache = ContentDecodeCache::new();
@@ -436,3 +436,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "cli_content/geometry_tests.rs"]
+mod geometry_tests;

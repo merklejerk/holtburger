@@ -80,7 +80,9 @@ pub use object_collision::{
     StaticColliderPlacement, resolve_gfx_obj_collision_shape,
     resolve_setup_volume_collision_shapes,
 };
-pub use repository::{ContentRepository, ContentSelectionError, ResolvedContent};
+pub use repository::{
+    ContentRepository, ContentSelectionError, MotionReferenceData, ResolvedContent,
+};
 pub use resource_error::{ContentResourceError, ContentResourceErrorKind};
 pub use scene_source::SceneContentSource;
 pub use selection_envelope::{

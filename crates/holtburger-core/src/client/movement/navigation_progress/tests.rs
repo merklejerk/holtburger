@@ -392,6 +392,137 @@ fn manual_release_and_pulse_expiry_retire_gap_progress_before_authored_motion() 
 }
 
 #[test]
+fn terminal_movement_boundaries_retire_gap_progress_before_authored_motion() {
+    use crate::client::movement::MovementSystem;
+    use crate::client::movement_types::{CharacterDrive, ClientMovementPolicy, PlayerDriveIntent};
+    use crate::{CharacterMotionEvent, CharacterMotionSequence, SequencedCharacterMotionEvent};
+    use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut};
+    use holtburger_world::WorldState;
+    use holtburger_world::entity::{
+        EntityMotionAdmission, EntityMotionDirective, EntityTurnToParameters, OrderedMotionScalar,
+    };
+    use holtburger_world::motion::{ServerDirectedTarget, begin_server_directed_motion};
+    use holtburger_world::state::motion_resolution::test_support::{
+        FixtureCycle, explicit_motion_catalog,
+    };
+    use std::time::{Duration, Instant};
+
+    #[derive(Debug, Clone, Copy)]
+    enum Terminal {
+        ManualReset,
+        ServerClear,
+        ServerComplete,
+        ServerFailure,
+    }
+    let scene = scene(&[(FIRST, 0.0), (LAST, 10.0)]);
+    let start = pose(FIRST, 0.0);
+    let dt = Duration::from_millis(30);
+    let input = || LocalNavigationInput {
+        admitted_fraction: 1.0,
+        interval: dt,
+        facing_rotation: None,
+        authored_offset: Some(RigidTransform {
+            translation: Vector3::new(2.0, 0.0, 0.0),
+            rotation: Quaternion::identity(),
+        }),
+        sticky_target: None,
+    };
+    for terminal in [
+        Terminal::ManualReset,
+        Terminal::ServerClear,
+        Terminal::ServerComplete,
+        Terminal::ServerFailure,
+    ] {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x5000_0001);
+        let table = 0x0900_0001;
+        world.seed_local_player_entity(guid, "Player", start);
+        world.set_motion_sequences(explicit_motion_catalog(
+            table,
+            holtburger_protocol::messages::movement::MotionStance::NonCombat as u32,
+            [FixtureCycle::moving(
+                holtburger_world::state::motion_resolution::test_support::FIXTURE_STAND_COMMAND,
+                Vector3::zero(),
+            )],
+            [],
+        ));
+        world
+            .player_entity_mut()
+            .unwrap()
+            .set_did_prop(PropertyDataId::MotionTable, Guid(table));
+        let mut movement = MovementSystem::with_policy(ClientMovementPolicy::Navigation);
+        let now = Instant::now();
+        if matches!(terminal, Terminal::ManualReset) {
+            movement.enqueue_drive_intent(
+                PlayerDriveIntent::ManualHeld(CharacterDrive::builder().forward().build()),
+                now,
+            );
+            let _prepared = movement.prepare_tick(now, &mut world);
+        } else {
+            let scalar = |value| OrderedMotionScalar::from_f32(value).unwrap();
+            let admission = EntityMotionAdmission {
+                object_instance_sequence: 1,
+                movement_sequence: 1,
+                server_control_sequence: 1,
+                is_autonomous: false,
+            };
+            let params = EntityTurnToParameters {
+                flags: 0,
+                speed: scalar(1.0),
+                desired_heading_degrees: scalar(start.rotation.to_heading().to_degrees()),
+            };
+            let directive = if matches!(terminal, Terminal::ServerFailure) {
+                EntityMotionDirective::TurnToObject {
+                    admission,
+                    target: Guid(0x7000_0001),
+                    fallback_heading_degrees: scalar(0.0),
+                    params,
+                }
+            } else {
+                EntityMotionDirective::TurnToHeading { admission, params }
+            };
+            let state = begin_server_directed_motion(
+                directive,
+                start,
+                Some(ServerDirectedTarget::new(start, None).unwrap()),
+            );
+            movement.admit_server_controlled_motion(Some(state), now, &mut world);
+        }
+        // Accumulate hidden x=8 progress while canonical placement stays in the first room.
+        for _ in 0..4 {
+            movement
+                .advance_navigation(&mut world, &scene, input())
+                .unwrap();
+        }
+        assert_eq!(world.local_player_runtime_pose(), Some(start));
+        match terminal {
+            Terminal::ManualReset => {
+                movement.enqueue_character_motion_event(SequencedCharacterMotionEvent {
+                    sequence: CharacterMotionSequence(1),
+                    event: CharacterMotionEvent::Reset,
+                });
+                let _prepared = movement.prepare_tick(now, &mut world);
+            }
+            Terminal::ServerClear => movement.clear_server_controlled_motion(),
+            Terminal::ServerComplete | Terminal::ServerFailure => {
+                movement
+                    .advance_local_authored_motion(&mut world, dt)
+                    .unwrap();
+                assert!(!movement.has_server_controlled_motion(), "{terminal:?}");
+            }
+        }
+        movement
+            .advance_navigation(&mut world, &scene, input())
+            .unwrap();
+        assert_eq!(
+            world.local_player_runtime_pose(),
+            Some(start),
+            "{terminal:?} must retire the previous source's gap progress"
+        );
+    }
+}
+
+#[test]
 fn overlap_prefers_retained_cell_then_destination_and_otherwise_waits() {
     let scene = scene(&[(FIRST, 0.0), (LAST, 0.0)]);
     let target = pose(LAST, 0.0);

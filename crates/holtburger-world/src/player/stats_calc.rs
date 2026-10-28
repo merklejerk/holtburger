@@ -150,6 +150,30 @@ fn modifier_contribution(
 }
 
 impl PlayerState {
+    /// Build unenchanted calculation inputs without hydration, XP tables, or network events.
+    pub fn from_base_attributes(
+        attributes: impl IntoIterator<Item = (stats::AttributeType, u32)>,
+    ) -> Self {
+        let mut player = Self::new();
+        for (attr_type, base) in attributes {
+            let breakdown = player.evaluate_attribute(attr_type, base);
+            player.attributes.insert(
+                attr_type,
+                stats::Attribute {
+                    attr_type,
+                    ranks: 0,
+                    start: base,
+                    spent_xp: 0,
+                    next_rank_xp: None,
+                    base,
+                    current: breakdown.finalization.result,
+                    breakdown,
+                },
+            );
+        }
+        player
+    }
+
     fn direct_modifiers(&self, flags: EnchantmentTypeFlags, key: u32) -> ModifierBreakdown {
         let mut result = ModifierBreakdown::default();
         for operation in [
@@ -398,7 +422,8 @@ impl PlayerState {
         if use_current { current } else { base }
     }
 
-    pub(super) fn evaluate_skill(
+    /// Evaluate one skill and its usability/formula breakdown from explicit advancement inputs.
+    pub fn evaluate_skill(
         &self,
         skill_type: stats::SkillType,
         ranks: u32,

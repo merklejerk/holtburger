@@ -324,7 +324,8 @@
 						throw new Error("Preview only: no server character creation");
 					if (
 						command.startsWith("load_") ||
-						command === "resolve_character_creation_appearance"
+						command === "resolve_character_creation_appearance" ||
+						command === "resolve_character_creation_stats"
 					)
 						return content.invoke(command, args);
 					return authority.invoke(command, args);

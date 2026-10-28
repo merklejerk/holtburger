@@ -99,6 +99,7 @@ const SHARED_HOST_COMMAND_NAMES = [
 	"host_status",
 	"load_character_creation_catalog",
 	"resolve_character_creation_appearance",
+	"resolve_character_creation_stats",
 	"load_soul_emotes",
 	"open_world_map",
 	"read_world_map_tiles",

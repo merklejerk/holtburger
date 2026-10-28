@@ -130,6 +130,8 @@ struct ExplorerPossessionTickResponse {
 }
 
 struct DevHostState {
+    /// Production static creation calculator, retained across allocation edits.
+    creation_stats: holtburger_3d_host::character_creation::CharacterCreationStatsService,
     /// Static creation queries use the same repository as the production host adapter.
     repository: Arc<ContentRepository>,
     /// Static world-map owner shared with production sidecar commands.
@@ -373,6 +375,22 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                         200,
                         "application/json",
                         &serde_json::to_vec(&serde_json::json!({ "name": request.name }))?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/character-creation-stats") => {
+            let request: holtburger_3d_host::character_creation::CharacterCreationStatsRequest =
+                serde_json::from_slice(&request.body)?;
+            match state.creation_stats.resolve(request, &state.repository) {
+                Ok(stats) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&stats)?,
                     )
                     .await
                 }
@@ -770,6 +788,8 @@ fn discover_host_state(
         Arc::clone(&simulation),
     )?);
     Ok(DevHostState {
+        creation_stats:
+            holtburger_3d_host::character_creation::CharacterCreationStatsService::default(),
         repository,
         world_map,
         content,

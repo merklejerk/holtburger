@@ -74,6 +74,14 @@ export class ClientPregameScene {
 	/** Canonical standing position resolved once from the authored AC position. */
 	readonly #stagePosition: SceneVec3;
 	#camera: Camera;
+	readonly #reducedMotion: () => boolean;
+	/** Only explicit focus changes animate; all pose state stays in the scene frame owner. */
+	#animateFraming = false;
+	#cameraTransition: {
+		readonly from: SceneVec3;
+		readonly to: SceneVec3;
+		readonly startedMs: number;
+	} | null = null;
 	readonly #model: LocalSceneModelHandle;
 	readonly #disconnectCharacter: () => void;
 	readonly #unsubscribeModel: () => void;
@@ -103,7 +111,9 @@ export class ClientPregameScene {
 		resources: ClientPregameSceneResources,
 		characters: ClientPregameCharacterService,
 		location: ClientPregameLocation,
+		reducedMotion: () => boolean,
 	) {
+		this.#reducedMotion = reducedMotion;
 		this.#resources = resources;
 		this.#location = location;
 		// Pregame owns a silent world; gameplay installs its own listener on handoff.
@@ -144,6 +154,13 @@ export class ClientPregameScene {
 		const sink: PregameCharacterSink = {
 			setSource: (source) => this.#setCharacterSource(source),
 			setView: (view) => {
+				if (
+					view !== null &&
+					this.#view !== null &&
+					view.framing.kind !== this.#view.framing.kind &&
+					this.#characterVisible
+				)
+					this.#animateFraming = true;
 				this.#view = view;
 				this.#compositionDirty = true;
 				if (view === null) {
@@ -193,12 +210,15 @@ export class ClientPregameScene {
 	}
 
 	#hideCharacter(): void {
+		this.#cameraTransition = null;
+		this.#animateFraming = false;
 		if (this.#characterVisible) this.#model.setVisible(false);
 		this.#characterVisible = false;
 		this.#resources.runtime.setPresentationLights([]);
 	}
 
 	#composeCharacter(
+		timeMs: number,
 		width: number,
 		height: number,
 		aspectRatio: number | null,
@@ -207,8 +227,11 @@ export class ClientPregameScene {
 			width !== this.#viewport.width ||
 			height !== this.#viewport.height ||
 			aspectRatio !== this.#viewport.aspectRatio
-		)
+		) {
 			this.#compositionDirty = true;
+			this.#cameraTransition = null;
+			this.#animateFraming = false;
+		}
 		if (!this.#compositionDirty) return;
 		this.#compositionDirty = false;
 		this.#viewport = { width, height, aspectRatio };
@@ -252,26 +275,36 @@ export class ClientPregameScene {
 			return;
 		}
 		const heading = outcome.headingRadians;
-		// Framing can cross a portal. Use a unique containing cell; ambiguous/missing
-		// topology retains the author's explicit camera cell without constraining motion.
-		const cells = this.#resources.runtime
-			.queryWorldPointResidencyCandidates(outcome.position)
-			?.envCells.filter(
-				(cell) =>
-					cell.containsPoint && cell.landblockId === this.#location.landblockId,
-			);
-		const cell = cells?.length === 1 ? cells.at(0) : undefined;
 		this.#model.setPlacement(this.#modelPlacement(heading));
 		this.#camera = {
 			...this.#camera,
 			placement: {
 				...this.#camera.placement,
-				envCellId:
-					cell === undefined ? this.#location.camera.envCellId : cell.envCellId,
-				position: outcome.position,
 				rotation: outcome.rotation,
 			},
 		};
+		if (
+			(this.#animateFraming || this.#cameraTransition !== null) &&
+			!this.#reducedMotion()
+		) {
+			const previous = this.#cameraTransition;
+			// Rotation and unchanged fit notifications must not restart an in-flight focus change.
+			if (
+				previous === null ||
+				previous.to.x !== outcome.position.x ||
+				previous.to.y !== outcome.position.y ||
+				previous.to.z !== outcome.position.z
+			)
+				this.#cameraTransition = {
+					from: this.#camera.placement.position,
+					to: outcome.position,
+					startedMs: timeMs,
+				};
+		} else {
+			this.#cameraTransition = null;
+			this.#setCameraPosition(outcome.position);
+		}
+		this.#animateFraming = false;
 		if (!this.#characterVisible) this.#model.setVisible(true);
 		this.#characterVisible = true;
 		const right = rotateRenderVector(new Vec3(1, 0, 0), rotation);
@@ -300,6 +333,57 @@ export class ClientPregameScene {
 			},
 		]);
 		this.#publishCharacter({ kind: "ready", replacement: model.replacement });
+	}
+
+	#setCameraPosition(position: SceneVec3): void {
+		// Framing may cross portals: residency follows the displayed pose, including during motion.
+		const cells = this.#resources.runtime
+			.queryWorldPointResidencyCandidates(position)
+			?.envCells.filter(
+				(cell) =>
+					cell.containsPoint && cell.landblockId === this.#location.landblockId,
+			);
+		const cell = cells?.length === 1 ? cells.at(0) : undefined;
+		this.#camera = {
+			...this.#camera,
+			placement: {
+				...this.#camera.placement,
+				position,
+				envCellId:
+					cell === undefined ? this.#location.camera.envCellId : cell.envCellId,
+			},
+		};
+	}
+
+	#advanceCamera(timeMs: number): void {
+		const transition = this.#cameraTransition;
+		if (transition === null) return;
+		const progress = this.#reducedMotion()
+			? 1
+			: Math.min(
+					1,
+					Math.max(
+						0,
+						(timeMs - transition.startedMs) /
+							CLIENT_PREGAME_CAMERA_TUNING.transitionMs,
+					),
+				);
+		if (progress === 1) {
+			this.#setCameraPosition(transition.to);
+			this.#cameraTransition = null;
+			return;
+		}
+		const eased = progress * progress * (3 - 2 * progress);
+		const { from, to } = transition;
+		this.#setCameraPosition(
+			sceneVec3(
+				new Vec3(
+					from.x + (to.x - from.x) * eased,
+					from.y + (to.y - from.y) * eased,
+					from.z + (to.z - from.z) * eased,
+				),
+			),
+		);
 	}
 
 	status(): ClientPregameSceneStatus {
@@ -358,7 +442,9 @@ export class ClientPregameScene {
 				width > 0 && height > 0
 					? runtime.resolveViewportExtent(width, height)
 					: null;
+			this.#advanceCamera(timeMs);
 			this.#composeCharacter(
+				timeMs,
 				width,
 				height,
 				extent === null ? null : extent.width / extent.height,

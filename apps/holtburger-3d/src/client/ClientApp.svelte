@@ -151,6 +151,7 @@
 	import {
 		loadCharacterCreationCatalog,
 		resolveCharacterCreationAppearance,
+		resolveCharacterCreationStats,
 	} from "./client-character-creation-contract";
 	import type { CharacterCreationServices } from "./client-character-creation";
 	import {
@@ -592,6 +593,12 @@
 			if (transport === null)
 				throw new Error("Character creation content is unavailable.");
 			return loadCharacterCreationCatalog(transport);
+		},
+		resolveStats: async (request) => {
+			const transport = hostTransport;
+			if (transport === null)
+				throw new Error("Character creation content is unavailable.");
+			return resolveCharacterCreationStats(transport, request);
 		},
 		resolveAppearance: async (request) => {
 			const transport = hostTransport;

@@ -1,0 +1,31 @@
+{
+  "heritage": 6,
+  "attributeCredits": 330,
+  "skillCredits": 14,
+  "attributes": [100, 10, 100, 100, 10, 10],
+  "requestedSkills": [0, 3, 3, 3, 0],
+  "expectedSkills": [0, 2, 2, 3, 0],
+  "skills": [
+    {
+      "id": 1,
+      "name": "Axe",
+      "trainedCost": 4,
+      "specializationUpgradeCost": 6,
+      "minimumAdvancement": 2
+    },
+    {
+      "id": 2,
+      "name": "Bow",
+      "trainedCost": 0,
+      "specializationUpgradeCost": 4,
+      "minimumAdvancement": 2
+    },
+    {
+      "id": 3,
+      "name": "Crossbow",
+      "trainedCost": 6,
+      "specializationUpgradeCost": 4,
+      "minimumAdvancement": 3
+    }
+  ]
+}

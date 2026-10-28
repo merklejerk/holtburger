@@ -11,6 +11,8 @@ import type { PregameCameraOffset } from "./client-pregame-camera";
 
 /** Client-owned pregame projection and per-focus camera placement preferences. */
 interface ClientPregameCameraTuning {
+	/** Eased Face/Body focus change duration; initial framing is immediate. */
+	readonly transitionMs: number;
 	/** Initial character rotation relative to facing the fitted camera; zero looks at the viewer. */
 	readonly initialYawRadians: number;
 	/** Full vertical field of view in degrees, shared by both focus modes. */
@@ -23,6 +25,7 @@ interface ClientPregameCameraTuning {
 
 /** Pregame projection and preferred translations; authored tuning may crop or clip the character. */
 export const CLIENT_PREGAME_CAMERA_TUNING = {
+	transitionMs: 250,
 	/** Start facing the fitted camera; isolated inspection keeps its separate initial yaw. */
 	initialYawRadians: 0,
 	/** Full vertical field of view in degrees, shared by body and face compositions. */

@@ -1,6 +1,12 @@
 <script module lang="ts">
 	/** Machine acceptance of the production creator with static content and synthetic server results. */
 	export interface CreatorWorkflowProof {
+		readonly raceChoicesPreserved: boolean;
+		readonly genderRandomizationPreserved: boolean;
+		readonly appearanceStepControlsVerified: boolean;
+		readonly raceLoreAndAttributeHelpVerified: boolean;
+		readonly raceBudgetReconciliationVerified: boolean;
+		readonly startingStatsVerified: boolean;
 		readonly submissions: number;
 		readonly appearanceRequests: number;
 		readonly obsoleteResolutionIgnored: boolean;
@@ -17,6 +23,7 @@
 </script>
 
 <script lang="ts">
+	import startingStatsFixture from "../../../../../crates/holtburger-core/tests/fixtures/character_creation_starting_stats.json";
 	import { onMount, tick, untrack } from "svelte";
 	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
 	import {
@@ -28,7 +35,12 @@
 	import {
 		loadCharacterCreationCatalog,
 		resolveCharacterCreationAppearance,
+		resolveCharacterCreationStats,
+		type CharacterCreationStats,
+		type CharacterCreationStatsRequest,
 		type CharacterCreationDraft,
+		type CharacterCreationCatalog,
+		type CharacterCreationAppearanceRequest,
 	} from "../../client/client-character-creation-contract";
 	import type { CharacterCreationServices } from "../../client/client-character-creation";
 	import type { CharacterManagementState } from "../../client/client-host-contract";
@@ -150,8 +162,37 @@
 		},
 	};
 	const hasSource = (): boolean => currentSource !== null;
+	let catalog: CharacterCreationCatalog | null = null;
+	let lastResolvedAppearance: CharacterCreationAppearanceRequest | null = null;
+	let successfulAppearances = 0;
+	let latestStats: {
+		request: CharacterCreationStatsRequest;
+		result: CharacterCreationStats;
+	} | null = null;
+	let statsQueries = 0;
+	let holdNextStats = false;
+	let releaseStats: (() => void) | null = null;
+	function creationCatalog(): CharacterCreationCatalog {
+		if (catalog === null) throw new Error("Creator catalog is not loaded");
+		return catalog;
+	}
 	const services: CharacterCreationServices = {
-		loadCatalog: async () => loadCharacterCreationCatalog(transport),
+		resolveStats: async (request) => {
+			statsQueries++;
+			if (holdNextStats) {
+				holdNextStats = false;
+				await new Promise<void>((resolve) => {
+					releaseStats = resolve;
+				});
+			}
+			const result = await resolveCharacterCreationStats(transport, request);
+			latestStats = { request, result };
+			return result;
+		},
+		loadCatalog: async () => {
+			catalog = await loadCharacterCreationCatalog(transport);
+			return catalog;
+		},
 		resolveAppearance: async (request) => {
 			appearanceRequests++;
 			if (holdNextResolution) {
@@ -166,7 +207,13 @@
 					releaseInitial = () =>
 						reject(new Error("Synthetic obsolete resolution."));
 				});
-			return resolveCharacterCreationAppearance(transport, request);
+			const result = await resolveCharacterCreationAppearance(
+				transport,
+				request,
+			);
+			lastResolvedAppearance = structuredClone(request);
+			successfulAppearances++;
+			return result;
 		},
 		submit: async (draft) => {
 			submissions++;
@@ -262,6 +309,193 @@
 			);
 		}
 	}
+	async function statsReady(): Promise<void> {
+		await until(
+			() =>
+				latestStats !== null &&
+				latestStats.request.heritage === Number(control("Race").value) &&
+				(latestStats.result.kind === "olthoi" ||
+					root.querySelector('[data-vital="Health"]')?.textContent?.trim() ===
+						String(latestStats.result.vitals[0])) &&
+				!root.querySelector(
+					'[aria-label="Starting vitals"] [aria-busy="true"]',
+				),
+			"current starting stats",
+		);
+		await tick();
+	}
+	async function verifyStartingStats(
+		appearanceEdit: (edit: () => Promise<void>) => Promise<void>,
+	): Promise<void> {
+		await statsReady();
+		const fixture = startingStatsFixture;
+		if (Number(control("Race").value) !== fixture.heritage)
+			await appearanceEdit(() => change("Race", fixture.heritage));
+		await click("Skills & Stats");
+		for (const name of [
+			"Strength",
+			"Endurance",
+			"Coordination",
+			"Quickness",
+			"Focus",
+			"Self",
+		])
+			await change(name, creationCatalog().minimumAttribute);
+		for (const [index, name] of [
+			"Strength",
+			"Endurance",
+			"Coordination",
+			"Quickness",
+			"Focus",
+			"Self",
+		].entries())
+			await change(name, fixture.attributes[index]);
+		await statsReady();
+		const normalHeritage = creationCatalog().heritages.find(
+			(race) => race.id === fixture.heritage,
+		);
+		if (normalHeritage === undefined)
+			throw new Error("Starting stats fixture heritage is missing");
+		const authored = normalHeritage.skills.find(
+			(skill) => skill.id === fixture.skill.id,
+		);
+		if (
+			JSON.stringify(authored?.formula) !==
+			JSON.stringify({
+				first: fixture.skill.first,
+				second: fixture.skill.second,
+				divisor: fixture.skill.divisor,
+			})
+		)
+			throw new Error(
+				"Starting stats fixture differs from authored Melee Defense formula",
+			);
+		for (const [tier, expected] of [
+			[1, fixture.skill.untrained],
+			[2, fixture.skill.trained],
+			[3, fixture.skill.specialized],
+		]) {
+			while (
+				latestStats !== null &&
+				latestStats.request.skills[fixture.skill.id] !== tier
+			) {
+				const current = latestStats.request.skills[fixture.skill.id];
+				const direction = current < tier ? "up" : "down";
+				const row = root
+					.querySelector(`[data-starting-skill="${fixture.skill.id}"]`)
+					?.closest(".creation-skill-row");
+				const action = row?.querySelector<HTMLButtonElement>(
+					`button[data-direction="${direction}"]`,
+				);
+				if (action === null || action === undefined || action.disabled)
+					throw new Error("Cannot exercise starting skill tier");
+				action.click();
+				await tick();
+				await statsReady();
+			}
+			const shown = root
+				.querySelector(`[data-starting-skill="${fixture.skill.id}"]`)
+				?.textContent?.trim();
+			if (shown !== String(expected))
+				throw new Error(
+					`Wrong starting skill value for tier ${tier}: ${shown}`,
+				);
+			const pools = [
+				...root.querySelectorAll("#creation-skills-stats [data-vital]"),
+			].map((node) => Number(node.textContent));
+			if (JSON.stringify(pools) !== JSON.stringify(fixture.vitals))
+				throw new Error("Wrong starting vital pools");
+		}
+		const level = root.querySelector(
+			`[data-starting-skill="${fixture.skill.id}"]`,
+		);
+		const summary = level?.closest("summary");
+		const name = summary?.querySelector(".creation-skill-name");
+		const arrows = summary
+			?.closest(".creation-skill-row")
+			?.querySelector(".creation-skill-actions");
+		if (
+			level === null ||
+			summary === null ||
+			name === null ||
+			name === undefined ||
+			arrows === null ||
+			arrows === undefined
+		)
+			throw new Error("Skill level is not grouped with its name");
+		const levelBounds = level.getBoundingClientRect();
+		const nameBounds = name.getBoundingClientRect();
+		const arrowBounds = arrows.getBoundingClientRect();
+		if (
+			levelBounds.left < nameBounds.right ||
+			levelBounds.left - nameBounds.right >=
+				arrowBounds.left - levelBounds.right
+		)
+			throw new Error("Skill level is not closer to its name than the arrows");
+		if (getComputedStyle(level).color === getComputedStyle(name).color)
+			throw new Error("Skill level color is indistinguishable from its name");
+		const visibleNumbers = () =>
+			[...root.querySelectorAll("[data-vital], [data-starting-skill]")].map(
+				(node) => node.textContent?.trim(),
+			);
+		const beforeUpdate = visibleNumbers();
+		holdNextStats = true;
+		await change("Endurance", fixture.attributes[1] - 1);
+		await until(() => releaseStats !== null, "held stat recalculation");
+		if (JSON.stringify(visibleNumbers()) !== JSON.stringify(beforeUpdate))
+			throw new Error(
+				"Starting values flickered or disappeared during a same-race edit",
+			);
+		const release = releaseStats;
+		if (release === null) throw new Error("Missing held stat recalculation");
+		releaseStats = null;
+		release();
+		await statsReady();
+		if (JSON.stringify(visibleNumbers()) === JSON.stringify(beforeUpdate))
+			throw new Error("Starting values did not refresh after recalculation");
+		await change("Endurance", fixture.attributes[1]);
+		await statsReady();
+		const count = statsQueries;
+		await click("Review");
+		await change("Character name", "Stats Probe");
+		const town = normalHeritage.startAreaIds[0];
+		if (town === undefined)
+			throw new Error("Starting stats fixture has no town");
+		await change("Starting town", town);
+		await tick();
+		if (statsQueries !== count)
+			throw new Error(
+				"Identity/town/Review changes recalculated starting stats",
+			);
+		if (
+			root
+				.querySelector(
+					`#creation-review [data-starting-skill="${fixture.skill.id}"]`,
+				)
+				?.textContent?.trim() !== String(fixture.skill.specialized)
+		)
+			throw new Error("Review starting skill disagrees with allocation");
+		const pools = [
+			...root.querySelectorAll("#creation-review [data-vital]"),
+		].map((node) => Number(node.textContent));
+		if (JSON.stringify(pools) !== JSON.stringify(fixture.vitals))
+			throw new Error("Review starting vitals disagree with allocation");
+		await click("Race");
+		await appearanceEdit(() =>
+			change("Race", fixture.heritageWithoutSkillBonus),
+		);
+		await statsReady();
+		if (
+			root
+				.querySelector(`[data-starting-skill="${fixture.skill.id}"]`)
+				?.textContent?.trim() !==
+			String(fixture.skill.specialized - fixture.skill.racialBonus)
+		)
+			throw new Error("Race change retained obsolete innate skill bonus");
+		await appearanceEdit(() => change("Race", fixture.heritage));
+		await statsReady();
+		await click("Skills & Stats");
+	}
 	async function run(): Promise<CreatorWorkflowProof> {
 		await click("Create character");
 		await until(() => appearanceRequests === 1, "initial appearance query");
@@ -300,9 +534,328 @@
 			["Self", 10],
 		] as const)
 			await change(name, value);
+		if (appearanceRequests !== beforeBuild)
+			throw new Error("Stat edits rebuilt appearance");
+		await until(
+			() => successfulAppearances === appearanceRequests - 1,
+			"all appearance work settled",
+		);
+		const appearanceEdit = async (action: () => Promise<void>) => {
+			const before = successfulAppearances;
+			await action();
+			await until(
+				() => successfulAppearances > before,
+				"appearance edit resolved",
+			);
+		};
+		const genderButton = (name: string) => {
+			const control = root.querySelector(`button[aria-label="${name}"]`);
+			if (!(control instanceof HTMLButtonElement))
+				throw new Error(`Missing gender toggle ${name}`);
+			return control;
+		};
+		const genderAppearance = (name: string) => {
+			const button = genderButton(name);
+			const icon = button.querySelector("svg");
+			if (icon === null) throw new Error(`Missing gender icon ${name}`);
+			const buttonBounds = button.getBoundingClientRect();
+			const iconBounds = icon.getBoundingClientRect();
+			const style = getComputedStyle(icon);
+			return {
+				buttonWidth: buttonBounds.width,
+				buttonHeight: buttonBounds.height,
+				centerX: buttonBounds.x + buttonBounds.width / 2,
+				centerY: buttonBounds.y + buttonBounds.height / 2,
+				iconWidth: iconBounds.width,
+				iconHeight: iconBounds.height,
+				color: style.stroke,
+				strokeWidth: style.strokeWidth,
+				radius: getComputedStyle(button).borderRadius,
+			};
+		};
+		const beforeGenderChange = {
+			Male: genderAppearance("Male"),
+			Female: genderAppearance("Female"),
+		};
+		await appearanceEdit(async () => {
+			genderButton("Female").click();
+			await tick();
+		});
+		await click("Appearance");
+		await appearanceEdit(() => click("Randomize appearance"));
+		if (genderButton("Female").getAttribute("aria-pressed") !== "true")
+			throw new Error("Missing gender selection state");
+		const afterGenderChange = {
+			Male: genderAppearance("Male"),
+			Female: genderAppearance("Female"),
+		};
+		if (
+			beforeGenderChange.Male.buttonWidth <=
+				beforeGenderChange.Female.buttonWidth ||
+			afterGenderChange.Female.buttonWidth <= afterGenderChange.Male.buttonWidth
+		)
+			throw new Error("Selected gender must have the larger button");
+		for (const name of ["Male", "Female"] as const) {
+			const before = beforeGenderChange[name];
+			const after = afterGenderChange[name];
+			if (after.radius !== "50%" || after.buttonWidth !== after.buttonHeight)
+				throw new Error("Gender button is not circular");
+			const scale = after.buttonWidth / before.buttonWidth;
+			// DOM geometry may contain fractional CSS pixels after scaling.
+			if (
+				Math.abs(after.iconWidth - before.iconWidth * scale) > 0.01 ||
+				Math.abs(after.iconHeight - before.iconHeight * scale) > 0.01
+			)
+				throw new Error(
+					"Gender glyph did not scale proportionally with its button",
+				);
+			if (before.color !== after.color)
+				throw new Error("Gender selection changed the icon color");
+			if (before.strokeWidth !== after.strokeWidth)
+				throw new Error("Gender selection changed the authored stroke styling");
+			if (before.centerX !== after.centerX || before.centerY !== after.centerY)
+				throw new Error("Gender selection moved the control's center");
+		}
+		const nameBounds = control("Character name").getBoundingClientRect();
+		const genderGroup = genderButton("Female").parentElement;
+		if (
+			genderGroup === null ||
+			genderGroup.getBoundingClientRect().top - nameBounds.bottom <
+				nameBounds.height / 2
+		)
+			throw new Error("Gender controls are too close to the name input");
+		const resolvedAppearance = () => {
+			if (lastResolvedAppearance === null)
+				throw new Error("Missing resolved appearance");
+			return lastResolvedAppearance;
+		};
+		if (resolvedAppearance().gender !== 2)
+			throw new Error("Randomization changed gender");
+		const stepButton = root.querySelector('button[aria-label="Next Eyes"]');
+		const eyeSlider = root.querySelector<HTMLInputElement>(
+			'input[aria-labelledby="creation-appearance-eyes"]',
+		);
+		if (!(stepButton instanceof HTMLButtonElement) || eyeSlider === null)
+			throw new Error("Missing appearance step controls");
+		const previous = root.querySelector('button[aria-label="Previous Eyes"]');
+		if (!(previous instanceof HTMLButtonElement))
+			throw new Error("Missing decrement control");
+		for (const row of root.querySelectorAll(".creation-appearance-variant")) {
+			const buttons = row.querySelectorAll("button");
+			const slider = row.querySelector('input[type="range"]');
+			const [left, right] = buttons;
+			if (
+				buttons.length !== 2 ||
+				left === undefined ||
+				right === undefined ||
+				slider === null
+			)
+				throw new Error("Appearance slider does not have two step controls");
+			const leftBounds = left.getBoundingClientRect();
+			const rangeBounds = slider.getBoundingClientRect();
+			const rightBounds = right.getBoundingClientRect();
+			if (
+				rangeBounds.width <= 0 ||
+				leftBounds.right > rangeBounds.left ||
+				rangeBounds.right > rightBounds.left
+			)
+				throw new Error("Appearance buttons do not flank the slider");
+			for (const button of buttons) {
+				const bounds = button.getBoundingClientRect();
+				if (
+					bounds.width !== bounds.height ||
+					getComputedStyle(button).borderRadius !== "50%" ||
+					bounds.height >= nameBounds.height
+				)
+					throw new Error(
+						"Appearance step controls are not compact circular buttons",
+					);
+				// Allow fractional pixel alignment when the grid is laid out at non-integral widths.
+				if (
+					Math.abs(
+						bounds.y +
+							bounds.height / 2 -
+							(rangeBounds.y + rangeBounds.height / 2),
+					) > 1
+				)
+					throw new Error(
+						"Appearance step controls are not aligned with the slider",
+					);
+			}
+		}
+		// Drive to both bounds through the actual slider before exercising one step.
+		eyeSlider.value = eyeSlider.min;
+		await appearanceEdit(async () => {
+			eyeSlider.dispatchEvent(new Event("input", { bubbles: true }));
+			await tick();
+		});
+		if (!previous.disabled)
+			throw new Error("Decrement remains enabled at the lower bound");
+		await appearanceEdit(async () => {
+			stepButton.click();
+			await tick();
+		});
+		if (
+			Number(eyeSlider.value) !==
+			Number(eyeSlider.min) + Number(eyeSlider.step)
+		)
+			throw new Error("Increment did not follow slider step");
+		eyeSlider.value = eyeSlider.max;
+		await appearanceEdit(async () => {
+			eyeSlider.dispatchEvent(new Event("input", { bubbles: true }));
+			await tick();
+		});
+		if (!stepButton.disabled)
+			throw new Error("Increment remains enabled at the upper bound");
+		const rememberedAppearance = structuredClone(
+			resolvedAppearance().appearance,
+		);
+		await click("Skills & Stats");
+		await verifyStartingStats(appearanceEdit);
+		const training = [
+			...root.querySelectorAll<HTMLButtonElement>(
+				".creation-skill-actions button",
+			),
+		].find(
+			(button) =>
+				!button.disabled &&
+				button.getAttribute("aria-label")?.includes(": Train."),
+		);
+		if (training === undefined)
+			throw new Error("No affordable optional training in production catalog");
+		training.click();
+		await tick();
+		const skillSelections = () =>
+			JSON.stringify(
+				[...root.querySelectorAll(".creation-skill-groups section")].map(
+					(section) => ({
+						tier: section.querySelector("h4")?.textContent?.trim(),
+						skills: [...section.querySelectorAll(".creation-skill-name")].map(
+							(summary) => summary.textContent?.trim(),
+						),
+					}),
+				),
+			);
+		const skillChoices = skillSelections();
+		const attributeChoices = () =>
+			[
+				"Strength",
+				"Endurance",
+				"Coordination",
+				"Quickness",
+				"Focus",
+				"Self",
+			].map((name) => control(name).value);
+		const allocations = attributeChoices();
+		const disclosure = root.querySelector(".creation-attribute-row details");
+		if (!(disclosure instanceof HTMLDetailsElement))
+			throw new Error("Missing attribute disclosure");
+		disclosure.open = true;
+		if (
+			!disclosure.textContent?.includes(
+				creationCatalog().attributeDescriptions[0],
+			)
+		)
+			throw new Error("Attribute help differs from catalog");
+		await click("Race");
+		const originalRace = Number(control("Race").value);
+		const alternate = creationCatalog().heritages.find(
+			(heritage) =>
+				heritage.id !== originalRace &&
+				heritage.attributeCredits ===
+					creationCatalog().heritages[0].attributeCredits,
+		);
+		if (alternate === undefined)
+			throw new Error("Missing compatible alternate race");
+		await appearanceEdit(() => change("Race", alternate.id));
+		if (resolvedAppearance().gender !== 2)
+			throw new Error("Race change reset gender");
+		if (
+			JSON.stringify(attributeChoices()) !== JSON.stringify(allocations) ||
+			skillSelections() !== skillChoices
+		)
+			throw new Error("Compatible race change reset the build");
+		for (const group of alternate.benefits.skillGroups) {
+			const section = root.querySelector(`[aria-label="${group.label}"]`);
+			const listed = [...(section?.querySelectorAll("li") ?? [])].map(
+				(item) => item.textContent,
+			);
+			if (JSON.stringify(listed) !== JSON.stringify(group.skills))
+				throw new Error("Starting skills are not itemized by training group");
+		}
+		const lore = root.querySelector(`[aria-label="${alternate.name} lore"]`);
+		if (
+			!alternate.lore.every((paragraph) =>
+				lore?.textContent?.includes(paragraph),
+			)
+		)
+			throw new Error("Race lore is missing or stale");
+		if (
+			control("Race").closest('[role="tabpanel"]')?.querySelector("select") !==
+			control("Race")
+		)
+			throw new Error("Missing race selector");
+		await appearanceEdit(() => change("Race", originalRace));
+		if (
+			JSON.stringify(resolvedAppearance().appearance) !==
+			JSON.stringify(rememberedAppearance)
+		)
+			throw new Error("Race return lost remembered appearance");
+		const lowerBudget = creationCatalog().heritages.find(
+			(heritage) =>
+				heritage.attributeCredits <
+				allocations.reduce((sum, value) => sum + Number(value), 0),
+		);
+		if (lowerBudget === undefined)
+			throw new Error("Missing lower-budget production race");
+		await appearanceEdit(() => change("Race", lowerBudget.id));
+		if (
+			attributeChoices().reduce((sum, value) => sum + Number(value), 0) !==
+			lowerBudget.attributeCredits
+		)
+			throw new Error("Lower race budget was not reconciled");
+		for (const olthoi of creationCatalog().heritages.filter(
+			(heritage) => heritage.id === 12 || heritage.id === 13,
+		)) {
+			if (olthoi.id !== Number(control("Race").value))
+				await appearanceEdit(() => change("Race", olthoi.id));
+			await statsReady();
+			if (
+				root.querySelector('[aria-label="Starting vitals"]') !== null ||
+				root.querySelector("[data-starting-skill]") !== null
+			)
+				throw new Error("Olthoi displayed normal starting-stat previews");
+			if (
+				root.querySelector('[role="group"][aria-label="Gender"]') !== null ||
+				resolvedAppearance().gender !== 2
+			)
+				throw new Error(
+					"Olthoi gender visibility or stored choice is incorrect",
+				);
+		}
+		await appearanceEdit(() => change("Race", originalRace));
+		if (genderButton("Female").getAttribute("aria-pressed") !== "true")
+			throw new Error("Returning from Olthoi lost the selected gender");
+		await click("Review");
+		if (!button("Create character").disabled)
+			throw new Error("Unspent attribute budget allowed submission");
+		const town = control("Starting town");
+		if (town.closest('[role="tabpanel"]')?.id !== "creation-review")
+			throw new Error("Starting town is outside Review");
+		await click("Skills & Stats");
+		for (const [index, name] of [
+			"Strength",
+			"Endurance",
+			"Coordination",
+			"Quickness",
+			"Focus",
+			"Self",
+		].entries())
+			await change(name, allocations[index]);
+		const beforeReview = appearanceRequests;
 		await click("Review");
 		await change("Character name", "Pregame Probe");
-		if (appearanceRequests !== beforeBuild)
+		if (appearanceRequests !== beforeReview)
 			throw new Error("Name/stat edits rebuilt appearance.");
 		await click("Create character");
 		await until(
@@ -476,6 +1029,12 @@
 		if (remainingLocalSurfaces !== 0)
 			throw new Error("Creator navigation retained a scene surface.");
 		return {
+			raceChoicesPreserved: true,
+			genderRandomizationPreserved: true,
+			appearanceStepControlsVerified: true,
+			raceLoreAndAttributeHelpVerified: true,
+			raceBudgetReconciliationVerified: true,
+			startingStatsVerified: true,
 			submissions,
 			appearanceRequests,
 			obsoleteResolutionIgnored: true,

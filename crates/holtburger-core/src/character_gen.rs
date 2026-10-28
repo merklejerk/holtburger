@@ -1,3 +1,4 @@
+use holtburger_common::properties::WeaponType;
 use holtburger_content::CharacterGenCatalog;
 use holtburger_content::character_gen::{
     CharacterGenHeritageGroup, CharacterGenSkillCosts, CharacterGenTemplate,
@@ -10,10 +11,69 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use thiserror::Error;
 
+pub mod starting_stats;
+
 pub const CHARACTER_GEN_UNKNOWN_CONSTANT: u32 = 1;
 pub const CHARACTER_GEN_DEFAULT_CLASS_ID: u32 = 1;
 pub const CHARACTER_GEN_MIN_ATTRIBUTE: u32 = 10;
 pub const CHARACTER_GEN_MAX_ATTRIBUTE: u32 = 100;
+
+/// Innate augmentation kinds granted by ACE's normal heritage creation path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CharacterGenInnateAugmentation {
+    /// Flat skill bonus.
+    JackOfAllTrades,
+    /// Critical chance rating bonus.
+    CriticalExpertise,
+    /// Damage resistance rating bonus.
+    DamageReduction,
+    /// Critical damage rating bonus.
+    CriticalPower,
+    /// Increased burden limit.
+    IncreasedCarryingCapacity,
+    /// Life Magic focus without a carried focus item.
+    InfusedLifeMagic,
+    /// Chance to resist a critical hit.
+    CriticalDefense,
+}
+
+/// Server-granted heritage benefits, separate from DAT training costs and frontend wording.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CharacterGenHeritageBenefits {
+    /// Normal character creation grants both a racial weapon pair and an innate augmentation.
+    Standard {
+        /// Melee/ranged affinities; servers with universal masteries ignore these restrictions.
+        racial_weapon_masteries: [WeaponType; 2],
+        /// Augmentation property granted once at creation.
+        innate_augmentation: CharacterGenInnateAugmentation,
+    },
+    /// Olthoi creation follows the server's separate path, without these benefits.
+    Olthoi,
+}
+
+/// ACE PlayerFactory.cs:GetMasteries/SetInnateAugmentations. Unknown heritages are not guessed.
+pub fn character_gen_heritage_benefits(heritage: u32) -> Option<CharacterGenHeritageBenefits> {
+    use CharacterGenInnateAugmentation::*;
+    use holtburger_common::properties::WeaponType::*;
+    let (melee, ranged, augmentation) = match heritage {
+        1 => (Dagger, Bow, JackOfAllTrades),
+        2 => (Staff, Magic, JackOfAllTrades),
+        3 => (Unarmed, Bow, JackOfAllTrades),
+        4 => (Sword, Crossbow, JackOfAllTrades),
+        5 | 10 => (Unarmed, Crossbow, CriticalExpertise),
+        6 => (Mace, Crossbow, DamageReduction),
+        7 => (Spear, Thrown, CriticalPower),
+        8 => (Axe, Thrown, IncreasedCarryingCapacity),
+        9 => (Sword, Magic, InfusedLifeMagic),
+        11 => (Axe, Thrown, CriticalDefense),
+        12 | 13 => return Some(CharacterGenHeritageBenefits::Olthoi),
+        _ => return None,
+    };
+    Some(CharacterGenHeritageBenefits::Standard {
+        racial_weapon_masteries: [melee, ranged],
+        innate_augmentation: augmentation,
+    })
+}
 
 pub fn custom_template_for_heritage(
     heritage: &CharacterGenHeritageGroup,
@@ -96,9 +156,8 @@ pub struct CharacterGenBuild {
 }
 
 impl CharacterGenBuild {
-    pub fn attribute_total(&self) -> u64 {
-        // Unvalidated host drafts may contain any u32; their sum must not overflow
-        // before validation can report the individual out-of-range attributes.
+    /// Primary attributes in character-creation protocol order.
+    pub fn attributes(&self) -> [u32; 6] {
         [
             self.strength_ability,
             self.endurance_ability,
@@ -107,9 +166,6 @@ impl CharacterGenBuild {
             self.focus_ability,
             self.self_ability,
         ]
-        .into_iter()
-        .map(u64::from)
-        .sum()
     }
 }
 
@@ -314,27 +370,40 @@ impl CharacterGenBuilder {
             }
         }
 
-        self.validate_attributes(build, heritage.attribute_credits, &mut errors);
-        self.validate_skills(build, heritage, &mut errors);
+        Self::validate_attributes(
+            &build.attributes(),
+            heritage.attribute_credits,
+            true,
+            &mut errors,
+        );
+        self.validate_skills(
+            build.heritage,
+            &build.skill_advancement_classes,
+            heritage,
+            &mut errors,
+        );
         self.validate_appearance(build, gender, &mut errors);
 
         errors
     }
 
     fn validate_attributes(
-        &self,
-        build: &CharacterGenBuild,
+        attributes: &[u32; 6],
         attribute_budget: u32,
+        require_complete: bool,
         errors: &mut Vec<CharacterGenValidationError>,
     ) {
         for (field, value) in [
-            ("strength", build.strength_ability),
-            ("endurance", build.endurance_ability),
-            ("coordination", build.coordination_ability),
-            ("quickness", build.quickness_ability),
-            ("focus", build.focus_ability),
-            ("self", build.self_ability),
-        ] {
+            "strength",
+            "endurance",
+            "coordination",
+            "quickness",
+            "focus",
+            "self",
+        ]
+        .into_iter()
+        .zip(attributes.iter().copied())
+        {
             if !(CHARACTER_GEN_MIN_ATTRIBUTE..=CHARACTER_GEN_MAX_ATTRIBUTE).contains(&value) {
                 errors.push(CharacterGenValidationError::AttributeOutOfRange {
                     field,
@@ -345,13 +414,13 @@ impl CharacterGenBuilder {
             }
         }
 
-        let total = build.attribute_total();
+        let total = attributes.iter().copied().map(u64::from).sum();
         if total > u64::from(attribute_budget) {
             errors.push(CharacterGenValidationError::AttributeBudgetExceeded {
                 total,
                 budget: attribute_budget,
             });
-        } else if total < u64::from(attribute_budget) {
+        } else if require_complete && total < u64::from(attribute_budget) {
             errors.push(CharacterGenValidationError::AttributeBudgetIncomplete {
                 total,
                 budget: attribute_budget,
@@ -362,21 +431,22 @@ impl CharacterGenBuilder {
 
     fn validate_skills(
         &self,
-        build: &CharacterGenBuild,
+        heritage_id: u32,
+        skills: &[SkillAdvancementClass],
         heritage: &holtburger_content::character_gen::CharacterGenHeritageGroup,
         errors: &mut Vec<CharacterGenValidationError>,
     ) {
-        if build.skill_advancement_classes.len() != self.catalog.expected_skill_slots {
+        if skills.len() != self.catalog.expected_skill_slots {
             errors.push(CharacterGenValidationError::SkillSlotCountMismatch {
                 expected: self.catalog.expected_skill_slots,
-                actual: build.skill_advancement_classes.len(),
+                actual: skills.len(),
             });
             return;
         }
 
         let mut spent_credits = 0i64;
 
-        for (skill_id, advancement) in build.skill_advancement_classes.iter().enumerate() {
+        for (skill_id, advancement) in skills.iter().enumerate() {
             if *advancement == SkillAdvancementClass::Inactive {
                 continue;
             }
@@ -396,10 +466,7 @@ impl CharacterGenBuilder {
                 continue;
             }
 
-            let Some(costs) = self
-                .catalog
-                .skill_costs_for_heritage(build.heritage, skill_id)
-            else {
+            let Some(costs) = self.catalog.skill_costs_for_heritage(heritage_id, skill_id) else {
                 errors.push(CharacterGenValidationError::UnknownSkill { skill_id });
                 continue;
             };
@@ -580,7 +647,31 @@ mod tests {
     };
     use std::collections::BTreeMap;
 
-    fn test_catalog() -> Arc<CharacterGenCatalog> {
+    #[test]
+    fn heritage_benefits_distinguish_traditional_affinities_innate_augmentations_and_olthoi() {
+        use super::character_gen_heritage_benefits;
+        use holtburger_common::properties::WeaponType;
+        assert_eq!(
+            character_gen_heritage_benefits(1),
+            Some(super::CharacterGenHeritageBenefits::Standard {
+                racial_weapon_masteries: [WeaponType::Dagger, WeaponType::Bow],
+                innate_augmentation: super::CharacterGenInnateAugmentation::JackOfAllTrades,
+            })
+        );
+        assert_eq!(
+            character_gen_heritage_benefits(5),
+            character_gen_heritage_benefits(10)
+        );
+        for heritage in [12, 13] {
+            assert_eq!(
+                character_gen_heritage_benefits(heritage),
+                Some(super::CharacterGenHeritageBenefits::Olthoi)
+            );
+        }
+        assert!(character_gen_heritage_benefits(0).is_none());
+    }
+
+    pub(super) fn test_catalog() -> Arc<CharacterGenCatalog> {
         Arc::new(CharacterGenCatalog {
             starter_areas: vec![CharacterGenStarterArea {
                 start_area_id: 0,
@@ -773,7 +864,7 @@ mod tests {
         })
     }
 
-    fn test_build() -> CharacterGenBuild {
+    pub(super) fn test_build() -> CharacterGenBuild {
         CharacterGenBuild {
             heritage: 6,
             gender: 1,
@@ -818,6 +909,102 @@ mod tests {
             is_admin: false,
             is_sentinel: false,
         }
+    }
+
+    #[test]
+    fn shared_reconciled_build_obeys_authoritative_budgets() {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        /// Inputs and expected semantic output shared with the browser reconciliation test.
+        struct Fixture {
+            /// Target heritage key in the synthetic core catalog.
+            heritage: u32,
+            /// Attribute pool expected by both consumers.
+            attribute_credits: u32,
+            /// Target skill pool for this reconciliation scenario.
+            skill_credits: u32,
+            /// Attribute allocation preserved by the browser helper.
+            attributes: [u32; 6],
+            /// Unaffordable skill choices before reconciliation.
+            requested_skills: Vec<u32>,
+            /// Browser-produced tiers to admit through the shared builder.
+            expected_skills: Vec<u32>,
+            /// Target cost and requirement facts verified against the core catalog.
+            skills: Vec<FixtureSkill>,
+        }
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        /// A resolved training rule consumed on both sides of the contract.
+        struct FixtureSkill {
+            /// Wire skill slot.
+            id: u32,
+            /// Credits needed for training.
+            trained_cost: i32,
+            /// Additional credits needed for specialization.
+            specialization_upgrade_cost: i32,
+            /// Required starting advancement tier.
+            minimum_advancement: u32,
+        }
+        let fixture: Fixture = serde_json::from_str(include_str!(
+            "../tests/fixtures/character_creation_reconciliation.json"
+        ))
+        .unwrap();
+        let mut catalog = test_catalog();
+        Arc::make_mut(&mut catalog)
+            .heritage_groups
+            .get_mut(&fixture.heritage)
+            .unwrap()
+            .skill_credits = fixture.skill_credits;
+        let heritage = catalog.heritage_group(fixture.heritage).unwrap();
+        assert_eq!(heritage.attribute_credits, fixture.attribute_credits);
+        assert_eq!(heritage.skill_credits, fixture.skill_credits);
+        for skill in fixture.skills {
+            let costs = catalog
+                .skill_costs_for_heritage(fixture.heritage, skill.id)
+                .unwrap();
+            assert_eq!(costs.trained_cost, skill.trained_cost);
+            assert_eq!(
+                costs.specialization_upgrade_cost,
+                skill.specialization_upgrade_cost
+            );
+            assert_eq!(
+                minimum_skill_advancement_for_heritage(&catalog, fixture.heritage, skill.id) as u32,
+                skill.minimum_advancement
+            );
+        }
+        let mut build = test_build();
+        build.heritage = fixture.heritage;
+        build.template_option = custom_template_for_heritage(heritage)
+            .unwrap()
+            .template_option;
+        [
+            build.strength_ability,
+            build.endurance_ability,
+            build.coordination_ability,
+            build.quickness_ability,
+            build.focus_ability,
+            build.self_ability,
+        ] = fixture.attributes;
+        let tiers = |values: Vec<u32>| {
+            values
+                .into_iter()
+                .map(|value| SkillAdvancementClass::from_repr(value).unwrap())
+                .collect()
+        };
+        build.skill_advancement_classes = tiers(fixture.requested_skills);
+        let builder = CharacterGenBuilder::new(catalog);
+        assert!(
+            builder
+                .validate(&build)
+                .unwrap_err()
+                .iter()
+                .any(|error| matches!(
+                    error,
+                    CharacterGenValidationError::SkillBudgetExceeded { .. }
+                ))
+        );
+        build.skill_advancement_classes = tiers(fixture.expected_skills);
+        assert!(builder.build_request(build).is_ok());
     }
 
     #[test]

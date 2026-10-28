@@ -1,5 +1,8 @@
 import {
 	characterCreationAppearanceRequestSchema,
+	characterCreationStatsRequestSchema,
+	type CharacterCreationStatsRequest,
+	type CharacterCreationStats,
 	type CharacterCreationAppearanceRequest,
 	type CharacterCreationCatalog,
 	type CharacterCreationDraft,
@@ -18,6 +21,9 @@ export type CreationAppearance = CharacterCreationDraft["appearance"];
 /** One capability set for production transport and synthetic creator acceptance. */
 export interface CharacterCreationServices {
 	loadCatalog(): Promise<CharacterCreationCatalog>;
+	resolveStats(
+		request: CharacterCreationStatsRequest,
+	): Promise<CharacterCreationStats>;
 	resolveAppearance(
 		request: CharacterCreationAppearanceRequest,
 	): Promise<CharacterCreationPreview>;
@@ -300,45 +306,35 @@ export type CreationPreviewResolution =
 			readonly message: string;
 	  };
 
-/** One host request in flight plus the latest pending edit; obsolete work never reaches the GPU. */
-export class CharacterCreationPreviewResolver {
-	readonly #resolve: CharacterCreationServices["resolveAppearance"];
-	readonly #publish: (state: CreationPreviewResolution) => void;
+/** One active static query and the newest pending edit; retirement withdraws publication rights. */
+class LatestCreationRequest<Request, Value> {
+	readonly #resolve: (request: Request) => Promise<Value>;
+	readonly #ready: (value: Value, request: Request) => void;
+	readonly #failed: (message: string) => void;
 	#revision = 0;
-	#pending: {
-		readonly revision: number;
-		readonly request: CharacterCreationAppearanceRequest;
-	} | null = null;
+	#pending: { revision: number; request: Request } | null = null;
 	#running = false;
 	#disposed = false;
-	#lastGood: ResolvedCreationPreview | null = null;
 
 	constructor(
-		resolve: CharacterCreationServices["resolveAppearance"],
-		publish: (state: CreationPreviewResolution) => void,
+		resolve: (request: Request) => Promise<Value>,
+		ready: (value: Value, request: Request) => void,
+		failed: (message: string) => void,
 	) {
 		this.#resolve = resolve;
-		this.#publish = publish;
+		this.#ready = ready;
+		this.#failed = failed;
 	}
-
-	request(request: CharacterCreationAppearanceRequest): void {
-		if (this.#disposed)
-			throw new Error("Creation preview resolver is disposed.");
-		this.#pending = {
-			revision: ++this.#revision,
-			request: characterCreationAppearanceRequestSchema.parse(request),
-		};
-		this.#publish({ kind: "pending", previous: this.#lastGood });
+	request(request: Request): void {
+		if (this.#disposed) throw new Error("Creation query resolver is disposed.");
+		this.#pending = { revision: ++this.#revision, request };
 		if (!this.#running) void this.#drain();
 	}
-
-	/** Pending transport cannot be cancelled, but retirement withdraws its right to publish. */
 	dispose(): void {
 		this.#disposed = true;
 		this.#pending = null;
 		this.#revision++;
 	}
-
 	async #drain(): Promise<void> {
 		this.#running = true;
 		try {
@@ -346,24 +342,116 @@ export class CharacterCreationPreviewResolver {
 				const pending = this.#pending;
 				this.#pending = null;
 				try {
-					const preview = await this.#resolve(pending.request);
-					if (this.#disposed || pending.revision !== this.#revision) continue;
-					this.#lastGood = {
-						heritage: pending.request.heritage,
-						visual: preview,
-					};
-					this.#publish({ kind: "ready", preview: this.#lastGood });
+					const result = await this.#resolve(pending.request);
+					if (!this.#disposed && pending.revision === this.#revision)
+						this.#ready(result, pending.request);
 				} catch (error) {
-					if (this.#disposed || pending.revision !== this.#revision) continue;
-					this.#publish({
-						kind: "failed",
-						previous: this.#lastGood,
-						message: error instanceof Error ? error.message : String(error),
-					});
+					if (!this.#disposed && pending.revision === this.#revision)
+						this.#failed(
+							error instanceof Error ? error.message : String(error),
+						);
 				}
 			}
 		} finally {
 			this.#running = false;
 		}
+	}
+}
+
+/** Appearance retains its last usable visual while newer resources resolve. */
+export class CharacterCreationPreviewResolver {
+	readonly #owner: LatestCreationRequest<
+		CharacterCreationAppearanceRequest,
+		CharacterCreationPreview
+	>;
+	readonly #publish: (state: CreationPreviewResolution) => void;
+	#lastGood: ResolvedCreationPreview | null = null;
+	constructor(
+		resolve: CharacterCreationServices["resolveAppearance"],
+		publish: (state: CreationPreviewResolution) => void,
+	) {
+		this.#publish = publish;
+		this.#owner = new LatestCreationRequest(
+			resolve,
+			(visual, request) => {
+				this.#lastGood = { heritage: request.heritage, visual };
+				publish({ kind: "ready", preview: this.#lastGood });
+			},
+			(message) =>
+				publish({ kind: "failed", previous: this.#lastGood, message }),
+		);
+	}
+	request(request: CharacterCreationAppearanceRequest): void {
+		this.#publish({ kind: "pending", previous: this.#lastGood });
+		this.#owner.request(
+			characterCreationAppearanceRequestSchema.parse(request),
+		);
+	}
+	dispose(): void {
+		this.#owner.dispose();
+	}
+}
+
+/** Same-race edits retain a complete snapshot until its replacement is ready. */
+export type CreationStatsResolution =
+	| {
+			readonly kind: "pending";
+			readonly previous: Extract<
+				CharacterCreationStats,
+				{ kind: "standard" }
+			> | null;
+	  }
+	| { readonly kind: "ready"; readonly stats: CharacterCreationStats }
+	| { readonly kind: "failed"; readonly message: string };
+
+/** Allocation-only coalescing: cosmetic/name edits cannot create calculation or renderer work. */
+export class CharacterCreationStatsResolver {
+	readonly #owner: LatestCreationRequest<
+		CharacterCreationStatsRequest,
+		CharacterCreationStats
+	>;
+	readonly #publish: (state: CreationStatsResolution) => void;
+	#lastKey: string | null = null;
+	#lastGood: {
+		readonly heritage: number;
+		readonly stats: Extract<CharacterCreationStats, { kind: "standard" }>;
+	} | null = null;
+	constructor(
+		resolve: CharacterCreationServices["resolveStats"],
+		publish: (state: CreationStatsResolution) => void,
+	) {
+		this.#publish = publish;
+		this.#owner = new LatestCreationRequest(
+			resolve,
+			(stats, request) => {
+				this.#lastGood =
+					stats.kind === "standard"
+						? { heritage: request.heritage, stats }
+						: null;
+				publish({ kind: "ready", stats });
+			},
+			(message) => publish({ kind: "failed", message }),
+		);
+	}
+	request(draft: CharacterCreationDraft): void {
+		const request = characterCreationStatsRequestSchema.parse({
+			heritage: draft.heritage,
+			attributes: draft.attributes,
+			skills: draft.skills,
+		});
+		const key = JSON.stringify(request);
+		if (key === this.#lastKey) return;
+		this.#lastKey = key;
+		// Changing races retires the old snapshot even if the user switches back before completion.
+		if (this.#lastGood !== null && this.#lastGood.heritage !== request.heritage)
+			this.#lastGood = null;
+		this.#publish({
+			kind: "pending",
+			previous: this.#lastGood === null ? null : this.#lastGood.stats,
+		});
+		this.#owner.request(request);
+	}
+	dispose(): void {
+		this.#owner.dispose();
 	}
 }

@@ -178,6 +178,9 @@ export class ClientPresentationRoot<
 									owner,
 									this.pregameCharacters,
 									this.#dependencies.pregameLocation,
+									() =>
+										window.matchMedia("(prefers-reduced-motion: reduce)")
+											.matches,
 								),
 								lifetime: new AbortController(),
 							}

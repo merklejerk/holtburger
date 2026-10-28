@@ -59,6 +59,25 @@
 	.client-pregame-screen .ui-button:where(:active:not(:disabled)) {
 		--ui-button-background-color: var(--pregame-button-active-background);
 	}
+	/* Compact pregame controls share circular chrome without text-action sizing. */
+	.client-pregame-screen .pregame-round-button {
+		border-radius: 50%;
+	}
+	/* Button size carries selection; icon hue and stroke remain independent of state. */
+	.client-pregame-screen .creation-gender .ui-button {
+		--ui-icon-stroke-width: 3;
+	}
+	.client-pregame-screen .creation-gender .ui-button[aria-pressed="true"] {
+		--ui-button-border-color: var(--ui-color-highlight);
+		box-shadow: 0 0 0 2px
+			color-mix(in srgb, var(--ui-color-highlight) 25%, transparent);
+	}
+	.client-pregame-screen .creation-gender [data-gender="1"] .pregame-icon {
+		color: #78baff;
+	}
+	.client-pregame-screen .creation-gender [data-gender="2"] .pregame-icon {
+		color: #ff87b8;
+	}
 	.client-pregame-screen :is(.enter-world, .pregame-primary) {
 		border-color: var(--ui-color-accent);
 		color: var(--ui-color-highlight);
@@ -236,7 +255,10 @@
 		border-bottom: 1px solid
 			color-mix(in srgb, var(--ui-color-border) 30%, transparent);
 	}
-	.client-pregame-screen .creation-skill-description {
+	.client-pregame-screen .creation-skill-level {
+		color: var(--ui-color-accent);
+	}
+	.client-pregame-screen .creation-description {
 		color: var(--ui-color-muted);
 	}
 	.client-pregame-screen .creation-skill-row summary:focus-visible {

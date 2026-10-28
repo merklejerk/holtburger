@@ -590,34 +590,33 @@ export async function probeClientPresentation(
 			read(`(() => {
             const panel = document.getElementById('creation-appearance');
             return {
-                body: panel.querySelector('select').value,
+                gender: document.querySelector('.creation-gender button[aria-pressed="true"]').dataset.gender,
                 features: [...panel.querySelectorAll('input[type="range"]')].map(input => input.value),
                 colors: [...panel.querySelectorAll('.palette-dropdown')].map(button => button.getAttribute('aria-label')),
             };
         })()`);
-		const firstBodyControls = await readAppearanceControls();
-		const secondBody = await read(`(() => {
-            const select = document.querySelector('#creation-appearance select');
-            return [...select.options].find(option => option.value !== select.value).value;
+		const firstGenderControls = await readAppearanceControls();
+		const secondGender = await read(`(() => {
+            return document.querySelector('.creation-gender button[aria-pressed="false"]').dataset.gender;
         })()`);
-		const chooseBody = (value) =>
+		const chooseGender = (value) =>
 			read(`(() => {
-            const select = document.querySelector('#creation-appearance select');
-            select.value = ${JSON.stringify(value)};
-            select.dispatchEvent(new Event('change', {bubbles: true}));
+            const button = [...document.querySelectorAll('.creation-gender button')].find(button => button.dataset.gender === ${JSON.stringify(value)});
+            if (!button || button.disabled) throw new Error('Unavailable gender: ' + ${JSON.stringify(value)});
+            button.click();
         })()`);
-		await chooseBody(secondBody);
+		await chooseGender(secondGender);
 		await read(`(() => {
             const slider = document.querySelector('#creation-appearance input[type="range"]');
             slider.value = slider.max;
             slider.dispatchEvent(new Event('input', {bubbles: true}));
         })()`);
-		const secondBodyControls = await readAppearanceControls();
-		await chooseBody(firstBodyControls.body);
-		assert.deepEqual(await readAppearanceControls(), firstBodyControls);
-		await chooseBody(secondBody);
-		assert.deepEqual(await readAppearanceControls(), secondBodyControls);
-		await chooseBody(firstBodyControls.body);
+		const secondGenderControls = await readAppearanceControls();
+		await chooseGender(firstGenderControls.gender);
+		assert.deepEqual(await readAppearanceControls(), firstGenderControls);
+		await chooseGender(secondGender);
+		assert.deepEqual(await readAppearanceControls(), secondGenderControls);
+		await chooseGender(firstGenderControls.gender);
 		await click("Race");
 		const firstRace = await read(
 			`document.querySelector('#creation-race select').value`,
@@ -633,7 +632,7 @@ export async function probeClientPresentation(
             select.dispatchEvent(new Event('change', {bubbles: true}));
         })()`);
 		await click("Appearance");
-		assert.deepEqual(await readAppearanceControls(), firstBodyControls);
+		assert.deepEqual(await readAppearanceControls(), firstGenderControls);
 		await read(
 			`document.querySelector('button[aria-label^="Skin color:"]').click()`,
 		);
@@ -717,12 +716,22 @@ export async function probeClientPresentation(
 			"Palette Tester",
 		);
 		assert.equal(
-			await read("document.querySelector('.creation-summary dd').textContent"),
+			await read(
+				"document.querySelector('.creation-review-identity dd').textContent.trim()",
+			),
 			"Palette Tester",
 		);
+		assert.deepEqual(
+			await read(
+				"[...document.querySelectorAll('#creation-review .creation-review-attributes dt')].map(label => label.textContent.trim())",
+			),
+			["Strength", "Endurance", "Coordination", "Quickness", "Focus", "Self"],
+		);
 		assert.equal(
-			await read("document.querySelectorAll('.creation-summary dt').length"),
-			12,
+			await read(
+				"document.querySelector('#creation-review select')?.closest('label').textContent.trim().startsWith('Starting town')",
+			),
+			true,
 		);
 		// A valid name does not bypass the unspent-attribute policy through form submission.
 		assert.equal(
@@ -893,7 +902,7 @@ export async function probeClientPresentation(
 			);
 		const originalCredits = await readCredits();
 		const originalTraining = await read(
-			`[...document.querySelectorAll('.creation-skill-row')].map(row => ({name: row.querySelector('summary').textContent.trim(), training: Number(row.closest('section').getAttribute('aria-labelledby').split('-').at(-1))}))`,
+			`[...document.querySelectorAll('.creation-skill-row')].map(row => ({name: row.querySelector('.creation-skill-name').textContent.trim(), training: Number(row.closest('section').getAttribute('aria-labelledby').split('-').at(-1))}))`,
 		);
 		let spentCredits = 0;
 		while (
@@ -915,12 +924,12 @@ export async function probeClientPresentation(
 		while (
 			await read(`(() => {
             const original = ${JSON.stringify(originalTraining)};
-            return [...document.querySelectorAll('.creation-skill-row')].some(row => Number(row.closest('section').getAttribute('aria-labelledby').split('-').at(-1)) > original.find(entry => entry.name === row.querySelector('summary').textContent.trim()).training);
+            return [...document.querySelectorAll('.creation-skill-row')].some(row => Number(row.closest('section').getAttribute('aria-labelledby').split('-').at(-1)) > original.find(entry => entry.name === row.querySelector('.creation-skill-name').textContent.trim()).training);
         })()`)
 		) {
 			await read(`(() => {
                 const original = ${JSON.stringify(originalTraining)};
-                const row = [...document.querySelectorAll('.creation-skill-row')].find(row => Number(row.closest('section').getAttribute('aria-labelledby').split('-').at(-1)) > original.find(entry => entry.name === row.querySelector('summary').textContent.trim()).training);
+                const row = [...document.querySelectorAll('.creation-skill-row')].find(row => Number(row.closest('section').getAttribute('aria-labelledby').split('-').at(-1)) > original.find(entry => entry.name === row.querySelector('.creation-skill-name').textContent.trim()).training);
                 const button = row.querySelector('button[data-direction="down"]');
                 if (button.disabled) throw new Error('Purchased tier cannot be refunded');
                 button.click();
@@ -931,9 +940,9 @@ export async function probeClientPresentation(
 		assert.equal(await readCredits(), originalCredits);
 		assert.equal(
 			await read(`(() => {
-            const details = [...document.querySelectorAll('.creation-skill-row details')].find(details => details.querySelector('.ui-mono') !== null);
+            const details = [...document.querySelectorAll('.creation-skill-row details')].find(details => details.querySelector('.creation-description .ui-mono') !== null);
             details.open = true;
-            return details.querySelector('.creation-skill-description p').textContent.trim().length > 0 && details.querySelector('.ui-mono').textContent.trim().startsWith('Formula: ');
+            return details.querySelector('.creation-description p').textContent.trim().length > 0 && details.querySelector('.creation-description .ui-mono').textContent.trim().startsWith('Formula: ');
         })()`),
 			true,
 		);
@@ -996,7 +1005,12 @@ export async function probeClientPresentation(
 			),
 			-1,
 		);
-		for (const label of ["Enter World", "Create character", "Disconnect"]) {
+		for (const label of [
+			"Enter World",
+			"Create character",
+			"Settings",
+			"Disconnect",
+		]) {
 			await client.send("Input.dispatchKeyEvent", {
 				type: "keyDown",
 				key: "Tab",

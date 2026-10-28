@@ -4,13 +4,15 @@ import argparse
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import struct
 import zipfile
 
 
 CONTENT_FILES = ("bootstrap.hba", "navigation.hnav", "content-info.json")
-NAVIGATION_HEADER = struct.Struct("<8sIIQ32s")
+NAVIGATION_FORMAT_VERSION = 2
+NAVIGATION_HEADER = struct.Struct("<8sIIQ")
 
 
 def validate_components(components: dict[str, bytes]) -> dict:
@@ -23,13 +25,11 @@ def validate_components(components: dict[str, bytes]) -> dict:
         raise ValueError("CLI bootstrap payload has no HBA header")
     if len(navigation) < NAVIGATION_HEADER.size:
         raise ValueError("CLI navigation header is truncated")
-    magic, version, _, _, companion = NAVIGATION_HEADER.unpack_from(navigation)
+    magic, version, _, _ = NAVIGATION_HEADER.unpack_from(navigation)
     if magic != b"HLTBNAV\0":
         raise ValueError("CLI navigation payload has no navigation header")
-    if version != 1:
+    if version != NAVIGATION_FORMAT_VERSION:
         raise ValueError(f"Unsupported CLI navigation format: {version}")
-    if companion != hashlib.sha256(bootstrap).digest():
-        raise ValueError("CLI navigation is bound to a different bootstrap HBA")
     info = json.loads(components["content-info.json"])
     if info["navigation_format"] != version:
         raise ValueError("CLI content provenance disagrees with its navigation format")
@@ -58,12 +58,16 @@ def archive_components(data: bytes, expected_sha256: str) -> dict[str, bytes]:
 def unpack_cli_content(data: bytes, expected_sha256: str, output: Path) -> dict:
     """Stage validated components and the original pinned input for package receipts."""
     components = archive_components(data, expected_sha256)
-    # Refuse an existing destination: mixing a regenerated companion with older staged files
-    # would make a locally inspected directory differ from the pinned input contract.
-    output.mkdir(parents=True, exist_ok=False)
-    for name, payload in components.items():
-        (output / name).write_bytes(payload)
-    (output / "cli-content.zip").write_bytes(data)
+    # Dev dats/ may already contain a full HBA. Add only these managed inputs, never replace
+    # an existing companion (including a broken symlink) or touch unrelated retail data.
+    files = {**components, "cli-content.zip": data}
+    for name in files:
+        if os.path.lexists(output / name):
+            raise FileExistsError(f"Refusing to replace existing CLI content: {output / name}")
+    output.mkdir(parents=True, exist_ok=True)
+    for name, payload in files.items():
+        with (output / name).open("xb") as destination:
+            destination.write(payload)
     return json.loads(components["content-info.json"])
 
 

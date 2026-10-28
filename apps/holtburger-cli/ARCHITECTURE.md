@@ -4,9 +4,15 @@ This crate is the primary interactive interface for Holtburger. It is a Terminal
 
 ## 🏗️ Project Structure
 
-The TUI composes the shared runtime with `NavigationContent`. `installation.rs` supplies explicit
-`--content` / `HOLTBURGER_CONTENT` and portable/platform candidate precedence; content owns exact
-opening and validation. Bootstrap and creation consume parsed catalogs from that selection.
+The TUI owns content selection in `installation.rs`: explicit `--content`, then
+`HOLTBURGER_CONTENT`, then working-directory `dats/`, then executable-adjacent `content/`.
+Both overrides accept directories only. A directory selects `bootstrap.hba` when present,
+otherwise `assets.hba`, and always requires `navigation.hnav`. There is no archive
+profile inference, runtime HBA geometry projection, platform search, or automatic format fallback.
+The frontend opens the HBA repository and navigation archive independently, loads bootstrap/
+creation facts, and passes a `PreparedNavigationSource` through core's storage-independent
+`SceneContentSource` and `SetupContentSource` contracts. It explicitly selects reduced
+movement behavior independently of these providers. The content layer owns decoding, not path precedence.
 
 Local approach/follow/scoot policy remains in `navigation.rs`, which submits bounded full-XYZ
 intent pulses toward known destinations. Core validates and commits positions, retains progress

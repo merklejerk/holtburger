@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 import zipfile
 
 from cli_content_input import (
-    CONTENT_FILES, NAVIGATION_HEADER, archive_components, unpack_cli_content,
+    CONTENT_FILES, NAVIGATION_HEADER, NAVIGATION_FORMAT_VERSION, archive_components, unpack_cli_content,
     validate_components, verify_staged_content,
 )
 from fetch_cli_content import fetch_cli_content
@@ -19,9 +19,9 @@ from fetch_cli_content import fetch_cli_content
 def components() -> dict[str, bytes]:
     bootstrap = b"HBA\0synthetic bootstrap"
     navigation = NAVIGATION_HEADER.pack(
-        b"HLTBNAV\0", 1, 0, NAVIGATION_HEADER.size, hashlib.sha256(bootstrap).digest(),
+        b"HLTBNAV\0", NAVIGATION_FORMAT_VERSION, 0, NAVIGATION_HEADER.size,
     )
-    info = {"navigation_format": 1, "generator_version": "0.1.0-alpha.3"}
+    info = {"navigation_format": NAVIGATION_FORMAT_VERSION, "generator_version": "0.1.0-alpha.3"}
     for name, payload in (("bootstrap", bootstrap), ("navigation", navigation)):
         info[name] = {"bytes": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
     return dict(zip(CONTENT_FILES, (bootstrap, navigation, json.dumps(info).encode())))
@@ -43,7 +43,7 @@ class CliContentInputTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary, patch("fetch_cli_content.subprocess.run", return_value=Mock(stdout=data)) as request:
             output = Path(temporary) / "content"
             fetch_cli_content({"url": url, "sha256": checksum}, output)
-            self.assertEqual(verify_staged_content(output, checksum)["navigation_format"], 1)
+            self.assertEqual(verify_staged_content(output, checksum)["navigation_format"], NAVIGATION_FORMAT_VERSION)
             self.assertEqual(request.call_args.args[0], ["gh", "api", url, "--header", "Accept: application/octet-stream"])
 
     def test_missing_or_foreign_asset_urls_never_start_authenticated_fetch(self):
@@ -97,11 +97,7 @@ class CliContentInputTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must contain exactly"):
             archive_components(data, hashlib.sha256(data).hexdigest())
 
-    def test_mismatched_companions_and_inaccurate_provenance_are_refused(self):
-        payloads = components()
-        payloads["bootstrap.hba"] += b"new generation"
-        with self.assertRaisesRegex(ValueError, "different bootstrap"):
-            validate_components(payloads)
+    def test_inaccurate_provenance_is_refused(self):
         for component, field, incorrect in (("bootstrap", "bytes", 0), ("navigation", "sha256", "0" * 64)):
             payloads = components()
             info = json.loads(payloads["content-info.json"])
@@ -111,17 +107,23 @@ class CliContentInputTests(unittest.TestCase):
             with self.subTest(component=component), self.assertRaisesRegex(ValueError, f"{component} {expected}"):
                 validate_components(payloads)
 
-    def test_existing_staging_is_not_overwritten(self):
+    def test_existing_dev_directory_keeps_full_hba_and_refuses_replacing_managed_inputs(self):
         data, digest = archive(components())
         with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            full_hba = output / "assets.hba"
+            full_hba.write_bytes(b"existing full retail content")
+            unpack_cli_content(data, digest, output)
+            self.assertEqual(full_hba.read_bytes(), b"existing full retail content")
             with self.assertRaises(FileExistsError):
-                unpack_cli_content(data, digest, Path(temporary))
+                unpack_cli_content(data, digest, output)
+            self.assertEqual(full_hba.read_bytes(), b"existing full retail content")
 
     def test_missing_headers_and_unsupported_format_are_refused(self):
         cases = (("bootstrap.hba", b"not an HBA", "HBA header"),
                  ("navigation.hnav", b"truncated", "truncated"),
                  ("navigation.hnav", b"notmagic" + bytes(NAVIGATION_HEADER.size - 8), "navigation header"),
-                 ("navigation.hnav", NAVIGATION_HEADER.pack(b"HLTBNAV\0", 2, 0, NAVIGATION_HEADER.size, bytes(32)), "Unsupported CLI navigation format"))
+                 ("navigation.hnav", NAVIGATION_HEADER.pack(b"HLTBNAV\0", NAVIGATION_FORMAT_VERSION + 1, 0, NAVIGATION_HEADER.size), "Unsupported CLI navigation format"))
         for name, payload, message in cases:
             payloads = components()
             payloads[name] = payload
@@ -131,7 +133,7 @@ class CliContentInputTests(unittest.TestCase):
     def test_provenance_format_must_match_the_payload(self):
         payloads = components()
         info = json.loads(payloads["content-info.json"])
-        info["navigation_format"] = 2
+        info["navigation_format"] = NAVIGATION_FORMAT_VERSION + 1
         payloads["content-info.json"] = json.dumps(info).encode()
         with self.assertRaisesRegex(ValueError, "provenance disagrees"):
             validate_components(payloads)

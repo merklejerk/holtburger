@@ -1,10 +1,10 @@
 //! Versioned, independently compressed prepared-navigation blocks.
 //!
-//! The 56-byte little-endian header is magic[8], version:u32, entry_count:u32,
-//! directory_offset:u64, bootstrap_sha256[32]. A sorted terminal directory addresses
+//! The 24-byte little-endian header is magic[8], version:u32, entry_count:u32,
+//! directory_offset:u64. A sorted terminal directory addresses
 //! cell-owner, shared-geometry, and terrain blocks. Each 28-byte entry is kind:u32, id:u32,
 //! offset:u64, decoded_length:u32, stored_length:u32, encoding:u32 (0 raw, 1 zstd).
-//! Typed payloads use the explicit version-one MessagePack schema in `payload`, retaining
+//! Typed payloads use the explicit MessagePack schema in `payload`, retaining
 //! f32 geometry and source identities. Schema field/variant order is part of the version.
 //! Runtime reads are positioned, so existing content workers can share an opened archive.
 
@@ -28,14 +28,14 @@ pub use payload::{
 
 const MAGIC: [u8; 8] = *b"HLTBNAV\0";
 /// Prepared navigation format version, independent of the application's version.
-pub const NAVIGATION_FORMAT_VERSION: u32 = 1;
+pub const NAVIGATION_FORMAT_VERSION: u32 = 2;
 /// Bootstrap companion filename in a generated content directory.
 pub const BOOTSTRAP_FILE: &str = "bootstrap.hba";
 /// Prepared scene companion filename in a generated content directory.
 pub const NAVIGATION_FILE: &str = "navigation.hnav";
 /// Generated provenance and component identities, read by inspection/release tooling.
 pub const CONTENT_INFO_FILE: &str = "content-info.json";
-const HEADER_BYTES: u64 = 56;
+const HEADER_BYTES: u64 = 24;
 const DIRECTORY_ENTRY_BYTES: u64 = 28;
 
 /// An independently loadable family of prepared navigation data.
@@ -70,7 +70,7 @@ pub struct NavigationBlockInfo {
     pub stored_bytes: u32,
 }
 
-/// Fingerprints exact file bytes for generation, inspection, and companion selection.
+/// Fingerprints exact file bytes for generation and inspection.
 pub fn sha256_file(path: impl AsRef<Path>) -> Result<[u8; 32]> {
     let mut source = File::open(path)?;
     let mut digest = Sha256::new();
@@ -113,8 +113,6 @@ pub enum NavigationArchiveError {
     Decode(#[from] rmp_serde::decode::Error),
     #[error("invalid navigation product: {0}")]
     Product(String),
-    #[error("navigation bundle does not match its companion bootstrap HBA")]
-    BootstrapMismatch,
 }
 
 type Result<T> = std::result::Result<T, NavigationArchiveError>;
@@ -126,7 +124,6 @@ struct Header {
     version: u32,
     entry_count: u32,
     directory_offset: u64,
-    bootstrap_sha256: [u8; 32],
 }
 
 #[derive(Clone, Copy, BinRead, BinWrite)]
@@ -192,20 +189,10 @@ impl Entry {
 /// Opened immutable navigation directory, safe to share across content workers.
 pub struct NavigationArchive {
     file: File,
-    bootstrap_sha256: [u8; 32],
     entries: Vec<Entry>,
 }
 
 impl NavigationArchive {
-    /// Opens a generated pair, rejecting accidentally mixed bootstrap/navigation generations.
-    pub fn open_for_bootstrap(path: impl AsRef<Path>, bootstrap: impl AsRef<Path>) -> Result<Self> {
-        let archive = Self::open(path)?;
-        if archive.bootstrap_sha256 != sha256_file(bootstrap)? {
-            return Err(NavigationArchiveError::BootstrapMismatch);
-        }
-        Ok(archive)
-    }
-
     /// Validates the header and directory without reading or decoding world payloads.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let file = File::open(path)?;
@@ -236,16 +223,7 @@ impl NavigationArchive {
             }
             entries.push(entry);
         }
-        Ok(Self {
-            file,
-            bootstrap_sha256: header.bootstrap_sha256,
-            entries,
-        })
-    }
-
-    /// Digest checked against the companion bootstrap by the selected CLI-content loader.
-    pub fn bootstrap_sha256(&self) -> &[u8; 32] {
-        &self.bootstrap_sha256
+        Ok(Self { file, entries })
     }
 
     /// Directory identities used for content inspection and archived-cell owner discovery.
@@ -292,18 +270,16 @@ impl NavigationArchive {
 /// Streaming writer used inside the generator's unpublished staging directory.
 pub struct NavigationArchiveWriter {
     file: File,
-    bootstrap_sha256: [u8; 32],
     entries: BTreeMap<NavigationBlockKey, WireEntry>,
 }
 
 impl NavigationArchiveWriter {
     /// Creates a new staging file, refusing to overwrite an existing file.
-    pub fn create(path: impl AsRef<Path>, bootstrap_sha256: [u8; 32]) -> Result<Self> {
+    pub fn create(path: impl AsRef<Path>) -> Result<Self> {
         let mut file = File::create_new(path)?;
         file.write_all(&[0; HEADER_BYTES as usize])?;
         Ok(Self {
             file,
-            bootstrap_sha256,
             entries: BTreeMap::new(),
         })
     }
@@ -342,7 +318,6 @@ impl NavigationArchiveWriter {
             entry_count: u32::try_from(self.entries.len())
                 .map_err(|_| NavigationArchiveError::Size)?,
             directory_offset: self.file.stream_position()?,
-            bootstrap_sha256: self.bootstrap_sha256,
         };
         for entry in self.entries.into_values() {
             entry.write(&mut self.file)?;

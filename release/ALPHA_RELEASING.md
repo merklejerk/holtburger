@@ -27,11 +27,15 @@ regenerating the navigation content. Replace `NEXT_VERSION` with the explicitly 
 for an automatic bump. Integration retains the version already selected on `3d-next`.
 
 `.github/cli-content.json` owns the approved generated ZIP SHA-256 and GitHub API asset URL.
-The current pin selects `cli-content-08167e0347ccd19f.zip` on the existing
-`content-alpha-df24573f24e4ca46` prerelease (GitHub asset `685438455`). It contains both the
-regenerated `bootstrap.hba` and `navigation.hnav`, plus their provenance. The production
-fetcher and headless bootstrap probe pass on the downloaded bytes. The older `micro-hba.zip`
-remains available for legacy consumers; the new CLI release path does not fetch it.
+The current pin selects format-2 `cli-content-bc8933cd905326fa.zip` on the existing
+`content-alpha-df24573f24e4ca46` prerelease (GitHub asset `685856679`; SHA-256
+`bc8933cd905326fa231f584fb1280d21f8eed5c218f0795b30068aadc13e0dc4`). It contains
+`bootstrap.hba`, `navigation.hnav`, and their provenance. The production fetcher and headless
+bootstrap probe pass on the downloaded bytes. HNAV has no runtime bootstrap digest binding.
+The frozen alpha.5 candidate retains format-1 asset `685438455`
+(`cli-content-08167e0347ccd19f.zip`). Its input and application assets remain unchanged.
+The older `micro-hba.zip` remains available for legacy consumers; this CLI release path does
+not fetch it.
 For future updates, store approved bytes as a fresh asset
 on the repository's public, non-latest content prerelease. Read-only CI tokens cannot retrieve
 draft release assets. Keep existing input assets available and do not replace their bytes.
@@ -46,11 +50,11 @@ cargo run --locked --release -p holtburger-tools --bin cli-content -- generate \
   --source /path/to/full/assets.hba --output /path/to/new-output
 cargo run --locked --release -p holtburger-tools --bin cli-content -- info \
   --content /path/to/new-output/content
-cargo run --locked -p holtburger-debug-harness --bin content_bootstrap -- /path/to/new-output/content
+cargo run --locked -p holtburger-cli --bin content_bootstrap -- /path/to/new-output/content
 ```
 
 The ZIP has exactly `bootstrap.hba`, `navigation.hnav`, and `content-info.json` at its root.
-The navigation header binds the bootstrap digest. Provenance records the source digest,
+The format-2 navigation header has no bootstrap binding. Provenance records the source digest,
 generator version, format, and companion identities. Inspect the complete creation catalog
 and representative scene through the production probe before approving a new input.
 `cli-content` is developer tooling and is not shipped in either product.
@@ -64,9 +68,9 @@ python3 .github/scripts/cli_content_input.py /path/to/cli-content.zip \
   --sha256 APPROVED_SHA256 --output .holtburger-local/cli-content
 ```
 
-Use a new staging directory. ZIP identity, exact entries, headers, companion binding, sizes,
+Use a new staging directory. ZIP identity, exact entries, headers, sizes,
 and component digests are checked before staging. The assembler compares staged components
-with the retained input ZIP. Runtime uses the content crate's codec and companion validation;
+with the retained input ZIP. Runtime uses the content crate's codec validation;
 it does not scan the full source corpus or apply a size gate.
 
 ## Product assembly

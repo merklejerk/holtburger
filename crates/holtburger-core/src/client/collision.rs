@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::movement_types::ClientMovementPolicy;
-use super::navigation_body::{NavigationBodyFacts, NavigationClientSource};
+use super::navigation_body::{NavigationBodyFacts, NavigationBodySource};
 use crate::{
     SimulationSceneBatchCompletion, SimulationSceneInterest, SimulationSceneOwnerOutcome,
     SimulationSceneOwnerRequest, SimulationSceneRequest, SimulationSceneResidency,
@@ -25,7 +25,9 @@ use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     PropertyDataId, PropertyFloat, WorldObjectPropertyAccessors as _,
 };
-use holtburger_content::{ContentRepository, LandblockCollisionAsset, LandblockSceneClass};
+use holtburger_content::{
+    ContentRepository, LandblockCollisionAsset, LandblockSceneClass, SceneContentSource,
+};
 use holtburger_world::{
     DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EffectiveEntityPhysicsState,
     EntityAppearance, EntityCollisionParticipation, EntityIntegrationEligibility,
@@ -188,43 +190,39 @@ pub(super) fn property_f32(
         .map(|value| value as f32)
 }
 
-/// Injectable synchronous content source used by the asynchronous coordinator.
-pub trait ClientCollisionSource: Send + Sync + 'static {
-    /// Resolves the existing content classification before geographic demand is expanded.
-    fn load_scene_class(&self, owner: Guid) -> Result<Option<LandblockSceneClass>>;
-
-    /// Loads one normalized landblock owner, or `None` when no CellLandblock exists.
-    fn load_collision(&self, landblock_id: u32) -> Result<Option<LandblockCollisionAsset>>;
-
+/// Injectable body preparation; independent of the environment scene provider.
+pub trait ClientBodySource: Send + Sync + 'static {
     /// Prepares one complete physical definition from captured entity facts.
     fn prepare_body(&self, facts: ClientEntityBodyFacts) -> Result<DynamicPhysicalBodyDefinition>;
 }
 
 /// Production source over the shared content service and repository.
 #[derive(Clone)]
-pub struct ContentClientCollisionSource {
+pub struct ContentClientPhysicsSource {
     service: Arc<crate::ContentAssetService>,
     content: Arc<ContentRepository>,
 }
 
-impl ContentClientCollisionSource {
+impl ContentClientPhysicsSource {
     pub fn new(service: Arc<crate::ContentAssetService>, content: Arc<ContentRepository>) -> Self {
         Self { service, content }
     }
 }
 
-impl ClientCollisionSource for ContentClientCollisionSource {
-    fn load_scene_class(&self, owner: Guid) -> Result<Option<LandblockSceneClass>> {
+impl SceneContentSource for ContentClientPhysicsSource {
+    fn load_scene_class(&self, owner: u32) -> Result<Option<LandblockSceneClass>> {
         Ok(self
             .service
-            .load_landblock(owner.0)?
+            .load_landblock(owner)?
             .map(|asset| asset.scene_class))
     }
 
     fn load_collision(&self, landblock_id: u32) -> Result<Option<LandblockCollisionAsset>> {
         self.service.load_collision(landblock_id)
     }
+}
 
+impl ClientBodySource for ContentClientPhysicsSource {
     fn prepare_body(&self, facts: ClientEntityBodyFacts) -> Result<DynamicPhysicalBodyDefinition> {
         crate::prepare_dynamic_entity_physical_definition(
             crate::DynamicEntityPhysicalPreparationInput {
@@ -289,11 +287,11 @@ struct ClientPhysicalRemoteBodyTarget {
 enum ClientRemoteBodyPreparation {
     Physical {
         facts: ClientEntityBodyFacts,
-        source: Arc<dyn ClientCollisionSource>,
+        source: Arc<dyn ClientBodySource>,
     },
     Navigation {
         facts: NavigationBodyFacts,
-        source: Arc<NavigationClientSource>,
+        source: Arc<NavigationBodySource>,
     },
 }
 
@@ -353,32 +351,27 @@ struct ClientRemoteBodyTarget {
     demand: LocalPhysicalDemand,
 }
 
-/// Explicit client composition; archive representation never selects movement behavior.
+/// Frontend-selected scene and body sources travel together through client construction.
 #[derive(Clone)]
-pub(super) enum ClientSpatialPolicy {
-    Physical(Arc<dyn ClientCollisionSource>),
-    Navigation(Arc<NavigationClientSource>),
+pub(super) struct ClientSpatialSources {
+    /// Environment geometry, independent of entity movement policy.
+    pub scenes: Arc<dyn SceneContentSource>,
+    /// Local movement and remote body preparation behavior.
+    pub bodies: ClientBodyPolicy,
 }
 
-impl ClientSpatialPolicy {
+/// Explicit body behavior; archive representation never selects movement behavior.
+#[derive(Clone)]
+pub(super) enum ClientBodyPolicy {
+    Physical(Arc<dyn ClientBodySource>),
+    Navigation(Arc<NavigationBodySource>),
+}
+
+impl ClientBodyPolicy {
     pub(crate) fn movement_policy(&self) -> ClientMovementPolicy {
         match self {
             Self::Physical(_) => ClientMovementPolicy::Physical,
             Self::Navigation(_) => ClientMovementPolicy::Navigation,
-        }
-    }
-
-    fn load_scene_class(&self, owner: Guid) -> Result<Option<LandblockSceneClass>> {
-        match self {
-            Self::Physical(source) => source.load_scene_class(owner),
-            Self::Navigation(source) => source.content.load_scene_class(owner.0),
-        }
-    }
-
-    fn load_collision(&self, owner: u32) -> Result<Option<LandblockCollisionAsset>> {
-        match self {
-            Self::Physical(source) => source.load_collision(owner),
-            Self::Navigation(source) => source.content.load_collision(owner),
         }
     }
 
@@ -484,7 +477,9 @@ enum ClientSpatialCompletion {
 
 /// Core-owned coordinator shared by desktop and TUI client compositions.
 pub struct ClientCollisionCoordinator {
-    source: ClientSpatialPolicy,
+    bodies: ClientBodyPolicy,
+    /// Geometry fidelity is selected independently of local/remote body behavior.
+    scenes: Arc<dyn SceneContentSource>,
     completion_tx: UnboundedSender<ClientSpatialCompletion>,
     completion_rx: UnboundedReceiver<ClientSpatialCompletion>,
     scene_worker: Option<tokio::task::JoinHandle<()>>,
@@ -505,14 +500,18 @@ pub struct ClientCollisionCoordinator {
 }
 
 impl ClientCollisionCoordinator {
-    pub fn new(source: Arc<dyn ClientCollisionSource>) -> Self {
-        Self::with_policy(ClientSpatialPolicy::Physical(source))
+    pub fn new<S: ClientBodySource + SceneContentSource>(source: Arc<S>) -> Self {
+        Self::with_policy(source.clone(), ClientBodyPolicy::Physical(source))
     }
 
-    pub(super) fn with_policy(source: ClientSpatialPolicy) -> Self {
+    pub(super) fn with_policy(
+        scenes: Arc<dyn SceneContentSource>,
+        bodies: ClientBodyPolicy,
+    ) -> Self {
         let (completion_tx, completion_rx) = mpsc::unbounded_channel();
         Self {
-            source,
+            bodies,
+            scenes,
             completion_tx,
             completion_rx,
             scene_worker: None,
@@ -535,9 +534,7 @@ impl ClientCollisionCoordinator {
         service: Arc<crate::ContentAssetService>,
         content: Arc<ContentRepository>,
     ) -> Self {
-        Self::new(Arc::new(ContentClientCollisionSource::new(
-            service, content,
-        )))
+        Self::new(Arc::new(ContentClientPhysicsSource::new(service, content)))
     }
 
     pub fn body_readiness(&self) -> ClientBodyReadiness {
@@ -693,7 +690,7 @@ impl ClientCollisionCoordinator {
             self.entity_response_override = None;
         }
         self.observe_scene_context(target.position);
-        let ClientSpatialPolicy::Physical(source) = &self.source else {
+        let ClientBodyPolicy::Physical(source) = &self.bodies else {
             self.retire_local_body_preparation();
             remove_local_player_physical_body(world, target.player, &mut events);
             return events;
@@ -896,7 +893,7 @@ impl ClientCollisionCoordinator {
                         let Some(guid) = target.body_id.authoritative_guid() else {
                             continue;
                         };
-                        let Some(current) = self.source.remote_target(world, guid) else {
+                        let Some(current) = self.bodies.remote_target(world, guid) else {
                             continue;
                         };
                         if !current.preparation.definition_eq(&target.preparation)
@@ -933,7 +930,7 @@ impl ClientCollisionCoordinator {
                         let Some(outcome) = world.scene.set_dynamic_physical_body(
                             target.body_id,
                             Some(configuration),
-                            self.source.remote_filter(),
+                            self.bodies.remote_filter(),
                             initial_cell,
                         ) else {
                             continue;
@@ -1054,11 +1051,11 @@ impl ClientCollisionCoordinator {
                 owner,
                 state: ClientSceneContextState::Pending,
             });
-            let source = self.source.clone();
+            let source = self.scenes.clone();
             let completion_tx = self.completion_tx.clone();
             self.scene_worker = Some(tokio::spawn(async move {
                 let result = tokio::task::spawn_blocking(move || {
-                    source.load_scene_class(owner)?.ok_or_else(|| {
+                    source.load_scene_class(owner.0)?.ok_or_else(|| {
                         anyhow!("Collision owner {:#010X} is absent from content", owner.0)
                     })
                 })
@@ -1105,12 +1102,12 @@ impl ClientCollisionCoordinator {
         self.scene_worker.take().inspect(|worker| worker.abort());
         self.scene_generation = self.scene_generation.saturating_add(1);
         let generation = self.scene_generation;
-        let source = self.source.clone();
+        let source = self.scenes.clone();
         let completion_tx = self.completion_tx.clone();
         self.scene_worker = Some(tokio::spawn(async move {
             let request_for_worker = request.clone();
             let outcomes = tokio::task::spawn_blocking(move || {
-                resolve_scene_request(&source, &request_for_worker)
+                resolve_scene_request(source.as_ref(), &request_for_worker)
             })
             .await
             .unwrap_or_else(|error| {
@@ -1134,11 +1131,7 @@ impl ClientCollisionCoordinator {
         }));
     }
 
-    fn start_body_loading(
-        &mut self,
-        target: ClientBodyTarget,
-        source: Arc<dyn ClientCollisionSource>,
-    ) {
+    fn start_body_loading(&mut self, target: ClientBodyTarget, source: Arc<dyn ClientBodySource>) {
         self.body_worker.take().inspect(|worker| worker.abort());
         self.body_generation = self.body_generation.saturating_add(1);
         self.next_body_request = self.next_body_request.saturating_add(1);
@@ -1178,7 +1171,7 @@ impl ClientCollisionCoordinator {
             .entities
             .iter()
             .filter_map(|entity| {
-                self.source
+                self.bodies
                     .remote_target(world, entity.guid)
                     .map(|target| (target.body_id, target))
             })
@@ -1504,7 +1497,7 @@ fn reconfigure_physical_body(
 }
 
 fn resolve_scene_request(
-    source: &ClientSpatialPolicy,
+    source: &dyn SceneContentSource,
     request: &SimulationSceneRequest,
 ) -> Vec<SimulationSceneOwnerOutcome> {
     request
@@ -1593,12 +1586,12 @@ mod tests {
         body_gate: Mutex<Option<BodyGate>>,
     }
 
-    impl ClientCollisionSource for FakeSource {
-        fn load_scene_class(&self, owner: Guid) -> Result<Option<LandblockSceneClass>> {
+    impl SceneContentSource for FakeSource {
+        fn load_scene_class(&self, owner: u32) -> Result<Option<LandblockSceneClass>> {
             self.classes
                 .lock()
                 .unwrap()
-                .get(&owner)
+                .get(&Guid(owner))
                 .cloned()
                 .unwrap_or(Ok(Some(LandblockSceneClass::OutdoorOnly)))
                 .map_err(anyhow::Error::msg)
@@ -1614,7 +1607,9 @@ mod tests {
                 static_geometry: Default::default(),
             }))
         }
+    }
 
+    impl ClientBodySource for FakeSource {
         fn prepare_body(
             &self,
             facts: ClientEntityBodyFacts,
@@ -1934,6 +1929,32 @@ mod tests {
         })
         .await
         .expect("client collision worker did not publish the expected scene revision");
+    }
+
+    #[tokio::test]
+    async fn environment_provider_is_independent_of_physical_body_preparation() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x5000_0001);
+        let destination = Guid(0x1234_0001);
+        world.seed_local_player_entity(guid, "Player", position(destination.0));
+        facts(&mut world, guid);
+        let scenes = Arc::new(FakeSource::default());
+        let bodies = Arc::new(FakeSource::default());
+        let mut coordinator = ClientCollisionCoordinator::with_policy(
+            scenes.clone(),
+            ClientBodyPolicy::Physical(bodies.clone()),
+        );
+        coordinator.observe(&mut world);
+        wait_for_readiness(&mut coordinator, &mut world, |readiness| {
+            matches!(readiness, ClientBodyReadiness::Ready { .. })
+        })
+        .await;
+        wait_for_scene_revision(&mut coordinator, &mut world, 1).await;
+        assert!(coordinator.destination_scene_ready(destination).unwrap());
+        assert!(!scenes.loaded.lock().unwrap().is_empty());
+        assert_eq!(scenes.prepared.load(Ordering::SeqCst), 0);
+        assert!(bodies.loaded.lock().unwrap().is_empty());
+        assert_eq!(bodies.prepared.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

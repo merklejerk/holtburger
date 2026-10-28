@@ -9,7 +9,7 @@ use holtburger_common::Guid;
 use holtburger_content::{ContentDecodeCache, ContentRepository};
 use holtburger_core::{
     ClientCommand, ClientLifecycleState, ClientRuntimeBuilder, ClientViewEvent,
-    ContentAssetService, ContentClientCollisionSource, DynamicEntityClip,
+    ContentAssetService, ContentClientPhysicsSource, DynamicEntityClip,
     DynamicEntityClipCompletion, DynamicEntityEvent,
 };
 use holtburger_protocol::messages::combat::CombatMode;
@@ -80,12 +80,13 @@ async fn main() -> Result<()> {
         Arc::clone(&repository),
         Arc::new(ContentDecodeCache::new()),
     ));
+    let physical_source = Arc::new(ContentClientPhysicsSource::new(
+        service,
+        Arc::clone(&repository),
+    ));
     let mut builder = ClientRuntimeBuilder::new(account)
         .server(args.host, args.port)
-        .physical_movement_source(Arc::new(ContentClientCollisionSource::new(
-            service,
-            Arc::clone(&repository),
-        )));
+        .physical_movement_source(physical_source.clone(), physical_source.clone());
     builder
         .load_assets(repository.as_ref())
         .context("client bootstrap content failed")?;

@@ -3,11 +3,24 @@ use std::io::Cursor;
 
 use holtburger_common::properties::{ObjectDescriptionFlag, PhysicsState};
 use holtburger_common::{Quaternion, Sphere, Vector3, position::WorldPosition};
+use holtburger_content::navigation_bundle::{
+    BOOTSTRAP_FILE, NAVIGATION_FILE, NavigationArchive, NavigationArchiveWriter,
+};
+use holtburger_content::{ContentRepository, NavigationSceneSource, PreparedNavigationSource};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, HbaStreamWriter, file_type::SetupModel};
 use holtburger_world::{
     PhysicalBodyDefinition, entity::Entity, resolve_effective_entity_physics_state,
 };
 use tempfile::TempDir;
+
+fn prepared_content(directory: &std::path::Path) -> Arc<PreparedNavigationSource> {
+    Arc::new(PreparedNavigationSource::new(
+        Arc::new(ContentRepository::from_hba_path(directory.join(BOOTSTRAP_FILE)).unwrap()),
+        NavigationSceneSource::new(
+            NavigationArchive::open(directory.join(NAVIGATION_FILE)).unwrap(),
+        ),
+    ))
+}
 
 mod room_motion;
 
@@ -27,7 +40,7 @@ fn facts() -> NavigationBodyFacts {
     }
 }
 
-fn source(spheres: Vec<Sphere>) -> (TempDir, NavigationClientSource) {
+fn source(spheres: Vec<Sphere>) -> (TempDir, Arc<PreparedNavigationSource>) {
     let sphere = Sphere {
         center: Vector3::zero(),
         radius: 0.5,
@@ -66,8 +79,16 @@ fn source(spheres: Vec<Sphere>) -> (TempDir, NavigationClientSource) {
         .add(EOR_PORTAL_NAMESPACE, SETUP, 0, bytes.into_inner())
         .unwrap();
     writer.finish().unwrap();
-    let content = NavigationContent::open(path).unwrap();
-    (temp, NavigationClientSource::new(Arc::new(content)))
+    let nav_path = temp.path().join("empty.hnav");
+    NavigationArchiveWriter::create(&nav_path)
+        .unwrap()
+        .finish()
+        .unwrap();
+    let content = Arc::new(PreparedNavigationSource::new(
+        Arc::new(ContentRepository::from_hba_path(path).unwrap()),
+        NavigationSceneSource::new(NavigationArchive::open(nav_path).unwrap()),
+    ));
+    (temp, content)
 }
 
 #[test]
@@ -82,20 +103,9 @@ fn preparation_preserves_both_motion_spheres_without_models_or_scripts() {
             radius: 0.4,
         },
     ];
-    let (_temp, source) = source(spheres.clone());
+    let (_temp, content) = source(spheres.clone());
+    let source = NavigationBodySource::new(content);
     let facts = facts();
-    let dimensions = source
-        .content
-        .bootstrap()
-        .read_setup_dimension_catalog()
-        .unwrap();
-    assert_eq!(
-        dimensions.get(SETUP),
-        Some(holtburger_content::SetupDimensions {
-            radius: 0.5,
-            height: 2.0
-        })
-    );
     let definition = source.prepare_body(facts.clone()).unwrap();
     assert!(matches!(
         definition.movement,
@@ -121,7 +131,8 @@ fn preparation_preserves_both_motion_spheres_without_models_or_scripts() {
 
 #[test]
 fn empty_setup_preserves_fixed_position_and_missing_setup_fails() {
-    let (_temp, source) = source(Vec::new());
+    let (_temp, content) = source(Vec::new());
+    let source = NavigationBodySource::new(content);
     let mut facts = facts();
     assert!(matches!(
         source.prepare_body(facts.clone()).unwrap().movement,
@@ -165,7 +176,7 @@ fn remote_capture_does_not_require_wcid_or_setup_to_hold_prediction() {
 
 #[tokio::test]
 async fn coordinator_installs_remote_envelopes_and_rebuilds_without_peer_response() {
-    use crate::client::collision::{ClientCollisionCoordinator, ClientSpatialPolicy};
+    use crate::client::collision::{ClientBodyPolicy, ClientCollisionCoordinator};
     use holtburger_common::properties::WorldObjectPropertyAccessorsMut as _;
     use holtburger_world::PhysicalCollisionExclusions;
     use std::time::{Duration, Instant};
@@ -174,8 +185,10 @@ async fn coordinator_installs_remote_envelopes_and_rebuilds_without_peer_respons
         center: Vector3::new(0.0, 0.0, 0.5),
         radius: 0.5,
     }]);
-    let mut coordinator =
-        ClientCollisionCoordinator::with_policy(ClientSpatialPolicy::Navigation(Arc::new(source)));
+    let mut coordinator = ClientCollisionCoordinator::with_policy(
+        source.clone(),
+        ClientBodyPolicy::Navigation(Arc::new(NavigationBodySource::new(source))),
+    );
     let mut world = WorldState::synthetic();
     let pose = WorldPosition {
         landblock_id: Guid(0x1234_0100),
@@ -236,12 +249,12 @@ async fn coordinator_installs_remote_envelopes_and_rebuilds_without_peer_respons
 #[tokio::test]
 async fn navigation_activation_waits_for_coverage_then_enters_without_model_body_facts() {
     use crate::client::builder::build_test_client;
-    use crate::client::collision::{ClientCollisionCoordinator, ClientSpatialPolicy};
+    use crate::client::collision::{ClientBodyPolicy, ClientCollisionCoordinator};
     use crate::client::movement::MovementSystem;
     use crate::client::movement_types::ClientMovementPolicy;
     use crate::client::{ClientState, ClientWorldActivationPhase, ClientWorldActivationState};
     use holtburger_content::navigation_bundle::{
-        BOOTSTRAP_FILE, NAVIGATION_FILE, NavigationArchiveWriter, NavigationTerrain, sha256_file,
+        NAVIGATION_FILE, NavigationArchiveWriter, NavigationTerrain,
     };
     use holtburger_content::{
         LandblockSceneClass, LandblockTerrain, TERRAIN_GRID_CELLS, TerrainCellDiagonals,
@@ -254,11 +267,7 @@ async fn navigation_activation_waits_for_coverage_then_enters_without_model_body
     let (temp, _hba_source) = source(Vec::new());
     let owner = Guid(0x1234_ffff);
     let grid_size = TERRAIN_GRID_CELLS + 1;
-    let mut writer = NavigationArchiveWriter::create(
-        temp.path().join(NAVIGATION_FILE),
-        sha256_file(temp.path().join(BOOTSTRAP_FILE)).unwrap(),
-    )
-    .unwrap();
+    let mut writer = NavigationArchiveWriter::create(temp.path().join(NAVIGATION_FILE)).unwrap();
     writer
         .add_terrain(
             owner.0,
@@ -279,7 +288,7 @@ async fn navigation_activation_waits_for_coverage_then_enters_without_model_body
         )
         .unwrap();
     writer.finish().unwrap();
-    let content = Arc::new(NavigationContent::open(temp.path()).unwrap());
+    let content = prepared_content(temp.path());
     for cause in [
         ClientWorldActivationState::InitialEntry,
         ClientWorldActivationState::Teleport,
@@ -294,9 +303,8 @@ async fn navigation_activation_waits_for_coverage_then_enters_without_model_body
         client.world.seed_local_player_entity(guid, "Player", pose);
         client.movement = MovementSystem::with_policy(ClientMovementPolicy::Navigation);
         client.collision_coordinator = Some(ClientCollisionCoordinator::with_policy(
-            ClientSpatialPolicy::Navigation(Arc::new(NavigationClientSource::new(Arc::clone(
-                &content,
-            )))),
+            content.clone(),
+            ClientBodyPolicy::Navigation(Arc::new(NavigationBodySource::new(content.clone()))),
         ));
         client.start_world_activation(cause, guid);
         if cause == ClientWorldActivationState::Teleport {

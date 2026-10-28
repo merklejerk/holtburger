@@ -105,7 +105,7 @@ pub struct NavigationBuildingPortal {
     pub linked_cells: Vec<u16>,
 }
 
-/// Stable version-one tree schema, preserving all runtime physics-node facts.
+/// Stable tree schema, preserving all runtime physics-node facts.
 #[derive(Serialize, Deserialize)]
 enum TreeWire {
     Portal {
@@ -327,7 +327,7 @@ impl RoomWire {
     }
 }
 
-/// Fixed version-one outdoor classification, avoiding dependency on enum source order.
+/// Fixed outdoor classification, avoiding dependency on enum source order.
 #[derive(Serialize, Deserialize)]
 enum SceneClassWire {
     Dungeon,

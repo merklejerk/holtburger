@@ -110,7 +110,7 @@ jobs:
         run: |
           cargo clippy --locked -p holtburger-cli --lib --bin tui --tests -- -D warnings
           cargo clippy --locked -p holtburger-tools --lib --bin dat2hba --bin dat-tool --bin cli-content -- -D warnings
-          cargo clippy --locked -p holtburger-debug-harness --bin content_bootstrap -- -D warnings
+          cargo clippy --locked -p holtburger-cli --bin content_bootstrap -- -D warnings
       - name: Deny 3D host lint warnings
         if: inputs.product != 'cli'
         run: cargo clippy --locked -p holtburger-3d-host --lib --tests -- -D warnings

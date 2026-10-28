@@ -1,15 +1,14 @@
 //! Synthetic prepared-content integration: doorway passage and wall sliding through core ticks.
 
 use super::*;
-use crate::client::collision::{ClientCollisionCoordinator, ClientSpatialPolicy};
+use crate::client::collision::{ClientBodyPolicy, ClientCollisionCoordinator};
 use crate::client::movement::MovementSystem;
 use crate::client::movement_types::ClientMovementPolicy;
 use crate::client::simulation;
 use holtburger_common::{Plane, properties::WorldObjectPropertyAccessorsMut};
 use holtburger_content::navigation_bundle::{
-    BOOTSTRAP_FILE, NAVIGATION_FILE, NavigationArchiveWriter, NavigationCell,
-    NavigationPortalConnection, NavigationPortalGeometry, NavigationRoomGeometry,
-    NavigationTerrain, sha256_file,
+    NAVIGATION_FILE, NavigationArchiveWriter, NavigationCell, NavigationPortalConnection,
+    NavigationPortalGeometry, NavigationRoomGeometry, NavigationTerrain,
 };
 use holtburger_content::{
     BspSolid, CollisionBox, CollisionPolygon, CollisionShape, LandblockCellStructureRef,
@@ -143,16 +142,12 @@ fn room(selector: u16) -> NavigationRoomGeometry {
     }
 }
 
-fn prepared_source() -> (TempDir, Arc<NavigationClientSource>) {
+fn prepared_source() -> (TempDir, Arc<PreparedNavigationSource>) {
     let (temp, _hba_source) = source(vec![Sphere {
         center: Vector3::zero(),
         radius: RADIUS,
     }]);
-    let mut writer = NavigationArchiveWriter::create(
-        temp.path().join(NAVIGATION_FILE),
-        sha256_file(temp.path().join(BOOTSTRAP_FILE)).unwrap(),
-    )
-    .unwrap();
+    let mut writer = NavigationArchiveWriter::create(temp.path().join(NAVIGATION_FILE)).unwrap();
     let grid_size = TERRAIN_GRID_CELLS + 1;
     writer
         .add_terrain(
@@ -201,12 +196,12 @@ fn prepared_source() -> (TempDir, Arc<NavigationClientSource>) {
         )
         .unwrap();
     writer.finish().unwrap();
-    let content = Arc::new(NavigationContent::open(temp.path()).unwrap());
-    (temp, Arc::new(NavigationClientSource::new(content)))
+    let content = prepared_content(temp.path());
+    (temp, content)
 }
 
 async fn runtime(
-    source: Arc<NavigationClientSource>,
+    source: Arc<PreparedNavigationSource>,
     start: Vector3,
     velocity: Vector3,
 ) -> (WorldState, ClientCollisionCoordinator, MovementSystem) {
@@ -223,8 +218,10 @@ async fn runtime(
         .properties
         .set_did_prop(PropertyDataId::Setup, Guid(SETUP));
     world.add_entity(entity);
-    let mut coordinator =
-        ClientCollisionCoordinator::with_policy(ClientSpatialPolicy::Navigation(source));
+    let mut coordinator = ClientCollisionCoordinator::with_policy(
+        source.clone(),
+        ClientBodyPolicy::Navigation(Arc::new(NavigationBodySource::new(source))),
+    );
     coordinator.observe(&mut world);
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {

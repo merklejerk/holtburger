@@ -3,12 +3,11 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use holtburger_common::Guid;
-use holtburger_content::{LandblockCollisionAsset, LandblockSceneClass};
+use holtburger_content::{LandblockCollisionAsset, LandblockSceneClass, SceneContentSource};
 use holtburger_core::{
-    ClientCollisionSource, ClientDynamicScriptFacts, ClientDynamicScriptSource,
-    ClientEntityBodyFacts, ClientSelectionEnvelopeProfile, ClientSelectionEnvelopeSource,
-    PreparedClientDynamicScript, PreparedDynamicScriptTimeline,
+    ClientBodySource, ClientDynamicScriptFacts, ClientDynamicScriptSource, ClientEntityBodyFacts,
+    ClientSelectionEnvelopeProfile, ClientSelectionEnvelopeSource, PreparedClientDynamicScript,
+    PreparedDynamicScriptTimeline,
 };
 use holtburger_world::{DynamicPhysicalBodyDefinition, SelectionEnvelope, SelectionGeometry};
 
@@ -47,8 +46,8 @@ impl<T> ReportingContentSource<T> {
     }
 }
 
-impl<T: ClientCollisionSource> ClientCollisionSource for ReportingContentSource<T> {
-    fn load_scene_class(&self, owner: Guid) -> Result<Option<LandblockSceneClass>> {
+impl<T: SceneContentSource> SceneContentSource for ReportingContentSource<T> {
+    fn load_scene_class(&self, owner: u32) -> Result<Option<LandblockSceneClass>> {
         self.failures.required(self.inner.load_scene_class(owner))
     }
 
@@ -56,7 +55,9 @@ impl<T: ClientCollisionSource> ClientCollisionSource for ReportingContentSource<
         self.failures
             .required(self.inner.load_collision(landblock_id))
     }
+}
 
+impl<T: ClientBodySource> ClientBodySource for ReportingContentSource<T> {
     fn prepare_body(&self, facts: ClientEntityBodyFacts) -> Result<DynamicPhysicalBodyDefinition> {
         self.failures.required(self.inner.prepare_body(facts))
     }

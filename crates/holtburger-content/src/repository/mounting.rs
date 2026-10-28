@@ -79,8 +79,30 @@ pub struct ResolvedContent {
 impl ResolvedContent {
     /// Resolves a user-selected location without environment or sibling-file overrides.
     pub fn open(path: impl Into<PathBuf>) -> Result<Self> {
+        Self::open_preferred(path, |_| true)
+    }
+
+    /// Prefer a directory's HBA installation when admitted by the consumer, otherwise try
+    /// its DAT installation. Families never mix; unreadable archives remain errors. An exact
+    /// file never falls back. The returned repository still requires consumer admission:
+    /// retaining a rejected candidate lets the application report its missing resource.
+    pub fn open_preferred(
+        path: impl Into<PathBuf>,
+        accepts: impl Fn(&ContentRepository) -> bool,
+    ) -> Result<Self> {
         let path = path.into();
-        let repository = open_selection(path.clone(), None)?;
+        let mut repository = open_selection(path.clone(), None)?;
+        if path.is_dir() && !accepts(&repository) {
+            match open_selection(path.clone(), Some(ArchiveFamily::Dat)) {
+                Ok(retail) => repository = retail,
+                Err(error)
+                    if matches!(
+                        error.downcast_ref::<ContentSelectionError>(),
+                        Some(ContentSelectionError::Empty { .. })
+                    ) => {}
+                Err(error) => return Err(error),
+            }
+        }
         let location = fs::canonicalize(&path)
             .map_err(|source| ContentSelectionError::Unavailable { path, source })?;
         Ok(Self {
@@ -109,7 +131,7 @@ impl ResolvedContent {
         accepts: impl Fn(&ContentRepository) -> bool,
     ) -> Result<Self> {
         for path in &paths {
-            match Self::open(path) {
+            match Self::open_preferred(path, &accepts) {
                 Ok(selection) => {
                     if accepts(&selection.repository) {
                         return Ok(selection);

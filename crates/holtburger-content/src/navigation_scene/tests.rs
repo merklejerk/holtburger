@@ -127,7 +127,7 @@ fn source(
 ) -> (TempDir, NavigationSceneSource) {
     let temp = TempDir::new().unwrap();
     let path = temp.path().join("navigation.hnav");
-    let mut writer = NavigationArchiveWriter::create(&path, [0; 32]).unwrap();
+    let mut writer = NavigationArchiveWriter::create(&path).unwrap();
     writer.add_terrain(OWNER, terrain).unwrap();
     if let Some(cells) = cells {
         writer.add_cells(OWNER, cells).unwrap();

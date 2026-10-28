@@ -29,7 +29,7 @@ pub fn resolve(selection: HostContentSelection) -> Result<ResolvedContent> {
             ResolvedContent::discover(root, accepts).context(CONTENT_GUIDANCE)
         }
         HostContentSelection::Explicit(path) => {
-            let resolved = ResolvedContent::open(path)?;
+            let resolved = ResolvedContent::open_preferred(path, accepts)?;
             if !accepts(&resolved.repository) {
                 return Err(ContentResourceError {
                     kind: ContentResourceErrorKind::Missing,
@@ -66,6 +66,24 @@ mod tests {
         writer.write(&path).unwrap();
         let resolved = resolve(HostContentSelection::Explicit(path)).unwrap();
         assert!(accepts(&resolved.repository));
+        let bootstrap = directory.path().join("bootstrap.hba");
+        let mut small = HbaWriter::new();
+        small
+            .add(
+                EOR_PORTAL_NAMESPACE,
+                0x0400_0001,
+                DatFileType::Palette as u32,
+                vec![0],
+            )
+            .unwrap();
+        small.write(&bootstrap).unwrap();
+        for selection in [
+            HostContentSelection::Explicit(directory.path().to_path_buf()),
+            HostContentSelection::Automatic(directory.path().to_path_buf()),
+        ] {
+            assert!(accepts(&resolve(selection).unwrap().repository));
+        }
+        assert!(resolve(HostContentSelection::Explicit(bootstrap)).is_err());
     }
 
     #[test]

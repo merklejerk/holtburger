@@ -34,12 +34,13 @@ portals, without furniture or peer collision. ACE remains authoritative. Gamepla
 that requires unavailable local physics, such as missile ground checks, is left to ACE;
 server rejection feedback still applies.
 
-An explicit `--content /absolute/path` selects either a prepared content directory containing
-`bootstrap.hba` and `navigation.hnav`, or an exact full HBA file. A full HBA is projected into
-the same reduced movement policy. Retail DAT directories are not a CLI content input.
+`--content /absolute/directory` and `HOLTBURGER_CONTENT` accept directories only. A directory
+uses `bootstrap.hba` when present, otherwise `assets.hba`. Either HBA supplies reference facts;
+`navigation.hnav` in the same directory always supplies geometry. Full HBAs do not enable a
+different simulation path or replace HNAV. Retail DAT directories are not CLI content input.
 
-Selection order is `--content`, `HOLTBURGER_CONTENT`, working-directory `content`,
-executable-adjacent `content`, then Holtburger's platform data directory's `content` folder.
+Selection order is `--content`, `HOLTBURGER_CONTENT`, working-directory `dats`, then
+executable-adjacent `content`.
 An existing malformed selection is an error; lower-priority content does not replace it.
 
 ## Scripts and utilities

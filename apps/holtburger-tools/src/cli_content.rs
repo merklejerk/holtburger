@@ -119,7 +119,7 @@ pub fn generate(source: &Path, output: &Path) -> Result<CliContentInfo> {
     let cache = ContentDecodeCache::new();
     let region = cache.active_region_data(&content)?;
     let navigation = content_dir.join(NAVIGATION_FILE);
-    let mut writer = NavigationArchiveWriter::create(&navigation, sha256_file(&bootstrap)?)?;
+    let mut writer = NavigationArchiveWriter::create(&navigation)?;
     let mut shared: BTreeMap<u32, BTreeMap<u32, NavigationRoomGeometry>> = BTreeMap::new();
     let mut cell_count = 0;
     for (index, owner) in owners.iter().copied().enumerate() {
@@ -354,10 +354,7 @@ fn write_zip(content: &Path, output: &Path) -> Result<()> {
 /// Inspects an exact generated pair and recorded identities without a geometry census.
 pub fn inspect(content: &Path) -> Result<CliContentInfo> {
     let info: CliContentInfo = serde_json::from_slice(&fs::read(content.join(CONTENT_INFO_FILE))?)?;
-    let archive = NavigationArchive::open_for_bootstrap(
-        content.join(NAVIGATION_FILE),
-        content.join(BOOTSTRAP_FILE),
-    )?;
+    let archive = NavigationArchive::open(content.join(NAVIGATION_FILE))?;
     ensure!(
         info.navigation_format == NAVIGATION_FORMAT_VERSION,
         "content metadata format does not match the reader"

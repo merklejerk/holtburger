@@ -34,8 +34,9 @@ To open Explorer without connecting to a server, use the same executable:
 ```
 
 Use the corresponding executable path on Windows/macOS. Optional `weenies.hwc` data is
-user-supplied. HBA files take precedence in a selected data directory; do not mix a compact
-CLI bootstrap HBA into a retail installation.
+user-supplied. A full HBA installation takes precedence in a selected directory. If readable
+HBAs contain only compact CLI data, h3d tries the retail DAT installation in that directory.
+Corrupt HBAs remain errors; h3d never combines HBA and DAT families.
 
 ## Native requirements
 

@@ -146,6 +146,14 @@ and inspect the actual native packages and exercise startup, the private host, c
 recovery, and packaged assets; they do not repeat shared unit suites. Platform-specific
 investigations use targeted checks as needed, without a generic dispatch interface.
 
+The Windows job installs the pinned LIEF packaging dependency and runs synthetic PE tests.
+Forge adds NVIDIA/AMD high-performance GPU exports to the final unsigned Electron executable
+before archive creation. The patch verifies existing exports, section bytes, entry point,
+image base and non-export directories before replacing the executable. Package and extracted
+archive inspection require both vendor hints to contain one; the existing Windows startup
+probe then exercises the patched executable. This uses standard Electron binaries, not a
+custom Electron build. Local Windows packaging setup is described in the 3D app README.
+
 Candidate packaging on every target retains branding, bootstrap,
 package/architecture/resource inspection, private-host smoke, default-client/Explorer content
 recovery, and actual packaged font/image decoding. The exhaustive development theme suite

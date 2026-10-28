@@ -175,6 +175,9 @@ function entryArguments(): {
 			app.commandLine.appendSwitch("use-angle", "gl");
 		if (!app.commandLine.hasSwitch("disable-gpu-vsync"))
 			app.commandLine.appendSwitch("disable-gpu-vsync");
+		// Request the faster adapter on hybrid laptops; OS and driver selection may prevail.
+		if (!app.commandLine.hasSwitch("force-high-performance-gpu"))
+			app.commandLine.appendSwitch("force-high-performance-gpu");
 	}
 	// Chromium's frame-rate-limit bypass also disables GPU vsync in the GPU subprocess.
 	// Remove both switches so the explicit app override wins over native flags and --uncapped.

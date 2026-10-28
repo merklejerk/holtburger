@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { entityDisplayName } from "../lib/game/entity-display-name";
 	import { untrack } from "svelte";
 	import UiPanelDialog from "../app/UiPanelDialog.svelte";
 	import UiTabs from "../app/UiTabs.svelte";
@@ -263,6 +264,7 @@
 					</p>{/if}
 				<ul>
 					{#each rows as row (row.guid)}
+						{@const displayName = entityDisplayName(row.facts.name, row.guid)}
 						{@const exactAlertEnabled =
 							findExactEntityAlert(view.rules, row.facts.name)?.enabled ===
 							true}
@@ -280,7 +282,7 @@
 								<button
 									class="ui-catalog-trigger entity-disclosure"
 									type="button"
-									aria-label={`Details for ${row.facts.name}`}
+									aria-label={`Details for ${displayName}`}
 									aria-expanded={expanded === row.guid}
 									onclick={() =>
 										(expanded = expanded === row.guid ? null : row.guid)}
@@ -300,8 +302,7 @@
 									class="ui-catalog-trigger entity-name"
 									type="button"
 									aria-pressed={selectedGuid === row.guid}
-									onclick={() => selectEntity(row.guid)}
-									>{row.facts.name}</button
+									onclick={() => selectEntity(row.guid)}>{displayName}</button
 								>
 								<span
 									>{row.distance === null
@@ -347,13 +348,14 @@
 									<div class="ui-icon-actions ui-list-actions">
 										<button
 											class="ui-button ui-icon-button"
-											aria-label={`Exact-name alert for ${row.facts.name}`}
+											aria-label={`Exact-name alert for ${displayName}`}
 											aria-pressed={exactAlertEnabled}
 											title={exactAlertEnabled
 												? "Disable exact-name alert"
 												: "Enable exact-name alert"}
 											type="button"
-											disabled={!view.editable}
+											disabled={!view.editable ||
+												row.facts.name.trim().length === 0}
 											onclick={() => toggleExactAlert(row.facts.name)}
 											><ClientHudIcon
 												name={exactAlertEnabled ? "bell-active" : "bell"}

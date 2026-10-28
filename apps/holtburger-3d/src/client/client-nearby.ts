@@ -1,3 +1,4 @@
+import { entityDisplayName } from "../lib/game/entity-display-name";
 import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
 import type {
 	ClientLifecycleSessionEvent,
@@ -419,7 +420,11 @@ export class ClientNearby {
 					...queued.map((entry) => ({
 						indented: queued.length > 1,
 						spans: [
-							{ kind: "entity" as const, guid: entry.guid, text: entry.name },
+							{
+								kind: "entity" as const,
+								guid: entry.guid,
+								text: entityDisplayName(entry.name, entry.guid),
+							},
 							{
 								kind: "plain" as const,
 								text: `${queued.length === 1 ? " detected" : ""} — ${entry.location}`,

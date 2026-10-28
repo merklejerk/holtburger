@@ -1,3 +1,4 @@
+import { entityDisplayName } from "../lib/game/entity-display-name";
 import { selectedEntityNameColor } from "./client-selected-entity-color";
 import { canInteractItem } from "./client-action-item";
 import type { HexRgbaColor } from "../lib/frontend-color";
@@ -14,7 +15,7 @@ type ClientSelectedHealth =
 
 /** Selected HUD facts sampled from the semantic mirror and the effective subscription. */
 export interface ClientSelectedEntityDisplay {
-	/** Current accepted name, absent until description is known. */
+	/** Presentation label with an unnamed fallback; absent until description is known. */
 	readonly name: string | null;
 	/** App-owned classification color, absent while description facts are pending. */
 	readonly nameColor: HexRgbaColor | null;
@@ -107,7 +108,7 @@ export class ClientSelectedEntityTracking {
 		const fraction =
 			this.#target?.guid === guid ? this.#target.healthFraction : null;
 		return {
-			name: record.description.name,
+			name: entityDisplayName(record.description.name, guid),
 			nameColor: selectedEntityNameColor(
 				record.description,
 				guid === read.level.playerGuid,

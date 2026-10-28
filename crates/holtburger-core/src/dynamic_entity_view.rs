@@ -49,7 +49,7 @@ pub struct DynamicEntityIdentityView {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicEntityDisplayView {
-    /// Required display name.
+    /// Authored display name; an empty string represents an unnamed entity.
     pub name: String,
     /// Optional nonnegative authored level.
     pub level: Option<u32>,

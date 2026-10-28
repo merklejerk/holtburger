@@ -7,6 +7,7 @@ import {
 import { DYNAMIC_ENTITY_PRESENTATION_CLASSES } from "../dynamic-entity-presentation-class";
 import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../map/map-blip-category";
 import { entityAppearanceSchema } from "./entity-appearance-contract";
+import { entityDisplayName } from "../entity-display-name";
 
 const finiteNumber = z.number().finite();
 const nonNegativeInteger = z.number().int().nonnegative();
@@ -111,7 +112,7 @@ export const dynamicEntityMotionSchema = z
 		message: "Motion playback must contain at least one clip.",
 	});
 
-const dynamicEntityViewSchema = z.object({
+const hostDynamicEntityViewSchema = z.object({
 	generation: nonNegativeInteger,
 	identity: z.object({
 		guid,
@@ -178,6 +179,18 @@ const dynamicEntityViewSchema = z.object({
 });
 
 const hostTimeSchema = z.object({ seconds: finiteNumber.nonnegative() });
+
+// This feed owns presentation text. Authoritative entity facts retain authored names for matching
+// and commands; every dynamic-view delivery path below shares this app-local label normalization.
+const dynamicEntityViewSchema = hostDynamicEntityViewSchema.transform(
+	(entity) => {
+		entity.display.name = entityDisplayName(
+			entity.display.name,
+			entity.identity.guid,
+		);
+		return entity;
+	},
+);
 
 const dynamicEntitySnapshotSchema = z.object({
 	hostTime: hostTimeSchema,

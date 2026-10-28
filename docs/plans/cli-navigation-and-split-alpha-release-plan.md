@@ -1,11 +1,9 @@
 # CLI navigation content and separate alpha distributions
 
-Status: the simplified TUI content path and accepted ownership/admission follow-up are
-implemented and locally verified.
-The approved format-2 input is uploaded, pinned locally, and verified through a fresh download.
-Commit/push to `claude` and `3d-next` is explicitly authorized.
-Next: selection of the next application candidate; no candidate dispatch is authorized yet.
-Alpha.5 remains frozen and unpublished; it does not contain this follow-up.
+Status: implementation and formal-review corrections are locally verified. The two-file
+input is uploaded, pinned, and verified through a fresh download. The user authorized
+committing/pushing the pending source, selecting `0.1.0-alpha.6`, and running one full draft
+candidate. Publication and manual acceptance remain separate. Alpha.5 stays frozen.
 Updated: 2026-10-28.
 
 ## Current steer — One TUI source contract, simple discovery
@@ -28,6 +26,9 @@ Accepted direction:
   classification/geometry and `SetupContentSource` for reduced body facts; it does not choose
   filenames/formats. Frontends explicitly select movement/body behavior independently of the
   scene provider. World/solver ownership and h3d's physical behavior stay unchanged.
+- Ship only `bootstrap.hba` and `navigation.hnav` in CLI content. Remove the generated JSON
+  receipt and its schema/checks. Generation statistics go to the console; the ZIP pin and
+  existing release manifest own integrity. Keep optional provenance in content-release notes.
 - Remove the runtime bootstrap checksum requirement entirely. HNAV format 2 has a 24-byte
   header with no bootstrap digest. Retain format/bounds validation and release ZIP/component
   integrity. Do not replace the removed binding with another compatibility handshake.
@@ -196,23 +197,51 @@ setup projection owner; frontend selection/cache lifetimes and solver policy are
 The restored ACE pin matches the pre-feature baseline exactly. Content format/pin and existing
 release assets are unchanged; no new data generation, push, build dispatch, or publication.
 
+### Two-file content follow-up
+
+The user approved removing the unnecessary generated receipt. This supersedes earlier
+three-file input inventories below; frozen candidates and historical inputs remain intact.
+
+- [x] Delete receipt generation/inspection types, metadata-only checks/tests, and the orphaned
+  Rust SHA-256 helper/dependency. Generation prints counts; inspection opens archives directly.
+- [x] Make fetch/staging/native/Flatpak inventories require the two content archives. Keep the
+  ZIP pin, exact entry/header checks, staged-byte comparison, and release manifest identities.
+- [x] Prepare a two-file ZIP using the already approved public HBA/HNAV bytes. No content
+  regeneration or HNAV format change is needed. Remove the obsolete receipt from dev `dats/`.
+- [x] Upload as a new input asset, repin, and verify a production download/bootstrap round trip.
+- [x] Complete focused tests/lint and update the checked-in notice input record.
+
+The two-file input is `cli-content-464d85155190efbd.zip`, GitHub asset `685954475`,
+31,237,262 bytes; SHA-256
+`464d85155190efbd18c0d2f985985df5e2ff9a5dd8a3a3d12b092721d571a9c4`.
+A fresh production fetch has exactly the two entries; HBA/HNAV bytes match the preceding
+approved public input exactly. Local and downloaded inputs pass the current bootstrap
+(13 heritage groups, 568 cells/shells). Direct inspection prints 65,025 terrain owners,
+3,409 cell blocks, and 769 shared geometry blocks without a receipt. All 46 release-tool
+and four generator tests pass; warnings-denied content/tool lint passes. Notice generation
+was refreshed locally after the unused dependency removal; HTML is byte-identical and
+only its input record changed. Prior inputs and all 11 frozen alpha.5 assets are preserved.
+No source commit/push, candidate dispatch, or publication was performed for this follow-up.
+
 ### Remaining work for this steer
 
 - [x] Obtain explicit approval to publicly upload `cli-content-bc8933cd905326fa.zip` to the
   existing `content-alpha-df24573f24e4ca46` content prerelease, preserving its existing assets.
 - [x] Upload the approved bytes, pin the returned asset URL and digest, then verify a production
-  fetch/bootstrap round trip. Current descriptor selects format-2 GitHub asset `685856679`;
+  fetch/bootstrap round trip. The initial format-2 GitHub asset `685856679` was verified;
   the downloaded ZIP matches the approved local bytes exactly and staged components validate.
   The current-code bootstrap reports 13 heritage groups and 568 cells/room shells.
 - [x] Obtain explicit go-ahead to commit/push this follow-up to `claude` and `3d-next`.
   User authorized this step after the upload round trip; candidate dispatch remains separate.
-- [ ] Select the next candidate/version explicitly, then perform one intentional candidate run
-  after the compatible input pin and reviewed source are available. Keep alpha.5's assets intact.
+- [x] Select `0.1.0-alpha.6` and authorize the pending commits/push plus one full draft run.
+- [ ] Perform that candidate run after committing the version bump and pushing reviewed source.
+  Keep alpha.5's assets intact; no publication is authorized.
 - [ ] Verify/freeze the new candidate and collect user acceptance for the changed TUI path;
   record exactly which native/Flatpak products and targets were tested.
 - [ ] Publish only with separate authorization, reusing the accepted candidate bytes.
 
-The regenerated ZIP is ready locally at `.holtburger-local/cli-content-v2/cli-content.zip`:
+The preceding three-file format-2 ZIP is retained locally at
+`.holtburger-local/cli-content-v2/cli-content.zip` (superseded by the two-file pin above):
 31,237,845 bytes; SHA-256
 `bc8933cd905326fa231f584fb1280d21f8eed5c218f0795b30068aadc13e0dc4`.
 

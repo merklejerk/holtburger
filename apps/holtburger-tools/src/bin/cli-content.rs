@@ -23,7 +23,7 @@ enum Command {
         #[arg(long)]
         output: PathBuf,
     },
-    /// Inspect the generated content/ directory and verify its recorded file identities.
+    /// Inspect the content/ archives and print navigation block counts.
     Info {
         #[arg(long)]
         content: PathBuf,
@@ -32,10 +32,9 @@ enum Command {
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-    let info = match Args::parse().command {
+    match Args::parse().command {
         Command::Generate { source, output } => cli_content::generate(&source, &output)?,
         Command::Info { content } => cli_content::inspect(&content)?,
     };
-    println!("{}", serde_json::to_string_pretty(&info)?);
     Ok(())
 }

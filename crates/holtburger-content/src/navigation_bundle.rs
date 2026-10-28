@@ -17,7 +17,6 @@ use std::{
 
 use binrw::{BinRead, BinWrite};
 use holtburger_dat::utils::FileExtPolyfill;
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 mod payload;
@@ -33,8 +32,6 @@ pub const NAVIGATION_FORMAT_VERSION: u32 = 2;
 pub const BOOTSTRAP_FILE: &str = "bootstrap.hba";
 /// Prepared scene companion filename in a generated content directory.
 pub const NAVIGATION_FILE: &str = "navigation.hnav";
-/// Generated provenance and component identities, read by inspection/release tooling.
-pub const CONTENT_INFO_FILE: &str = "content-info.json";
 const HEADER_BYTES: u64 = 24;
 const DIRECTORY_ENTRY_BYTES: u64 = 28;
 
@@ -68,14 +65,6 @@ pub struct NavigationBlockInfo {
     pub decoded_bytes: u32,
     /// Payload bytes on disk, excluding the directory entry.
     pub stored_bytes: u32,
-}
-
-/// Fingerprints exact file bytes for generation and inspection.
-pub fn sha256_file(path: impl AsRef<Path>) -> Result<[u8; 32]> {
-    let mut source = File::open(path)?;
-    let mut digest = Sha256::new();
-    std::io::copy(&mut source, &mut digest)?;
-    Ok(digest.finalize().into())
 }
 
 /// Structural or I/O failure while opening, producing, or reading a navigation bundle.

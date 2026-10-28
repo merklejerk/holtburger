@@ -16,7 +16,6 @@ The HBA may be reduced or full; it never replaces HNAV or changes the reduced TU
 `--content` and `HOLTBURGER_CONTENT` select a directory, never an individual file.
 To use the full HBA for reference facts, select a directory containing `assets.hba` and
 `navigation.hnav`, without `bootstrap.hba`.
-Generated metadata is for tooling; it does not impose a runtime bootstrap checksum binding.
 
 Native CLI bundles keep these files under executable-adjacent `content/`. The CLI Flatpak
 selects `/app/lib/holtburger/content` through `HOLTBURGER_CONTENT`. h3d keeps its own

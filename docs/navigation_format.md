@@ -1,7 +1,7 @@
 # Prepared CLI navigation format
 
-The CLI content directory contains `bootstrap.hba`, `navigation.hnav`, and
-`content-info.json`. Bootstrap uses the existing [HBA format](hba_format.md), with complete
+The CLI content directory contains `bootstrap.hba` and `navigation.hnav`.
+Bootstrap uses the existing [HBA format](hba_format.md), with complete
 creation choices, setup facts, and simulation motion data. Navigation is a separate format;
 it does not create partially populated retail Environment or CellLandblock record types.
 
@@ -81,18 +81,17 @@ Physics shell geometry is retained for constrained remote prediction. Local move
 point containment under core's selected policy. The file does not encode local input,
 gravity policy, route planning, contact claims, or packet timing.
 
-## Provenance and release input
+## Release input
 
-`content-info.json` records `generator_version`, `navigation_format`, source HBA SHA-256,
-bootstrap/navigation byte sizes and SHA-256 values, and owner/cell/shared-structure counts.
-This metadata is for generation, inspection, and release verification. App version changes
-alone do not invalidate an otherwise compatible pair.
+The approved ZIP contains exactly the two named files at its root. Release tooling pins
+its SHA-256 digest and compares staged bytes with that archive before assembly. The release
+manifest records bundled file identities. The ZIP remains a CI input; client bundles contain
+the two extracted archives. There is no separate content metadata file or runtime binding.
 
-The approved ZIP contains exactly the three named files at its root. Release tooling pins
-the ZIP digest and component identities before staging, and
-compares staged bytes with the pinned archive before assembly. The ZIP remains a CI input;
-the client bundle contains the three extracted companions. Runtime does not scan the source
-retail corpus or enforce a content size limit.
+Generation prints owner/cell/shared-structure counts to the console. Inspection opens the
+archives directly and prints navigation block counts. Optional generation provenance belongs
+in content-release notes. App version changes alone do not invalidate compatible content.
+Runtime does not scan the source retail corpus or enforce a content size limit.
 
 Generate with `cli-content generate --source FULL.hba --output NEW_DIRECTORY`; inspect with
 `cli-content info --content NEW_DIRECTORY/content`. The generator is developer tooling,

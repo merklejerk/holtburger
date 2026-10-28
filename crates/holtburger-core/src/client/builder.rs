@@ -1,5 +1,8 @@
+use super::collision::ClientSpatialPolicy;
+use super::movement_types::ClientMovementPolicy;
+use super::navigation_body::NavigationClientSource;
 use anyhow::{Context, Result, anyhow};
-use holtburger_content::ContentRepository;
+use holtburger_content::{ContentRepository, NavigationContent};
 use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, SpellTable, XpTable};
 use holtburger_session::Session;
 use holtburger_world::{WorldBootstrap, WorldState};
@@ -25,7 +28,7 @@ pub struct ClientRuntimeBuilder {
     account_name: String,
     server_endpoint: Option<ServerEndpoint>,
     world_bootstrap: Option<Arc<WorldBootstrap>>,
-    collision_source: Option<Arc<dyn super::collision::ClientCollisionSource>>,
+    spatial_policy: Option<ClientSpatialPolicy>,
     dynamic_script_source: Option<Arc<dyn super::dynamic_script::ClientDynamicScriptSource>>,
     selection_envelope_source:
         Option<Arc<dyn super::selection_envelope::ClientSelectionEnvelopeSource>>,
@@ -42,7 +45,7 @@ impl ClientRuntimeBuilder {
             account_name: account_name.into(),
             server_endpoint: None,
             world_bootstrap: None,
-            collision_source: None,
+            spatial_policy: None,
             dynamic_script_source: None,
             selection_envelope_source: None,
             combat_tuning: ClientCombatTuning::default(),
@@ -99,18 +102,28 @@ impl ClientRuntimeBuilder {
             character_titles: Arc::new(character_titles),
             contracts: Arc::new(contracts),
             motion_sequences: Arc::new(motion_sequences),
+            setup_dimensions: Arc::new(content.read_setup_dimension_catalog()?),
             soul_emote_catalog: Arc::new(soul_emote_catalog),
         }));
 
         Ok(())
     }
 
-    /// Injects the content-backed source used to stage client collision and player-body products.
-    pub fn collision_source(
+    /// Selects full physical simulation and its content-backed scene/body preparation source.
+    pub fn physical_movement_source(
         mut self,
         source: Arc<dyn super::collision::ClientCollisionSource>,
     ) -> Self {
-        self.collision_source = Some(source);
+        self.spatial_policy = Some(ClientSpatialPolicy::Physical(source));
+        self
+    }
+
+    /// Selects point-validated local motion and room-shell-constrained remote prediction.
+    /// The caller loads bootstrap from this selection's exact indexed repository.
+    pub fn navigation_content(mut self, content: Arc<NavigationContent>) -> Self {
+        self.spatial_policy = Some(ClientSpatialPolicy::Navigation(Arc::new(
+            NavigationClientSource::new(content),
+        )));
         self
     }
 
@@ -205,6 +218,10 @@ impl ClientRuntimeBuilder {
         })?;
         let (client_view_event_tx, _) = broadcast::channel(4096);
 
+        let movement_policy = self.spatial_policy.as_ref().map_or(
+            ClientMovementPolicy::Physical,
+            ClientSpatialPolicy::movement_policy,
+        );
         Ok(ClientRuntime {
             #[cfg(feature = "runtime-fixture")]
             runtime_fixture: None,
@@ -247,15 +264,15 @@ impl ClientRuntimeBuilder {
             command_rx: None,
             message_dump_dir: self.message_dump_dir,
             message_counter: 0,
-            movement: MovementSystem::new(),
+            movement: MovementSystem::with_policy(movement_policy),
             combat_engagement: Default::default(),
             combat_attribution: Default::default(),
             combat_tuning: self.combat_tuning,
             combat_approach_drive_active: false,
             melee_approach_state: None,
             collision_coordinator: self
-                .collision_source
-                .map(super::collision::ClientCollisionCoordinator::new),
+                .spatial_policy
+                .map(super::collision::ClientCollisionCoordinator::with_policy),
             dynamic_script_coordinator: self
                 .dynamic_script_source
                 .map(super::dynamic_script::ClientDynamicScriptCoordinator::new),

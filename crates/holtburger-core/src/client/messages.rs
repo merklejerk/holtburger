@@ -84,6 +84,9 @@ impl ClientRuntime {
             },
         );
         let events = self.world.apply_player_pose_effect(effect);
+        if reset_cause.is_some() {
+            self.movement.reset_navigation_progress();
+        }
 
         if installs_teleport_destination {
             self.activation

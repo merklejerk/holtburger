@@ -4,6 +4,20 @@ This crate is the primary interactive interface for Holtburger. It is a Terminal
 
 ## 🏗️ Project Structure
 
+The TUI composes the shared runtime with `NavigationContent`. `installation.rs` supplies explicit
+`--content` / `HOLTBURGER_CONTENT` and portable/platform candidate precedence; content owns exact
+opening and validation. Bootstrap and creation consume parsed catalogs from that selection.
+
+Local approach/follow/scoot policy remains in `navigation.rs`, which submits bounded full-XYZ
+intent pulses toward known destinations. Core validates and commits positions, retains progress
+through known gaps, and reports accepted cell changes. The frontend does not assign a target
+cell to an unrelated position or snap Z at arrival. Local gravity/jumping/stairs are unsupported;
+remote prediction uses shared room-shell/terrain solving without furniture or peer collision.
+
+Gameplay requests whose physical eligibility cannot be evaluated in this reduced composition
+are delegated to ACE. This allows missile requests without inventing local ground contact;
+known target/range/ownership/busy checks remain shared. h3d retains its physical composition.
+
 - **`src/bin/tui.rs`**: The main executable entry point. Orchestrates terminal lifecycle, logging, and the core event loop.
 - **`src/lib.rs`**: The crate surface. Re-exports the top-level modules used by the binary and by tests: `components`, `navigation`, `pages`, `scripting`, `state`, `theme`, `types`, `update`, `utils`, and `version`.
 - **`src/state.rs`**: Core application state management. Defines `AppState`, `RenderContext`, and the top-level shell/event plumbing.

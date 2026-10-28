@@ -1,7 +1,7 @@
 use std::time::Instant;
 use std::{fs::File, sync::Mutex};
 
-use holtburger_content::ContentRepository;
+use holtburger_content::CharacterGenCatalog;
 use holtburger_core::ClientState;
 use holtburger_dat::file_type::SkillTable;
 use holtburger_scripting::ScriptHostConfig;
@@ -55,7 +55,8 @@ pub struct AppState {
     pub net_stats: NetStats,
     pub world_name: String,
     pub server_time: Option<(f64, Instant)>,
-    pub content: Option<Arc<ContentRepository>>,
+    /// Parsed creation choices from the exact bootstrap source, shared across roster rebuilds.
+    pub character_gen_catalog: Option<Arc<CharacterGenCatalog>>,
     pub spell_catalog: Option<Arc<SpellCatalog>>,
     pub skill_table: Option<Arc<SkillTable>>,
     pub verbosity: u8,

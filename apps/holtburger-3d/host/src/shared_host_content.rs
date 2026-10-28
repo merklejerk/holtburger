@@ -152,6 +152,7 @@ impl SharedHostContent {
             character_titles: Arc::new(character_titles),
             contracts: Arc::new(contracts),
             motion_sequences: Arc::new(motion_catalog),
+            setup_dimensions: Arc::new(self.repository.read_setup_dimension_catalog()?),
             soul_emote_catalog,
         };
         let bootstrap = Arc::new(bootstrap);

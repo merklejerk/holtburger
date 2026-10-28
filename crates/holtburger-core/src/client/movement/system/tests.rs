@@ -34,6 +34,16 @@ use std::io::{Cursor, Read};
 const FIXTURE_MOTION_TABLE_ID: u32 = 0x0900_0020;
 
 #[test]
+fn navigation_policy_reports_jump_as_unsupported_without_waiting_for_body_facts() {
+    let world = WorldState::synthetic();
+    let movement = MovementSystem::with_policy(ClientMovementPolicy::Navigation);
+    assert_eq!(
+        movement.character_motion_readiness(&world),
+        CharacterMotionReadiness::Unsupported
+    );
+}
+
+#[test]
 fn dead_authority_advances_once_despite_held_manual_drive() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x7000_0001);
@@ -1818,17 +1828,12 @@ async fn snap_facing_sends_autonomous_position_sync_with_updated_rotation() {
 }
 
 #[tokio::test]
-async fn arrival_pose_sync_updates_runtime_pose_and_clears_server_motion() {
+async fn controller_settlement_stops_once_at_the_committed_pose() {
     let mut world = WorldState::synthetic();
     let guid = Guid(0x0102_0304);
     let position = WorldPosition {
         landblock_id: Guid(0x1000_0001),
         coords: Vector3::new(12.0, -4.0, 1.5),
-        rotation: Quaternion::from_heading(0.0),
-    };
-    let arrival_pose = WorldPosition {
-        landblock_id: Guid(0x1000_0100),
-        coords: Vector3::new(12.0, -4.0, 7.25),
         rotation: Quaternion::from_heading(0.0),
     };
 
@@ -1854,24 +1859,35 @@ async fn arrival_pose_sync_updates_runtime_pose_and_clears_server_motion() {
         .await
         .expect("autonomous drive should emit a motion pulse");
 
+    let before_settlement = session.packet_sequence;
     movement.enqueue_drive_intent(
-        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle {
-            pose: Some(arrival_pose),
-        }),
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle),
         start + Duration::from_millis(30),
     );
     movement
         .tick(start + Duration::from_millis(30), &mut world, &mut session)
         .await
-        .expect("arrival pose should sync and stop motion");
+        .expect("settlement should stop motion");
 
     let body = world
         .scene
         .body(SpatialBodyId::LocalPlayer(guid))
         .expect("local player runtime body should exist");
-    assert_eq!(body.pose, arrival_pose);
-    assert_eq!(session.packet_sequence, 4);
+    assert_eq!(body.pose, position);
+    assert_eq!(session.packet_sequence, before_settlement + 1);
     assert!(!movement.should_send_stop_pulse());
+
+    let repeated = start + Duration::from_millis(60);
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle),
+        repeated,
+    );
+    movement
+        .tick(repeated, &mut world, &mut session)
+        .await
+        .unwrap();
+    assert_eq!(session.packet_sequence, before_settlement + 1);
+    assert_eq!(world.local_player_runtime_pose(), Some(position));
 }
 
 #[tokio::test]
@@ -2057,7 +2073,7 @@ fn client_directed_presentation_retains_idle_until_control_is_released() {
         MotionCommand::RUN_FORWARD
     );
     movement.ingest_drive_intent(
-        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle { pose: None }),
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle),
         now,
     );
     let idle = movement
@@ -2258,7 +2274,7 @@ fn passive_drive_commands_preserve_local_emote_playback() {
         PlayerDriveIntent::SynchronizeHeld(CharacterDrive::default()),
         PlayerDriveIntent::SynchronizeHeld(CharacterDrive::builder().run().forward().build()),
         PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Update(drive)),
-        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle { pose: None }),
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle),
         PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Release),
     ] {
         let mut world = WorldState::synthetic();
@@ -2363,14 +2379,11 @@ fn displaced_controller_cannot_steer_settle_or_release_the_new_source() {
         let selected = movement.active_movement;
         for command in [
             ClientDirectedCommand::Update(drive),
-            ClientDirectedCommand::Settle {
-                pose: Some(WorldPosition::default()),
-            },
+            ClientDirectedCommand::Settle,
             ClientDirectedCommand::Release,
         ] {
             movement.ingest_client_directed_command(command);
             assert_eq!(movement.active_movement, selected);
-            assert!(movement.pending_arrival_pose.is_none());
         }
     }
 }
@@ -2397,7 +2410,7 @@ fn controller_retains_ownership_without_repeating_displacement() {
         movement.active_movement,
         Some(ActiveMovement::ClientDirected(Some(drive)))
     );
-    movement.ingest_client_directed_command(ClientDirectedCommand::Settle { pose: None });
+    movement.ingest_client_directed_command(ClientDirectedCommand::Settle);
     assert_eq!(
         movement.active_movement,
         Some(ActiveMovement::ClientDirected(None))
@@ -2504,6 +2517,185 @@ fn captured_actions(file: &tempfile::NamedTempFile) -> Vec<GameAction> {
 }
 
 #[tokio::test]
+async fn reduced_gap_packets_use_committed_pose_and_report_the_next_accepted_cell_immediately() {
+    use super::super::position_publication::POSITION_HEARTBEAT_INTERVAL;
+    use holtburger_common::Plane;
+    use holtburger_content::{
+        CellVolume, LandblockColliders, LandblockCollisionAsset, LandblockPlacement,
+        TerrainCollisionSurface,
+    };
+    use holtburger_world::{CollisionScene, PointPlacement};
+
+    let start = WorldPosition {
+        landblock_id: Guid(0x1234_0100),
+        coords: Vector3::zero(),
+        rotation: Quaternion::identity(),
+    };
+    let destination = WorldPosition {
+        landblock_id: Guid(0x1234_0101),
+        coords: Vector3::new(10.0, 0.0, 0.0),
+        ..start
+    };
+    // Two half-spaces leave a known gap at x in (1,9); no intermediate cell is fabricated.
+    let volumes = [
+        (0x0100, Vector3::new(-1.0, 0.0, 0.0), 1.0),
+        (0x0101, Vector3::new(1.0, 0.0, 0.0), -9.0),
+    ]
+    .map(|(cell_selector, normal, d)| CellVolume {
+        cell_selector,
+        placement: LandblockPlacement {
+            origin: Vector3::zero(),
+            orientation: Quaternion::identity(),
+        },
+        planes: vec![Plane { normal, d }],
+        portals: Vec::new(),
+    });
+    let mut scene = CollisionScene::new();
+    scene
+        .insert(LandblockCollisionAsset {
+            landblock_id: 0x1234_ffff,
+            terrain: TerrainCollisionSurface::empty(),
+            static_geometry: LandblockColliders::new(Vec::new(), volumes.into()),
+        })
+        .unwrap();
+    let mut world = WorldState::synthetic();
+    seed_local_player(&mut world, Guid(0x5000_0001), start);
+    world.player.instance_sequence = 7;
+    world.player.server_control_sequence = 11;
+    world.player.teleport_sequence = 13;
+    world.player.force_position_sequence = 17;
+    let mut movement = MovementSystem::with_policy(ClientMovementPolicy::Navigation);
+    let mut session = Session::new_test();
+    let capture = tempfile::NamedTempFile::new().unwrap();
+    session
+        .set_capture(capture.path().to_str().unwrap())
+        .unwrap();
+    let now = Instant::now();
+    let dt = Duration::from_millis(20);
+    let drive = AutonomousDriveIntent {
+        desired_world_delta: Vector3::new(2.0, 0.0, 0.0),
+        desired_heading: None,
+        target_hint: Some(destination),
+        gait: Gait::Walk,
+        force_grounded: false,
+    };
+    let input = || LocalNavigationInput {
+        admitted_fraction: 1.0,
+        interval: dt,
+        facing_rotation: None,
+        authored_offset: None,
+        sticky_target: None,
+    };
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Acquire(drive)),
+        now,
+    );
+    movement.tick(now, &mut world, &mut session).await.unwrap();
+    movement
+        .advance_navigation(&mut world, &scene, input())
+        .unwrap();
+    assert_eq!(world.local_player_runtime_pose(), Some(start));
+    assert!(
+        movement
+            .publish_position_after_simulation(
+                now + POSITION_HEARTBEAT_INTERVAL,
+                &world,
+                &mut session,
+                false
+            )
+            .await
+            .unwrap()
+    );
+
+    let facing_at = now + POSITION_HEARTBEAT_INTERVAL * 2;
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Update(drive)),
+        facing_at,
+    );
+    movement.enqueue_drive_intent(PlayerDriveIntent::SnapFacing { heading: 0.3 }, facing_at);
+    movement
+        .tick(facing_at, &mut world, &mut session)
+        .await
+        .unwrap();
+    movement
+        .advance_navigation(&mut world, &scene, input())
+        .unwrap();
+    assert_eq!(
+        world.local_player_runtime_pose().unwrap().coords,
+        start.coords
+    );
+    let stopped_at = now + POSITION_HEARTBEAT_INTERVAL * 3;
+    movement.enqueue_drive_intent(
+        PlayerDriveIntent::ClientDirected(ClientDirectedCommand::Settle),
+        stopped_at,
+    );
+    movement
+        .tick(stopped_at, &mut world, &mut session)
+        .await
+        .unwrap();
+
+    let resumed_at = now + POSITION_HEARTBEAT_INTERVAL * 4;
+    for step in 0..5 {
+        let at = resumed_at + dt * step;
+        let command = if step == 0 {
+            ClientDirectedCommand::Acquire(drive)
+        } else {
+            ClientDirectedCommand::Update(drive)
+        };
+        movement.enqueue_drive_intent(PlayerDriveIntent::ClientDirected(command), at);
+        movement.tick(at, &mut world, &mut session).await.unwrap();
+        movement
+            .advance_navigation(&mut world, &scene, input())
+            .unwrap();
+        let reported = movement
+            .publish_position_after_simulation(at, &world, &mut session, false)
+            .await
+            .unwrap();
+        assert_eq!(
+            reported,
+            step == 4,
+            "accepted cell change must preempt the heartbeat"
+        );
+    }
+    let actions = captured_actions(&capture);
+    assert!(
+        actions
+            .iter()
+            .any(|action| matches!(action, GameAction::MoveToState(_)))
+    );
+    assert!(actions.iter().any(|action| matches!(action, GameAction::AutonomousPosition(packet) if packet.position.landblock_id == destination.landblock_id)));
+    for action in actions {
+        let (position, sequences) = match action {
+            GameAction::MoveToState(packet) => (
+                packet.position,
+                [
+                    packet.instance_sequence,
+                    packet.server_control_sequence,
+                    packet.teleport_sequence,
+                    packet.force_position_sequence,
+                ],
+            ),
+            GameAction::AutonomousPosition(packet) => (
+                packet.position,
+                [
+                    packet.instance_sequence,
+                    packet.server_control_sequence,
+                    packet.teleport_sequence,
+                    packet.force_position_sequence,
+                ],
+            ),
+            other => panic!("unexpected gap fixture action: {other:?}"),
+        };
+        assert_eq!(sequences, [7, 11, 13, 17]);
+        assert!(position.coords == start.coords || position.coords == destination.coords);
+        let PointPlacement::Unique(classified) = scene.point_placement(position).unwrap() else {
+            panic!("packet position has no unique valid cell")
+        };
+        assert_eq!(classified.landblock_id, position.landblock_id);
+    }
+}
+
+#[tokio::test]
 async fn approach_cancellation_packet_preserves_current_pose_and_authority_sequences() {
     for stop in [true, false] {
         let mut world = WorldState::synthetic();
@@ -2591,18 +2783,15 @@ fn stop_preserves_jump_sequence_history_until_epoch_retirement() {
 }
 
 #[test]
-fn manual_acquisition_retires_pending_controller_arrival() {
+fn manual_acquisition_retires_controller_facing() {
     let now = Instant::now();
     let mut movement = MovementSystem::new();
     movement.ingest_client_directed_command(ClientDirectedCommand::AcquireFacing { heading: 1.0 });
-    movement.ingest_client_directed_command(ClientDirectedCommand::Settle {
-        pose: Some(WorldPosition::default()),
-    });
+    movement.ingest_client_directed_command(ClientDirectedCommand::Settle);
     movement.ingest_drive_intent(
         PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build()),
         now,
     );
-    assert!(movement.pending_arrival_pose.is_none());
     assert!(movement.pending_facing.absolute_heading.is_none());
     assert!(movement.has_active_manual_drive());
 }

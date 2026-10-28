@@ -1,36 +1,47 @@
 //! Validate the TUI's production content bootstrap without opening a socket or terminal UI.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, ensure};
 use clap::Parser;
-use holtburger_content::ContentRepository;
+use holtburger_content::NavigationContent;
 use holtburger_core::ClientRuntimeBuilder;
-use holtburger_dat::file_type::CharGen;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-/// Reads bootstrap assets and character-generation data from a supplied HBA installation.
+/// Representative interior owner retained in both the full corpus and focused generation fixture.
+const TOPOLOGY_PROBE_OWNER: u32 = 0x8602_ffff;
+
+/// Reads the actual CLI bootstrap, creation catalog, and prepared/model-free navigation source.
 #[derive(Parser)]
 struct Arguments {
-    /// Single HBA archive or directory containing HBA archives.
+    /// Prepared content directory or exact full HBA file.
     content: PathBuf,
 }
 
 fn main() -> Result<()> {
     let arguments = Arguments::parse();
-    let content = if arguments.content.is_dir() {
-        ContentRepository::from_hba_dir(&arguments.content)
-    } else {
-        ContentRepository::from_hba_path(&arguments.content)
-    }
-    .context("open TUI content")?;
+    let content =
+        Arc::new(NavigationContent::open(&arguments.content).context("open CLI content")?);
     ClientRuntimeBuilder::new("content-bootstrap-probe")
-        .load_assets(&content)
+        .navigation_content(Arc::clone(&content))
+        .load_assets(content.bootstrap())
         .context("load production client bootstrap")?;
     let character_generation = content
-        .read_asset::<CharGen>("character generation")
-        .context("load TUI character-generation data")?;
+        .bootstrap()
+        .read_character_gen_catalog()
+        .context("load complete CLI character-generation catalog")?;
+    let scene = content
+        .load_collision(TOPOLOGY_PROBE_OWNER)?
+        .context("CLI content has no representative interior navigation owner")?;
+    let cells = scene.static_geometry.cell_volumes().len();
+    let shells = scene.static_geometry.colliders.len();
+    ensure!(
+        cells > 0,
+        "CLI navigation probe owner has no interior cells"
+    );
+    ensure!(shells > 0, "CLI navigation probe owner has no room shells");
     println!(
-        "Content bootstrap passed: {} heritage groups",
-        character_generation.heritage_groups.len()
+        "CLI content bootstrap passed: {} heritage groups, {cells} cells, {shells} room shells",
+        character_generation.heritage_groups.len(),
     );
     Ok(())
 }

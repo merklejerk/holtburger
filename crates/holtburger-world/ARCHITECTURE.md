@@ -23,6 +23,24 @@ The refactor goal was simple: **handlers orchestrate, models mutate**.
 
 ## Ownership Split
 
+### Content-independent spatial queries
+
+`CollisionScene` consumes prepared cell/shell/terrain products rather than DAT/HBA paths.
+`point_placement` returns unique containment, overlapping candidates, known outside space, or
+unavailable owner coverage. It checks the authored owner first, preserving dungeon coordinates
+outside geographic bounds; only outdoor-capable geometry permits geographic reanchoring.
+Core's selected movement composition owns retained/destination preference and commit policy.
+
+Both physical and navigation compositions use the same scene/body authority and reconciliation
+rules. Reduced remote envelopes omit object/peer targets while retaining shared shell/portal
+solving. Parent-owned attachments remain parent-owned. Runtime pose and support facts remain
+distinct: a valid local navigation endpoint does not imply solved ground contact.
+
+`WorldState::cylinder_distance` uses prepared physical dimensions when available, or authored
+setup dimensions, entity scale, and canonical runtime poses for pose-only actors. Missing
+dimensions remain unknown rather than creating a guessed radius. This supports shared interaction
+semantics without requiring visual/model hydration in reduced clients.
+
 ### `handlers/` — protocol orchestration
 
 Files: [src/handlers](src/handlers)

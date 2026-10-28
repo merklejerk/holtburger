@@ -34,6 +34,7 @@ reqwest.workspace = true
 
 [dev-dependencies]
 holtburger-world = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true
 
 [build-dependencies]
 winresource = { version = "0.1.34", default-features = false }

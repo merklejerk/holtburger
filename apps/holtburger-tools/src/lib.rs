@@ -1,3 +1,4 @@
+pub mod cli_content;
 pub mod dat2hba;
 pub mod error;
 pub mod spell_export;

@@ -1,4 +1,5 @@
-use super::movement::{MovementSystem, PendingJumpAttempt};
+use super::movement::{LocalNavigationInput, MovementSystem, PendingJumpAttempt};
+use super::movement_types::ClientMovementPolicy;
 use super::runtime_profile::RuntimePhaseProfile;
 use crate::SimulationSceneSnapshot;
 use crate::client::character_jump::{
@@ -59,7 +60,7 @@ pub(super) struct ClientSimulationTick {
 pub(super) enum ClientBodyMotion {
     /// Accepted physical geometry, including intermediate placement boundaries.
     Physical(PlacedMotionPath),
-    /// Unconstrained projection with only endpoint geometry.
+    /// Endpoint projection without a fully traversed physical path.
     PoseOnly,
     /// Discontinuous placement, with no interpolated transit.
     CorrectionSnap,
@@ -242,6 +243,12 @@ pub(super) fn tick_with_precise_jump(
         committed_jump = Some(jump.committed);
     }
     profile.checkpoint("jump_preparation");
+    let navigation_sticky_target =
+        if movement.movement_policy() == ClientMovementPolicy::Navigation && !local_dead {
+            world.prepare_position_only_sticky_target(local_guid)
+        } else {
+            None
+        };
     if let Some(collision) = collision {
         let prepared_jump = pending_jump
             .as_ref()
@@ -283,10 +290,34 @@ pub(super) fn tick_with_precise_jump(
         ));
     }
     profile.checkpoint("physical_contacts");
+    if local_dead {
+        movement.reset_navigation_progress();
+    }
+    if movement.movement_policy() == ClientMovementPolicy::Navigation
+        && !local_dead
+        && let Some(collision) = collision
+    {
+        let previous = world.local_player_runtime_pose();
+        events.extend(movement.advance_navigation(
+            world,
+            &collision.scene,
+            LocalNavigationInput {
+                admitted_fraction: dt.as_secs_f32() / elapsed.as_secs_f32(),
+                interval: dt,
+                facing_rotation,
+                authored_offset,
+                sticky_target: navigation_sticky_target,
+            },
+        )?);
+        if world.local_player_runtime_pose() != previous {
+            body_motions.insert(local_guid, ClientBodyMotion::PoseOnly);
+        }
+    }
     events.extend(tick_pose_only_remote_entities(
         dt,
         world,
         collision.is_some(),
+        movement.movement_policy(),
         &mut body_motions,
     )?);
     profile.checkpoint("pose_only_projection");
@@ -840,6 +871,7 @@ fn tick_pose_only_remote_entities(
     dt: Duration,
     world: &mut WorldState,
     collision_enabled: bool,
+    policy: ClientMovementPolicy,
     body_motions: &mut HashMap<Guid, ClientBodyMotion>,
 ) -> Result<Vec<WorldEvent>> {
     let Some(request) = build_projection_request(world) else {
@@ -854,9 +886,9 @@ fn tick_pose_only_remote_entities(
         // Content preparation is asynchronous. Until its movement geometry is known, a
         // physical candidate cannot safely fall back to unconstrained dead reckoning.
         let awaiting_physics = !physical
-            && collision_enabled
+            && (collision_enabled || policy == ClientMovementPolicy::Navigation)
             && matches!(input.body_id, SpatialBodyId::Entity(guid)
-                if super::collision::remote_body_requires_physics(world, guid));
+                if super::collision::remote_body_requires_physics(world, guid, policy));
         if physical || awaiting_physics {
             continue;
         }
@@ -1023,11 +1055,25 @@ mod tests {
         let body_id = SpatialBodyId::Entity(guid);
         let dt = Duration::from_millis(30);
 
-        tick_pose_only_remote_entities(dt, &mut world, true, &mut HashMap::new()).unwrap();
+        tick_pose_only_remote_entities(
+            dt,
+            &mut world,
+            true,
+            ClientMovementPolicy::Physical,
+            &mut HashMap::new(),
+        )
+        .unwrap();
         assert_eq!(world.scene.body(body_id).unwrap().pose, pose);
 
         // Clients without collision preparation retain their explicit pose-only simulation.
-        tick_pose_only_remote_entities(dt, &mut world, false, &mut HashMap::new()).unwrap();
+        tick_pose_only_remote_entities(
+            dt,
+            &mut world,
+            false,
+            ClientMovementPolicy::Physical,
+            &mut HashMap::new(),
+        )
+        .unwrap();
         assert!(world.scene.body(body_id).unwrap().pose.coords.z < pose.coords.z);
     }
 

@@ -22,7 +22,7 @@ holtburger-protocol.workspace = true
 holtburger-weenie-catalog.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-rmp-serde = "1.3.1"
+rmp-serde.workspace = true
 tempfile = { workspace = true, optional = true }
 
 [[bin]]

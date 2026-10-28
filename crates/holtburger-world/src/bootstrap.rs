@@ -20,6 +20,8 @@ pub struct WorldBootstrap {
     /// Immutable quest contract definitions and parsed progress formats.
     pub contracts: Arc<ContractCatalog>,
     pub motion_sequences: Arc<MotionSequenceCatalog>,
+    /// Setup-owned interaction dimensions, available even for bodies without local physics.
+    pub setup_dimensions: Arc<holtburger_content::SetupDimensionCatalog>,
     pub soul_emote_catalog: Arc<SoulEmoteCatalog>,
 }
 
@@ -43,6 +45,7 @@ impl WorldBootstrap {
             character_titles: Arc::new(CharacterTitleCatalog::default()),
             contracts: Arc::new(ContractCatalog::default()),
             motion_sequences: Arc::new(MotionSequenceCatalog::default()),
+            setup_dimensions: Arc::new(holtburger_content::SetupDimensionCatalog::default()),
             soul_emote_catalog: Arc::new(SoulEmoteCatalog::default()),
         }
     }

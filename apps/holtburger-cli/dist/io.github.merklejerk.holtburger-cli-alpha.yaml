@@ -1,0 +1,34 @@
+id: io.github.merklejerk.holtburger-cli-alpha
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: holtburger-cli
+modules:
+  - name: holtburger-cli
+    buildsystem: simple
+    build-options:
+      no-debuginfo: true
+    build-commands:
+      - mkdir -p /app/lib/holtburger /app/bin
+      - cp -a bundle/. /app/lib/holtburger/
+      - ln -s /app/lib/holtburger/holtburger-cli /app/bin/holtburger-cli
+      - ln -s /app/lib/holtburger/dat2hba /app/bin/dat2hba
+      - ln -s /app/lib/holtburger/dat-tool /app/bin/dat-tool
+      - install -Dm644 io.github.merklejerk.holtburger-cli-alpha.desktop /app/share/applications/io.github.merklejerk.holtburger-cli-alpha.desktop
+      - install -Dm644 io.github.merklejerk.holtburger-cli-alpha.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-cli-alpha.metainfo.xml
+      - install -Dm644 io.github.merklejerk.holtburger-cli.svg /app/share/icons/hicolor/scalable/apps/io.github.merklejerk.holtburger-cli-alpha.svg
+    sources:
+      - type: dir
+        path: ../../../.holtburger-local/cli-native
+        dest: bundle
+      - type: file
+        path: io.github.merklejerk.holtburger-cli-alpha.desktop
+      - type: file
+        path: io.github.merklejerk.holtburger-cli-alpha.metainfo.xml
+      - type: file
+        path: io.github.merklejerk.holtburger-cli.svg
+finish-args:
+  - --share=network
+  - --env=HOLTBURGER_CONTENT=/app/lib/holtburger/content
+  - --env=SCRIPT_DIR=/var/data/holtburger/scripts
+  - --env=SCRIPT_BUNDLE_DIR=/app/lib/holtburger/scripts

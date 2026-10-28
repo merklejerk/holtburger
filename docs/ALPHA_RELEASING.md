@@ -148,7 +148,9 @@ The Flatpaks reuse their already-built Linux native archives. One job shares too
 setup, with separate cached builder state per product. The CLI has networking but no graphical
 sockets or Electron. The 3D recipe retains graphics/audio/network and the pinned Zypak helper;
 it keeps `io.github.merklejerk.holtburger-alpha` and existing settings, while the download is
-named `holtburger-3d-VERSION-x86_64.flatpak`. CLI uses `io.github.merklejerk.holtburger-cli`.
+named `holtburger-3d-VERSION-x86_64.flatpak`. CLI uses `io.github.merklejerk.holtburger-cli-alpha`.
+The alpha CLI appears as **Holtburger CLI Alpha** and has separate settings from main/nightly
+`io.github.merklejerk.holtburger-cli`. Nightly preparation explicitly selects `--nightly-cli`.
 Both alpha products use Freedesktop 26.08. The generated alpha recipe selects that runtime
 from the 3D recipe; the checked-in CLI recipe remains independently usable for staging.
 

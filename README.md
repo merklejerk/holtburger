@@ -148,6 +148,9 @@ Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
 ### Linux Flatpak (recommended)
 
 Download the flatpak from releases then run `flatpak install ./holtburger-cli.flatpak`.
+The alpha CLI uses a separate app ID, `io.github.merklejerk.holtburger-cli-alpha`,
+and appears as **Holtburger CLI Alpha**. It can coexist with the main/nightly CLI;
+see the [alpha quickstart](docs/ALPHA_CLI_QUICKSTART.md) for its commands.
 
 ```bash
 # see help

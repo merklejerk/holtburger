@@ -18,7 +18,7 @@ MIN_FILE_CHOOSER_PORTAL_VERSION = 3
 
 def probe_cli_tools(inputs: Path, outputs: Path) -> None:
     """CLI utilities use explicit input/output grants and need no graphical portal backend."""
-    app_id = "io.github.merklejerk.holtburger-cli"
+    app_id = "io.github.merklejerk.holtburger-cli-alpha"
     dat = str(inputs / "client_portal.dat")
     converted = outputs / "converted.hba"
     prefix = ["flatpak", "run", "--user", f"--filesystem={inputs}:ro", f"--filesystem={outputs}:rw"]

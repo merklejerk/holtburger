@@ -394,7 +394,7 @@ class ReleaseManifestTests(unittest.TestCase):
                 bundle.write_bytes(product.encode())
                 record = {**identity, "product": product,
                           "target": next(target.triple for target in TARGETS if target.platform == "linux"),
-                          "appId": f"io.github.merklejerk.holtburger-{'cli' if product == 'cli' else 'alpha'}",
+                          "appId": f"io.github.merklejerk.holtburger-{'cli-alpha' if product == 'cli' else 'alpha'}",
                           "archive": bundle.name, "sha256": digest(bundle),
                           "runtime": flatpak_runtime_ref(json.loads(THREED_FLATPAK_RECIPE.read_text()))}
                 if product == "cli":
@@ -510,7 +510,7 @@ class ProductFlatpakTests(unittest.TestCase):
             (files / "bin").mkdir()
             for tool in ("holtburger-cli", "dat2hba", "dat-tool"):
                 (files / "bin" / tool).symlink_to(f"/app/lib/holtburger/{tool}")
-            recipe = {"id": "io.github.merklejerk.holtburger-cli",
+            recipe = {"id": "io.github.merklejerk.holtburger-cli-alpha",
                       "runtime": "org.freedesktop.Platform", "runtime-version": "26.08"}
             runtime = flatpak_runtime_ref(recipe)
             (files.parent / "metadata").write_text(f"[Application]\nname={recipe['id']}\nruntime={runtime}\n")

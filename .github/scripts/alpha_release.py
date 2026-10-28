@@ -41,7 +41,8 @@ SCRIPTS = ("fighter.js", "mage.js", "mage.data.json", "mage.data.bin")
 TOOLS = ("holtburger-cli", "dat2hba", "dat-tool")
 APP = ROOT / "apps/holtburger-3d"
 THREED_FLATPAK_RECIPE = ROOT / ".github/flatpak/io.github.merklejerk.holtburger-alpha.json"
-CLI_FLATPAK_RECIPE = ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml"
+CLI_FLATPAK_RECIPE = ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli-alpha.yaml"
+CLI_NIGHTLY_FLATPAK_RECIPE = ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml"
 CLI_CONTENT_DESCRIPTOR = ROOT / ".github/cli-content.json"
 PRODUCTS = ("cli", "3d")
 
@@ -380,7 +381,7 @@ def manifest(artifacts: Path) -> list[Path]:
     if any(record["contentFiles"] != cli_records[0]["contentFiles"] for record in cli_records):
         raise ValueError("CLI native targets contain different content companions")
     runtime = flatpak_runtime_ref(json.loads(THREED_FLATPAK_RECIPE.read_text()))
-    app_ids = {"cli": "io.github.merklejerk.holtburger-cli",
+    app_ids = {"cli": "io.github.merklejerk.holtburger-cli-alpha",
                "3d": "io.github.merklejerk.holtburger-alpha"}
     for product in PRODUCTS:
         native = next(record for record in records if record["product"] == product and record["target"] == "x86_64-unknown-linux-gnu")
@@ -446,9 +447,18 @@ def stage(artifacts: Path, tag: str) -> None:
     print(f"Draft staged for final user verification: {release['html_url']}")
 
 
-def flatpak_recipe(product: str) -> dict:
+def flatpak_recipe_path(product: str, *, nightly_cli: bool = False) -> Path:
+    """Keep main's CLI installation separate from the alpha products."""
+    if nightly_cli:
+        if product != "cli":
+            raise ValueError("The nightly CLI recipe requires a CLI native package")
+        return CLI_NIGHTLY_FLATPAK_RECIPE
+    return CLI_FLATPAK_RECIPE if product == "cli" else THREED_FLATPAK_RECIPE
+
+
+def flatpak_recipe(product: str, *, nightly_cli: bool = False) -> dict:
     """Expand one product recipe, using the alpha's shared Freedesktop runtime generation."""
-    path = CLI_FLATPAK_RECIPE if product == "cli" else THREED_FLATPAK_RECIPE
+    path = flatpak_recipe_path(product, nightly_cli=nightly_cli)
     recipe = json.loads(run("flatpak-builder", "--show-manifest", str(path)))
     runtime = json.loads(THREED_FLATPAK_RECIPE.read_text())
     for key in ("runtime", "runtime-version", "sdk"):
@@ -482,13 +492,13 @@ def installed_flatpak_runtime(files: Path, recipe: dict) -> str:
     return runtime
 
 
-def flatpak_manifest(native: Path, output: Path) -> None:
+def flatpak_manifest(native: Path, output: Path, *, nightly_cli: bool = False) -> None:
     """Package one inspected native inventory without rebuilding or duplicating its receipt."""
     info = verify_bundle(native)
     require_flatpak_candidate(info)
     product = info["product"]
-    recipe_path = CLI_FLATPAK_RECIPE if product == "cli" else THREED_FLATPAK_RECIPE
-    recipe = flatpak_recipe(product)
+    recipe_path = flatpak_recipe_path(product, nightly_cli=nightly_cli)
+    recipe = flatpak_recipe(product, nightly_cli=nightly_cli)
     module = next(module for module in recipe["modules"] if module["name"] == f"holtburger-{product}")
     payload = next(source for source in module["sources"] if source.get("dest") == "bundle")
     payload["path"] = str(native.resolve())
@@ -500,7 +510,7 @@ def flatpak_manifest(native: Path, output: Path) -> None:
     write_json(output, recipe)
 
 
-def prepare_flatpak(artifacts: Path, product: str, output: Path) -> Path:
+def prepare_flatpak(artifacts: Path, product: str, output: Path, *, nightly_cli: bool = False) -> Path:
     """Extract the selected verified Linux archive as its Flatpak's immutable input."""
     record = json.loads((artifacts / f"metadata-{product}-x86_64-unknown-linux-gnu.json").read_text())
     require_flatpak_candidate(record)
@@ -516,7 +526,7 @@ def prepare_flatpak(artifacts: Path, product: str, output: Path) -> Path:
     for key in info:
         if info[key] != record[key]:
             raise ValueError(f"Flatpak archive metadata differs from its native input: {key}")
-    flatpak_manifest(native, output)
+    flatpak_manifest(native, output, nightly_cli=nightly_cli)
     return native.resolve()
 
 
@@ -599,6 +609,8 @@ def main() -> None:
     flatpak.add_argument("--native", type=Path, required=True)
     flatpak.add_argument("--output", type=Path, required=True)
     prepare = commands.add_parser("prepare-flatpak")
+    prepare.add_argument("--nightly-cli", action="store_true",
+                         help="Keep the main CLI Flatpak identity instead of the alpha identity")
     prepare.add_argument("--product", choices=PRODUCTS, required=True)
     prepare.add_argument("--artifacts", type=Path, required=True)
     prepare.add_argument("--output", type=Path, required=True)
@@ -621,7 +633,8 @@ def main() -> None:
     elif arguments.command == "flatpak-manifest":
         flatpak_manifest(arguments.native.resolve(), arguments.output)
     elif arguments.command == "prepare-flatpak":
-        print(prepare_flatpak(arguments.artifacts.resolve(), arguments.product, arguments.output.resolve()))
+        print(prepare_flatpak(arguments.artifacts.resolve(), arguments.product, arguments.output.resolve(),
+                              nightly_cli=arguments.nightly_cli))
     elif arguments.command == "record-flatpak":
         record_flatpak(arguments.files.resolve(), arguments.native.resolve(),
                        arguments.bundle.resolve(), arguments.output)

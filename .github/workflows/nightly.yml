@@ -106,7 +106,7 @@ jobs:
           sudo flatpak install --noninteractive --assumeyes flathub "org.freedesktop.Platform/x86_64/$RUNTIME_VERSION" "org.freedesktop.Sdk/x86_64/$RUNTIME_VERSION"
       - name: Materialize recipe from the native CLI archive
         run: |
-          python .github/scripts/alpha_release.py prepare-flatpak --product cli \
+          python .github/scripts/alpha_release.py prepare-flatpak --product cli --nightly-cli \
             --artifacts .holtburger-local/nightly-linux --output .holtburger-local/nightly-flatpak.json
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:

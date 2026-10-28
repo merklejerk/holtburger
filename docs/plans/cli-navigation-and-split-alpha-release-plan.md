@@ -3,8 +3,33 @@
 Status: alpha.6 built successfully on its first attempt and is frozen in an unpublished draft.
 All automated packaging/installed probes and downloaded-asset checks pass. Source is
 `41b638f8aff47151fe8458e8142d8b329288a0c4`. Manual acceptance of these exact bytes is
-pending; publication is not authorized. Alpha.5 remains unchanged.
+pending; publication is not authorized. Alpha.5 remains unchanged. A subsequent local steer
+separates the alpha CLI Flatpak identity; alpha.6 does not contain that change. No new draft
+is authorized for this steer.
 Updated: 2026-10-28.
+
+## Follow-up steer — Separate alpha CLI installation
+
+The user authorized a local implementation of a separate alpha CLI identity and explicitly
+asked to defer a new draft. This supersedes the original CLI identity decision below.
+
+- [x] Alpha CLI uses `io.github.merklejerk.holtburger-cli-alpha`, displayed as
+  **Holtburger CLI Alpha**, with matching desktop/metainfo/icon installation identities.
+- [x] Keep main/nightly `io.github.merklejerk.holtburger-cli` and its existing recipe unchanged.
+  The shared packaging helper explicitly selects that recipe with `--nightly-cli` for nightly.
+- [x] Update alpha installed probes, manifest validation, release documentation, and tests.
+- [x] Keep 3D's `io.github.merklejerk.holtburger-alpha` identity and settings unchanged.
+- [x] Focused local verification: all 46 release-tool tests pass; both actual CLI recipes
+  materialize with `flatpak-builder --show-manifest`; generated manifests resolve existing
+  launcher/metainfo/icon sources with matching IDs and display names. Desktop-file validation,
+  shell syntax, and diff whitespace checks pass. No build, install, or visual acceptance performed.
+- [ ] Build a fresh candidate when separately authorized. Do not alter alpha.6 assets.
+
+The two CLI apps can coexist; Flatpak gives them separate settings and writable scripts.
+There is no automatic settings migration. Native binary/download names and app versions
+are unchanged by this packaging-only steer. Alpha.6 retains the old CLI identity and remains
+an immutable baseline. The user subsequently authorized committing this local change.
+Push, workflow dispatch, and draft updates remain deferred.
 
 ## Current steer — One TUI source contract, simple discovery
 
@@ -346,7 +371,9 @@ This concession applies to known geometry, not missing/pending coverage. An unre
 
 Native targets remain Linux x86-64, Windows x86-64, and macOS Apple Silicon. Native names become `holtburger-cli-<version>-<target>` and `holtburger-3d-<version>-<target>`, with the existing platform archive conventions. No combined-suite archive remains after cutover.
 
-Keep the CLI Flatpak ID `io.github.merklejerk.holtburger-cli`. **Keep the existing alpha Flatpak ID `io.github.merklejerk.holtburger-alpha` for 3D-only**, preserving its settings; update its display name, description, installed inventory, and download name to 3D. No app-ID or settings migration. The earlier suggestion of a new 3D ID was explicitly withdrawn.
+Use CLI alpha Flatpak ID `io.github.merklejerk.holtburger-cli-alpha` and display name
+**Holtburger CLI Alpha**, separate from main/nightly `io.github.merklejerk.holtburger-cli`.
+The original shared CLI identity is superseded by the follow-up steer above. **Keep the existing alpha Flatpak ID `io.github.merklejerk.holtburger-alpha` for 3D-only**, preserving its settings; update its display name, description, installed inventory, and download name to 3D. No 3D app-ID or settings migration. The earlier suggestion of a new 3D ID was explicitly withdrawn.
 
 Both products retain the workspace/app version convention and existing `release_version.py` operation. The navigation format version is independent: an app version bump does not itself require content regeneration.
 

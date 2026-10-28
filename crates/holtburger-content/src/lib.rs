@@ -1,4 +1,5 @@
 pub mod active_region;
+pub mod character_creation_text;
 pub mod character_gen;
 pub mod character_titles;
 pub mod collision_pose;

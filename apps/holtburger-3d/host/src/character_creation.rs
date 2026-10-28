@@ -1,24 +1,144 @@
 //! Pre-game choice projection and semantic draft adaptation; rules remain in core/content.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result, anyhow};
 use holtburger_common::stats::AttributeType;
 use holtburger_content::CharacterGenCatalog;
+use holtburger_content::character_creation_text::CREATION_ATTRIBUTE_DESCRIPTIONS;
 use holtburger_content::character_gen::is_unavailable_character_gen_skill_cost;
 use holtburger_content::{ContentRepository, MotionClip};
+use holtburger_core::character_gen::starting_stats::StartingStats;
 use holtburger_core::character_gen::{
     CHARACTER_GEN_MAX_ATTRIBUTE, CHARACTER_GEN_MIN_ATTRIBUTE, CharacterGenBuild,
-    CharacterGenBuilder, character_gen_appearance_choices, custom_template_for_heritage,
-    minimum_skill_advancement_for_heritage,
+    CharacterGenBuilder, CharacterGenHeritageBenefits, CharacterGenInnateAugmentation,
+    character_gen_appearance_choices, character_gen_heritage_benefits,
+    custom_template_for_heritage, minimum_skill_advancement_for_heritage,
 };
 use holtburger_core::client::object_preview::{
     ObjectPreviewClip, ObjectPreviewPose, ObjectPreviewVisual,
 };
+use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable};
 use holtburger_protocol::messages::{
     CharacterCreateAppearanceData, CharacterCreateRequestData, SkillAdvancementClass,
 };
 use serde::{Deserialize, Serialize};
+
+/// Allocation-only query, independent of appearance, identity, and submission completeness.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CharacterCreationStatsRequest {
+    /// Selected heritage catalog key.
+    heritage: u32,
+    /// Strength, endurance, coordination, quickness, focus, self in protocol order.
+    attributes: [u32; 6],
+    /// Complete advancement vector, including inactive slots.
+    skills: Vec<u32>,
+}
+
+/// Starting stat projection with an explicit exclusion for server-defined Olthoi builds.
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum CharacterCreationStats {
+    /// Both Olthoi variants use a separate server initialization path.
+    Olthoi,
+    /// Effective unenchanted starting values under normal creation rules.
+    Standard {
+        /// Full starting pools, in health, stamina, mana order.
+        vitals: [u32; 3],
+        /// Values and usability keyed by stable skill ID.
+        skills: Vec<CreationStartingSkill>,
+    },
+}
+
+/// The UI must not infer usability from a value: innate bonuses can affect unusable skills.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreationStartingSkill {
+    /// Stable skill identity.
+    id: u32,
+    /// Effective starting value, including applicable innate bonuses.
+    value: u32,
+    /// Whether the skill can be used at its chosen advancement.
+    usable: bool,
+}
+
+/// Parsed rules retained for the static creator lifetime, without a live player session.
+struct CreationStatsRules {
+    /// Shared creation initializer and allocation validation.
+    builder: CharacterGenBuilder,
+    /// Authored skill formulas and untrained usability.
+    skills: SkillTable,
+    /// Authored maximum pool formulas.
+    vitals: SecondaryAttributeTable,
+}
+
+/// Lazy static calculation service; allocation edits never reread the archives.
+#[derive(Default)]
+pub struct CharacterCreationStatsService {
+    /// One coherent parsed ruleset, installed only after every required table loads.
+    rules: Mutex<Option<Arc<CreationStatsRules>>>,
+}
+
+impl CharacterCreationStatsService {
+    /// Keep parsing outside the allocation path once the coherent ruleset is installed.
+    fn rules(&self, repository: &ContentRepository) -> Result<Arc<CreationStatsRules>> {
+        let mut cached = self
+            .rules
+            .lock()
+            .map_err(|_| anyhow!("Creation stat rules lock poisoned"))?;
+        if let Some(rules) = cached.as_ref() {
+            return Ok(Arc::clone(rules));
+        }
+        let rules = Arc::new(CreationStatsRules {
+            builder: CharacterGenBuilder::new(Arc::new(repository.read_character_gen_catalog()?)),
+            skills: repository.read_asset::<SkillTable>("creation skill stats")?,
+            vitals: repository.read_asset::<SecondaryAttributeTable>("creation vital stats")?,
+        });
+        *cached = Some(Arc::clone(&rules));
+        Ok(rules)
+    }
+
+    /// Read static rules once, then evaluate editable drafts without world activation.
+    pub fn resolve(
+        &self,
+        request: CharacterCreationStatsRequest,
+        repository: &ContentRepository,
+    ) -> Result<CharacterCreationStats> {
+        let rules = self.rules(repository)?;
+        let skills = request
+            .skills
+            .into_iter()
+            .enumerate()
+            .map(|(index, value)| {
+                SkillAdvancementClass::from_repr(value).with_context(|| {
+                    format!("Unknown advancement class {value} at skill slot {index}")
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let result = rules.builder.starting_stats(
+            request.heritage,
+            request.attributes,
+            &skills,
+            &rules.skills,
+            &rules.vitals,
+        )?;
+        Ok(match result {
+            StartingStats::Olthoi => CharacterCreationStats::Olthoi,
+            StartingStats::Standard { vitals, skills } => CharacterCreationStats::Standard {
+                vitals,
+                skills: skills
+                    .into_iter()
+                    .map(|skill| CreationStartingSkill {
+                        id: skill.skill as u32,
+                        value: skill.value,
+                        usable: skill.usable,
+                    })
+                    .collect(),
+            },
+        })
+    }
+}
 
 /// Appearance-only query; name, skill and attribute validity do not gate preview editing.
 #[derive(Debug, Clone, Deserialize)]
@@ -156,6 +276,8 @@ impl CharacterCreationDraft {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CharacterCreationCatalog {
+    /// Retail attribute help in the same order as the draft's attribute tuple.
+    attribute_descriptions: [&'static str; 6],
     /// Shared attribute slider lower bound.
     minimum_attribute: u32,
     /// Shared attribute slider upper bound.
@@ -181,6 +303,10 @@ struct NamedChoice {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct HeritageChoice {
+    /// Authored localized lore paragraphs, rendered as plain text.
+    lore: Vec<String>,
+    /// Applicable racial rules and required-training explanations, prepared once for the Race page.
+    benefits: HeritageBenefits,
     /// Heritage identity/name used by the heritage selector.
     #[serde(flatten)]
     identity: NamedChoice,
@@ -198,6 +324,25 @@ struct HeritageChoice {
     defaults: CharacterCreationDefaults,
     /// Usable creation skills with heritage overrides already applied.
     skills: Vec<SkillChoice>,
+}
+
+/// App-local racial explanations and itemized starting skill groups.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HeritageBenefits {
+    /// Prose explaining innate benefits, weapon affinities, or exceptional server rules.
+    descriptions: Vec<String>,
+    /// Nonempty training groups shown under one heading each on the Race page.
+    skill_groups: Vec<CreationSkillGroup>,
+}
+
+/// Starting skills sharing one training entitlement or requirement.
+#[derive(Debug, Serialize)]
+struct CreationSkillGroup {
+    /// Group heading, such as "Free skills".
+    label: &'static str,
+    /// Authored skill names, alphabetized for browsing.
+    skills: Vec<String>,
 }
 
 /// One body option and its indexed appearance controls.
@@ -361,6 +506,7 @@ impl CharacterCreationCatalog {
         catalog: &CharacterGenCatalog,
         repository: &ContentRepository,
     ) -> Result<Self> {
+        let reference_text = repository.read_character_creation_text()?;
         let heritages = catalog
             .heritage_groups
             .values()
@@ -448,6 +594,8 @@ impl CharacterCreationCatalog {
                     })
                     .collect::<Result<Vec<_>>>()?;
                 Ok(HeritageChoice {
+                    lore: reference_text.lore(heritage.heritage_id)?.to_vec(),
+                    benefits: heritage_benefit_text(heritage.heritage_id, &skills)?,
                     identity: NamedChoice {
                         id: heritage.heritage_id,
                         name: heritage.name.clone(),
@@ -465,6 +613,7 @@ impl CharacterCreationCatalog {
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(Self {
+            attribute_descriptions: CREATION_ATTRIBUTE_DESCRIPTIONS,
             minimum_attribute: CHARACTER_GEN_MIN_ATTRIBUTE,
             maximum_attribute: CHARACTER_GEN_MAX_ATTRIBUTE,
             skill_slots: catalog.expected_skill_slots,
@@ -481,10 +630,128 @@ impl CharacterCreationCatalog {
     }
 }
 
+/// Wording is app-local; the shared creation rules own which server benefits each heritage gets.
+fn heritage_benefit_text(heritage: u32, skills: &[SkillChoice]) -> Result<HeritageBenefits> {
+    let facts = character_gen_heritage_benefits(heritage)
+        .with_context(|| format!("Unknown heritage benefits for {heritage}"))?;
+    let CharacterGenHeritageBenefits::Standard {
+        racial_weapon_masteries: [melee, ranged],
+        innate_augmentation,
+    } = facts
+    else {
+        // ACE PlayerFactory.Create bypasses normal attribute/skill allocation for both Olthoi.
+        return Ok(HeritageBenefits {
+            descriptions: vec!["Olthoi use server-defined attributes and skills rather than normal character-creation allocations.".to_owned()],
+            skill_groups: Vec::new(),
+        });
+    };
+    let mut descriptions = vec![format!(
+        "Traditional weapon affinities: {melee} (melee) and {ranged} (ranged). These apply on servers using racial mastery rules; servers with universal masteries do not restrict this benefit by race."
+    )];
+    // Effects verified in ACE CreatureSkill.GetAugBonus_Current, Creature_Rating,
+    // DamageEvent, Player_Spells.HasFoci, and Player_Inventory.GetEncumbranceCapacity.
+    let description = match innate_augmentation {
+        CharacterGenInnateAugmentation::JackOfAllTrades => "Jack of All Trades: +5 to skills.",
+        CharacterGenInnateAugmentation::CriticalExpertise => {
+            "Critical Expertise: increased critical-hit chance rating."
+        }
+        CharacterGenInnateAugmentation::DamageReduction => {
+            "Damage Reduction: increased damage resistance rating."
+        }
+        CharacterGenInnateAugmentation::CriticalPower => {
+            "Critical Power: increased critical-hit damage rating."
+        }
+        CharacterGenInnateAugmentation::IncreasedCarryingCapacity => {
+            "Increased Carrying Capacity: carry more before becoming burdened."
+        }
+        CharacterGenInnateAugmentation::InfusedLifeMagic => {
+            "Infused Life Magic: an innate Life Magic focus, without carrying a focus item."
+        }
+        CharacterGenInnateAugmentation::CriticalDefense => {
+            "Critical Defense: a chance to resist incoming critical hits."
+        }
+    };
+    descriptions.push(description.to_owned());
+    let mut free = Vec::new();
+    let mut trained = Vec::new();
+    let mut specialized = Vec::new();
+    for skill in skills.iter().filter(|skill| skill.minimum_advancement >= 2) {
+        let group = if skill.minimum_advancement == 3 {
+            &mut specialized
+        } else if skill.trained_cost == Some(0) {
+            &mut free
+        } else {
+            &mut trained
+        };
+        group.push(skill.identity.name.clone());
+    }
+    let skill_groups = [
+        ("Free skills", free),
+        ("Required training", trained),
+        ("Required specialization", specialized),
+    ]
+    .into_iter()
+    .filter_map(|(label, mut skills)| {
+        if skills.is_empty() {
+            return None;
+        }
+        skills.sort();
+        Some(CreationSkillGroup { label, skills })
+    })
+    .collect();
+    Ok(HeritageBenefits {
+        descriptions,
+        skill_groups,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn heritage_help_distinguishes_normal_training_from_server_owned_olthoi_allocations() {
+        let skill = |name: &str, cost, minimum| SkillChoice {
+            identity: NamedChoice {
+                id: 1,
+                name: name.to_owned(),
+            },
+            description: String::new(),
+            formula: None,
+            trained_cost: Some(cost),
+            specialization_upgrade_cost: Some(2),
+            minimum_advancement: minimum,
+        };
+        let skills = [
+            skill("Beta", 0, 2),
+            skill("Alpha", 0, 2),
+            skill("Required", 4, 2),
+            skill("Specialized", 0, 3),
+            skill("Optional", 4, 1),
+        ];
+        let normal = heritage_benefit_text(1, &skills).unwrap();
+        assert_eq!(normal.skill_groups.len(), 3);
+        assert_eq!(normal.skill_groups[0].label, "Free skills");
+        assert_eq!(normal.skill_groups[0].skills, ["Alpha", "Beta"]);
+        assert_eq!(normal.skill_groups[1].label, "Required training");
+        assert_eq!(normal.skill_groups[1].skills, ["Required"]);
+        assert_eq!(normal.skill_groups[2].label, "Required specialization");
+        assert_eq!(normal.skill_groups[2].skills, ["Specialized"]);
+        assert!(
+            normal
+                .descriptions
+                .iter()
+                .any(|text| text.contains("universal masteries"))
+        );
+        for heritage in [12, 13] {
+            let olthoi = heritage_benefit_text(heritage, &skills).unwrap();
+            assert!(olthoi.skill_groups.is_empty());
+            assert_eq!(olthoi.descriptions.len(), 1);
+            assert!(olthoi.descriptions[0].contains("server-defined attributes and skills"));
+        }
+        assert!(heritage_benefit_text(0, &[]).is_err());
+    }
 
     #[test]
     fn skill_formula_projection_preserves_attribute_identity_and_rejects_invalid_inputs() {

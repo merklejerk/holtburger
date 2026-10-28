@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
+import reconciliationFixture from "../../../../crates/holtburger-core/tests/fixtures/character_creation_reconciliation.json";
+import { characterCreationDraftSchema } from "./client-character-creation-contract";
 import {
 	CharacterCreationPreviewResolver,
+	CharacterCreationStatsResolver,
+	type CreationStatsResolution,
 	creationBuildBalance,
 	initialCreationDraft,
 	initialCreationAppearance,
@@ -18,13 +22,24 @@ import {
 	applyCreationAttribute,
 	applyCreationSkill,
 	creationSkillFormulaText,
+	reconcileCreationHeritage,
 } from "./client-character-creation-build";
 import type {
 	CharacterCreationCatalog,
 	CharacterCreationPreview,
+	CharacterCreationStats,
+	CharacterCreationStatsRequest,
 } from "./client-character-creation-contract";
 
 const catalog = {
+	attributeDescriptions: [
+		"Strength help",
+		"Endurance help",
+		"Coordination help",
+		"Quickness help",
+		"Focus help",
+		"Self help",
+	],
 	minimumAttribute: 10,
 	maximumAttribute: 100,
 	skillSlots: 2,
@@ -33,6 +48,8 @@ const catalog = {
 		{
 			id: 1,
 			name: "Heritage",
+			lore: ["Heritage lore."],
+			benefits: { descriptions: [], skillGroups: [] },
 			attributeCredits: 330,
 			skillCredits: 12,
 			startAreaIds: [4],
@@ -119,6 +136,163 @@ function deferred<T>() {
 async function flush(): Promise<void> {
 	for (let index = 0; index < 8; index++) await Promise.resolve();
 }
+
+describe("starting stat query lifetime", () => {
+	const result: CharacterCreationStats = {
+		kind: "standard",
+		vitals: [28, 55, 55],
+		skills: [{ id: 0, value: 47, usable: true }],
+	};
+
+	it("ignores cosmetic and identity edits and coalesces allocation edits and retains the last complete same-race snapshot", async () => {
+		const first = deferred<CharacterCreationStats>();
+		const second = deferred<CharacterCreationStats>();
+		const resolve = vi
+			.fn<
+				(
+					request: CharacterCreationStatsRequest,
+				) => Promise<CharacterCreationStats>
+			>()
+			.mockReturnValueOnce(first.promise)
+			.mockReturnValueOnce(second.promise);
+		const states: CreationStatsResolution[] = [];
+		const owner = new CharacterCreationStatsResolver(resolve, (state) =>
+			states.push(state),
+		);
+		const initial = draft();
+		owner.request(initial);
+		owner.request({
+			...initial,
+			name: "Changed",
+			gender: 2,
+			startArea: 4,
+			appearance: { ...initial.appearance, skinHue: 0.9 },
+		});
+		expect(resolve).toHaveBeenCalledTimes(1);
+		owner.request({ ...initial, attributes: [10, 20, 10, 10, 10, 10] });
+		owner.request({ ...initial, attributes: [10, 30, 10, 10, 10, 10] });
+		first.resolve(result);
+		await flush();
+		expect(states.every((state) => state.kind === "pending")).toBe(true);
+		expect(resolve).toHaveBeenCalledTimes(2);
+		expect(resolve.mock.calls[1][0].attributes[1]).toBe(30);
+		second.resolve(result);
+		await flush();
+		expect(states.at(-1)).toEqual({ kind: "ready", stats: result });
+		owner.request({ ...initial, attributes: [10, 40, 10, 10, 10, 10] });
+		expect(states.at(-1)).toEqual({ kind: "pending", previous: result });
+		owner.dispose();
+		await flush();
+	});
+
+	it("withdraws normal stats during race changes, omits Olthoi, and recalculates on return", async () => {
+		const delayed = deferred<CharacterCreationStats>();
+		const resolve = vi
+			.fn<
+				(
+					request: CharacterCreationStatsRequest,
+				) => Promise<CharacterCreationStats>
+			>()
+			.mockResolvedValueOnce(result)
+			.mockReturnValueOnce(delayed.promise)
+			.mockResolvedValueOnce({ kind: "olthoi" })
+			.mockResolvedValueOnce(result);
+		const states: CreationStatsResolution[] = [];
+		const owner = new CharacterCreationStatsResolver(resolve, (state) =>
+			states.push(state),
+		);
+		const initial = draft();
+		owner.request(initial);
+		await flush();
+		owner.request({ ...initial, heritage: 12 });
+		expect(states.at(-1)).toEqual({ kind: "pending", previous: null });
+		owner.request({ ...initial, heritage: 13 });
+		delayed.resolve(result);
+		await flush();
+		expect(states.at(-1)).toEqual({ kind: "ready", stats: { kind: "olthoi" } });
+		owner.request(initial);
+		await flush();
+		expect(states.at(-1)).toEqual({ kind: "ready", stats: result });
+		owner.dispose();
+	});
+
+	it("replaces a retained snapshot atomically and never restores it across an interrupted race change", async () => {
+		const update = deferred<CharacterCreationStats>();
+		const race = deferred<CharacterCreationStats>();
+		const returned = deferred<CharacterCreationStats>();
+		const replacement: CharacterCreationStats = {
+			kind: "standard",
+			vitals: [5, 10, 10],
+			skills: [{ id: 0, value: 12, usable: true }],
+		};
+		const resolve = vi
+			.fn<
+				(
+					request: CharacterCreationStatsRequest,
+				) => Promise<CharacterCreationStats>
+			>()
+			.mockResolvedValueOnce(result)
+			.mockReturnValueOnce(update.promise)
+			.mockReturnValueOnce(race.promise)
+			.mockReturnValueOnce(returned.promise);
+		const states: CreationStatsResolution[] = [];
+		const owner = new CharacterCreationStatsResolver(resolve, (state) =>
+			states.push(state),
+		);
+		const initial = draft();
+		initial.attributes = [55, 55, 55, 55, 55, 55];
+		owner.request(initial);
+		await flush();
+		owner.request({ ...initial, attributes: [10, 10, 10, 10, 10, 10] });
+		expect(states.at(-1)).toEqual({ kind: "pending", previous: result });
+		update.resolve(replacement);
+		await flush();
+		expect(states.at(-1)).toEqual({ kind: "ready", stats: replacement });
+		owner.request({ ...initial, heritage: 12 });
+		expect(states.at(-1)).toEqual({ kind: "pending", previous: null });
+		owner.request(initial);
+		expect(states.at(-1)).toEqual({ kind: "pending", previous: null });
+		race.resolve({ kind: "olthoi" });
+		await flush();
+		expect(states.at(-1)).toEqual({ kind: "pending", previous: null });
+		returned.resolve(result);
+		await flush();
+		expect(states.at(-1)).toEqual({ kind: "ready", stats: result });
+		owner.dispose();
+	});
+
+	it("surfaces current failures and prevents publication after disposal", async () => {
+		const delayed = deferred<CharacterCreationStats>();
+		const states: CreationStatsResolution[] = [];
+		const owner = new CharacterCreationStatsResolver(
+			() => delayed.promise,
+			(state) => states.push(state),
+		);
+		owner.request(draft());
+		delayed.reject(new Error("Missing stat table"));
+		await flush();
+		expect(states.at(-1)).toEqual({
+			kind: "failed",
+			message: "Missing stat table",
+		});
+		owner.dispose();
+		const retired = deferred<CharacterCreationStats>();
+		const publish = vi.fn();
+		const other = new CharacterCreationStatsResolver(
+			() => retired.promise,
+			publish,
+		);
+		other.request(draft());
+		other.dispose();
+		retired.resolve(result);
+		await flush();
+		expect(publish).toHaveBeenCalledTimes(1);
+		expect(publish).toHaveBeenLastCalledWith({
+			kind: "pending",
+			previous: null,
+		});
+	});
+});
 const request = (skinHue: number) => ({
 	heritage: 1,
 	gender: 1,
@@ -493,5 +667,274 @@ describe("creator attribute and skill controls", () => {
 			creationSkillFormulaText({ first: "Self", second: null, divisor: 1 }),
 		).toBe("Self");
 		expect(creationSkillFormulaText(null)).toBeNull();
+	});
+});
+
+describe("race-change reconciliation", () => {
+	const original = catalog.heritages[0];
+	const build = () => initialDraft(() => 0, "Preserved Name");
+	function reconcile(
+		draft: ReturnType<typeof build>,
+		target: CreationHeritage,
+	) {
+		return reconcileCreationHeritage(
+			{ ...catalog, heritages: [original, { ...target, id: 2 }] },
+			draft,
+			2,
+			draft.appearance,
+		);
+	}
+
+	it("preserves compatible choices and never mutates its input", () => {
+		const draft = build();
+		draft.attributes[0] = catalog.maximumAttribute;
+		draft.skills[0] = 3;
+		const before = structuredClone(draft);
+		const result = reconcile(draft, original);
+		expect(result).toEqual({ ...before, heritage: 2 });
+		expect(draft).toEqual(before);
+		const again = reconcileCreationHeritage(
+			{ ...catalog, heritages: [{ ...original, id: 2 }] },
+			result,
+			2,
+			draft.appearance,
+		);
+		expect(again).toEqual(result);
+	});
+
+	it("preserves gender identity rather than choosing the first body", () => {
+		const draft = build();
+		const target = {
+			...original,
+			genders: [{ ...original.genders[0], id: 2 }, original.genders[0]],
+		};
+		expect(reconcile(draft, target).gender).toBe(draft.gender);
+		expect(() =>
+			reconcile(draft, { ...target, genders: [target.genders[0]] }),
+		).toThrow();
+	});
+
+	it("reduces highest attributes with stable tuple ties and leaves larger budgets unspent", () => {
+		const draft = build();
+		draft.attributes[0] += 2;
+		draft.attributes[1] += 2;
+		const minimum = catalog.minimumAttribute * draft.attributes.length;
+		const result = reconcile(draft, {
+			...original,
+			attributeCredits: minimum + 1,
+		});
+		expect(result.attributes).toEqual([
+			catalog.minimumAttribute,
+			catalog.minimumAttribute + 1,
+			...draft.attributes.slice(2),
+		]);
+		expect(
+			reconcile(draft, {
+				...original,
+				attributeCredits: original.attributeCredits + 1,
+			}).attributes,
+		).toEqual(draft.attributes);
+		expect(() =>
+			reconcile(draft, { ...original, attributeCredits: minimum - 1 }),
+		).toThrow("minimum attributes");
+	});
+
+	it("retains lost free training when its new cost is affordable and applies new requirements", () => {
+		const draft = build();
+		const paid = {
+			...original.skills[1],
+			trainedCost: original.skills[0].trainedCost,
+			minimumAdvancement: 1,
+		};
+		expect(
+			reconcile(draft, { ...original, skills: [original.skills[0], paid] })
+				.skills[1],
+		).toBe(2);
+		const required = { ...original.skills[0], minimumAdvancement: 2 };
+		const result = reconcile(draft, {
+			...original,
+			skills: [required, original.skills[1]],
+		});
+		expect(result.skills[0]).toBe(required.minimumAdvancement);
+	});
+
+	it("removes optional specialization before training and reprices the target race", () => {
+		const draft = build();
+		draft.skills = [3, 3];
+		const target = {
+			...original,
+			skillCredits: original.skills[0].trainedCost,
+			skills: [
+				original.skills[0],
+				{
+					...original.skills[1],
+					specializationUpgradeCost:
+						original.skills[0].specializationUpgradeCost + 1,
+				},
+			],
+		};
+		const result = reconcile(draft, target);
+		expect(result.skills).toEqual([2, 2]);
+		expect(creationBuildBalance(target, result).skills).toBe(0);
+	});
+
+	it("unlocks paid training refunds through a zero-cost specialization", () => {
+		const draft = build();
+		draft.skills[0] = 3;
+		const result = reconcile(draft, {
+			...original,
+			skillCredits: 0,
+			skills: [
+				{ ...original.skills[0], specializationUpgradeCost: 0 },
+				original.skills[1],
+			],
+		});
+		expect(result.skills).toEqual([1, 2]);
+	});
+
+	it("refunds the largest specialization first and breaks equal refunds by skill ID", () => {
+		const draft = build();
+		draft.skills = [3, 3];
+		const upgrade = original.skills[0].specializationUpgradeCost;
+		const training = original.skills[0].trainedCost;
+		const target = {
+			...original,
+			skillCredits: training + upgrade,
+			skills: [
+				original.skills[0],
+				{ ...original.skills[1], specializationUpgradeCost: upgrade + 1 },
+			],
+		};
+		expect(reconcile(draft, target).skills).toEqual([3, 2]);
+		expect(
+			reconcile(draft, {
+				...target,
+				skills: [
+					target.skills[0],
+					{ ...target.skills[1], specializationUpgradeCost: upgrade },
+				],
+			}).skills,
+		).toEqual([2, 3]);
+	});
+
+	it("clears skills made inactive and rejects inconsistent requirements or vector sizes", () => {
+		const draft = build();
+		const result = reconcile(draft, {
+			...original,
+			skills: [original.skills[0]],
+		});
+		expect(result.skills[1]).toBe(0);
+		expect(() => reconcile({ ...draft, skills: [] }, original)).toThrow(
+			"incomplete skill vector",
+		);
+		expect(() =>
+			reconcile(draft, {
+				...original,
+				skills: [{ ...original.skills[0], id: catalog.skillSlots }],
+			}),
+		).toThrow("exceeds the skill vector");
+		expect(() =>
+			reconcile(draft, {
+				...original,
+				skills: [
+					{
+						...original.skills[0],
+						minimumAdvancement: 3,
+						specializationUpgradeCost: null,
+					},
+				],
+			}),
+		).toThrow("Required training is unavailable");
+	});
+
+	it("lowers unavailable tiers without removing required training", () => {
+		const draft = build();
+		draft.skills[0] = 3;
+		expect(
+			reconcile(draft, {
+				...original,
+				skills: [
+					{ ...original.skills[0], specializationUpgradeCost: null },
+					original.skills[1],
+				],
+			}).skills[0],
+		).toBe(2);
+		expect(
+			reconcile(draft, {
+				...original,
+				skills: [
+					{ ...original.skills[0], trainedCost: null },
+					original.skills[1],
+				],
+			}).skills[0],
+		).toBe(1);
+		expect(() =>
+			reconcile(draft, {
+				...original,
+				skillCredits: 0,
+				skills: [
+					{ ...original.skills[0], minimumAdvancement: 2 },
+					original.skills[1],
+				],
+			}),
+		).toThrow("required training");
+	});
+
+	it("retains valid towns and selects a valid replacement", () => {
+		const draft = build();
+		const target = { ...original, id: 2, startAreaIds: [5] };
+		const result = reconcileCreationHeritage(
+			{
+				...catalog,
+				startAreas: [...catalog.startAreas, { id: 5, name: "Other town" }],
+				heritages: [original, target],
+			},
+			draft,
+			target.id,
+			draft.appearance,
+		);
+		expect(result.startArea).toBe(target.startAreaIds[0]);
+		expect(() => reconcile(draft, { ...original, startAreaIds: [] })).toThrow(
+			"starting town",
+		);
+	});
+});
+
+it("produces the same asset-independent reconciled build admitted by the Rust builder", () => {
+	const source = catalog.heritages[0];
+	const target: CreationHeritage = {
+		...source,
+		id: reconciliationFixture.heritage,
+		attributeCredits: reconciliationFixture.attributeCredits,
+		skillCredits: reconciliationFixture.skillCredits,
+		startAreaIds: [0],
+		skills: reconciliationFixture.skills.map((skill) => ({
+			...skill,
+			description: skill.name,
+			formula: null,
+		})),
+	};
+	const draft = characterCreationDraftSchema.parse({
+		...initialDraft(() => 0, "Shared fixture"),
+		attributes: reconciliationFixture.attributes,
+		skills: reconciliationFixture.requestedSkills,
+		startArea: 0,
+	});
+	const result = reconcileCreationHeritage(
+		{
+			...catalog,
+			skillSlots: reconciliationFixture.requestedSkills.length,
+			startAreas: [{ id: 0, name: "Holtburg" }],
+			heritages: [source, target],
+		},
+		draft,
+		target.id,
+		draft.appearance,
+	);
+	expect(result.attributes).toEqual(reconciliationFixture.attributes);
+	expect(result.skills).toEqual(reconciliationFixture.expectedSkills);
+	expect(creationBuildBalance(target, result)).toEqual({
+		attributes: 0,
+		skills: 0,
 	});
 });

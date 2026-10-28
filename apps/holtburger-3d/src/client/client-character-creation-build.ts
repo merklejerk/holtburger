@@ -5,6 +5,9 @@ import {
 } from "./client-character-creation-contract";
 import {
 	creationBuildBalance,
+	creationGender,
+	creationHeritage,
+	type CreationAppearance,
 	type CreationHeritage,
 } from "./client-character-creation";
 
@@ -44,6 +47,94 @@ export interface CreationAttributeControl {
 }
 
 type Skill = CreationHeritage["skills"][number];
+
+/** Preserve player investment; only race constraints and affordability may reduce it. */
+export function reconcileCreationHeritage(
+	catalog: CharacterCreationCatalog,
+	draft: CharacterCreationDraft,
+	heritageId: number,
+	appearance: CreationAppearance,
+): CharacterCreationDraft {
+	const heritage = creationHeritage(catalog, heritageId);
+	creationGender(heritage, draft.gender);
+	if (draft.skills.length !== catalog.skillSlots)
+		throw new Error("Creation draft has an incomplete skill vector.");
+	if (
+		heritage.attributeCredits <
+		catalog.minimumAttribute * draft.attributes.length
+	)
+		throw new Error("Race attribute budget cannot cover minimum attributes.");
+	const attributes: CharacterCreationDraft["attributes"] = [
+		...draft.attributes,
+	];
+	for (let index = 0; index < attributes.length; index++)
+		attributes[index] = Math.max(
+			catalog.minimumAttribute,
+			Math.min(catalog.maximumAttribute, attributes[index]),
+		);
+	let excess =
+		attributes.reduce((sum, value) => sum + value, 0) -
+		heritage.attributeCredits;
+	while (excess > 0) {
+		// Stable tuple order breaks ties while repeatedly shaving the highest investment.
+		let highest = 0;
+		for (let index = 1; index < attributes.length; index++)
+			if (attributes[index] > attributes[highest]) highest = index;
+		attributes[highest]--;
+		excess--;
+	}
+	const skills = draft.skills.map(() => 0);
+	for (const skill of heritage.skills) {
+		if (skill.id >= skills.length)
+			throw new Error(`Race skill ${skill.name} exceeds the skill vector.`);
+		const maximum =
+			skill.trainedCost === null
+				? 1
+				: skill.specializationUpgradeCost === null
+					? 2
+					: 3;
+		if (skill.minimumAdvancement > maximum)
+			throw new Error(`Required training is unavailable for ${skill.name}.`);
+		skills[skill.id] = Math.max(
+			skill.minimumAdvancement,
+			Math.min(maximum, Math.max(1, draft.skills[skill.id])),
+		);
+	}
+	const firstTown = heritage.startAreaIds[0];
+	if (firstTown === undefined)
+		throw new Error(`Race ${heritage.name} has no starting town.`);
+	const next = {
+		...draft,
+		heritage: heritageId,
+		appearance,
+		attributes,
+		skills,
+		startArea: heritage.startAreaIds.includes(draft.startArea)
+			? draft.startArea
+			: firstTown,
+	};
+	for (const tier of [3, 2]) {
+		// Zero-refund specializations also need removing to unlock a paid training refund.
+		const candidates = heritage.skills
+			.flatMap((skill) => {
+				const refund =
+					tier === 3 ? skill.specializationUpgradeCost : skill.trainedCost;
+				return skills[skill.id] === tier &&
+					skill.minimumAdvancement < tier &&
+					refund !== null
+					? [{ skill, refund }]
+					: [];
+			})
+			.toSorted((a, b) => b.refund - a.refund || a.skill.id - b.skill.id);
+		for (const { skill } of candidates) {
+			if (creationBuildBalance(heritage, next).skills >= 0) break;
+			skills[skill.id] = tier - 1;
+		}
+	}
+	if (creationBuildBalance(heritage, next).skills < 0)
+		throw new Error("Race skill budget cannot cover required training.");
+	return next;
+}
 
 function skillActions(skill: Skill, training: number, remaining: number) {
 	const upgradeLabel = training < 2 ? "Train" : "Specialize";

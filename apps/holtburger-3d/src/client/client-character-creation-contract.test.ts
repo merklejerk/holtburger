@@ -3,6 +3,8 @@ import {
 	characterCreationDraftSchema,
 	loadCharacterCreationCatalog,
 	resolveCharacterCreationAppearance,
+	resolveCharacterCreationStats,
+	characterCreationStatsSchema,
 } from "./client-character-creation-contract";
 
 const draft = {
@@ -37,6 +39,55 @@ const draft = {
 };
 
 describe("creation host boundary", () => {
+	it("resolves allocation-only values and preserves explicit Olthoi exclusion", async () => {
+		const request = {
+			heritage: draft.heritage,
+			attributes: [55, 55, 55, 55, 55, 55] as [
+				number,
+				number,
+				number,
+				number,
+				number,
+				number,
+			],
+			skills: [],
+		};
+		for (const result of [
+			{ kind: "olthoi" },
+			{
+				kind: "standard",
+				vitals: [28, 55, 55],
+				skills: [{ id: 6, value: 47, usable: true }],
+			},
+		]) {
+			expect(
+				await resolveCharacterCreationStats(
+					{
+						invoke: async (command, args) => {
+							expect(command).toBe("resolve_character_creation_stats");
+							expect(args).toEqual({ request });
+							return result;
+						},
+					},
+					request,
+				),
+			).toEqual(result);
+		}
+		expect(() =>
+			characterCreationStatsSchema.parse({
+				kind: "standard",
+				vitals: [28, 55],
+				skills: [],
+			}),
+		).toThrow();
+		expect(() =>
+			characterCreationStatsSchema.parse({
+				kind: "standard",
+				vitals: [28, 55, 55],
+				skills: [{ id: 6, value: 0 }],
+			}),
+		).toThrow();
+	});
 	it("resolves an appearance without requiring a name or completed build", async () => {
 		const preview = {
 			body: {
@@ -100,6 +151,14 @@ describe("creation host boundary", () => {
 	it("loads choices through the static content capability", async () => {
 		const commands: string[] = [];
 		const catalog = {
+			attributeDescriptions: [
+				"Strength help",
+				"Endurance help",
+				"Coordination help",
+				"Quickness help",
+				"Focus help",
+				"Self help",
+			],
 			minimumAttribute: 10,
 			maximumAttribute: 100,
 			skillSlots: 0,

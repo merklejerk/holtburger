@@ -1,3 +1,4 @@
+import { CLIENT_PREGAME_CAMERA_TUNING } from "../../client/client-pregame-tuning";
 import { creationFaceFraming } from "../../client/client-character-creation";
 import type { ObjectPreviewVisual } from "../../lib/game/runtime/object-preview-source";
 import { DynamicEntitySystem } from "../../lib/game/systems/dynamic-entity-system";
@@ -256,6 +257,28 @@ export async function probePregameSceneComposition(
 		};
 		surface.setView(faceView);
 		await settle("ready");
+		const startedMs = time * 1000;
+		const focusPositions = new Set<string>();
+		const firstFocusCamera = currentCamera();
+		if (firstFocusCamera === null)
+			throw new Error("Missing focus start camera");
+		focusPositions.add(JSON.stringify(firstFocusCamera.placement.position));
+		while (
+			time * 1000 - startedMs <
+			CLIENT_PREGAME_CAMERA_TUNING.transitionMs
+		) {
+			await frame();
+			const camera = currentCamera();
+			if (camera === null) throw new Error("Missing focus animation camera");
+			focusPositions.add(JSON.stringify(camera.placement.position));
+		}
+		if (
+			!window.matchMedia("(prefers-reduced-motion: reduce)").matches &&
+			focusPositions.size < 3
+		)
+			throw new Error(
+				`Focus transition did not traverse an intermediate camera pose: ${focusPositions.size}`,
+			);
 		assertFacingCamera(new Vec3(0, 1.65 * source.body.scale, 0));
 		await assertStableTurn(faceView);
 		const faceCamera = currentCamera();
@@ -313,6 +336,7 @@ export async function probePregameSceneComposition(
 			lightChangedPixels,
 			restorationDifferences,
 			faceCameraMoved: true,
+			focusTransitionPoses: focusPositions.size,
 			limitationsRecovered: true,
 			handoffClearedModelsAndLight: true,
 			desiredSourceSurvivedDriverReplacement: true,

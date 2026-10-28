@@ -36,6 +36,7 @@
 	import {
 		loadCharacterCreationCatalog,
 		resolveCharacterCreationAppearance,
+		resolveCharacterCreationStats,
 	} from "../../client/client-character-creation-contract";
 	import type {
 		HostCommandName,
@@ -153,6 +154,8 @@
 				const scene = await openReviewWorld();
 				showcase = {
 					services: {
+						resolveStats: (request) =>
+							resolveCharacterCreationStats(transport, request),
 						loadCatalog: async () => loadCharacterCreationCatalog(transport),
 						resolveAppearance: async (request) =>
 							resolveCharacterCreationAppearance(transport, request),
@@ -253,6 +256,8 @@
 					entryPending: false,
 					management: { kind: "idle" },
 					creation: {
+						resolveStats: (request) =>
+							resolveCharacterCreationStats(transport, request),
 						loadCatalog: async () => catalog,
 						resolveAppearance: (request) =>
 							resolveCharacterCreationAppearance(transport, request),

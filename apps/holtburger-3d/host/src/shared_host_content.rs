@@ -42,6 +42,8 @@ pub struct SharedHostContent {
     soul_emotes: Arc<Mutex<Option<Arc<holtburger_content::SoulEmoteCatalog>>>>,
     /// One decoded spell table shared by bootstrap assembly and static queries.
     spell_table: Arc<Mutex<Option<Arc<SpellTable>>>>,
+    /// Static creation calculator, shared by allocation requests.
+    pub creation_stats: Arc<crate::character_creation::CharacterCreationStatsService>,
 }
 
 impl SharedHostContent {
@@ -79,6 +81,9 @@ impl SharedHostContent {
             setup_dimensions: Arc::new(motion_reference.setup_dimensions),
             client_bootstrap: Arc::new(Mutex::new(None)),
             spell_table: Arc::new(Mutex::new(None)),
+            creation_stats: Arc::new(
+                crate::character_creation::CharacterCreationStatsService::default(),
+            ),
             soul_emotes: Arc::new(Mutex::new(None)),
         })
     }
@@ -171,6 +176,10 @@ pub enum SharedContentCommand {
     HostStatus,
     /// Static pre-game choices; independent of character/world activation.
     LoadCharacterCreationCatalog,
+    /// Starting allocations use static rules, independently of appearance resolution.
+    ResolveCharacterCreationStats {
+        request: crate::character_creation::CharacterCreationStatsRequest,
+    },
     /// Static appearance resolution; does not require a completed submission draft.
     ResolveCharacterCreationAppearance {
         request: crate::character_creation::CharacterCreationAppearanceRequest,
@@ -236,6 +245,7 @@ pub const SHARED_CONTENT_COMMAND_NAMES: &[&str] = &[
     "host_status",
     "load_character_creation_catalog",
     "resolve_character_creation_appearance",
+    "resolve_character_creation_stats",
     "load_soul_emotes",
     "open_world_map",
     "read_world_map_tiles",
@@ -268,6 +278,13 @@ pub async fn dispatch_shared_content(
 
     match command {
         HostStatus => encode_json(runtime.status()),
+        ResolveCharacterCreationStats { request } => encode_json(
+            runtime
+                .content()
+                .creation_stats
+                .resolve(request, &runtime.content().repository)
+                .map_err(required_error)?,
+        ),
         ResolveCharacterCreationAppearance { request } => encode_json(
             request
                 .resolve(&runtime.content().repository)

@@ -111,6 +111,14 @@ const skill = namedChoice
 /** Static UI choices with costs and baseline advancement already interpreted by shared rules. */
 const catalogSchema = z
 	.object({
+		attributeDescriptions: z.tuple([
+			z.string(),
+			z.string(),
+			z.string(),
+			z.string(),
+			z.string(),
+			z.string(),
+		]),
 		minimumAttribute: word,
 		maximumAttribute: word,
 		skillSlots: index,
@@ -118,6 +126,20 @@ const catalogSchema = z
 		heritages: z.array(
 			namedChoice
 				.extend({
+					lore: z.array(z.string().min(1)).min(1),
+					benefits: z
+						.object({
+							descriptions: z.array(z.string().min(1)),
+							skillGroups: z.array(
+								z
+									.object({
+										label: z.string().min(1),
+										skills: z.array(z.string().min(1)).min(1),
+									})
+									.strict(),
+							),
+						})
+						.strict(),
 					attributeCredits: word,
 					skillCredits: word,
 					startAreaIds: z.array(word),
@@ -150,6 +172,46 @@ const creationPreviewSchema = z
 	})
 	.strict();
 export type CharacterCreationPreview = z.infer<typeof creationPreviewSchema>;
+
+/** Only allocation fields can affect starting stats. */
+export const characterCreationStatsRequestSchema =
+	characterCreationDraftSchema.pick({
+		heritage: true,
+		attributes: true,
+		skills: true,
+	});
+export type CharacterCreationStatsRequest = z.infer<
+	typeof characterCreationStatsRequestSchema
+>;
+
+/** The host owns both numerical calculation and whether a race supports it. */
+export const characterCreationStatsSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("olthoi") }).strict(),
+	z
+		.object({
+			kind: z.literal("standard"),
+			vitals: z.tuple([word, word, word]),
+			skills: z.array(
+				z.object({ id: word, value: word, usable: z.boolean() }).strict(),
+			),
+		})
+		.strict(),
+]);
+export type CharacterCreationStats = z.infer<
+	typeof characterCreationStatsSchema
+>;
+
+/** Resolve starting values through the same static host capability in every frontend transport. */
+export async function resolveCharacterCreationStats(
+	transport: Pick<HostTransport, "invoke">,
+	request: CharacterCreationStatsRequest,
+): Promise<CharacterCreationStats> {
+	return characterCreationStatsSchema.parse(
+		await transport.invoke("resolve_character_creation_stats", {
+			request: characterCreationStatsRequestSchema.parse(request),
+		}),
+	);
+}
 
 /** Resolve content directly, independently of world presentation or creation submission. */
 export async function resolveCharacterCreationAppearance(

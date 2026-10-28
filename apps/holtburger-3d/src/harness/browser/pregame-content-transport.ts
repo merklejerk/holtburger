@@ -16,6 +16,7 @@ export function pregameContentTransport(url: string): HostTransport {
 		load_setup_visual: "/setup-visual",
 		load_character_creation_catalog: "/character-creation-catalog",
 		resolve_character_creation_appearance: "/character-creation-appearance",
+		resolve_character_creation_stats: "/character-creation-stats",
 		load_animation: "/animation",
 		load_physics_script: "/physics-script",
 		load_particle_emitter: "/particle-emitter",
@@ -41,7 +42,8 @@ export function pregameContentTransport(url: string): HostTransport {
 			if (!response.ok) throw new Error(await response.text());
 			return catalog ||
 				command === "load_landblock_profile" ||
-				command === "resolve_character_creation_appearance"
+				command === "resolve_character_creation_appearance" ||
+				command === "resolve_character_creation_stats"
 				? response.json()
 				: new Uint8Array(await response.arrayBuffer());
 		},

@@ -63,6 +63,7 @@ function fixture(
 			sceneClass: "dungeon-only" as const,
 		})),
 	};
+	const reducedMotion = vi.fn(() => false);
 	const scene = new ClientPregameScene(
 		{
 			runtime,
@@ -71,8 +72,17 @@ function fixture(
 		},
 		characters,
 		location,
+		reducedMotion,
 	);
-	return { scene, runtime, receipt, profileSource, characters, model };
+	return {
+		scene,
+		runtime,
+		receipt,
+		profileSource,
+		characters,
+		model,
+		reducedMotion,
+	};
 }
 
 describe("ClientPregameScene", () => {
@@ -226,6 +236,10 @@ describe("ClientPregameScene", () => {
 			framing: { kind: "face", center: new Vec3(0, 1.65, 0), height: 0.5 },
 		});
 		scene.frame(1064, 1440, 900);
+		expect(
+			runtime.setPrimaryView.mock.lastCall?.[0].camera.placement.position,
+		).toEqual(bodyCamera.placement.position);
+		scene.frame(1070, 1440, 900);
 		const faceCamera = runtime.setPrimaryView.mock.lastCall?.[0].camera;
 		expect(faceCamera?.near).toBe(bodyCamera.near);
 		expect(faceCamera?.far).toBe(bodyCamera.far);
@@ -373,5 +387,81 @@ describe("ClientPregameScene", () => {
 		await Promise.all([start, retirement]);
 		expect(runtime.activateScene).not.toHaveBeenCalled();
 		expect(scene.status()).toEqual({ kind: "stopped" });
+	});
+});
+
+describe("pregame focus animation", () => {
+	it("uses elapsed frame time, retargets continuously, follows displayed residency, and stops when hidden", async () => {
+		const { scene, runtime, receipt, characters, model, reducedMotion } =
+			fixture();
+		const surface = characters.open(
+			() => {},
+			() => {},
+		);
+		surface.setView(PREGAME_TEST_VIEW);
+		surface.setSource(PREGAME_TEST_SOURCE);
+		await scene.start();
+		runtime.sceneActivationStatus.mockReturnValue({ kind: "ready", receipt });
+		await vi.waitFor(() =>
+			expect(model.create.mock.results[0]?.value.status().kind).toBe("ready"),
+		);
+		const duration = CLIENT_PREGAME_CAMERA_TUNING.transitionMs;
+		const position = () => {
+			const camera = runtime.setPrimaryView.mock.lastCall?.[0].camera;
+			if (camera === undefined) throw new Error("Missing camera frame");
+			return camera.placement.position;
+		};
+		scene.frame(0, 1440, 900);
+		const body = position();
+		const faceView = {
+			...PREGAME_TEST_VIEW,
+			framing: {
+				kind: "face" as const,
+				center: new Vec3(0, 1.65, 0),
+				height: 0.5,
+			},
+		};
+		surface.setView(faceView);
+		scene.frame(duration, 1440, 900);
+		expect(position()).toEqual(body);
+		scene.frame(duration * 1.5, 1440, 900);
+		const midpoint = position();
+		expect(midpoint).not.toEqual(body);
+		expect(
+			runtime.queryWorldPointResidencyCandidates.mock.lastCall?.[0],
+		).toEqual(midpoint);
+		scene.frame(duration * 2, 1440, 900);
+		const face = position();
+		for (const axis of ["x", "y", "z"] as const)
+			expect(midpoint[axis]).toBeCloseTo((body[axis] + face[axis]) / 2);
+		const queries =
+			runtime.queryWorldPointResidencyCandidates.mock.calls.length;
+		scene.frame(duration * 3, 1440, 900);
+		expect(runtime.queryWorldPointResidencyCandidates.mock.calls.length).toBe(
+			queries,
+		);
+		surface.setView(PREGAME_TEST_VIEW);
+		scene.frame(duration * 4, 1440, 900);
+		scene.frame(duration * 4.5, 1440, 900);
+		const reverseAt = position();
+		surface.setView(faceView);
+		scene.frame(duration * 4.5, 1440, 900);
+		expect(position()).toEqual(reverseAt);
+		scene.frame(duration * 5.5, 1440, 900);
+		expect(position()).toEqual(face);
+		reducedMotion.mockReturnValue(true);
+		surface.setView(PREGAME_TEST_VIEW);
+		scene.frame(duration * 6, 1440, 900);
+		expect(position()).toEqual(body);
+		reducedMotion.mockReturnValue(false);
+		surface.setView(faceView);
+		scene.frame(duration * 7, 1440, 900);
+		surface.setView(null);
+		scene.frame(duration * 8, 1440, 900);
+		const hidden = position();
+		scene.frame(duration * 9, 1440, 900);
+		expect(position()).toEqual(hidden);
+		await scene.destroy();
+		expect(scene.frame(duration * 10, 1440, 900)).toBe(false);
 	});
 });

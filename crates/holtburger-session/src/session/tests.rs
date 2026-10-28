@@ -1,101 +1,170 @@
+use super::types::*;
 use super::{Session, SessionEvent, Transport};
+use crate::optional_header::OptionalHeaderCursor;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use byteorder::{ByteOrder, LittleEndian};
+use futures::{FutureExt, task::AtomicWaker};
+use holtburger_protocol::crypto::Isaac;
 use holtburger_protocol::messages::transport::{self, packet_flags};
 use holtburger_protocol::messages::*;
 use holtburger_protocol::traits::{ProtocolPack, ProtocolUnpack};
 use std::collections::VecDeque;
 use std::net::SocketAddr;
-use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::task::Poll;
+use tokio::time::{Instant, advance};
 
-type SentPacket = (SocketAddr, Vec<u8>);
-type RecvPacket = (Vec<u8>, SocketAddr);
-type RecvQueue = Arc<Mutex<VecDeque<RecvPacket>>>;
+/// Gate reads and writes independently; Pending never consumes or commits a datagram.
+#[derive(Default)]
+struct TransportState {
+    incoming: VecDeque<(Vec<u8>, SocketAddr)>,
+    sent: Vec<Vec<u8>>,
+    writes_blocked: bool,
+    fail_send: bool,
+    short_send: bool,
+    read_calls: usize,
+}
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct ScriptedTransport {
-    sent: Arc<Mutex<Vec<SentPacket>>>,
-    recv: Arc<Mutex<Vec<Vec<u8>>>>,
-    recv_addr: SocketAddr,
+    state: Arc<Mutex<TransportState>>,
+    read_waker: Arc<AtomicWaker>,
+    write_waker: Arc<AtomicWaker>,
+    sent_notify: Arc<tokio::sync::Notify>,
 }
 
 impl ScriptedTransport {
-    fn new(recv_packets: Vec<Vec<u8>>, recv_addr: SocketAddr) -> Self {
-        Self {
-            sent: Arc::new(Mutex::new(Vec::new())),
-            recv: Arc::new(Mutex::new(recv_packets)),
-            recv_addr,
+    fn new(packets: Vec<Vec<u8>>, addr: SocketAddr) -> Self {
+        let transport = Self::default();
+        for packet in packets {
+            transport.push_from(packet, addr);
         }
+        transport
     }
-
-    async fn sent_packets(&self) -> Vec<Vec<u8>> {
-        self.sent
+    fn push(&self, packet: Vec<u8>) {
+        self.push_from(packet, "127.0.0.1:9000".parse().unwrap());
+    }
+    fn push_from(&self, packet: Vec<u8>, addr: SocketAddr) {
+        self.state
             .lock()
-            .await
-            .iter()
-            .map(|(_, bytes)| bytes.clone())
-            .collect()
+            .unwrap()
+            .incoming
+            .push_back((packet, addr));
+        self.read_waker.wake();
     }
-
-    async fn sent_entries(&self) -> Vec<(SocketAddr, Vec<u8>)> {
-        self.sent.lock().await.clone()
+    fn block_writes(&self, blocked: bool) {
+        self.state.lock().unwrap().writes_blocked = blocked;
+        self.write_waker.wake();
+    }
+    async fn sent_packets(&self) -> Vec<Vec<u8>> {
+        self.state.lock().unwrap().sent.clone()
+    }
+    async fn wait_for_sent(&self, count: usize) {
+        loop {
+            let notified = self.sent_notify.notified();
+            if self.state.lock().unwrap().sent.len() >= count {
+                return;
+            }
+            notified.await;
+        }
     }
 }
 
 #[async_trait]
 impl Transport for ScriptedTransport {
-    async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> Result<usize> {
-        self.sent.lock().await.push((addr, buf.to_vec()));
-        Ok(buf.len())
+    async fn send_to(&self, bytes: &[u8], _addr: SocketAddr) -> Result<usize> {
+        std::future::poll_fn(|cx| {
+            self.write_waker.register(cx.waker());
+            let mut state = self.state.lock().unwrap();
+            if state.fail_send {
+                return Poll::Ready(Err(anyhow!("Synthetic send failure")));
+            }
+            if state.writes_blocked {
+                return Poll::Pending;
+            }
+            if state.short_send {
+                return Poll::Ready(Ok(bytes.len() - 1));
+            }
+            state.sent.push(bytes.to_vec());
+            self.sent_notify.notify_one();
+            Poll::Ready(Ok(bytes.len()))
+        })
+        .await
     }
-
-    async fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
-        let mut recv = self.recv.lock().await;
-        if recv.is_empty() {
-            return Err(anyhow!("Empty"));
-        }
-
-        let data = recv.remove(0);
-        buf[..data.len()].copy_from_slice(&data);
-        Ok((data.len(), self.recv_addr))
-    }
-}
-
-#[derive(Clone)]
-struct SequencedTransport {
-    sent: Arc<Mutex<Vec<SentPacket>>>,
-    recv: RecvQueue,
-}
-
-impl SequencedTransport {
-    fn new(recv_packets: Vec<(Vec<u8>, SocketAddr)>) -> Self {
-        Self {
-            sent: Arc::new(Mutex::new(Vec::new())),
-            recv: Arc::new(Mutex::new(recv_packets.into_iter().collect())),
-        }
-    }
-}
-
-#[async_trait]
-impl Transport for SequencedTransport {
-    async fn send_to(&self, buf: &[u8], addr: SocketAddr) -> Result<usize> {
-        self.sent.lock().await.push((addr, buf.to_vec()));
-        Ok(buf.len())
-    }
-
-    async fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
-        let mut recv = self.recv.lock().await;
-        if let Some((data, addr)) = recv.pop_front() {
-            buf[..data.len()].copy_from_slice(&data);
-            Ok((data.len(), addr))
-        } else {
-            Err(anyhow!("Empty"))
-        }
+    async fn recv_from(&self, bytes: &mut [u8]) -> Result<(usize, SocketAddr)> {
+        std::future::poll_fn(|cx| {
+            self.read_waker.register(cx.waker());
+            let mut state = self.state.lock().unwrap();
+            state.read_calls += 1;
+            let Some((packet, addr)) = state.incoming.pop_front() else {
+                return Poll::Pending;
+            };
+            let len = packet.len().min(bytes.len());
+            bytes[..len].copy_from_slice(&packet[..len]);
+            Poll::Ready(Ok((len, addr)))
+        })
+        .await
     }
 }
 
+fn connected(transport: &ScriptedTransport) -> Session {
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport.clone());
+    session.packet_sequence = 2;
+    session.last_sent_client_sequence = 1;
+    session.has_server_seq = true;
+    session.last_control_scheduled = Some(Instant::now());
+    session
+}
+
+fn control(sequence: u32, flags: u32, payload: &[u8]) -> Vec<u8> {
+    build_transport_packet(
+        PacketHeader {
+            sequence,
+            flags,
+            ..Default::default()
+        },
+        payload,
+    )
+}
+
+fn encrypted_packet(sequence: u32, payload: &[u8], crypto: &mut Isaac) -> Vec<u8> {
+    let mut bytes = build_single_fragment_packet(sequence, payload);
+    let mut header = unpack_header(&bytes);
+    header.flags |= packet_flags::ENCRYPTED_CHECKSUM;
+    let hash = Session::new_test()
+        .calculate_payload_hash(header.flags, &bytes[transport::HEADER_SIZE..])
+        .unwrap();
+    header.checksum = header
+        .calculate_checksum()
+        .wrapping_add(hash ^ crypto.current_key);
+    crypto.consume_key();
+    let mut head = Vec::new();
+    header.pack(&mut head);
+    bytes[..transport::HEADER_SIZE].copy_from_slice(&head);
+    bytes
+}
+
+fn logout_message() -> GameMessage {
+    GameMessage::CharacterLogOff
+}
+
+fn request_ids(bytes: &[u8]) -> Vec<u32> {
+    let header = unpack_header(bytes);
+    Session::new_test()
+        .read_sequence_list(
+            header.flags,
+            &bytes[transport::HEADER_SIZE..],
+            packet_flags::REQUEST_RETRANSMIT,
+        )
+        .unwrap()
+}
+
+async fn delivered_byte(session: &mut Session, byte: u8) {
+    let events = session.recv_message().await.unwrap();
+    assert!(matches!(events.as_slice(), [SessionEvent::Message(message)] if message == &[byte]));
+}
 fn build_transport_packet(header: PacketHeader, payload: &[u8]) -> Vec<u8> {
     let session = Session::new_test();
     let mut header = header;
@@ -135,18 +204,6 @@ fn build_connect_request_packet(connect_request: ConnectRequestData) -> Vec<u8> 
     )
 }
 
-fn build_connect_response_packet(cookie: u64, client_id: u16) -> Vec<u8> {
-    build_transport_packet(
-        PacketHeader {
-            flags: packet_flags::CONNECT_RESPONSE,
-            id: client_id,
-            size: transport::CONNECT_RESPONSE_SIZE as u16,
-            ..Default::default()
-        },
-        &cookie.to_le_bytes(),
-    )
-}
-
 fn build_single_fragment_packet(sequence: u32, payload: &[u8]) -> Vec<u8> {
     let mut body = Vec::new();
     FragmentHeader {
@@ -173,9 +230,7 @@ fn build_single_fragment_packet(sequence: u32, payload: &[u8]) -> Vec<u8> {
 
 #[tokio::test]
 async fn test_payload_offset_handshake() {
-    let session = Session::new("127.0.0.1:9000".parse().unwrap())
-        .await
-        .unwrap();
+    let session = Session::new_test();
 
     assert_eq!(
         session.get_payload_offset(packet_flags::CONNECT_RESPONSE, &[0u8; 100]),
@@ -198,9 +253,7 @@ async fn test_payload_offset_handshake() {
 
 #[tokio::test]
 async fn test_payload_hash_handshake() {
-    let session = Session::new("127.0.0.1:9000".parse().unwrap())
-        .await
-        .unwrap();
+    let session = Session::new_test();
 
     let payload = vec![1u8; 32];
     let hash = session
@@ -214,11 +267,10 @@ async fn test_payload_hash_handshake() {
 
 #[tokio::test]
 async fn test_payload_hash_blobs() {
-    let session = Session::new("127.0.0.1:9000".parse().unwrap())
-        .await
-        .unwrap();
+    let session = Session::new_test();
 
     let mut payload = vec![0u8; 16];
+    LittleEndian::write_u16(&mut payload[8..10], 1);
     LittleEndian::write_u16(&mut payload[10..12], 20);
     payload.extend_from_slice(&[1, 2, 3, 4]);
 
@@ -283,156 +335,6 @@ fn test_encrypted_checksum_xor_logic() {
     );
 }
 
-#[tokio::test]
-async fn test_multi_fragment_packet_unaligned() {
-    struct MultiFragMock(Arc<Mutex<Vec<Vec<u8>>>>);
-    #[async_trait]
-    impl Transport for MultiFragMock {
-        async fn send_to(&self, _buf: &[u8], _addr: SocketAddr) -> Result<usize> {
-            Ok(0)
-        }
-        async fn recv_from(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr)> {
-            let mut q = self.0.lock().await;
-            if q.is_empty() {
-                return Err(anyhow!("Empty"));
-            }
-            let data = q.remove(0);
-            buf[..data.len()].copy_from_slice(&data);
-            Ok((data.len(), "127.0.0.1:9000".parse().unwrap()))
-        }
-    }
-
-    let hex = "71000000060000003C8E48C70B0029B157000100AD0000000000008001001D0000000900E9020000000200000001000000AE0000000000008001001D0000000900E9020000000400000001000000AF0000000000008001001D0000000900E9020000000600000001000000";
-    let data = hex::decode(hex).unwrap();
-    let mut header = unpack_header(&data);
-    header.flags &= !packet_flags::ENCRYPTED_CHECKSUM;
-    let packet = build_transport_packet(header, &data[transport::HEADER_SIZE..]);
-
-    let q = Arc::new(Mutex::new(vec![packet]));
-    let mut session = Session::new_test();
-    session.transport = Box::new(MultiFragMock(q));
-    session.last_server_seq = 112;
-    session.has_server_seq = true;
-
-    let events = session.recv_message().await.unwrap();
-
-    assert_eq!(events.len(), 3);
-
-    for (i, event) in events.iter().enumerate() {
-        if let SessionEvent::Message(msg_data) = event {
-            assert_eq!(msg_data.len(), 13);
-            assert_eq!(msg_data[0..2], [0xE9, 0x02]);
-
-            let vital_id = u32::from_le_bytes(msg_data[5..9].try_into().unwrap());
-            let expected_id = match i {
-                0 => 2,
-                1 => 4,
-                2 => 6,
-                _ => panic!("Too many messages"),
-            };
-            assert_eq!(vital_id, expected_id);
-        } else {
-            panic!("Expected SessionEvent::Message");
-        }
-    }
-}
-
-#[tokio::test]
-async fn test_ack_sequence_prunes_cached_packets() {
-    let transport = ScriptedTransport::new(
-        vec![build_transport_packet(
-            PacketHeader {
-                sequence: 11,
-                flags: packet_flags::ACK_SEQUENCE,
-                size: 4,
-                ..Default::default()
-            },
-            &6u32.to_le_bytes(),
-        )],
-        "127.0.0.1:9000".parse().unwrap(),
-    );
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-
-    session
-        .send_packet(
-            PacketHeader {
-                sequence: 5,
-                flags: packet_flags::BLOB_FRAGMENTS,
-                id: session.client_id,
-                ..Default::default()
-            },
-            &[1, 2, 3, 4],
-        )
-        .await
-        .unwrap();
-    session
-        .send_packet(
-            PacketHeader {
-                sequence: 6,
-                flags: packet_flags::BLOB_FRAGMENTS,
-                id: session.client_id,
-                ..Default::default()
-            },
-            &[5, 6, 7, 8],
-        )
-        .await
-        .unwrap();
-
-    assert!(session.cached_packets.contains_key(&5));
-    assert!(session.cached_packets.contains_key(&6));
-
-    let mut buf = [0u8; 1024];
-    let _ = session.recv_packet(&mut buf).await.unwrap();
-
-    assert!(!session.cached_packets.contains_key(&5));
-    assert!(session.cached_packets.contains_key(&6));
-}
-
-#[tokio::test]
-async fn test_piggybacked_ack_still_queues_ack_for_ordered_packet() {
-    let fragment_packet = build_single_fragment_packet(7, &[0xAA, 0xBB, 0xCC]);
-    let fragment_payload = &fragment_packet[transport::HEADER_SIZE..];
-
-    let mut payload = Vec::with_capacity(transport::ACK_SEQUENCE_SIZE + fragment_payload.len());
-    payload.extend_from_slice(&6u32.to_le_bytes());
-    payload.extend_from_slice(fragment_payload);
-
-    let packet = build_transport_packet(
-        PacketHeader {
-            sequence: 7,
-            flags: packet_flags::BLOB_FRAGMENTS | packet_flags::ACK_SEQUENCE,
-            size: payload.len() as u16,
-            ..Default::default()
-        },
-        &payload,
-    );
-    let transport = ScriptedTransport::new(vec![packet], "127.0.0.1:9000".parse().unwrap());
-    let sent_handle = transport.clone();
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-    session.last_server_seq = 6;
-    session.has_server_seq = true;
-
-    let events = session.recv_message().await.unwrap();
-    assert_eq!(events.len(), 1);
-    assert!(session.flush_pending_control_packets().await.unwrap());
-
-    let sent_packets = sent_handle.sent_packets().await;
-    assert!(
-        sent_packets
-            .iter()
-            .any(|packet| unpack_header(packet).flags == packet_flags::ACK_SEQUENCE)
-    );
-
-    let sent_entries = sent_handle.sent_entries().await;
-    assert!(sent_entries.iter().any(|(addr, packet)| {
-        *addr == session.server_addr && unpack_header(packet).flags == packet_flags::ACK_SEQUENCE
-    }));
-}
-
 #[test]
 fn test_payload_hash_multi_fragment_unaligned_matches_wire_layout() {
     let session = Session::new_test();
@@ -462,642 +364,6 @@ fn test_payload_hash_multi_fragment_unaligned_matches_wire_layout() {
         ));
 
     assert_eq!(hash, expected);
-}
-
-#[tokio::test]
-async fn test_request_retransmit_sends_cached_packet() {
-    let requested_sequence = 9u32;
-    let retransmit_payload = [1u32.to_le_bytes(), requested_sequence.to_le_bytes()].concat();
-    let transport = ScriptedTransport::new(
-        vec![build_transport_packet(
-            PacketHeader {
-                sequence: 12,
-                flags: packet_flags::REQUEST_RETRANSMIT,
-                size: retransmit_payload.len() as u16,
-                ..Default::default()
-            },
-            &retransmit_payload,
-        )],
-        "127.0.0.1:9000".parse().unwrap(),
-    );
-    let sent_handle = transport.clone();
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-
-    session
-        .send_packet(
-            PacketHeader {
-                sequence: requested_sequence,
-                flags: packet_flags::BLOB_FRAGMENTS,
-                id: session.client_id,
-                ..Default::default()
-            },
-            &[0xAA, 0xBB, 0xCC, 0xDD],
-        )
-        .await
-        .unwrap();
-
-    let original_packet = sent_handle.sent_packets().await[0].clone();
-
-    let mut buf = [0u8; 1024];
-    let _ = session.recv_packet(&mut buf).await.unwrap();
-    assert!(session.flush_pending_control_packets().await.unwrap());
-
-    let sent_packets = sent_handle.sent_packets().await;
-    assert_eq!(sent_packets.len(), 2);
-    assert_eq!(
-        session.reliability().sent,
-        super::PacketDeliveryCounters {
-            packets: 2,
-            retransmissions: 1
-        }
-    );
-
-    let original_header = unpack_header(&original_packet);
-    let retransmit_header = unpack_header(&sent_packets[1]);
-    assert_eq!(retransmit_header.sequence, original_header.sequence);
-    assert_eq!(retransmit_header.id, original_header.id);
-    assert_eq!(
-        retransmit_header.flags,
-        original_header.flags | packet_flags::RETRANSMISSION
-    );
-}
-
-#[tokio::test]
-async fn test_handshake_response_is_scheduled_and_flushed_outside_recv() {
-    let connect_request = ConnectRequestData {
-        time: 123.5,
-        cookie: 0x1122_3344_5566_7788,
-        client_id: 0x345,
-        server_seed: 0x1234_5678,
-        client_seed: 0x9ABC_DEF0,
-    };
-    let transport = ScriptedTransport::new(
-        vec![build_connect_request_packet(connect_request.clone())],
-        "127.0.0.1:9000".parse().unwrap(),
-    );
-    let sent_handle = transport.clone();
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-
-    let events = session.recv_message().await.unwrap();
-    assert_eq!(events.len(), 1);
-    assert!(matches!(events[0], SessionEvent::TimeSync(time) if time == connect_request.time));
-    assert_eq!(
-        session.server_source_addr,
-        "127.0.0.1:9000".parse().unwrap()
-    );
-    assert_eq!(
-        session.pending_server_source_addr,
-        Some("127.0.0.1:9001".parse().unwrap())
-    );
-    assert_eq!(session.pending_control_packets.len(), 1);
-    assert!(sent_handle.sent_packets().await.is_empty());
-
-    session
-        .pending_control_packets
-        .first_mut()
-        .expect("handshake response should be queued")
-        .ready_at = std::time::Instant::now() - std::time::Duration::from_millis(1);
-
-    assert!(session.flush_pending_control_packets().await.unwrap());
-
-    let sent_packets = sent_handle.sent_packets().await;
-    assert_eq!(sent_packets.len(), 1);
-    let header = unpack_header(&sent_packets[0]);
-    assert_eq!(header.flags, packet_flags::CONNECT_RESPONSE);
-    assert_eq!(header.sequence, 1);
-    assert_eq!(header.id, 0);
-    assert_eq!(header.size, transport::CONNECT_RESPONSE_SIZE as u16);
-}
-
-#[tokio::test]
-async fn test_packets_from_activation_port_are_accepted_after_handshake_request() {
-    let connect_request = ConnectRequestData {
-        time: 123.5,
-        cookie: 0x1122_3344_5566_7788,
-        client_id: 0x345,
-        server_seed: 0x1234_5678,
-        client_seed: 0x9ABC_DEF0,
-    };
-    let transport = SequencedTransport::new(vec![
-        (
-            build_connect_request_packet(connect_request),
-            "127.0.0.1:9000".parse().unwrap(),
-        ),
-        (
-            build_transport_packet(
-                PacketHeader {
-                    flags: packet_flags::TIME_SYNC,
-                    size: 8,
-                    ..Default::default()
-                },
-                &1.25f64.to_le_bytes(),
-            ),
-            "127.0.0.1:9001".parse().unwrap(),
-        ),
-    ]);
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-
-    let first_events = session.recv_message().await.unwrap();
-    assert_eq!(first_events.len(), 1);
-    assert!(matches!(first_events[0], SessionEvent::TimeSync(time) if time == 123.5));
-    assert_eq!(
-        session.server_source_addr,
-        "127.0.0.1:9000".parse().unwrap()
-    );
-    assert_eq!(
-        session.pending_server_source_addr,
-        Some("127.0.0.1:9001".parse().unwrap())
-    );
-
-    let second_events = session.recv_message().await.unwrap();
-    assert_eq!(second_events.len(), 1);
-    assert!(matches!(second_events[0], SessionEvent::TimeSync(time) if time == 1.25));
-    assert_eq!(
-        session.server_source_addr,
-        "127.0.0.1:9001".parse().unwrap()
-    );
-    assert_eq!(session.pending_server_source_addr, None);
-}
-
-#[tokio::test]
-async fn test_packets_from_login_port_are_accepted_until_activation_port_is_confirmed() {
-    let connect_request = ConnectRequestData {
-        time: 123.5,
-        cookie: 0x1122_3344_5566_7788,
-        client_id: 0x345,
-        server_seed: 0x1234_5678,
-        client_seed: 0x9ABC_DEF0,
-    };
-    let boot_message = GameMessage::AccountBoot(Box::new(BootAccountData {
-        reason: Some(" because the password entered for this account was not correct".to_string()),
-    }));
-    let mut boot_payload = Vec::new();
-    boot_message.pack(&mut boot_payload);
-
-    let transport = SequencedTransport::new(vec![
-        (
-            build_connect_request_packet(connect_request),
-            "127.0.0.1:9000".parse().unwrap(),
-        ),
-        (
-            build_single_fragment_packet(2, &boot_payload),
-            "127.0.0.1:9000".parse().unwrap(),
-        ),
-    ]);
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-
-    let first_events = session.recv_message().await.unwrap();
-    assert_eq!(first_events.len(), 1);
-    assert!(matches!(first_events[0], SessionEvent::TimeSync(time) if time == 123.5));
-    assert_eq!(
-        session.pending_server_source_addr,
-        Some("127.0.0.1:9001".parse().unwrap())
-    );
-
-    let second_events = session.recv_message().await.unwrap();
-    assert_eq!(second_events.len(), 1);
-    assert!(matches!(second_events[0], SessionEvent::Message(ref msg) if msg == &boot_payload));
-    assert_eq!(
-        session.server_source_addr,
-        "127.0.0.1:9000".parse().unwrap()
-    );
-    assert_eq!(
-        session.pending_server_source_addr,
-        Some("127.0.0.1:9001".parse().unwrap())
-    );
-}
-
-#[tokio::test]
-async fn test_connect_response_parses_cookie_from_optional_header_offset() {
-    let cookie = 0x1122_3344_5566_7788u64;
-    let client_id = 0x345u16;
-    let transport = ScriptedTransport::new(
-        vec![build_connect_response_packet(cookie, client_id)],
-        "127.0.0.1:9000".parse().unwrap(),
-    );
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-
-    let events = session.recv_message().await.unwrap();
-    assert!(events.is_empty());
-    assert_eq!(session.connection_cookie, cookie);
-    assert_eq!(session.client_id, client_id);
-}
-
-#[tokio::test]
-async fn test_wrapped_server_sequence_zero_is_processed_as_expected() {
-    let transport = ScriptedTransport::new(
-        vec![build_single_fragment_packet(0, &[0xAA, 0xBB, 0xCC])],
-        "127.0.0.1:9000".parse().unwrap(),
-    );
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-    session.last_server_seq = u32::MAX;
-    session.has_server_seq = true;
-
-    let events = session.recv_message().await.unwrap();
-    assert_eq!(events.len(), 1);
-    assert!(matches!(events[0], SessionEvent::Message(ref msg) if msg == &vec![0xAA, 0xBB, 0xCC]));
-    assert_eq!(session.last_server_seq, 0);
-}
-
-#[tokio::test]
-async fn test_out_of_order_server_packet_requests_retransmit() {
-    let transport = ScriptedTransport::new(
-        vec![
-            build_transport_packet(
-                PacketHeader {
-                    sequence: 4,
-                    ..Default::default()
-                },
-                &[],
-            ),
-            build_transport_packet(
-                PacketHeader {
-                    sequence: 2,
-                    ..Default::default()
-                },
-                &[],
-            ),
-        ],
-        "127.0.0.1:9000".parse().unwrap(),
-    );
-    let sent_handle = transport.clone();
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-    session.packet_sequence = 5;
-    session.last_server_seq = 1;
-    session.has_server_seq = true;
-
-    let events = session.recv_message().await.unwrap();
-    assert!(events.is_empty());
-
-    let sent_packets = sent_handle.sent_packets().await;
-    let retransmit_packet = sent_packets
-        .iter()
-        .find(|packet| (unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT) != 0)
-        .expect("missing retransmit request packet");
-    let retransmit_header = unpack_header(retransmit_packet);
-    assert_eq!(retransmit_header.sequence, 4);
-    assert_eq!(retransmit_header.flags, packet_flags::REQUEST_RETRANSMIT);
-
-    let sent_entries = sent_handle.sent_entries().await;
-    assert!(sent_entries.iter().any(|(addr, packet)| {
-        *addr == session.server_addr
-            && (unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT) != 0
-    }));
-
-    assert!(session.reliability().receive_gap);
-    assert_eq!(session.reliability().received.packets, 2);
-    assert_eq!(session.reliability().sent.packets, 0);
-
-    let payload = &retransmit_packet[transport::HEADER_SIZE..];
-    assert_eq!(LittleEndian::read_u32(&payload[0..4]), 2);
-    assert_eq!(LittleEndian::read_u32(&payload[4..8]), 2);
-    assert_eq!(LittleEndian::read_u32(&payload[8..12]), 3);
-}
-
-#[tokio::test]
-async fn test_single_packet_gap_requests_retransmit() {
-    let transport = ScriptedTransport::new(
-        vec![build_transport_packet(
-            PacketHeader {
-                sequence: 3,
-                ..Default::default()
-            },
-            &[],
-        )],
-        "127.0.0.1:9000".parse().unwrap(),
-    );
-    let sent_handle = transport.clone();
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-    session.packet_sequence = 5;
-    session.last_server_seq = 1;
-    session.has_server_seq = true;
-
-    let error = session.recv_message().await.unwrap_err();
-    assert!(error.to_string().contains("Empty"));
-
-    let sent_packets = sent_handle.sent_packets().await;
-    let retransmit_packet = sent_packets
-        .iter()
-        .find(|packet| (unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT) != 0)
-        .expect("missing retransmit request packet");
-
-    let payload = &retransmit_packet[transport::HEADER_SIZE..];
-    assert_eq!(LittleEndian::read_u32(&payload[0..4]), 1);
-    assert_eq!(LittleEndian::read_u32(&payload[4..8]), 2);
-}
-
-#[tokio::test]
-async fn test_send_request_retransmit_wraps_sequence_window() {
-    let transport = ScriptedTransport::new(vec![], "127.0.0.1:9000".parse().unwrap());
-    let sent_handle = transport.clone();
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-    session.last_server_seq = u32::MAX;
-
-    session.send_request_retransmit(1).unwrap();
-    assert!(session.flush_pending_control_packets().await.unwrap());
-
-    let sent_packets = sent_handle.sent_packets().await;
-    let retransmit_packet = sent_packets
-        .iter()
-        .find(|packet| (unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT) != 0)
-        .expect("missing retransmit request packet");
-
-    let payload = &retransmit_packet[transport::HEADER_SIZE..];
-    assert_eq!(LittleEndian::read_u32(&payload[0..4]), 1);
-    assert_eq!(LittleEndian::read_u32(&payload[4..8]), 0);
-}
-
-#[tokio::test]
-async fn test_queued_ack_uses_latest_client_sequence_when_flushed() {
-    let transport = ScriptedTransport::new(vec![], "127.0.0.1:9000".parse().unwrap());
-    let sent_handle = transport.clone();
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-    session.packet_sequence = 2;
-    session.client_id = 0x123;
-
-    session.queue_ack(0x55).unwrap();
-
-    let header = PacketHeader {
-        sequence: session.packet_sequence,
-        flags: packet_flags::BLOB_FRAGMENTS,
-        id: session.client_id,
-        ..Default::default()
-    };
-    session.packet_sequence += 1;
-    session.send_packet(header, &[]).await.unwrap();
-
-    assert!(session.flush_pending_control_packets().await.unwrap());
-
-    let sent_packets = sent_handle.sent_packets().await;
-    assert_eq!(sent_packets.len(), 2);
-    assert_eq!(unpack_header(&sent_packets[0]).sequence, 2);
-
-    let ack_header = unpack_header(&sent_packets[1]);
-    assert_eq!(ack_header.flags, packet_flags::ACK_SEQUENCE);
-    assert_eq!(ack_header.sequence, 2);
-}
-
-#[test]
-fn test_read_sequence_list_rejects_oversized_count() {
-    let session = Session::new_test();
-    let count = (crate::session::types::MAX_RETRANSMIT_SEQUENCE_IDS + 1) as u32;
-    let payload = count.to_le_bytes();
-
-    let result = session.read_sequence_list(
-        packet_flags::REQUEST_RETRANSMIT,
-        &payload,
-        packet_flags::REQUEST_RETRANSMIT,
-    );
-    assert!(result.is_none());
-}
-
-#[test]
-fn test_build_packet_bytes_rejects_payloads_larger_than_u16() {
-    let mut session = Session::new_test();
-    let payload = vec![0u8; u16::MAX as usize + 1];
-
-    let err = session.send_packet_to_addr(
-        PacketHeader {
-            flags: packet_flags::BLOB_FRAGMENTS,
-            sequence: 1,
-            ..Default::default()
-        },
-        &payload,
-        session.server_addr,
-    );
-
-    let runtime = tokio::runtime::Runtime::new().expect("runtime should build");
-    let err = runtime.block_on(err).unwrap_err();
-    assert!(err.to_string().contains("packet payload too large"));
-}
-
-#[test]
-fn test_build_cleartext_control_packet_rejects_payloads_larger_than_u16() {
-    let mut session = Session::new_test();
-    let payload = vec![0u8; u16::MAX as usize + 1];
-
-    let err = session
-        .queue_deferred_cleartext_control_packet(
-            PacketHeader {
-                flags: packet_flags::ACK_SEQUENCE,
-                ..Default::default()
-            },
-            &payload,
-            session.server_addr,
-            std::time::Instant::now(),
-            false,
-        )
-        .unwrap_err();
-
-    assert!(err.to_string().contains("packet payload too large"));
-}
-
-#[test]
-fn test_handshake_request_rejects_activation_port_overflow() {
-    let mut session = Session::new_test();
-    session.server_addr = "127.0.0.1:65535".parse().unwrap();
-
-    let err = session
-        .handle_handshake_request(ConnectRequestData {
-            time: 1.0,
-            cookie: 0x1122_3344_5566_7788,
-            client_id: 0x345,
-            server_seed: 0x1234_5678,
-            client_seed: 0x9ABC_DEF0,
-        })
-        .unwrap_err();
-
-    assert!(err.to_string().contains("activation port overflow"));
-}
-
-#[tokio::test]
-async fn test_first_server_packet_sequence_two_does_not_request_retransmit() {
-    let transport = ScriptedTransport::new(
-        vec![build_transport_packet(
-            PacketHeader {
-                sequence: 2,
-                flags: packet_flags::TIME_SYNC,
-                size: 8,
-                ..Default::default()
-            },
-            &0.0f64.to_le_bytes(),
-        )],
-        "127.0.0.1:9000".parse().unwrap(),
-    );
-    let sent_handle = transport.clone();
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-
-    let events = session.recv_message().await.unwrap();
-    assert_eq!(events.len(), 1);
-    assert!(matches!(events[0], SessionEvent::TimeSync(_)));
-
-    let sent_packets = sent_handle.sent_packets().await;
-    assert!(
-        sent_packets.iter().all(|packet| {
-            (unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT) == 0
-        })
-    );
-}
-
-#[tokio::test]
-async fn test_retransmit_uses_cached_packet_with_piggybacked_ack() {
-    let requested_sequence = 9u32;
-    let retransmit_payload = [1u32.to_le_bytes(), requested_sequence.to_le_bytes()].concat();
-    let transport = ScriptedTransport::new(
-        vec![build_transport_packet(
-            PacketHeader {
-                sequence: 50,
-                flags: packet_flags::REQUEST_RETRANSMIT,
-                size: retransmit_payload.len() as u16,
-                ..Default::default()
-            },
-            &retransmit_payload,
-        )],
-        "127.0.0.1:9000".parse().unwrap(),
-    );
-    let sent_handle = transport.clone();
-
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-    session.has_server_seq = true;
-    session.last_server_seq = 42;
-
-    session
-        .send_packet(
-            PacketHeader {
-                sequence: requested_sequence,
-                flags: packet_flags::BLOB_FRAGMENTS,
-                id: session.client_id,
-                ..Default::default()
-            },
-            &[0xAA, 0xBB, 0xCC, 0xDD],
-        )
-        .await
-        .unwrap();
-
-    let original_packet = sent_handle.sent_packets().await[0].clone();
-    let original_header = unpack_header(&original_packet);
-    assert_ne!(original_header.flags & packet_flags::ACK_SEQUENCE, 0);
-
-    let mut buf = [0u8; 1024];
-    let _ = session.recv_packet(&mut buf).await.unwrap();
-    assert!(session.flush_pending_control_packets().await.unwrap());
-
-    let sent_packets = sent_handle.sent_packets().await;
-    assert_eq!(sent_packets.len(), 2);
-
-    let retransmit_header = unpack_header(&sent_packets[1]);
-    assert_eq!(retransmit_header.sequence, original_header.sequence);
-    assert_eq!(
-        retransmit_header.flags,
-        original_header.flags | packet_flags::RETRANSMISSION
-    );
-}
-
-#[tokio::test]
-async fn rejected_packet_recovery_releases_later_messages() {
-    let mut session = Session::new_test();
-    session.has_server_seq = true;
-    let rejection = build_transport_packet(
-        PacketHeader {
-            sequence: 4,
-            flags: packet_flags::REJECT_RETRANSMIT,
-            ..Default::default()
-        },
-        &[1_u32.to_le_bytes(), 2_u32.to_le_bytes()].concat(),
-    );
-    session.transport = Box::new(ScriptedTransport::new(
-        vec![build_single_fragment_packet(3, &[3]), rejection],
-        session.server_addr,
-    ));
-    let events = session.recv_message().await.unwrap();
-    assert!(matches!(events.as_slice(), [SessionEvent::Message(bytes)] if bytes == &[3]));
-    assert_eq!(session.last_server_seq, 3);
-    assert!(session.recv_message().await.unwrap().is_empty());
-    assert_eq!(session.last_server_seq, 4);
-    assert!(session.rejected_server_sequences.is_empty());
-}
-
-#[tokio::test]
-async fn future_rejection_does_not_skip_an_unresolved_earlier_packet() {
-    let mut session = Session::new_test();
-    session.has_server_seq = true;
-    let rejection = build_transport_packet(
-        PacketHeader {
-            sequence: 6,
-            flags: packet_flags::REJECT_RETRANSMIT,
-            ..Default::default()
-        },
-        &[1_u32.to_le_bytes(), 4_u32.to_le_bytes()].concat(),
-    );
-    session.transport = Box::new(ScriptedTransport::new(
-        vec![
-            build_single_fragment_packet(5, &[5]),
-            rejection,
-            build_single_fragment_packet(2, &[2]),
-            build_single_fragment_packet(3, &[3]),
-        ],
-        session.server_addr,
-    ));
-    for expected in [2, 3, 5] {
-        let events = session.recv_message().await.unwrap();
-        assert!(
-            matches!(events.as_slice(), [SessionEvent::Message(bytes)] if bytes == &[expected])
-        );
-        assert_eq!(session.last_server_seq, u32::from(expected));
-    }
-    assert!(session.recv_message().await.unwrap().is_empty());
-    assert_eq!(session.last_server_seq, 6);
-}
-
-#[tokio::test]
-async fn received_packets_win_over_crossed_retransmit_rejections() {
-    let mut session = Session::new_test();
-    session.has_server_seq = true;
-    let rejection = build_transport_packet(
-        PacketHeader {
-            sequence: 4,
-            flags: packet_flags::REJECT_RETRANSMIT,
-            ..Default::default()
-        },
-        &[
-            3_u32.to_le_bytes(),
-            1_u32.to_le_bytes(),
-            2_u32.to_le_bytes(),
-            3_u32.to_le_bytes(),
-        ]
-        .concat(),
-    );
-    session.transport = Box::new(ScriptedTransport::new(
-        vec![build_single_fragment_packet(3, &[3]), rejection],
-        session.server_addr,
-    ));
-    let events = session.recv_message().await.unwrap();
-    assert!(matches!(events.as_slice(), [SessionEvent::Message(bytes)] if bytes == &[3]));
-    assert_eq!(session.last_server_seq, 3);
-    assert!(session.rejected_server_sequences.is_empty());
 }
 
 /// ACE NetworkSession.SendBundle keeps UIQueue messages ordered when stock spans packets.
@@ -1200,100 +466,1011 @@ async fn fragmented_vendor_refresh_preserves_sale_receipts_before_completion() {
     assert_eq!(actual, expected);
 }
 
-#[tokio::test]
-async fn delivery_observations_count_valid_repairs_once_across_ordered_queue_release() {
-    let header = |sequence, flags| PacketHeader {
-        sequence,
-        flags,
+/// InfiniteLeaftide mirror 975060438fa0f44c4e5aa3f0cdd4adf409184cab,
+/// NetworkSession.Retransmit: any missing cached server packet forces player logout.
+#[derive(Default)]
+struct StrictPeer {
+    cache: std::collections::BTreeSet<u32>,
+    forced_logout: bool,
+}
+impl StrictPeer {
+    fn process(&mut self, bytes: &[u8]) {
+        let header = unpack_header(bytes);
+        let payload = &bytes[transport::HEADER_SIZE..];
+        let session = Session::new_test();
+        if header.flags & packet_flags::ACK_SEQUENCE != 0 {
+            let ack = session.read_ack_sequence(header.flags, payload).unwrap();
+            self.cache.retain(|sequence| *sequence >= ack);
+        }
+        if header.flags & packet_flags::REQUEST_RETRANSMIT != 0 {
+            self.forced_logout |= request_ids(bytes).iter().any(|id| !self.cache.contains(id));
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn captured_reorder_avoids_the_strict_peers_cache_miss_logout() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    session.last_server_seq = 10431;
+    advance(ACK_INTERVAL).await;
+    transport.push(build_single_fragment_packet(10433, &[3]));
+    transport.push(build_single_fragment_packet(10432, &[2]));
+    delivered_byte(&mut session, 2).await;
+    delivered_byte(&mut session, 3).await;
+    let sent = transport.sent_packets().await;
+    assert!(
+        sent.iter()
+            .all(|packet| unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT == 0)
+    );
+    let mut peer = StrictPeer {
+        cache: [10432, 10433].into(),
         ..Default::default()
     };
-    let transport = ScriptedTransport::new(
-        vec![
-            build_transport_packet(header(4, 0), &[]),
-            build_transport_packet(header(2, packet_flags::RETRANSMISSION), &[]),
-            build_transport_packet(header(3, packet_flags::RETRANSMISSION), &[]),
-        ],
-        "127.0.0.1:9000".parse().unwrap(),
-    );
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-    session.last_server_seq = 1;
-    session.has_server_seq = true;
-    session.recv_message().await.unwrap();
-    assert!(session.reliability().receive_gap);
-    session.recv_message().await.unwrap();
+    for packet in &sent {
+        peer.process(packet);
+    }
+    assert!(!peer.forced_logout);
+    assert!(!peer.cache.contains(&10432));
+    // Prove this peer detects the actual race, instead of accepting all client traffic.
+    peer.process(&control(
+        1,
+        packet_flags::REQUEST_RETRANSMIT,
+        &Session::pack_sequence_list(&[10432]),
+    ));
+    assert!(peer.forced_logout);
+}
+
+#[tokio::test(start_paused = true)]
+async fn due_recovery_drains_ingress_even_between_the_strict_boundary_and_idle_wake() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    for byte in [2, 3, 5] {
+        transport.push(build_single_fragment_packet(u32::from(byte), &[byte]));
+    }
+    delivered_byte(&mut session, 2).await;
+    // Earlier content is still ready, but the deadline now permits a request for packet 4.
+    advance(REQUEST_RETRANSMIT_INTERVAL + std::time::Duration::from_nanos(1)).await;
+    transport.push(build_single_fragment_packet(4, &[4]));
+    delivered_byte(&mut session, 3).await;
+    assert!(transport.sent_packets().await.is_empty());
     assert!(!session.reliability().receive_gap);
-    session.recv_message().await.unwrap();
-    assert_eq!(session.last_server_seq, 4);
+    delivered_byte(&mut session, 4).await;
+    delivered_byte(&mut session, 5).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn pending_recovery_drains_ingress_before_sending_while_earlier_content_is_ready() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    for byte in [2, 3, 4, 6] {
+        transport.push(build_single_fragment_packet(u32::from(byte), &[byte]));
+    }
+    delivered_byte(&mut session, 2).await;
+    advance(REQUEST_RETRANSMIT_INTERVAL + CONTROL_TIMER_TICK).await;
+    transport.block_writes(true);
+    delivered_byte(&mut session, 3).await;
+    transport.push(build_single_fragment_packet(5, &[5]));
+    transport.block_writes(false);
+    delivered_byte(&mut session, 4).await;
+    assert!(transport.sent_packets().await.is_empty());
+    assert!(!session.reliability().receive_gap);
+    delivered_byte(&mut session, 5).await;
+    delivered_byte(&mut session, 6).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn loss_retries_while_idle_and_uses_the_shared_strict_clock() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    transport.push(build_single_fragment_packet(3, &[3]));
+    assert!(session.recv_message().now_or_never().is_none());
+    advance(REQUEST_RETRANSMIT_INTERVAL).await;
+    assert!(session.recv_message().now_or_never().is_none());
+    assert!(transport.sent_packets().await.is_empty());
+    advance(std::time::Duration::from_nanos(1)).await;
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(request_ids(&transport.sent_packets().await[0]), vec![2]);
+    advance(REQUEST_RETRANSMIT_INTERVAL + std::time::Duration::from_nanos(1)).await;
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(transport.sent_packets().await.len(), 2);
+    transport.push(build_single_fragment_packet(2, &[2]));
+    delivered_byte(&mut session, 2).await;
+    delivered_byte(&mut session, 3).await;
+    advance(ACK_INTERVAL - std::time::Duration::from_nanos(1)).await;
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(transport.sent_packets().await.len(), 2);
+    advance(std::time::Duration::from_nanos(1)).await;
+    assert!(session.recv_message().now_or_never().is_none());
     assert_eq!(
-        session.reliability().received,
-        super::PacketDeliveryCounters {
-            packets: 3,
-            retransmissions: 2
-        }
+        unpack_header(&transport.sent_packets().await[2]).flags,
+        packet_flags::ACK_SEQUENCE
     );
 }
 
-#[tokio::test]
-async fn delivery_observations_ignore_invalid_checksums() {
-    let header = PacketHeader {
-        sequence: 2,
-        ..Default::default()
-    };
-    let mut corrupt = build_transport_packet(header.clone(), &[]);
-    // Header checksum starts at byte 8; retain a well-formed header with a wrong checksum.
+#[tokio::test(start_paused = true)]
+async fn timer_wakes_recovery_without_another_inbound_packet() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    transport.push(build_single_fragment_packet(3, &[3]));
+    let task = tokio::spawn(async move { session.recv_message().await });
+    tokio::task::yield_now().await;
+    advance(REQUEST_RETRANSMIT_INTERVAL + CONTROL_TIMER_TICK).await;
+    tokio::time::timeout(REQUEST_RETRANSMIT_INTERVAL, transport.wait_for_sent(1))
+        .await
+        .unwrap();
+    assert_eq!(request_ids(&transport.sent_packets().await[0]), vec![2]);
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+}
+
+#[tokio::test(start_paused = true)]
+async fn game_sends_piggyback_only_a_due_ack_and_never_piggyback_a_nak() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    session.send_message(&logout_message()).await.unwrap();
+    assert_eq!(
+        unpack_header(&transport.sent_packets().await[0]).flags & packet_flags::ACK_SEQUENCE,
+        0
+    );
+    advance(ACK_INTERVAL).await;
+    session.send_message(&logout_message()).await.unwrap();
+    assert_ne!(
+        unpack_header(&transport.sent_packets().await[1]).flags & packet_flags::ACK_SEQUENCE,
+        0
+    );
+    transport.push(build_single_fragment_packet(3, &[3]));
+    advance(REQUEST_RETRANSMIT_INTERVAL + std::time::Duration::from_nanos(1)).await;
+    session.send_message(&logout_message()).await.unwrap();
+    let sent = transport.sent_packets().await;
+    assert_eq!(
+        unpack_header(&sent[2]).flags,
+        packet_flags::REQUEST_RETRANSMIT
+    );
+    assert_eq!(request_ids(&sent[2]), vec![2]);
+    assert_eq!(
+        unpack_header(&sent[3]).flags
+            & (packet_flags::REQUEST_RETRANSMIT | packet_flags::ACK_SEQUENCE),
+        0
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn cancelled_pending_request_is_recompiled_after_send_path_ingress() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    transport.push(build_single_fragment_packet(3, &[3]));
+    advance(ACK_INTERVAL).await;
+    transport.block_writes(true);
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(session.pending_packets.len(), 1);
+    let stamp = session.last_control_scheduled;
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(session.pending_packets.len(), 1);
+    assert_eq!(session.last_control_scheduled, stamp);
+    transport.push(build_single_fragment_packet(2, &[2]));
+    transport.block_writes(false);
+    session.send_message(&logout_message()).await.unwrap();
+    assert!(
+        transport
+            .sent_packets()
+            .await
+            .iter()
+            .all(|packet| unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT == 0)
+    );
+    delivered_byte(&mut session, 2).await;
+    delivered_byte(&mut session, 3).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn pending_ack_keeps_its_safe_boundary_when_a_later_hole_appears() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    advance(ACK_INTERVAL).await;
+    transport.block_writes(true);
+    assert!(session.recv_message().now_or_never().is_none());
+    transport.push(build_single_fragment_packet(3, &[3]));
+    transport.block_writes(false);
+    assert!(session.recv_message().now_or_never().is_none());
+    let bytes = transport.sent_packets().await;
+    assert_eq!(
+        LittleEndian::read_u32(&bytes[0][transport::HEADER_SIZE..]),
+        1
+    );
+    assert!(session.reliability().receive_gap);
+}
+
+#[tokio::test(start_paused = true)]
+async fn encrypted_originals_and_duplicates_preserve_keys_before_and_after_delivery() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    let seed = 7;
+    session.isaac_s2c = Some(Isaac::new(seed));
+    let mut peer = Isaac::new(seed);
+    let first = encrypted_packet(2, &[2], &mut peer);
+    let second = encrypted_packet(3, &[3], &mut peer);
+    transport.push(second.clone());
+    assert!(session.recv_message().now_or_never().is_none());
+    let key = session.isaac_s2c.as_ref().unwrap().current_key;
+    transport.push(second.clone());
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(session.isaac_s2c.as_ref().unwrap().current_key, key);
+    let mut corrupt = first.clone();
     corrupt[8] ^= 1;
-    let transport = ScriptedTransport::new(
-        vec![corrupt, build_transport_packet(header, &[])],
-        "127.0.0.1:9000".parse().unwrap(),
-    );
-    let mut session = Session::new_test();
-    session.transport = Box::new(transport);
-    session.last_server_seq = 1;
-    session.has_server_seq = true;
-    session.recv_message().await.unwrap();
+    transport.push(corrupt);
+    transport.push(first);
+    delivered_byte(&mut session, 2).await;
+    delivered_byte(&mut session, 3).await;
+    let key_after_recovery = session.isaac_s2c.as_ref().unwrap().current_key;
+    transport.push(second);
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(session.reliability().received.packets, 2);
     assert_eq!(
-        session.reliability().received,
-        super::PacketDeliveryCounters {
-            packets: 1,
-            retransmissions: 0
-        }
+        session.isaac_s2c.as_ref().unwrap().current_key,
+        key_after_recovery
     );
 }
 
-struct FailingSendTransport;
-
-#[async_trait]
-impl Transport for FailingSendTransport {
-    async fn send_to(&self, _: &[u8], _: SocketAddr) -> Result<usize> {
-        Err(anyhow!("Synthetic send failure"))
-    }
-    async fn recv_from(&self, _: &mut [u8]) -> Result<(usize, SocketAddr)> {
-        Err(anyhow!("Synthetic receive failure"))
-    }
-}
-
-#[tokio::test]
-async fn delivery_observations_ignore_failed_sends() {
-    let mut session = Session::new_test();
-    session.transport = Box::new(FailingSendTransport);
-    let previous_send = session.last_send_time;
+#[tokio::test(start_paused = true)]
+async fn pending_original_survives_cancellation_and_precedes_later_originals() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    session.isaac_c2s = Some(Isaac::new(7));
+    transport.block_writes(true);
     assert!(
         session
-            .send_packet(
-                PacketHeader {
-                    sequence: 2,
-                    ..Default::default()
-                },
-                &[]
+            .send_message(&logout_message())
+            .now_or_never()
+            .is_none()
+    );
+    let next = session.packet_sequence;
+    let key = session.isaac_c2s.as_ref().unwrap().current_key;
+    assert_eq!(session.pending_packets.len(), 1);
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(session.packet_sequence, next);
+    assert_eq!(session.isaac_c2s.as_ref().unwrap().current_key, key);
+    transport.block_writes(false);
+    session.send_message(&logout_message()).await.unwrap();
+    let bytes = transport.sent_packets().await;
+    assert_eq!(
+        bytes
+            .iter()
+            .map(|packet| unpack_header(packet).sequence)
+            .collect::<Vec<_>>(),
+        vec![2, 3]
+    );
+    assert_eq!(session.cached_packets.len(), 2);
+    assert!(session.pending_packets.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn cache_strips_ack_and_repair_reuses_the_original_key() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    let seed = 9;
+    let mut peer = Isaac::new(seed);
+    let original_key = peer.current_key;
+    session.isaac_c2s = Some(Isaac::new(seed));
+    advance(ACK_INTERVAL).await;
+    session.send_message(&logout_message()).await.unwrap();
+    let original = transport.sent_packets().await[0].clone();
+    assert_ne!(
+        unpack_header(&original).flags & packet_flags::ACK_SEQUENCE,
+        0
+    );
+    let retained = &session.cached_packets[&2].bytes;
+    assert_eq!(
+        unpack_header(retained).flags & packet_flags::ACK_SEQUENCE,
+        0
+    );
+    let next_key = session.isaac_c2s.as_ref().unwrap().current_key;
+    transport.push(control(
+        1,
+        packet_flags::REQUEST_RETRANSMIT,
+        &Session::pack_sequence_list(&[2]),
+    ));
+    assert!(session.recv_message().now_or_never().is_none());
+    let repaired = &transport.sent_packets().await[1];
+    let header = unpack_header(repaired);
+    let hash = session
+        .calculate_payload_hash(header.flags, &repaired[transport::HEADER_SIZE..])
+        .unwrap();
+    assert_eq!(header.sequence, 2);
+    assert_eq!(header.flags & packet_flags::ACK_SEQUENCE, 0);
+    assert_ne!(header.flags & packet_flags::RETRANSMISSION, 0);
+    assert_eq!(
+        header.checksum.wrapping_sub(header.calculate_checksum()) ^ hash,
+        original_key
+    );
+    assert_eq!(session.isaac_c2s.as_ref().unwrap().current_key, next_key);
+    peer.consume_key();
+    assert_eq!(peer.current_key, next_key);
+}
+
+#[tokio::test(start_paused = true)]
+async fn ack_eviction_retains_boundary_and_late_requests_receive_rejections() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    for _ in 0..2 {
+        session.send_message(&logout_message()).await.unwrap();
+    }
+    transport.push(control(1, packet_flags::ACK_SEQUENCE, &3u32.to_le_bytes()));
+    assert!(session.recv_message().now_or_never().is_none());
+    assert!(!session.cached_packets.contains_key(&2));
+    assert!(session.cached_packets.contains_key(&3));
+    advance(ACK_INTERVAL).await;
+    assert!(session.recv_message().now_or_never().is_none());
+    assert!(!session.cached_packets.contains_key(&2));
+    transport.push(control(
+        1,
+        packet_flags::REQUEST_RETRANSMIT,
+        &Session::pack_sequence_list(&[2]),
+    ));
+    assert!(session.recv_message().now_or_never().is_none());
+    let sent = transport.sent_packets().await;
+    let header = unpack_header(sent.last().unwrap());
+    assert_eq!(header.flags, packet_flags::REJECT_RETRANSMIT);
+    assert_eq!(header.sequence, 3);
+    assert_eq!(session.cached_packets.len(), 1);
+    // ACE PacketHeaderOptional reads this list without retaining a consumer for C2S holes.
+    assert_eq!(
+        session
+            .read_sequence_list(
+                header.flags,
+                &sent.last().unwrap()[transport::HEADER_SIZE..],
+                packet_flags::REJECT_RETRANSMIT
             )
+            .unwrap(),
+        vec![2]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn cache_capacity_counts_reserved_originals_and_fails_before_identity_allocation() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    session.isaac_c2s = Some(Isaac::new(9));
+    transport.block_writes(true);
+    for _ in 0..MAX_CACHED_PACKETS {
+        assert!(
+            session
+                .send_message(&logout_message())
+                .now_or_never()
+                .is_none()
+        );
+    }
+    let sequence = session.packet_sequence;
+    let key = session.isaac_c2s.as_ref().unwrap().current_key;
+    let error = session.send_message(&logout_message()).await.unwrap_err();
+    assert!(error.to_string().contains("capacity exhausted"));
+    assert_eq!(session.packet_sequence, sequence);
+    assert_eq!(session.isaac_c2s.as_ref().unwrap().current_key, key);
+    assert!(transport.sent_packets().await.is_empty());
+    transport.block_writes(false);
+    assert!(session.recv_message().now_or_never().is_none());
+    // Receive turns have bounded write work too; service the remaining retained originals.
+    for _ in 0..MAX_CACHED_PACKETS / RECEIVE_BATCH_LIMIT {
+        assert!(session.recv_message().now_or_never().is_none());
+    }
+    assert_eq!(session.cached_packets.len(), MAX_CACHED_PACKETS);
+    transport.push(control(
+        1,
+        packet_flags::REQUEST_RETRANSMIT,
+        &Session::pack_sequence_list(&[2]),
+    ));
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_ne!(
+        unpack_header(transport.sent_packets().await.last().unwrap()).flags
+            & packet_flags::RETRANSMISSION,
+        0
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn received_packets_win_over_crossed_rejections_and_release_confirmed_holes() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    transport.push(build_single_fragment_packet(3, &[3]));
+    transport.push(control(
+        4,
+        packet_flags::REJECT_RETRANSMIT,
+        &Session::pack_sequence_list(&[2, 3]),
+    ));
+    delivered_byte(&mut session, 3).await;
+    assert!(session.recv_message().await.unwrap().is_empty());
+    assert_eq!(session.last_server_seq, 4);
+    assert!(session.rejected_server_sequences.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn receive_window_and_rejections_are_bounded_before_timers() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    let too_far = session.last_server_seq + MAX_RETRANSMIT_SEQUENCE_WINDOW + 1;
+    transport.push(build_single_fragment_packet(too_far, &[1]));
+    assert!(
+        session
+            .recv_message()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Abnormal server")
+    );
+    assert!(session.pending_server_packets.is_empty());
+    transport.push(control(
+        2,
+        packet_flags::REJECT_RETRANSMIT,
+        &Session::pack_sequence_list(&[too_far]),
+    ));
+    assert!(
+        session
+            .recv_message()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("Abnormal server")
+    );
+    assert!(session.rejected_server_sequences.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn read_ahead_does_not_admit_another_batch_per_delivered_packet() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    for sequence in 2..2 + MAX_BUFFERED_PACKETS as u32 + RECEIVE_BATCH_LIMIT as u32 {
+        transport.push(build_single_fragment_packet(sequence, &[1]));
+    }
+    delivered_byte(&mut session, 1).await;
+    let remaining = transport.state.lock().unwrap().incoming.len();
+    for _ in 1..RECEIVE_BATCH_LIMIT {
+        delivered_byte(&mut session, 1).await;
+    }
+    assert_eq!(transport.state.lock().unwrap().incoming.len(), remaining);
+    assert!(session.pending_server_packets.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn wrong_source_traffic_consumes_the_read_budget() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    for _ in 0..RECEIVE_BATCH_LIMIT * 3 {
+        transport.push_from(vec![0], "127.0.0.2:9000".parse().unwrap());
+    }
+    assert!(session.recv_message().now_or_never().is_none());
+    assert!(transport.state.lock().unwrap().read_calls <= RECEIVE_BATCH_LIMIT + 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn handshake_barrier_initializes_once_before_encrypted_read_ahead() {
+    let transport = ScriptedTransport::default();
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport.clone());
+    let request = ConnectRequestData {
+        time: 123.5,
+        cookie: 42,
+        client_id: 216,
+        server_seed: 7,
+        client_seed: 9,
+    };
+    transport.push(build_connect_request_packet(request.clone()));
+    let mut server = Isaac::new(request.server_seed);
+    let data = encrypted_packet(2, &[2], &mut server);
+    transport.push_from(data.clone(), "127.0.0.1:9001".parse().unwrap());
+    assert!(
+        matches!(session.recv_message().await.unwrap().as_slice(), [SessionEvent::TimeSync(time)] if *time == request.time)
+    );
+    let initialized_at = session.last_control_scheduled;
+    delivered_byte(&mut session, 2).await;
+    let key = session.isaac_s2c.as_ref().unwrap().current_key;
+    assert_eq!(session.server_source_addr.port(), 9001);
+    transport.push_from(
+        build_connect_request_packet(request.clone()),
+        session.server_source_addr,
+    );
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(session.last_control_scheduled, initialized_at);
+    assert_eq!(session.isaac_s2c.as_ref().unwrap().current_key, key);
+    assert_eq!(session.packet_sequence, 2);
+    let mut fresh = Session::new_test();
+    assert_eq!(
+        fresh.handle_handshake_request(request).unwrap(),
+        Some(123.5)
+    );
+    assert!(fresh.last_control_scheduled.is_some());
+}
+
+#[tokio::test(start_paused = true)]
+async fn handshake_delay_and_port_overflow_remain_explicit() {
+    let transport = ScriptedTransport::default();
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport.clone());
+    transport.push(build_connect_request_packet(ConnectRequestData {
+        time: 0.0,
+        cookie: 42,
+        client_id: 216,
+        server_seed: 7,
+        client_seed: 9,
+    }));
+    session.recv_message().await.unwrap();
+    assert!(transport.sent_packets().await.is_empty());
+    advance(std::time::Duration::from_millis(
+        transport::ACE_HANDSHAKE_RACE_DELAY_MS,
+    ))
+    .await;
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(
+        unpack_header(&transport.sent_packets().await[0]).flags,
+        packet_flags::CONNECT_RESPONSE
+    );
+    let mut invalid = Session::new_test();
+    invalid.server_addr.set_port(u16::MAX);
+    assert!(
+        invalid
+            .handle_handshake_request(ConnectRequestData {
+                time: 0.0,
+                cookie: 1,
+                client_id: 2,
+                server_seed: 3,
+                client_seed: 4
+            })
+            .unwrap_err()
+            .to_string()
+            .contains("activation port overflow")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn wrapping_delivery_and_ack_eviction_use_serial_order() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    session.last_server_seq = u32::MAX;
+    transport.push(build_single_fragment_packet(0, &[0]));
+    delivered_byte(&mut session, 0).await;
+    session.packet_sequence = u32::MAX;
+    session.last_sent_client_sequence = u32::MAX - 1;
+    session.send_message(&logout_message()).await.unwrap();
+    session.send_message(&logout_message()).await.unwrap();
+    assert!(session.cached_packets.contains_key(&u32::MAX));
+    assert!(session.cached_packets.contains_key(&1));
+    transport.push(control(0, packet_flags::ACK_SEQUENCE, &1u32.to_le_bytes()));
+    assert!(session.recv_message().now_or_never().is_none());
+    assert!(!session.cached_packets.contains_key(&u32::MAX));
+    assert!(session.cached_packets.contains_key(&1));
+}
+
+#[tokio::test(start_paused = true)]
+async fn outgoing_lists_use_retail_limit_while_parser_accepts_wire_capacity() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    transport.push(build_single_fragment_packet(
+        MAX_RETRANSMIT_SEQUENCE_WINDOW,
+        &[1],
+    ));
+    advance(ACK_INTERVAL).await;
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(
+        request_ids(&transport.sent_packets().await[0]).len(),
+        MAX_OUTGOING_SEQUENCE_IDS
+    );
+    let ids = vec![2; MAX_RETRANSMIT_SEQUENCE_IDS];
+    let payload = Session::pack_sequence_list(&ids);
+    assert_eq!(
+        session
+            .read_sequence_list(
+                packet_flags::REQUEST_RETRANSMIT,
+                &payload,
+                packet_flags::REQUEST_RETRANSMIT
+            )
+            .unwrap()
+            .len(),
+        MAX_RETRANSMIT_SEQUENCE_IDS
+    );
+    assert!(
+        session
+            .read_sequence_list(
+                packet_flags::REQUEST_RETRANSMIT,
+                &Session::pack_sequence_list(&vec![2; MAX_RETRANSMIT_SEQUENCE_IDS + 1]),
+                packet_flags::REQUEST_RETRANSMIT
+            )
+            .is_none()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn failed_and_short_writes_do_not_commit_cache_or_observations() {
+    for short in [false, true] {
+        let transport = ScriptedTransport::default();
+        {
+            let mut state = transport.state.lock().unwrap();
+            state.short_send = short;
+            state.fail_send = !short;
+        }
+        let mut session = connected(&transport);
+        assert!(session.send_message(&logout_message()).await.is_err());
+        assert_eq!(session.bytes_out, 0);
+        assert_eq!(session.reliability().sent.packets, 0);
+        assert!(session.cached_packets.is_empty());
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn partial_recovery_retries_only_current_holes() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    transport.push(build_single_fragment_packet(6, &[6]));
+    advance(ACK_INTERVAL).await;
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(
+        request_ids(&transport.sent_packets().await[0]),
+        vec![2, 3, 4, 5]
+    );
+    transport.push(build_single_fragment_packet(3, &[3]));
+    transport.push(build_single_fragment_packet(5, &[5]));
+    advance(REQUEST_RETRANSMIT_INTERVAL + CONTROL_TIMER_TICK).await;
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(request_ids(&transport.sent_packets().await[1]), vec![2, 4]);
+    transport.push(build_single_fragment_packet(2, &[2]));
+    delivered_byte(&mut session, 2).await;
+    assert!(session.reliability().receive_gap);
+    delivered_byte(&mut session, 3).await;
+    transport.push(build_single_fragment_packet(4, &[4]));
+    for byte in [4, 5, 6] {
+        delivered_byte(&mut session, byte).await;
+    }
+    assert!(!session.reliability().receive_gap);
+}
+
+#[tokio::test(start_paused = true)]
+async fn future_rejection_never_skips_an_earlier_unresolved_packet() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    transport.push(build_single_fragment_packet(5, &[5]));
+    transport.push(control(
+        6,
+        packet_flags::REJECT_RETRANSMIT,
+        &Session::pack_sequence_list(&[4]),
+    ));
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(session.last_server_seq, 1);
+    transport.push(build_single_fragment_packet(2, &[2]));
+    transport.push(build_single_fragment_packet(3, &[3]));
+    for byte in [2, 3, 5] {
+        delivered_byte(&mut session, byte).await;
+    }
+    assert!(session.recv_message().await.unwrap().is_empty());
+    assert_eq!(session.last_server_seq, 6);
+}
+
+#[tokio::test(start_paused = true)]
+async fn activation_is_confirmed_only_by_valid_traffic_and_login_source_remains_allowed() {
+    let transport = ScriptedTransport::default();
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport.clone());
+    transport.push(build_connect_request_packet(ConnectRequestData {
+        time: 1.0,
+        cookie: 42,
+        client_id: 216,
+        server_seed: 7,
+        client_seed: 9,
+    }));
+    session.recv_message().await.unwrap();
+    let mut corrupt = build_single_fragment_packet(2, &[2]);
+    corrupt[8] ^= 1;
+    transport.push_from(corrupt, "127.0.0.1:9001".parse().unwrap());
+    transport.push(build_single_fragment_packet(2, &[2]));
+    delivered_byte(&mut session, 2).await;
+    assert_eq!(session.server_source_addr.port(), 9000);
+    assert_eq!(session.pending_server_source_addr.unwrap().port(), 9001);
+    transport.push_from(
+        build_single_fragment_packet(3, &[3]),
+        "127.0.0.1:9001".parse().unwrap(),
+    );
+    delivered_byte(&mut session, 3).await;
+    assert_eq!(session.server_source_addr.port(), 9001);
+    assert!(session.pending_server_source_addr.is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn normal_controls_do_not_repopulate_cache_or_allocate_keys_at_capacity() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    session.isaac_c2s = Some(Isaac::new(9));
+    for _ in 0..MAX_CACHED_PACKETS {
+        session.send_message(&logout_message()).await.unwrap();
+    }
+    let next = session.packet_sequence;
+    let key = session.isaac_c2s.as_ref().unwrap().current_key;
+    advance(ACK_INTERVAL).await;
+    assert!(session.recv_message().now_or_never().is_none());
+    let sent = transport.sent_packets().await;
+    assert_eq!(
+        unpack_header(sent.last().unwrap()).flags,
+        packet_flags::ACK_SEQUENCE
+    );
+    assert_eq!(session.cached_packets.len(), MAX_CACHED_PACKETS);
+    assert_eq!(session.packet_sequence, next);
+    assert_eq!(session.isaac_c2s.as_ref().unwrap().current_key, key);
+    transport.push(control(
+        1,
+        packet_flags::ACK_SEQUENCE,
+        &(next - 1).to_le_bytes(),
+    ));
+    assert!(session.recv_message().now_or_never().is_none());
+    session.send_message(&logout_message()).await.unwrap();
+    assert_eq!(session.cached_packets.len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn reliable_admission_rejects_oversized_messages_without_spending_identity() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    session.isaac_c2s = Some(Isaac::new(7));
+    let sequence = session.packet_sequence;
+    let key = session.isaac_c2s.as_ref().unwrap().current_key;
+    let oversized = vec![0; transport::MAX_PACKET_SIZE];
+    assert!(
+        session
+            .prepare_reliable(packet_flags::BLOB_FRAGMENTS, &oversized)
+            .is_err()
+    );
+    assert_eq!(session.packet_sequence, sequence);
+    assert_eq!(session.isaac_c2s.as_ref().unwrap().current_key, key);
+    assert!(transport.sent_packets().await.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn outgoing_response_queue_is_bounded_and_repeated_repairs_are_coalesced() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    session.send_message(&logout_message()).await.unwrap();
+    session
+        .retransmit_sequences(&vec![2; MAX_RETRANSMIT_SEQUENCE_IDS])
+        .unwrap();
+    session.retransmit_sequences(&[2]).unwrap();
+    assert_eq!(session.pending_packets.len(), 1);
+    while session.pending_packets.len() < MAX_PENDING_PACKETS {
+        session
+            .queue_cleartext_control(
+                packet_flags::REJECT_RETRANSMIT,
+                Session::pack_sequence_list(&[0]),
+            )
+            .unwrap();
+    }
+    assert!(
+        session
+            .queue_cleartext_control(
+                packet_flags::REJECT_RETRANSMIT,
+                Session::pack_sequence_list(&[0])
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("queue capacity exhausted")
+    );
+    assert_eq!(session.pending_packets.len(), MAX_PENDING_PACKETS);
+}
+
+#[tokio::test(start_paused = true)]
+async fn malformed_payload_does_not_acknowledge_or_close_a_hole() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    transport.push(build_single_fragment_packet(3, &[3]));
+    let mut malformed = build_single_fragment_packet(2, &[2]);
+    // A zero fragment count is structurally invalid even with a matching additive checksum.
+    malformed[transport::HEADER_SIZE + 8..transport::HEADER_SIZE + 10]
+        .copy_from_slice(&0u16.to_le_bytes());
+    transport.push(malformed);
+    assert!(session.recv_message().now_or_never().is_none());
+    assert!(session.reliability().receive_gap);
+    assert_eq!(session.reliability().received.packets, 1);
+    transport.push(build_single_fragment_packet(2, &[2]));
+    delivered_byte(&mut session, 2).await;
+    delivered_byte(&mut session, 3).await;
+    assert!(
+        OptionalHeaderCursor::new(&[], packet_flags::ACK_SEQUENCE)
+            .hash_bytes()
+            .is_err()
+    );
+    assert!(
+        OptionalHeaderCursor::new(&[], packet_flags::REQUEST_RETRANSMIT)
+            .hash_bytes()
+            .is_err()
+    );
+    assert!(
+        OptionalHeaderCursor::new(&u32::MAX.to_le_bytes(), packet_flags::REJECT_RETRANSMIT)
+            .hash_bytes()
+            .is_err()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn wire_size_and_future_ack_validation_precede_control_side_effects() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    let mut truncated = build_single_fragment_packet(2, &[2]);
+    truncated.pop();
+    transport.push(truncated);
+    assert!(
+        session
+            .recv_message()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("payload size")
+    );
+    assert_eq!(session.reliability().received.packets, 0);
+    transport.push(control(1, packet_flags::ACK_SEQUENCE, &2u32.to_le_bytes()));
+    assert!(
+        session
+            .recv_message()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("unsent C2S")
+    );
+    assert_eq!(session.last_sent_client_sequence, 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn late_original_wins_when_pending_read_and_write_become_ready_together() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    transport.push(build_single_fragment_packet(3, &[3]));
+    advance(ACK_INTERVAL).await;
+    transport.block_writes(true);
+    let task = tokio::spawn(async move {
+        let events = session.recv_message().await.unwrap();
+        (session, events)
+    });
+    tokio::task::yield_now().await;
+    transport.push(build_single_fragment_packet(2, &[2]));
+    transport.block_writes(false);
+    let (mut session, events) = task.await.unwrap();
+    assert!(matches!(events.as_slice(), [SessionEvent::Message(bytes)] if bytes == &[2]));
+    assert!(
+        transport
+            .sent_packets()
+            .await
+            .iter()
+            .all(|packet| unpack_header(packet).flags & packet_flags::REQUEST_RETRANSMIT == 0)
+    );
+    delivered_byte(&mut session, 3).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn repeated_handshake_ack_does_not_rewind_the_sent_control_stamp() {
+    let transport = ScriptedTransport::default();
+    let mut session = Session::new_test();
+    session.transport = Box::new(transport.clone());
+    let request = ConnectRequestData {
+        time: 1.0,
+        cookie: 42,
+        client_id: 216,
+        server_seed: 7,
+        client_seed: 9,
+    };
+    transport.push(build_connect_request_packet(request.clone()));
+    session.recv_message().await.unwrap();
+    advance(std::time::Duration::from_millis(
+        transport::ACE_HANDSHAKE_RACE_DELAY_MS,
+    ))
+    .await;
+    session.send_message(&logout_message()).await.unwrap();
+    assert_eq!(session.last_sent_client_sequence, 2);
+    transport.push(build_connect_request_packet(request));
+    assert!(session.recv_message().now_or_never().is_none());
+    advance(std::time::Duration::from_millis(
+        transport::ACE_HANDSHAKE_RACE_DELAY_MS,
+    ))
+    .await;
+    assert!(session.recv_message().now_or_never().is_none());
+    assert_eq!(session.last_sent_client_sequence, 2);
+    transport.push(control(1, packet_flags::ACK_SEQUENCE, &2u32.to_le_bytes()));
+    assert!(session.recv_message().now_or_never().is_none());
+}
+
+#[test]
+fn retained_content_removes_all_disposable_header_ranges_in_wire_order() {
+    let session = Session::new_test();
+    let fragment = build_single_fragment_packet(2, &[7]);
+    let fragment_body = &fragment[transport::HEADER_SIZE..];
+    let mut body = Session::pack_sequence_list(&[1]);
+    body.extend_from_slice(&Session::pack_sequence_list(&[3]));
+    body.extend_from_slice(&4u32.to_le_bytes());
+    body.extend_from_slice(fragment_body);
+    let flags = packet_flags::REQUEST_RETRANSMIT
+        | packet_flags::REJECT_RETRANSMIT
+        | packet_flags::ACK_SEQUENCE
+        | packet_flags::BLOB_FRAGMENTS;
+    let original = control(2, flags, &body);
+    let retained = session.retained_packet(&original).unwrap();
+    assert_eq!(unpack_header(&retained).flags, packet_flags::BLOB_FRAGMENTS);
+    assert_eq!(&retained[transport::HEADER_SIZE..], fragment_body);
+    assert_eq!(retained, fragment);
+}
+
+#[tokio::test(start_paused = true)]
+async fn action_identity_commits_with_retained_send_and_not_with_failed_preparation() {
+    use holtburger_protocol::messages::misc::actions::PingRequestActionData;
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    transport.block_writes(true);
+    assert!(
+        session
+            .send_action(GameAction::PingRequest(Box::new(PingRequestActionData)))
+            .now_or_never()
+            .is_none()
+    );
+    assert_eq!(session.game_action_sequence, 1);
+    transport.block_writes(false);
+    session
+        .send_action(GameAction::PingRequest(Box::new(PingRequestActionData)))
+        .await
+        .unwrap();
+    assert_eq!(session.game_action_sequence, 2);
+    for packet in transport.sent_packets().await {
+        let mut offset = transport::HEADER_SIZE + transport::FRAGMENT_HEADER_SIZE;
+        let message = GameMessage::unpack(&packet, &mut offset).unwrap();
+        let GameMessage::GameAction(action) = message else {
+            panic!("expected a game action");
+        };
+        assert_eq!(action.sequence, unpack_header(&packet).sequence - 1);
+    }
+    while session.cached_packets.len() < MAX_CACHED_PACKETS {
+        session.send_message(&logout_message()).await.unwrap();
+    }
+    let before = session.game_action_sequence;
+    assert!(
+        session
+            .send_action(GameAction::PingRequest(Box::new(PingRequestActionData)))
             .await
             .is_err()
     );
+    assert_eq!(session.game_action_sequence, before);
+}
+
+#[tokio::test(start_paused = true)]
+async fn echo_control_keeps_its_mandatory_payload_and_uses_client_identity() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    session.isaac_c2s = Some(Isaac::new(7));
+    session.last_server_seq = 40;
+    let timestamp = 10_f32;
+    transport.push(control(
+        41,
+        packet_flags::ECHO_REQUEST,
+        &timestamp.to_le_bytes(),
+    ));
+    assert!(session.recv_message().await.unwrap().is_empty());
+    let sent = transport.sent_packets().await;
+    let header = unpack_header(&sent[0]);
+    assert_eq!(header.sequence, 2);
     assert_eq!(
-        session.reliability().sent,
-        super::PacketDeliveryCounters::default()
+        header.flags,
+        packet_flags::ECHO_RESPONSE | packet_flags::ENCRYPTED_CHECKSUM
     );
-    assert_eq!(session.bytes_out, 0);
-    assert_eq!(session.last_send_time, previous_send);
+    assert_eq!(header.size as usize, transport::ECHO_RESPONSE_SIZE);
+    assert_eq!(
+        &sent[0][transport::HEADER_SIZE..transport::HEADER_SIZE + transport::ECHO_REQUEST_SIZE],
+        &timestamp.to_le_bytes()
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn timer_wakes_normal_ack_without_server_or_game_traffic() {
+    let transport = ScriptedTransport::default();
+    let mut session = connected(&transport);
+    let task = tokio::spawn(async move { session.recv_message().await });
+    tokio::task::yield_now().await;
+    advance(ACK_INTERVAL).await;
+    tokio::time::timeout(ACK_INTERVAL, transport.wait_for_sent(1))
+        .await
+        .unwrap();
+    let sent = transport.sent_packets().await;
+    assert_eq!(unpack_header(&sent[0]).flags, packet_flags::ACK_SEQUENCE);
+    assert_eq!(
+        LittleEndian::read_u32(&sent[0][transport::HEADER_SIZE..]),
+        1
+    );
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
 }

@@ -1,11 +1,9 @@
 use super::types::{CharacterManagementOperation, CharacterManagementState};
 use anyhow::{Result, ensure};
 use holtburger_common::Guid;
-use holtburger_common::sequence::is_newer_u32;
 use holtburger_protocol::errors::CharacterError;
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
-use std::time::Duration;
 
 pub(super) struct CharacterSelectionState {
     pub(super) account_name: String,
@@ -220,14 +218,6 @@ impl CharacterSelectionState {
         self.character_id = Some(char_id);
         self.enter_world_sent = false;
 
-        // Wait up to 1s for the server seq to advance (helps ensure our ACK reflects the latest server packet)
-        let prev_seq = session.last_server_seq;
-        let mut waited = 0u64;
-        while !is_newer_u32(session.last_server_seq, prev_seq) && waited < 1000 {
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            waited += 50;
-        }
-
         let msg =
             GameMessage::CharacterEnterWorldRequest(Box::new(CharacterEnterWorldRequestData {
                 guid: char_id,
@@ -254,6 +244,24 @@ impl CharacterSelectionState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::FutureExt;
+
+    #[tokio::test]
+    async fn character_selection_sends_without_waiting_for_receive_progress() {
+        let mut state = CharacterSelectionState::new("account".into());
+        let mut session = Session::new_test();
+        let before = session.last_server_seq;
+        let next_packet = session.packet_sequence;
+        let guid = Guid(0x5000_0001);
+        state
+            .select_character(guid, &mut session)
+            .now_or_never()
+            .expect("selection must not wait for an idle borrowed socket")
+            .unwrap();
+        assert_eq!(state.character_id, Some(guid));
+        assert_eq!(session.last_server_seq, before);
+        assert_eq!(session.packet_sequence, next_packet + 1);
+    }
 
     fn entry(guid: Guid, name: &str) -> CharacterEntry {
         CharacterEntry {

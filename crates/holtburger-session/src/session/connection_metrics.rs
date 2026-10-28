@@ -2,7 +2,7 @@
 
 use holtburger_protocol::messages::{PacketHeader, transport::packet_flags};
 
-/// Cumulative sequenced datagrams, including repeated repair transmissions.
+/// Cumulative admitted/sent sequenced datagrams, including repair transmissions.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct PacketDeliveryCounters {
     /// Observed sequenced traffic, excluding standalone ACKs and retransmit requests.
@@ -32,11 +32,11 @@ impl PacketDeliveryCounters {
 /// Coherent transport facts sampled without modifying delivery or retransmission behavior.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TransportReliability {
-    /// Checksum-accepted incoming sequenced datagrams, including repair duplicates.
+    /// Admitted incoming sequenced datagrams; early-discarded encrypted duplicates are excluded.
     pub received: PacketDeliveryCounters,
     /// Successfully sent sequenced datagrams, including repair transmissions.
     pub sent: PacketDeliveryCounters,
-    /// Ordered receive delivery is blocked by a missing sequence preceding buffered traffic.
+    /// A known unresolved transport hole precedes accepted later traffic, including read-ahead.
     pub receive_gap: bool,
 }
 

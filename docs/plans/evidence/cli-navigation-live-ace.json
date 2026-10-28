@@ -1,0 +1,1220 @@
+{
+  "date": "2026-10-28",
+  "scope": "Noninteractive real UDP session against user-provided local ACE dev server, using project Session/protocol code. No TUI or client-side physics simulation. No credential/account/name values recorded.",
+  "server_build_and_fast_tick_mode": "Not identified; live findings apply to the running dev server, not a proved census of ACE configurations.",
+  "outcome": "One-shot endpoint reports can disagree with ACE physics-cell placement. These runs did not interpolate or report crossed cells; follow-up interpolated replays reached the destination with matching cells. See cli-navigation-interpolated-ace.json before interpreting these failures as a policy blocker.",
+  "reproduction": {
+    "from_cell": "EC0E0107",
+    "requested_cell": "EC0E010B",
+    "reported_gameplay_cell": "EC0E010B",
+    "reported_physics_cell": "EC0E0109",
+    "distance_m": 20.20649116072605,
+    "restore": "Authoritative teleport restored both cells to EC0E010B; emitted teleport sequence and destination updates observed. ACE adds roughly 5 mm to its gameplay teleport destination height."
+  },
+  "source_explanation": {
+    "ACE/Source/ACE.Server/Physics/PhysicsObj.cs": "UpdateObjectInternalServer calls SetPositionInternal; change_cell delegates to change_cell_server on servers; enter_cell_server rewrites RequestPos.ObjCellID. update_object_server then forces the mutated RequestPos. update_object_server_new restores the cached cell before its final transition, so this is not a proof of identical behavior across modes.",
+    "ACE/Source/ACE.Server/WorldObjects/Player_Tick.cs": "UpdatePlayerPosition separately assigns Location = newPosition after successful server physics update.",
+    "fixture_limitation": "Earlier source-extracted fixture stubbed transition and cell-entry internals and did not simulate RequestPos cell mutation; its 66 passing cases cannot establish physical-cell identity."
+  },
+  "runs": {
+    "initial_shortcut_and_portals": {
+      "steps": [
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340739,
+            "coords": {
+              "x": 156.0,
+              "y": 74.4,
+              "z": 31.005
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                74.400002,
+                31.004999
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 2.2360679718542607e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                74.4,
+                31.005
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340742,
+            "coords": {
+              "x": 156.0,
+              "y": 74.4,
+              "z": 22.65
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0106",
+              "coords": [
+                156.0,
+                74.400002,
+                22.65
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 1.9999999949504854e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0106",
+              "coords": [
+                156.0,
+                74.4,
+                22.65
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340739,
+            "coords": {
+              "x": 156.0,
+              "y": 74.4,
+              "z": 31.005
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                74.400002,
+                31.004999
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 2.2360679718542607e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                74.4,
+                31.005
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340739,
+            "coords": {
+              "x": 156.0,
+              "y": 84.25,
+              "z": 31.05
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                84.25,
+                31.049999
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 1.0000000010279564e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                84.25,
+                31.05
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340741,
+            "coords": {
+              "x": 156.0,
+              "y": 84.25,
+              "z": 30.95
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0105",
+              "coords": [
+                156.0,
+                84.25,
+                30.950001
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 1.0000000010279564e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0105",
+              "coords": [
+                156.0,
+                84.25,
+                30.95
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340739,
+            "coords": {
+              "x": 156.0,
+              "y": 74.4,
+              "z": 31.005
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                74.400002,
+                31.004999
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 2.2360679718542607e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                74.4,
+                31.005
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340739,
+            "coords": {
+              "x": 167.95,
+              "y": 84.0,
+              "z": 37.54
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0103",
+              "coords": [
+                167.949997,
+                84.0,
+                37.540001
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 3.1622776521843957e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0103",
+              "coords": [
+                167.95,
+                84.0,
+                37.54
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340540,
+            "coords": {
+              "x": 168.05,
+              "y": 84.0,
+              "z": 37.54
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E003C",
+              "coords": [
+                168.050003,
+                84.0,
+                37.540001
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 3.1622776521843957e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E003C",
+              "coords": [
+                168.05,
+                84.0,
+                37.54
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340739,
+            "coords": {
+              "x": 167.95,
+              "y": 84.0,
+              "z": 37.54
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0103",
+              "coords": [
+                167.949997,
+                84.0,
+                37.540001
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 3.1622776521843957e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0103",
+              "coords": [
+                167.95,
+                84.0,
+                37.54
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340739,
+            "coords": {
+              "x": 156.0,
+              "y": 74.4,
+              "z": 31.005
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                74.400002,
+                31.004999
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 2.2360679718542607e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                74.4,
+                31.005
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340747,
+            "coords": {
+              "x": 155.87827,
+              "y": 64.75458,
+              "z": 31.005
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E010B",
+              "coords": [
+                155.878265,
+                64.754578,
+                31.004999
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 5.477225566412067e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E010B",
+              "coords": [
+                155.87827,
+                64.75458,
+                31.005
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        }
+      ],
+      "teleport_sequences": [],
+      "baseline": {
+        "landblockId": 3960340747,
+        "coords": {
+          "x": 155.87827,
+          "y": 64.75458,
+          "z": 31.005
+        },
+        "rotation": {
+          "w": 0.24020562,
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.9707218
+        }
+      },
+      "completed": true
+    },
+    "outdoor_owner_boundary_and_repositions": {
+      "steps": [
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340512,
+            "coords": {
+              "x": 84.0,
+              "y": 191.75,
+              "z": 233.10501
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0020",
+              "coords": [
+                84.0,
+                191.75,
+                233.105011
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 9.999999974752427e-07
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0103",
+              "coords": [
+                84.0,
+                191.75,
+                233.10501
+              ],
+              "matches_requested_cell": false,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960406041,
+            "coords": {
+              "x": 84.0,
+              "y": 0.25,
+              "z": 233.10501
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0F0019",
+              "coords": [
+                84.0,
+                0.25,
+                233.105011
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 9.999999974752427e-07
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0F0019",
+              "coords": [
+                84.0,
+                0.25,
+                233.10501
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340512,
+            "coords": {
+              "x": 84.0,
+              "y": 191.75,
+              "z": 233.10501
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0020",
+              "coords": [
+                84.0,
+                191.75,
+                233.105011
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 9.999999974752427e-07
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0020",
+              "coords": [
+                84.0,
+                191.75,
+                233.10501
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340747,
+            "coords": {
+              "x": 155.87827,
+              "y": 64.75458,
+              "z": 31.005
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E010B",
+              "coords": [
+                155.878265,
+                64.754578,
+                31.004999
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 5.477225566412067e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0027",
+              "coords": [
+                155.87827,
+                64.75458,
+                31.005
+              ],
+              "matches_requested_cell": false,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "server_teleport",
+          "requested": {
+            "landblockId": 3960340739,
+            "coords": {
+              "x": 156.0,
+              "y": 74.4,
+              "z": 31.005
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                74.400002,
+                31.009998
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.004998000400160548
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                74.4,
+                31.005
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "server_teleport",
+          "requested": {
+            "landblockId": 3960340747,
+            "coords": {
+              "x": 155.87827,
+              "y": 64.75458,
+              "z": 31.005
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E010B",
+              "coords": [
+                155.878265,
+                64.754578,
+                31.009998
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.004998002901160115
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E010B",
+              "coords": [
+                155.87827,
+                64.75458,
+                31.005
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        }
+      ],
+      "teleport_sequences": [
+        1,
+        2
+      ],
+      "baseline": {
+        "landblockId": 3960340747,
+        "coords": {
+          "x": 155.87827,
+          "y": 64.75458,
+          "z": 31.005
+        },
+        "rotation": {
+          "w": 0.24020562,
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.9707218
+        }
+      },
+      "completed": true
+    },
+    "near_portal_indoor_shortcut": {
+      "steps": [
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340739,
+            "coords": {
+              "x": 156.0,
+              "y": 84.25,
+              "z": 31.05
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                84.25,
+                31.049999
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 1.0000000010279564e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                84.25,
+                31.05
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340742,
+            "coords": {
+              "x": 156.0,
+              "y": 74.4,
+              "z": 22.65
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0106",
+              "coords": [
+                156.0,
+                74.400002,
+                22.65
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 1.9999999949504854e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0106",
+              "coords": [
+                156.0,
+                74.4,
+                22.65
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340739,
+            "coords": {
+              "x": 156.0,
+              "y": 84.25,
+              "z": 31.05
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                84.25,
+                31.049999
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 1.0000000010279564e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0103",
+              "coords": [
+                156.0,
+                84.25,
+                31.05
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340747,
+            "coords": {
+              "x": 155.87827,
+              "y": 64.75458,
+              "z": 31.005
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E010B",
+              "coords": [
+                155.878265,
+                64.754578,
+                31.004999
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 5.477225566412067e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E010B",
+              "coords": [
+                155.87827,
+                64.75458,
+                31.005
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "server_teleport",
+          "requested": {
+            "landblockId": 3960340747,
+            "coords": {
+              "x": 155.87827,
+              "y": 64.75458,
+              "z": 31.005
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E010B",
+              "coords": [
+                155.878265,
+                64.754578,
+                31.009998
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.004998002901160115
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E010B",
+              "coords": [
+                155.87827,
+                64.75458,
+                31.005
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        }
+      ],
+      "teleport_sequences": [
+        1
+      ],
+      "baseline": {
+        "landblockId": 3960340747,
+        "coords": {
+          "x": 155.87827,
+          "y": 64.75458,
+          "z": 31.009998
+        },
+        "rotation": {
+          "w": 0.24020562,
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.9707218
+        }
+      },
+      "completed": true
+    },
+    "second_indoor_component_and_reproduction": {
+      "steps": [
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340743,
+            "coords": {
+              "x": 155.87288,
+              "y": 65.0,
+              "z": 10.8
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0107",
+              "coords": [
+                155.872879,
+                65.0,
+                10.8
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 9.999999974752427e-07
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0107",
+              "coords": [
+                155.87288,
+                65.0,
+                10.8
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340745,
+            "coords": {
+              "x": 155.9072,
+              "y": 65.0,
+              "z": 21.8998
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0109",
+              "coords": [
+                155.907196,
+                65.0,
+                21.899799
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 4.12310561520782e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0109",
+              "coords": [
+                155.9072,
+                65.0,
+                21.8998
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340743,
+            "coords": {
+              "x": 155.87288,
+              "y": 65.0,
+              "z": 10.8
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E0107",
+              "coords": [
+                155.872879,
+                65.0,
+                10.8
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 9.999999974752427e-07
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0107",
+              "coords": [
+                155.87288,
+                65.0,
+                10.8
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "autonomous_position",
+          "requested": {
+            "landblockId": 3960340747,
+            "coords": {
+              "x": 155.87827,
+              "y": 64.75458,
+              "z": 31.005
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E010B",
+              "coords": [
+                155.878265,
+                64.754578,
+                31.004999
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 5.477225566412067e-06
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E0109",
+              "coords": [
+                155.87827,
+                64.75458,
+                31.005
+              ],
+              "matches_requested_cell": false,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        },
+        {
+          "kind": "server_teleport",
+          "requested": {
+            "landblockId": 3960340747,
+            "coords": {
+              "x": 155.87827,
+              "y": 64.75458,
+              "z": 31.005
+            },
+            "rotation": {
+              "w": 0.24020562,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.9707218
+            }
+          },
+          "observations": [
+            {
+              "channel": "gameplay_location",
+              "cell": "EC0E010B",
+              "coords": [
+                155.878265,
+                64.754578,
+                31.009998
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.004998002901160115
+            },
+            {
+              "channel": "physics",
+              "cell": "EC0E010B",
+              "coords": [
+                155.87827,
+                64.75458,
+                31.005
+              ],
+              "matches_requested_cell": true,
+              "coordinate_error_m": 0.0
+            }
+          ]
+        }
+      ],
+      "teleport_sequences": [
+        1
+      ],
+      "baseline": {
+        "landblockId": 3960340747,
+        "coords": {
+          "x": 155.87827,
+          "y": 64.75458,
+          "z": 31.009998
+        },
+        "rotation": {
+          "w": 0.24020562,
+          "x": 0.0,
+          "y": 0.0,
+          "z": 0.9707218
+        }
+      },
+      "completed": true
+    }
+  },
+  "source_sha256": {
+    "ACE/Source/ACE.Server/Physics/PhysicsObj.cs": "ca612a6f41d0ba66db66698dd2c519e063466282402eb9dec0fcb2f775cfc452",
+    "ACE/Source/ACE.Server/WorldObjects/Player_Tick.cs": "210c8151b10e60d3f55056191a7180f96efd6ed5b0d2507d0f5770485e4ef584"
+  },
+  "interpretation": "Earlier product-review escalation was premature: the failing route sent one final position, while the agreed TUI policy interpolates and reports committed cell changes. Preserve the one-shot failure as a diagnostic limitation, not proof that ordinary interpolation fails. Physics residency uses the first sphere center, so cell-ID equality at every body-reference-position boundary sample is not a general correctness invariant."
+}

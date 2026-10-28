@@ -2,6 +2,7 @@ use super::common::{
     build_autonomous_position, build_motion_state_raw_motion_state, encode_contact_long_jump,
     normalize_heading, raw_motion_state_with_motion_style, signed_heading_delta,
 };
+use super::navigation_progress::NavigationProgress;
 use super::position_publication::{PositionPublication, PositionSample};
 use crate::client::character_motion::{
     CharacterMotionController, CharacterMotionEvent, CharacterMotionEventResult,
@@ -9,23 +10,24 @@ use crate::client::character_motion::{
     SequencedCharacterMotionEvent,
 };
 use crate::client::movement_types::{
-    AutonomousDriveIntent, CharacterDrive, ClientDirectedCommand, LongitudinalMotion, MotionStyle,
-    MovementPacketMetadata, PlayerDriveIntent, Turn,
+    AutonomousDriveIntent, CharacterDrive, ClientDirectedCommand, ClientMovementPolicy,
+    LongitudinalMotion, MotionStyle, MovementPacketMetadata, PlayerDriveIntent, Turn,
 };
 use crate::client::types::{
     ClientCharacterMotionFeedback, ClientCharacterMotionOutcome, ClientCharacterMotionRejection,
 };
 use anyhow::{Context as _, Result};
 use holtburger_common::sequence::is_newer_u16;
-use holtburger_common::{Guid, Quaternion, Vector3};
+use holtburger_common::{Guid, Quaternion, RigidTransform, Vector3};
 use holtburger_protocol::messages::game_action::*;
 use holtburger_protocol::messages::game_message::RawMotionState;
 use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionItem};
 use holtburger_session::Session;
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::motion::{
-    CharacterMotionPresentation, MotionCommand, MotionContact, MotionOrder, SequenceTick,
-    ServerDirectedMotionResolution, ServerDirectedMotionState, resolve_server_directed_motion,
+    CharacterMotionPresentation, DirectedMotionSupport, DirectedMotionTravel, MotionCommand,
+    MotionContact, MotionOrder, SequenceTick, ServerDirectedMotionResolution,
+    ServerDirectedMotionState, resolve_server_directed_motion,
 };
 use holtburger_world::spatial::{ContactState, LocalDriveControl, LocalDriveGait};
 use holtburger_world::{SpatialBodyId, WorldEvent, WorldState};
@@ -175,7 +177,25 @@ pub(crate) struct PreparedMovementTick {
     explicit_stop_requested: bool,
 }
 
+/// Contributions admitted together for one reduced local simulation interval.
+pub(crate) struct LocalNavigationInput {
+    /// Portion of the frontend's requested travel admitted after discarding catch-up time.
+    pub admitted_fraction: f32,
+    /// Admitted time available to rate-based sticky pursuit.
+    pub interval: Duration,
+    /// Relative local yaw, composed with the selected source's rotation once.
+    pub facing_rotation: Option<Quaternion>,
+    /// Already advanced authored root; target-directed client movement must not also apply it.
+    pub authored_offset: Option<RigidTransform>,
+    /// Sticky facts sampled before any body moved this interval.
+    pub sticky_target: Option<holtburger_world::StickyBodyTarget>,
+}
+
 pub(crate) struct MovementSystem {
+    /// Immutable policy chosen together with the coordinator source at composition.
+    movement_policy: ClientMovementPolicy,
+    /// Candidate progress belongs to the current client intent, never to packet publication.
+    navigation_progress: NavigationProgress,
     sequence_diagnostics: MovementSequenceDiagnostics,
     /// Drive and jump lifecycle commands retain their shared admission order.
     queued_control_commands: Vec<QueuedControlCommand>,
@@ -185,7 +205,6 @@ pub(crate) struct MovementSystem {
     /// Expected local queue refusals published by ClientRuntime through ordinary action feedback.
     authored_motion_rejections: Vec<holtburger_protocol::errors::WeenieError>,
     pending_authored_commands: Vec<AuthoredMotionIntent>,
-    pending_arrival_pose: Option<holtburger_common::position::WorldPosition>,
     /// Ordered absolute correction and subsequent relative input for physical integration.
     pending_facing: PendingFacing,
     /// Sole selected source of local locomotion; absence leaves authoritative playback in charge.
@@ -237,7 +256,12 @@ enum ActiveMovement {
     /// Client-produced displacement for the current simulation tick.
     ClientDirected(Option<AutonomousDriveIntent>),
     /// Server approach/turn state, including its receipt-time target facts and progress.
-    ServerDirected(ServerDirectedMotionState),
+    ServerDirected {
+        /// Retained command reduction state.
+        state: ServerDirectedMotionState,
+        /// Direction sampled by that reduction, consumed with this tick's authored travel budget.
+        travel: Option<DirectedMotionTravel>,
+    },
 }
 
 /// Input lifetime survives temporary server ownership without turning expired pulses into holds.
@@ -275,8 +299,19 @@ fn published_drive(state: CharacterDrive, motion_style: MotionStyle) -> Publishe
 }
 
 impl MovementSystem {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
+        Self::with_policy(ClientMovementPolicy::Physical)
+    }
+
+    pub(crate) fn movement_policy(&self) -> ClientMovementPolicy {
+        self.movement_policy
+    }
+
+    pub(crate) fn with_policy(movement_policy: ClientMovementPolicy) -> Self {
         Self {
+            movement_policy,
+            navigation_progress: NavigationProgress::default(),
             sequence_diagnostics: MovementSequenceDiagnostics::default(),
             queued_control_commands: Vec::new(),
             character_motion: CharacterMotionController::new(),
@@ -284,7 +319,6 @@ impl MovementSystem {
             character_motion_feedback: Vec::new(),
             authored_motion_rejections: Vec::new(),
             pending_authored_commands: Vec::new(),
-            pending_arrival_pose: None,
             pending_facing: PendingFacing::default(),
             active_movement: None,
             manual_input: ManualInputLifetime::None,
@@ -315,6 +349,9 @@ impl MovementSystem {
         self.process_control_commands(now, world, false);
         self.expire_active_movement(now);
         if !self.has_active_manual_drive() {
+            // The gesture retires the automatic source. Its replacement authored motion must
+            // start at the committed pose, not inherit a cancelled approach's gap candidate.
+            self.navigation_progress.reset();
             self.active_movement = None;
             if self.manual_input != ManualInputLifetime::None
                 && !self.character_motion.effective_drive().is_stationary()
@@ -325,18 +362,20 @@ impl MovementSystem {
         // ACE can stop physics at a gesture boundary even when the held axes are unchanged.
         // Publish this manual takeover once with the newly admitted server-control sequence.
         self.movement_publication_required |= self.has_active_manual_drive();
-        self.pending_arrival_pose = None;
         self.pending_facing = PendingFacing::default();
         self.pending_authored_commands.clear();
     }
 
     fn select_server_directive(&mut self, motion: Option<ServerDirectedMotionState>) {
-        self.active_movement = motion.map(ActiveMovement::ServerDirected);
+        self.navigation_progress.reset();
+        self.active_movement = motion.map(|state| ActiveMovement::ServerDirected {
+            state,
+            travel: None,
+        });
         self.movement_publication_required = false;
         self.character_motion.cancel_charge();
         self.pending_jump_attempt = None;
         self.pending_authored_commands.clear();
-        self.pending_arrival_pose = None;
         self.pending_facing = PendingFacing::default();
         self.pending_manual_playback_stop = false;
     }
@@ -354,6 +393,7 @@ impl MovementSystem {
     /// after that rejection boundary. Protocol sequence diagnostics intentionally survive because
     /// the connected session and its server-authored ordering epochs remain continuous.
     pub(crate) fn retire_movement_epoch(&mut self) {
+        self.navigation_progress.reset();
         self.queued_control_commands.clear();
         self.character_motion.clear();
         self.manual_input = ManualInputLifetime::None;
@@ -361,7 +401,6 @@ impl MovementSystem {
         self.character_motion_feedback.clear();
         self.authored_motion_rejections.clear();
         self.pending_authored_commands.clear();
-        self.pending_arrival_pose = None;
         self.pending_facing = PendingFacing::default();
         self.active_movement = None;
         self.pending_manual_playback_stop = false;
@@ -385,7 +424,7 @@ impl MovementSystem {
     pub(crate) fn has_server_controlled_motion(&self) -> bool {
         matches!(
             self.active_movement,
-            Some(ActiveMovement::ServerDirected(_))
+            Some(ActiveMovement::ServerDirected { .. })
         )
     }
 
@@ -430,13 +469,13 @@ impl MovementSystem {
 
     /// A semantic acquisition replaces the selected source and owns its mandatory notification.
     fn acquire_manual_control(&mut self, until: Option<Instant>) {
+        self.navigation_progress.reset();
         self.movement_publication_required |= self.has_server_controlled_motion();
         self.manual_input = match until {
             Some(until) => ManualInputLifetime::Pulse { until },
             None => ManualInputLifetime::Held,
         };
         self.active_movement = Some(ActiveMovement::Manual);
-        self.pending_arrival_pose = None;
         self.pending_facing.absolute_heading = None;
         self.pending_manual_playback_stop = false;
     }
@@ -486,6 +525,7 @@ impl MovementSystem {
                 };
             }
             PlayerDriveIntent::Stop => {
+                self.navigation_progress.reset();
                 self.manual_input = ManualInputLifetime::None;
                 let had_server_directive = self.has_server_controlled_motion();
                 self.movement_publication_required |= had_server_directive;
@@ -493,7 +533,6 @@ impl MovementSystem {
                 self.pending_authored_commands.clear();
                 self.character_motion.release_input();
                 self.pending_jump_attempt = None;
-                self.pending_arrival_pose = None;
                 self.pending_facing = PendingFacing::default();
                 self.active_movement = None;
                 self.pending_manual_playback_stop |= had_manual_drive;
@@ -503,10 +542,10 @@ impl MovementSystem {
 
     fn ingest_client_directed_command(&mut self, command: ClientDirectedCommand) {
         if command.acquires_control() {
+            self.navigation_progress.reset();
             self.movement_publication_required |= self.has_server_controlled_motion();
             self.character_motion.release_input();
             self.pending_jump_attempt = None;
-            self.pending_arrival_pose = None;
             self.pending_facing = PendingFacing::default();
             self.pending_authored_commands.clear();
             self.pending_manual_playback_stop = self.has_server_controlled_motion();
@@ -519,7 +558,6 @@ impl MovementSystem {
         match command {
             ClientDirectedCommand::Acquire(intent) | ClientDirectedCommand::Update(intent) => {
                 self.active_movement = Some(ActiveMovement::ClientDirected(Some(intent)));
-                self.pending_arrival_pose = None;
             }
             ClientDirectedCommand::AcquireFacing { heading } => {
                 self.active_movement = Some(ActiveMovement::ClientDirected(None));
@@ -528,14 +566,14 @@ impl MovementSystem {
                     delta_radians: 0.0,
                 };
             }
-            ClientDirectedCommand::Settle { pose } => {
+            ClientDirectedCommand::Settle => {
+                self.navigation_progress.reset();
                 self.active_movement = Some(ActiveMovement::ClientDirected(None));
-                self.pending_arrival_pose = pose;
                 self.movement_publication_required |= self.published_motion.is_some();
             }
             ClientDirectedCommand::Release => {
+                self.navigation_progress.reset();
                 self.active_movement = None;
-                self.pending_arrival_pose = None;
                 self.pending_facing = PendingFacing::default();
                 self.movement_publication_required |= self.published_motion.is_some();
             }
@@ -647,18 +685,6 @@ impl MovementSystem {
             self.process_control_commands(now, world, prepared.explicit_stop_requested);
 
         let mut events = Vec::new();
-        if let Some(pose) = self.pending_arrival_pose.take() {
-            events.extend(
-                self.execute_arrival_pose(
-                    now,
-                    pose,
-                    world,
-                    session,
-                    MovementPacketMetadata::default(),
-                )
-                .await?,
-            );
-        }
         if let Some(heading) = self.pending_facing.absolute_heading.take() {
             events.extend(
                 self.execute_snap_facing(
@@ -711,7 +737,7 @@ impl MovementSystem {
                 }
                 None
                 | Some(ActiveMovement::ClientDirected(None))
-                | Some(ActiveMovement::ServerDirected(_)) => {}
+                | Some(ActiveMovement::ServerDirected { .. }) => {}
             }
         }
 
@@ -828,6 +854,9 @@ impl MovementSystem {
     }
 
     fn character_motion_readiness(&self, world: &WorldState) -> CharacterMotionReadiness {
+        if self.movement_policy == ClientMovementPolicy::Navigation {
+            return CharacterMotionReadiness::Unsupported;
+        }
         if self.pending_jump_attempt.is_some() {
             return CharacterMotionReadiness::Airborne;
         }
@@ -850,6 +879,96 @@ impl MovementSystem {
     /// Consume additive manual yaw once, when the physical solver admits this tick.
     pub(crate) fn take_relative_facing_delta(&mut self) -> f32 {
         std::mem::take(&mut self.pending_facing.delta_radians)
+    }
+
+    /// Discards uncommitted intent samples after an authoritative placement reset.
+    pub(crate) fn reset_navigation_progress(&mut self) {
+        self.navigation_progress.reset();
+    }
+
+    /// Commits reduced local locomotion only after point containment, independently of physical
+    /// body availability. Authored playback still advances separately and must not add its root.
+    pub(crate) fn advance_navigation(
+        &mut self,
+        world: &mut WorldState,
+        collision: &holtburger_world::CollisionScene,
+        input: LocalNavigationInput,
+    ) -> Result<Vec<WorldEvent>> {
+        let LocalNavigationInput {
+            admitted_fraction,
+            interval,
+            facing_rotation,
+            authored_offset,
+            sticky_target,
+        } = input;
+        let Some(committed) = world.local_player_runtime_pose() else {
+            self.navigation_progress.reset();
+            return Ok(Vec::new());
+        };
+        let physics = world
+            .player_entity()
+            .context("navigation movement requires a player entity")?
+            .physics
+            .effective();
+        if !physics.supports_local_simulation()
+            || physics.integration_eligibility
+                != holtburger_world::EntityIntegrationEligibility::Eligible
+        {
+            self.navigation_progress.reset();
+            return Ok(Vec::new());
+        }
+        let mut source_rotation = None;
+        let accepted = match self.active_movement {
+            Some(ActiveMovement::ClientDirected(Some(intent))) => self
+                .navigation_progress
+                .advance(collision, committed, intent, admitted_fraction)?,
+            Some(ActiveMovement::ClientDirected(None)) => {
+                // A frontend pulse is consumed once, so faster simulation ticks may have no
+                // new budget. Preserve intent progress through those ticks; explicit settle,
+                // release, acquisition, and authoritative resets retire it at their owners.
+                None
+            }
+            source => {
+                if let Some(target) = sticky_target {
+                    source_rotation = Some(Quaternion::from_heading(target.heading));
+                    self.navigation_progress
+                        .advance_sticky(collision, committed, target, interval)?
+                } else if let Some(offset) = authored_offset {
+                    let offset = facing_rotation.map_or(offset, |rotation| {
+                        RigidTransform {
+                            translation: Vector3::zero(),
+                            rotation,
+                        }
+                        .combine(&offset)
+                    });
+                    source_rotation = Some(committed.rotation.multiply(&offset.rotation));
+                    let travel = match source {
+                        Some(ActiveMovement::ServerDirected { travel, .. }) => travel,
+                        _ => None,
+                    };
+                    let scale = world
+                        .player_entity()
+                        .context("navigation authored motion requires a player entity")?
+                        .scale
+                        .effective();
+                    self.navigation_progress
+                        .advance_authored(collision, committed, offset, scale, travel)?
+                } else {
+                    self.navigation_progress.reset();
+                    None
+                }
+            }
+        };
+        let mut pose = accepted.unwrap_or(committed);
+        if let Some(rotation) = source_rotation {
+            pose.rotation = rotation;
+        } else if let Some(rotation) = facing_rotation {
+            pose.rotation = pose.rotation.multiply(&rotation);
+        }
+        if pose == committed {
+            return Ok(Vec::new());
+        }
+        Ok(world.set_local_player_runtime_pose(pose))
     }
 
     pub(crate) fn take_pending_jump_attempt(&mut self) -> Option<PendingJumpAttempt> {
@@ -880,7 +999,7 @@ impl MovementSystem {
 
         let intent = match self.active_movement? {
             ActiveMovement::ClientDirected(intent) => intent?,
-            ActiveMovement::Manual | ActiveMovement::ServerDirected(_) => return None,
+            ActiveMovement::Manual | ActiveMovement::ServerDirected { .. } => return None,
         };
 
         Some(LocalDriveControl {
@@ -946,7 +1065,7 @@ impl MovementSystem {
         if guid == Guid::NULL {
             return Ok(None);
         }
-        if let Some(ActiveMovement::ServerDirected(state)) = self.active_movement {
+        if let Some(ActiveMovement::ServerDirected { state, .. }) = self.active_movement {
             let Some(current_pose) = world.local_player_runtime_pose() else {
                 return Ok(None);
             };
@@ -965,18 +1084,23 @@ impl MovementSystem {
                 .player_entity()
                 .ok_or_else(|| anyhow::anyhow!("server-directed player entity is unavailable"))?
                 .motion_contact(contact);
-            let terminal_order = steady_order.with_character_presentation(
-                contact.presentation(CharacterMotionPresentation::StanceDefault),
-            );
+            let support = match self.movement_policy {
+                ClientMovementPolicy::Physical => DirectedMotionSupport::Physical(contact),
+                ClientMovementPolicy::Navigation => DirectedMotionSupport::PositionOnly,
+            };
+            let terminal_order = steady_order.with_character_presentation(support.presentation());
             let order = match resolve_server_directed_motion(
                 state,
                 steady_order,
                 current_pose,
-                contact,
+                support,
                 target,
             ) {
                 ServerDirectedMotionResolution::Active(step) => {
-                    self.active_movement = Some(ActiveMovement::ServerDirected(step.state));
+                    self.active_movement = Some(ActiveMovement::ServerDirected {
+                        state: step.state,
+                        travel: step.travel,
+                    });
                     step.order
                 }
                 ServerDirectedMotionResolution::Complete { sticky_target } => {
@@ -1049,13 +1173,17 @@ impl MovementSystem {
             .runtime_body_view(body_id)
             .map(|body| body.contact)
             .unwrap_or(ContactState::Unknown);
-        let presentation = match world
-            .player_entity()
-            .context("manual player entity is unavailable")?
-            .motion_contact(contact)
-        {
-            MotionContact::Unrestricted(_) => CharacterMotionPresentation::Grounded,
-            MotionContact::RequiresSupport(contact) => self.character_presentation(contact),
+        let presentation = if self.movement_policy == ClientMovementPolicy::Navigation {
+            CharacterMotionPresentation::Grounded
+        } else {
+            match world
+                .player_entity()
+                .context("manual player entity is unavailable")?
+                .motion_contact(contact)
+            {
+                MotionContact::Unrestricted(_) => CharacterMotionPresentation::Grounded,
+                MotionContact::RequiresSupport(contact) => self.character_presentation(contact),
+            }
         };
         // Retail accepts turn-in-place while unsupported but replaces planar locomotion with
         // `Falling` until walkable contact returns (`CMotionInterp::apply_interpreted_movement`,
@@ -1252,26 +1380,6 @@ impl MovementSystem {
 
         self.send_autonomous_position_sync(now, world, session, metadata)
             .await?;
-
-        Ok(world_events)
-    }
-
-    async fn execute_arrival_pose(
-        &mut self,
-        now: Instant,
-        pose: holtburger_common::position::WorldPosition,
-        world: &mut WorldState,
-        session: &mut Session,
-        metadata: MovementPacketMetadata,
-    ) -> Result<Vec<WorldEvent>> {
-        log::info!("movement: applying arrival pose {:?}", pose);
-
-        let world_events = world.set_local_player_runtime_pose(pose);
-        self.send_autonomous_position_sync(now, world, session, metadata)
-            .await?;
-
-        self.send_stop_pulse(world, session, metadata, now).await?;
-        self.note_stop_published();
 
         Ok(world_events)
     }

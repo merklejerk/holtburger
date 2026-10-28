@@ -741,7 +741,7 @@ impl ClientHostRuntime {
             .server(startup.host.clone(), startup.port)
             .world_bootstrap(bootstrap)
             .require_external_world_reveal()
-            .collision_source(Arc::new(
+            .physical_movement_source(Arc::new(
                 crate::reporting_content_source::ReportingContentSource::new(
                     holtburger_core::ContentClientCollisionSource::new(
                         Arc::clone(&self.content.service),

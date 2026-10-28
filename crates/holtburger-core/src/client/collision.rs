@@ -12,6 +12,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::time::Instant;
 
+use super::movement_types::ClientMovementPolicy;
+use super::navigation_body::{NavigationBodyFacts, NavigationClientSource};
 use crate::{
     SimulationSceneBatchCompletion, SimulationSceneInterest, SimulationSceneOwnerOutcome,
     SimulationSceneOwnerRequest, SimulationSceneRequest, SimulationSceneResidency,
@@ -101,7 +103,7 @@ impl ClientEntityBodyFacts {
     }
 }
 
-fn option_f32_eq(left: Option<f32>, right: Option<f32>) -> bool {
+pub(super) fn option_f32_eq(left: Option<f32>, right: Option<f32>) -> bool {
     left.map(f32::to_bits) == right.map(f32::to_bits)
 }
 
@@ -133,21 +135,7 @@ pub fn client_entity_body_facts(
         .ok_or(ClientEntityBodyFactsError::MissingSetup)?;
 
     Ok(ClientEntityBodyFacts {
-        is_contact_character: guid == world.player.guid
-            || entity
-                .flags
-                .contains(holtburger_common::properties::ObjectDescriptionFlag::PLAYER)
-            || (!entity.flags.intersects(
-                holtburger_common::properties::ObjectDescriptionFlag::DOOR
-                    | holtburger_common::properties::ObjectDescriptionFlag::CORPSE
-                    | holtburger_common::properties::ObjectDescriptionFlag::VENDOR,
-            ) && entity
-                .properties
-                .get_int_prop(holtburger_common::properties::PropertyInt::ItemType)
-                .is_some_and(|bits| {
-                    holtburger_common::properties::ItemType::from_bits_retain(bits as u32)
-                        .contains(holtburger_common::properties::ItemType::CREATURE)
-                })),
+        is_contact_character: is_contact_character(world.player.guid, entity),
         guid: entity.guid,
         instance_sequence: entity.instance_sequence(),
         wcid,
@@ -162,6 +150,28 @@ pub fn client_entity_body_facts(
     })
 }
 
+/// Authoritative character classification shared by full bodies and reduced envelopes.
+pub(super) fn is_contact_character(
+    player: Guid,
+    entity: &holtburger_world::entity::Entity,
+) -> bool {
+    entity.guid == player
+        || entity
+            .flags
+            .contains(holtburger_common::properties::ObjectDescriptionFlag::PLAYER)
+        || (!entity.flags.intersects(
+            holtburger_common::properties::ObjectDescriptionFlag::DOOR
+                | holtburger_common::properties::ObjectDescriptionFlag::CORPSE
+                | holtburger_common::properties::ObjectDescriptionFlag::VENDOR,
+        ) && entity
+            .properties
+            .get_int_prop(holtburger_common::properties::PropertyInt::ItemType)
+            .is_some_and(|bits| {
+                holtburger_common::properties::ItemType::from_bits_retain(bits as u32)
+                    .contains(holtburger_common::properties::ItemType::CREATURE)
+            }))
+}
+
 /// Extracts body facts for the selected player without duplicating entity hydration rules.
 pub fn client_player_body_facts(
     world: &WorldState,
@@ -169,7 +179,7 @@ pub fn client_player_body_facts(
     client_entity_body_facts(world, world.player.guid)
 }
 
-fn property_f32(
+pub(super) fn property_f32(
     properties: &holtburger_common::properties::WorldObjectProperties,
     property: PropertyFloat,
 ) -> Option<f32> {
@@ -252,11 +262,11 @@ pub enum ClientBodyReadiness {
     },
 }
 
+/// Geographic scene demand needs identity and placement, not model-preparation facts.
 #[derive(Clone)]
-struct ClientSpatialTarget {
+struct ClientSceneTarget {
     player: ClientPlayerIdentity,
     position: WorldPosition,
-    facts: ClientEntityBodyFacts,
 }
 
 #[derive(Clone)]
@@ -268,10 +278,141 @@ struct ClientBodyTarget {
 
 /// Immutable remote-body demand guarded by server identity and complete definition facts.
 #[derive(Debug, Clone, PartialEq)]
-struct ClientRemoteBodyTarget {
+struct ClientPhysicalRemoteBodyTarget {
     body_id: SpatialBodyId,
     facts: ClientEntityBodyFacts,
     demand: LocalPhysicalDemand,
+}
+
+/// A captured operation keeps each source paired with exactly the facts it accepts.
+#[derive(Clone)]
+enum ClientRemoteBodyPreparation {
+    Physical {
+        facts: ClientEntityBodyFacts,
+        source: Arc<dyn ClientCollisionSource>,
+    },
+    Navigation {
+        facts: NavigationBodyFacts,
+        source: Arc<NavigationClientSource>,
+    },
+}
+
+impl ClientRemoteBodyPreparation {
+    fn definition_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Physical { facts: a, .. }, Self::Physical { facts: b, .. }) => {
+                a.definition_eq(b)
+            }
+            (Self::Navigation { facts: a, .. }, Self::Navigation { facts: b, .. }) => {
+                a.definition_eq(b)
+            }
+            _ => false,
+        }
+    }
+
+    fn preparation_eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Physical { facts: a, .. }, Self::Physical { facts: b, .. }) => {
+                a.preparation_eq(b)
+            }
+            // Reduced definitions have no animation/script targets to reconfigure. Rebuild the
+            // small envelope on state changes instead of invoking full-target reconfiguration.
+            (Self::Navigation { facts: a, .. }, Self::Navigation { facts: b, .. }) => {
+                a.definition_eq(b)
+            }
+            _ => false,
+        }
+    }
+
+    fn object_scale(&self) -> f32 {
+        match self {
+            Self::Physical { facts, .. } => facts.object_scale,
+            Self::Navigation { facts, .. } => facts.object_scale,
+        }
+    }
+
+    fn physics(&self) -> EffectiveEntityPhysicsState {
+        match self {
+            Self::Physical { facts, .. } => facts.physics,
+            Self::Navigation { facts, .. } => facts.physics,
+        }
+    }
+
+    fn prepare(self) -> Result<DynamicPhysicalBodyDefinition> {
+        match self {
+            Self::Physical { facts, source } => source.prepare_body(facts),
+            Self::Navigation { facts, source } => source.prepare_body(facts),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ClientRemoteBodyTarget {
+    body_id: SpatialBodyId,
+    preparation: ClientRemoteBodyPreparation,
+    demand: LocalPhysicalDemand,
+}
+
+/// Explicit client composition; archive representation never selects movement behavior.
+#[derive(Clone)]
+pub(super) enum ClientSpatialPolicy {
+    Physical(Arc<dyn ClientCollisionSource>),
+    Navigation(Arc<NavigationClientSource>),
+}
+
+impl ClientSpatialPolicy {
+    pub(crate) fn movement_policy(&self) -> ClientMovementPolicy {
+        match self {
+            Self::Physical(_) => ClientMovementPolicy::Physical,
+            Self::Navigation(_) => ClientMovementPolicy::Navigation,
+        }
+    }
+
+    fn load_scene_class(&self, owner: Guid) -> Result<Option<LandblockSceneClass>> {
+        match self {
+            Self::Physical(source) => source.load_scene_class(owner),
+            Self::Navigation(source) => source.content.load_scene_class(owner.0),
+        }
+    }
+
+    fn load_collision(&self, owner: u32) -> Result<Option<LandblockCollisionAsset>> {
+        match self {
+            Self::Physical(source) => source.load_collision(owner),
+            Self::Navigation(source) => source.content.load_collision(owner),
+        }
+    }
+
+    fn remote_target(&self, world: &WorldState, guid: Guid) -> Option<ClientRemoteBodyTarget> {
+        match self {
+            Self::Physical(source) => {
+                client_remote_body_target(world, guid).map(|target| ClientRemoteBodyTarget {
+                    body_id: target.body_id,
+                    demand: target.demand,
+                    preparation: ClientRemoteBodyPreparation::Physical {
+                        facts: target.facts,
+                        source: Arc::clone(source),
+                    },
+                })
+            }
+            Self::Navigation(source) => {
+                NavigationBodyFacts::capture(world, guid).map(|facts| ClientRemoteBodyTarget {
+                    body_id: SpatialBodyId::Entity(guid),
+                    demand: facts.demand(),
+                    preparation: ClientRemoteBodyPreparation::Navigation {
+                        facts,
+                        source: Arc::clone(source),
+                    },
+                })
+            }
+        }
+    }
+
+    fn remote_filter(&self) -> PhysicalCollisionFilter {
+        PhysicalCollisionFilter::ALL.with_exclusion(
+            holtburger_world::PhysicalCollisionExclusions::ENTITY_RESPONSE,
+            self.movement_policy() == ClientMovementPolicy::Navigation,
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -284,7 +425,7 @@ enum ClientRemoteBodyStatus {
 
 /// One remote body's definition demand and mutually exclusive preparation state.
 struct ClientRemoteBodyDemand {
-    facts: ClientEntityBodyFacts,
+    preparation: ClientRemoteBodyPreparation,
     demand: LocalPhysicalDemand,
     status: ClientRemoteBodyStatus,
 }
@@ -343,7 +484,7 @@ enum ClientSpatialCompletion {
 
 /// Core-owned coordinator shared by desktop and TUI client compositions.
 pub struct ClientCollisionCoordinator {
-    source: Arc<dyn ClientCollisionSource>,
+    source: ClientSpatialPolicy,
     completion_tx: UnboundedSender<ClientSpatialCompletion>,
     completion_rx: UnboundedReceiver<ClientSpatialCompletion>,
     scene_worker: Option<tokio::task::JoinHandle<()>>,
@@ -365,6 +506,10 @@ pub struct ClientCollisionCoordinator {
 
 impl ClientCollisionCoordinator {
     pub fn new(source: Arc<dyn ClientCollisionSource>) -> Self {
+        Self::with_policy(ClientSpatialPolicy::Physical(source))
+    }
+
+    pub(super) fn with_policy(source: ClientSpatialPolicy) -> Self {
         let (completion_tx, completion_rx) = mpsc::unbounded_channel();
         Self {
             source,
@@ -506,10 +651,38 @@ impl ClientCollisionCoordinator {
         }
     }
 
+    /// Reduced local activation needs containment, independently of physical model readiness.
+    pub(super) fn activation_point_ready(&self, pose: WorldPosition) -> Result<bool> {
+        match self.snapshot().scene.point_placement(pose)? {
+            holtburger_world::PointPlacement::Unique(_)
+            | holtburger_world::PointPlacement::Overlapping { .. } => Ok(true),
+            holtburger_world::PointPlacement::Outside => {
+                anyhow::bail!("Navigation destination has no containing cell or outdoor domain")
+            }
+            holtburger_world::PointPlacement::Unavailable { owner } => {
+                match self.residency.availability().get(&owner) {
+                    Some(crate::SimulationSceneOwnerAvailability::Absent) => anyhow::bail!(
+                        "Navigation destination owner {:#010X} is absent from content",
+                        owner.0
+                    ),
+                    Some(crate::SimulationSceneOwnerAvailability::Failed { cause }) => {
+                        anyhow::bail!("Navigation destination loading failed: {cause}")
+                    }
+                    Some(crate::SimulationSceneOwnerAvailability::Resident { .. }) => {
+                        anyhow::bail!("Navigation scene lost resident owner {:#010X}", owner.0)
+                    }
+                    Some(crate::SimulationSceneOwnerAvailability::Pending { .. }) | None => {
+                        Ok(false)
+                    }
+                }
+            }
+        }
+    }
+
     /// Independently refreshes scene interest and immutable authoritative-body definition demand.
     pub fn observe(&mut self, world: &mut WorldState) -> Vec<WorldEvent> {
         let mut events = self.observe_remote_bodies(world);
-        let Some(target) = Self::target_from_world(world) else {
+        let Some(target) = Self::scene_target_from_world(world) else {
             self.clear();
             return events;
         };
@@ -520,10 +693,16 @@ impl ClientCollisionCoordinator {
             self.entity_response_override = None;
         }
         self.observe_scene_context(target.position);
-        let body_target = ClientBodyTarget {
-            player: target.player,
-            demand: local_player_physical_demand(target.facts.physics),
-            facts: target.facts,
+        let ClientSpatialPolicy::Physical(source) = &self.source else {
+            self.retire_local_body_preparation();
+            remove_local_player_physical_body(world, target.player, &mut events);
+            return events;
+        };
+        let source = Arc::clone(source);
+        let Some(body_target) = Self::body_target_from_world(world) else {
+            self.retire_local_body_preparation();
+            remove_local_player_physical_body(world, target.player, &mut events);
+            return events;
         };
         let same_body = self.body_target.as_ref().is_some_and(|current| {
             current.player == body_target.player
@@ -544,7 +723,7 @@ impl ClientCollisionCoordinator {
                 self.body_target = Some(body_target);
             } else {
                 remove_local_player_physical_body(world, body_target.player, &mut events);
-                self.start_body_loading(body_target);
+                self.start_body_loading(body_target, source);
             }
         }
         events
@@ -591,7 +770,7 @@ impl ClientCollisionCoordinator {
             match completion {
                 ClientSpatialCompletion::Context(completion) => {
                     if completion.generation != self.scene_generation
-                        || Self::target_from_world(world).is_none_or(|target| {
+                        || Self::scene_target_from_world(world).is_none_or(|target| {
                             Guid((target.position.landblock_id.0 & 0xffff_0000) | 0xffff)
                                 != completion.owner
                         })
@@ -606,7 +785,7 @@ impl ClientCollisionCoordinator {
                             Err(cause) => ClientSceneContextState::Failed(cause),
                         },
                     });
-                    if let Some(target) = Self::target_from_world(world) {
+                    if let Some(target) = Self::scene_target_from_world(world) {
                         self.observe_scene_context(target.position);
                     }
                 }
@@ -635,15 +814,14 @@ impl ClientCollisionCoordinator {
                         continue;
                     }
                     self.body_worker = None;
-                    let Some(current) = Self::target_from_world(world) else {
+                    let Some(current) = Self::body_target_from_world(world) else {
                         self.body_target = None;
                         self.body_readiness = ClientBodyReadiness::Waiting;
                         continue;
                     };
                     if current.player != completion.target.player
                         || !current.facts.definition_eq(&completion.target.facts)
-                        || local_player_physical_demand(current.facts.physics)
-                            != completion.target.demand
+                        || current.demand != completion.target.demand
                     {
                         self.body_target = None;
                         self.body_readiness = ClientBodyReadiness::Waiting;
@@ -709,7 +887,7 @@ impl ClientCollisionCoordinator {
                             .remote_bodies
                             .get(&target.body_id)
                             .is_none_or(|demand| {
-                                !demand.facts.definition_eq(&target.facts)
+                                !demand.preparation.definition_eq(&target.preparation)
                                     || demand.demand != target.demand
                             })
                         {
@@ -718,10 +896,12 @@ impl ClientCollisionCoordinator {
                         let Some(guid) = target.body_id.authoritative_guid() else {
                             continue;
                         };
-                        let Ok(current) = client_entity_body_facts(world, guid) else {
+                        let Some(current) = self.source.remote_target(world, guid) else {
                             continue;
                         };
-                        if !current.definition_eq(&target.facts) {
+                        if !current.preparation.definition_eq(&target.preparation)
+                            || current.demand != target.demand
+                        {
                             continue;
                         }
                         let configuration = match result.and_then(|physical| {
@@ -730,7 +910,7 @@ impl ClientCollisionCoordinator {
                                 guid,
                                 physical,
                                 target.demand,
-                                current.object_scale,
+                                current.preparation.object_scale(),
                             )
                         }) {
                             Ok(physical) => physical,
@@ -753,12 +933,12 @@ impl ClientCollisionCoordinator {
                         let Some(outcome) = world.scene.set_dynamic_physical_body(
                             target.body_id,
                             Some(configuration),
-                            PhysicalCollisionFilter::ALL,
+                            self.source.remote_filter(),
                             initial_cell,
                         ) else {
                             continue;
                         };
-                        world.synchronize_entity_contact_status(current.guid);
+                        world.synchronize_entity_contact_status(guid);
                         self.remote_bodies
                             .get_mut(&target.body_id)
                             .expect("matching remote demand vanished during installation")
@@ -818,22 +998,42 @@ impl ClientCollisionCoordinator {
         }
     }
 
-    fn target_from_world(world: &WorldState) -> Option<ClientSpatialTarget> {
+    fn scene_target_from_world(world: &WorldState) -> Option<ClientSceneTarget> {
         let guid = world.player.guid;
         if guid == Guid::NULL {
             return None;
         }
         let entity = world.player_entity()?;
         let position = entity.position;
-        let facts = client_player_body_facts(world).ok()?;
-        Some(ClientSpatialTarget {
+        Some(ClientSceneTarget {
             player: ClientPlayerIdentity {
                 guid,
-                instance_sequence: facts.instance_sequence,
+                instance_sequence: entity.instance_sequence(),
             },
             position,
+        })
+    }
+
+    fn body_target_from_world(world: &WorldState) -> Option<ClientBodyTarget> {
+        let scene = Self::scene_target_from_world(world)?;
+        let facts = client_player_body_facts(world).ok()?;
+        Some(ClientBodyTarget {
+            player: scene.player,
+            demand: local_player_physical_demand(facts.physics),
             facts,
         })
+    }
+
+    /// Missing body facts retire only body work; static coverage remains independently useful.
+    fn retire_local_body_preparation(&mut self) {
+        if self.body_target.is_some()
+            || !matches!(self.body_readiness, ClientBodyReadiness::Waiting)
+        {
+            self.body_worker.take().inspect(|worker| worker.abort());
+            self.body_generation = self.body_generation.saturating_add(1);
+            self.body_target = None;
+            self.body_readiness = ClientBodyReadiness::Waiting;
+        }
     }
 
     /// Resolves content off-thread, then selects owner demand from its authoritative class.
@@ -854,7 +1054,7 @@ impl ClientCollisionCoordinator {
                 owner,
                 state: ClientSceneContextState::Pending,
             });
-            let source = Arc::clone(&self.source);
+            let source = self.source.clone();
             let completion_tx = self.completion_tx.clone();
             self.scene_worker = Some(tokio::spawn(async move {
                 let result = tokio::task::spawn_blocking(move || {
@@ -905,12 +1105,12 @@ impl ClientCollisionCoordinator {
         self.scene_worker.take().inspect(|worker| worker.abort());
         self.scene_generation = self.scene_generation.saturating_add(1);
         let generation = self.scene_generation;
-        let source = Arc::clone(&self.source);
+        let source = self.source.clone();
         let completion_tx = self.completion_tx.clone();
         self.scene_worker = Some(tokio::spawn(async move {
             let request_for_worker = request.clone();
             let outcomes = tokio::task::spawn_blocking(move || {
-                resolve_scene_request(source.as_ref(), &request_for_worker)
+                resolve_scene_request(&source, &request_for_worker)
             })
             .await
             .unwrap_or_else(|error| {
@@ -934,13 +1134,16 @@ impl ClientCollisionCoordinator {
         }));
     }
 
-    fn start_body_loading(&mut self, target: ClientBodyTarget) {
+    fn start_body_loading(
+        &mut self,
+        target: ClientBodyTarget,
+        source: Arc<dyn ClientCollisionSource>,
+    ) {
         self.body_worker.take().inspect(|worker| worker.abort());
         self.body_generation = self.body_generation.saturating_add(1);
         self.next_body_request = self.next_body_request.saturating_add(1);
         let generation = self.body_generation;
         let request = self.next_body_request;
-        let source = Arc::clone(&self.source);
         let completion_tx = self.completion_tx.clone();
         let completion_target = target.clone();
         let worker_target = target.clone();
@@ -975,7 +1178,9 @@ impl ClientCollisionCoordinator {
             .entities
             .iter()
             .filter_map(|entity| {
-                client_remote_body_target(world, entity.guid).map(|target| (target.body_id, target))
+                self.source
+                    .remote_target(world, entity.guid)
+                    .map(|target| (target.body_id, target))
             })
             .collect::<BTreeMap<_, _>>();
         if remote_body_demands_match(&self.remote_bodies, &desired) {
@@ -987,13 +1192,20 @@ impl ClientCollisionCoordinator {
         let mut reconfigured = BTreeSet::new();
         for (&body_id, demand) in &self.remote_bodies {
             if desired.get(&body_id).is_some_and(|target| {
-                target.facts.definition_eq(&demand.facts) && target.demand == demand.demand
+                target.preparation.definition_eq(&demand.preparation)
+                    && target.demand == demand.demand
             }) {
                 continue;
             }
             if desired.get(&body_id).is_some_and(|target| {
-                demand.facts.preparation_eq(&target.facts)
-                    && reconfigure_physical_body(world, target, &mut events)
+                demand.preparation.preparation_eq(&target.preparation)
+                    && reconfigure_physical_body(
+                        world,
+                        target.body_id,
+                        target.preparation.physics(),
+                        target.demand,
+                        &mut events,
+                    )
             }) {
                 reconfigured.insert(body_id);
                 continue;
@@ -1009,7 +1221,7 @@ impl ClientCollisionCoordinator {
                     self.remote_bodies
                         .get(&body_id)
                         .filter(|demand| {
-                            demand.facts.definition_eq(&target.facts)
+                            demand.preparation.definition_eq(&target.preparation)
                                 && demand.demand == target.demand
                         })
                         .map_or(ClientRemoteBodyStatus::Pending, |demand| {
@@ -1035,7 +1247,7 @@ impl ClientCollisionCoordinator {
                 (
                     body_id,
                     ClientRemoteBodyDemand {
-                        facts: target.facts,
+                        preparation: target.preparation,
                         demand: target.demand,
                         status,
                     },
@@ -1059,7 +1271,7 @@ impl ClientCollisionCoordinator {
                 demand.status = ClientRemoteBodyStatus::Preparing;
                 ClientRemoteBodyTarget {
                     body_id,
-                    facts: demand.facts.clone(),
+                    preparation: demand.preparation.clone(),
                     demand: demand.demand,
                 }
             })
@@ -1071,7 +1283,6 @@ impl ClientCollisionCoordinator {
 
     fn start_remote_body_loading(&mut self, targets: Vec<ClientRemoteBodyTarget>) {
         let generation = self.remote_body_generation;
-        let source = Arc::clone(&self.source);
         let completion_tx = self.completion_tx.clone();
         self.remote_body_worker = Some(tokio::spawn(async move {
             let failed_targets = targets.clone();
@@ -1079,8 +1290,10 @@ impl ClientCollisionCoordinator {
                 targets
                     .into_iter()
                     .map(|target| {
-                        let result = source
-                            .prepare_body(target.facts.clone())
+                        let result = target
+                            .preparation
+                            .clone()
+                            .prepare()
                             .map_err(|error| format!("{error:#}"));
                         (target, result)
                     })
@@ -1114,7 +1327,8 @@ fn remote_body_demands_match(
     current.len() == desired.len()
         && current.iter().all(|(body_id, demand)| {
             desired.get(body_id).is_some_and(|target| {
-                target.facts.definition_eq(&demand.facts) && target.demand == demand.demand
+                target.preparation.definition_eq(&demand.preparation)
+                    && target.demand == demand.demand
             })
         })
 }
@@ -1133,12 +1347,30 @@ fn local_player_physical_demand(physics: EffectiveEntityPhysicsState) -> LocalPh
 }
 
 /// Physical candidates must wait for content preparation instead of using collision-free projection.
-pub(super) fn remote_body_requires_physics(world: &WorldState, guid: Guid) -> bool {
-    client_remote_body_target(world, guid).is_some()
+pub(super) fn remote_body_requires_physics(
+    world: &WorldState,
+    guid: Guid,
+    policy: ClientMovementPolicy,
+) -> bool {
+    match policy {
+        ClientMovementPolicy::Physical => client_remote_body_target(world, guid).is_some(),
+        // Reduced prediction never silently bypasses shell constraints when setup facts or
+        // supported physics are unavailable. Attachments retain their existing parent ownership.
+        ClientMovementPolicy::Navigation => {
+            guid != world.player.guid
+                && world
+                    .entities
+                    .get(guid)
+                    .is_some_and(|entity| entity.attachment().is_none())
+        }
+    }
 }
 
 /// Resolves complete positive physical demand from current authoritative client facts.
-fn client_remote_body_target(world: &WorldState, guid: Guid) -> Option<ClientRemoteBodyTarget> {
+fn client_remote_body_target(
+    world: &WorldState,
+    guid: Guid,
+) -> Option<ClientPhysicalRemoteBodyTarget> {
     let entity = world.entities.get(guid)?;
     let body_id = SpatialBodyId::Entity(guid);
     if guid == world.player.guid
@@ -1177,7 +1409,7 @@ fn client_remote_body_target(world: &WorldState, guid: Guid) -> Option<ClientRem
     };
     demand
         .requires_physical_body()
-        .then_some(ClientRemoteBodyTarget {
+        .then_some(ClientPhysicalRemoteBodyTarget {
             body_id,
             facts,
             demand,
@@ -1234,48 +1466,45 @@ fn reconfigure_local_player_body(
     target: &ClientBodyTarget,
     events: &mut Vec<WorldEvent>,
 ) -> bool {
-    let physical_target = ClientRemoteBodyTarget {
-        body_id: SpatialBodyId::LocalPlayer(target.player.guid),
-        facts: target.facts.clone(),
-        demand: target.demand,
-    };
-    reconfigure_physical_body(world, &physical_target, events)
+    reconfigure_physical_body(
+        world,
+        SpatialBodyId::LocalPlayer(target.player.guid),
+        target.facts.physics,
+        target.demand,
+        events,
+    )
 }
 
 fn reconfigure_physical_body(
     world: &mut WorldState,
-    target: &ClientRemoteBodyTarget,
+    body_id: SpatialBodyId,
+    physics: EffectiveEntityPhysicsState,
+    demand: LocalPhysicalDemand,
     events: &mut Vec<WorldEvent>,
 ) -> bool {
-    let Some((configuration, initial_cell, filter)) =
-        world.scene.body(target.body_id).and_then(|body| {
-            let physical = body.physical.as_ref()?;
-            let configuration =
-                physical.dynamic_configuration_for_state(target.facts.physics, target.demand)?;
-            let initial_cell = body.pose.is_indoors().then_some(body.pose.landblock_id);
-            Some((configuration, initial_cell, physical.collision_filter))
-        })
+    let Some((configuration, initial_cell, filter)) = world.scene.body(body_id).and_then(|body| {
+        let physical = body.physical.as_ref()?;
+        let configuration = physical.dynamic_configuration_for_state(physics, demand)?;
+        let initial_cell = body.pose.is_indoors().then_some(body.pose.landblock_id);
+        Some((configuration, initial_cell, physical.collision_filter))
+    }) else {
+        return false;
+    };
+    let Some(outcome) =
+        world
+            .scene
+            .set_dynamic_physical_body(body_id, Some(configuration), filter, initial_cell)
     else {
         return false;
     };
-    let Some(outcome) = world.scene.set_dynamic_physical_body(
-        target.body_id,
-        Some(configuration),
-        filter,
-        initial_cell,
-    ) else {
-        return false;
-    };
     if outcome.change != holtburger_world::PhysicalBodyReconfiguration::Unchanged {
-        events.push(WorldEvent::RuntimeBodyChanged {
-            body_id: target.body_id,
-        });
+        events.push(WorldEvent::RuntimeBodyChanged { body_id });
     }
     true
 }
 
 fn resolve_scene_request(
-    source: &dyn ClientCollisionSource,
+    source: &ClientSpatialPolicy,
     request: &SimulationSceneRequest,
 ) -> Vec<SimulationSceneOwnerOutcome> {
     request
@@ -1705,6 +1934,39 @@ mod tests {
         })
         .await
         .expect("client collision worker did not publish the expected scene revision");
+    }
+
+    #[tokio::test]
+    async fn scene_residency_survives_missing_body_facts_and_later_body_hydration() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x5000_0001);
+        let destination = Guid(0x1234_0001);
+        world.seed_local_player_entity(guid, "Player", position(destination.0));
+        let source = Arc::new(FakeSource::default());
+        let mut coordinator = ClientCollisionCoordinator::new(source.clone());
+
+        coordinator.observe(&mut world);
+        wait_for_scene_revision(&mut coordinator, &mut world, 1).await;
+        assert!(coordinator.destination_scene_ready(destination).unwrap());
+        assert!(matches!(
+            coordinator.body_readiness(),
+            ClientBodyReadiness::Waiting
+        ));
+        assert_eq!(source.prepared.load(Ordering::SeqCst), 0);
+        let scene_revision = coordinator.snapshot().revision;
+        let scene_loads = source.loaded.lock().unwrap().len();
+
+        coordinator.observe(&mut world);
+        assert_eq!(coordinator.snapshot().revision, scene_revision);
+        facts(&mut world, guid);
+        coordinator.observe(&mut world);
+        wait_for_readiness(&mut coordinator, &mut world, |readiness| {
+            matches!(readiness, ClientBodyReadiness::Ready { .. })
+        })
+        .await;
+        assert_eq!(coordinator.snapshot().revision, scene_revision);
+        assert_eq!(source.loaded.lock().unwrap().len(), scene_loads);
+        assert_eq!(source.prepared.load(Ordering::SeqCst), 1);
     }
 
     async fn wait_for_physical_body(
@@ -2418,7 +2680,7 @@ mod tests {
         ));
         facts(&mut world, guid);
         let current = client_remote_body_target(&world, guid).unwrap();
-        let stale = ClientRemoteBodyTarget {
+        let stale = ClientPhysicalRemoteBodyTarget {
             demand: LocalPhysicalDemand {
                 target: LocalTargetDemand::Retained,
                 integration: LocalIntegrationDemand::Eligible,
@@ -2427,11 +2689,14 @@ mod tests {
         };
         let source = Arc::new(FakeSource::default());
         let physical = source.prepare_body(stale.facts.clone()).unwrap();
-        let mut coordinator = ClientCollisionCoordinator::new(source);
+        let mut coordinator = ClientCollisionCoordinator::new(source.clone());
         coordinator.remote_bodies.insert(
             current.body_id,
             ClientRemoteBodyDemand {
-                facts: current.facts,
+                preparation: ClientRemoteBodyPreparation::Physical {
+                    facts: current.facts,
+                    source: source.clone(),
+                },
                 demand: current.demand,
                 status: ClientRemoteBodyStatus::Unavailable,
             },
@@ -2441,7 +2706,17 @@ mod tests {
             .send(ClientSpatialCompletion::RemoteBodies(
                 ClientRemoteBodyCompletion {
                     generation: coordinator.remote_body_generation,
-                    targets: vec![(stale, Ok(physical))],
+                    targets: vec![(
+                        ClientRemoteBodyTarget {
+                            body_id: stale.body_id,
+                            demand: stale.demand,
+                            preparation: ClientRemoteBodyPreparation::Physical {
+                                facts: stale.facts,
+                                source: source.clone(),
+                            },
+                        },
+                        Ok(physical),
+                    )],
                 },
             ))
             .unwrap();

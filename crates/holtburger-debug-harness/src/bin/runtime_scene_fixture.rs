@@ -150,7 +150,7 @@ async fn main() -> Result<()> {
     ));
     let builder = |account: String| -> Result<ClientRuntimeBuilder> {
         let mut builder = ClientRuntimeBuilder::new(account)
-            .collision_source(Arc::new(ContentClientCollisionSource::new(
+            .physical_movement_source(Arc::new(ContentClientCollisionSource::new(
                 Arc::clone(&service),
                 Arc::clone(&repository),
             )))

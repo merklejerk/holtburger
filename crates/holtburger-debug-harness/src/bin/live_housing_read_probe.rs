@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     ));
     let mut builder = ClientRuntimeBuilder::new(account)
         .server(args.host.clone(), args.port)
-        .collision_source(Arc::new(ContentClientCollisionSource::new(
+        .physical_movement_source(Arc::new(ContentClientCollisionSource::new(
             service,
             Arc::clone(&repository),
         )));

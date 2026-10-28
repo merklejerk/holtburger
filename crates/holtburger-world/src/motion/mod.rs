@@ -36,9 +36,9 @@ pub(crate) use rates::{MotionRow, baseline_row, locomotion_row};
 
 pub use actuation::{authored_grounded_actuation, grounded_character_actuation};
 pub use directed::{
-    ServerDirectedMotionFailure, ServerDirectedMotionResolution, ServerDirectedMotionState,
-    ServerDirectedMotionStep, ServerDirectedTarget, begin_server_directed_motion,
-    resolve_server_directed_motion,
+    DirectedMotionSupport, DirectedMotionTravel, ServerDirectedMotionFailure,
+    ServerDirectedMotionResolution, ServerDirectedMotionState, ServerDirectedMotionStep,
+    ServerDirectedTarget, begin_server_directed_motion, resolve_server_directed_motion,
 };
 pub use observed::{
     LocomotionPresentationSource, OBSERVED_ANGULAR_IDLE_RATE_RADIANS,

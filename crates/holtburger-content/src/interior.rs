@@ -48,7 +48,9 @@ pub struct LandblockEnvCell {
 }
 
 /// Stable reference to a CellStruct embedded in its owning Environment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct LandblockCellStructureRef {
     /// Full Environment DID.
     pub environment_id: u32,

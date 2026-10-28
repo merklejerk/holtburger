@@ -120,6 +120,7 @@ fn main() -> Result<()> {
         character_titles: Arc::new(content.read_character_title_catalog()?),
         contracts: Arc::new(content.read_contract_catalog()?),
         motion_sequences: Arc::new(content.read_motion_sequence_catalog()?),
+        setup_dimensions: Arc::new(content.read_setup_dimension_catalog()?),
         soul_emote_catalog: Arc::new(SoulEmoteCatalog::default()),
     };
     let mut world = WorldState::new(Arc::new(bootstrap));

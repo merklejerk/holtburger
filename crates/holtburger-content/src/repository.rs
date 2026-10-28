@@ -317,6 +317,22 @@ impl ContentRepository {
             .context("failed to project raw motion content into the runtime motion contract")
     }
 
+    /// Reads setup-owned gameplay dimensions without preparing collision or following links.
+    pub fn read_setup_dimension_catalog(&self) -> Result<crate::SetupDimensionCatalog> {
+        let setups = self.decode_portal_records(DatFileType::SetupModel, SetupModel::read)?;
+        Ok(crate::SetupDimensionCatalog::new(setups.into_iter().map(
+            |setup| {
+                (
+                    setup.id,
+                    crate::SetupDimensions {
+                        radius: setup.radius,
+                        height: setup.height,
+                    },
+                )
+            },
+        )))
+    }
+
     /// Decodes each resolved portal resource once, in deterministic index order.
     ///
     /// File types are inferred from the id prefix, which is namespace-blind, so the namespace is

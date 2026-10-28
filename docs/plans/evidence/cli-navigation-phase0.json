@@ -1,0 +1,36 @@
+{
+  "setup_envelopes": {
+    "setups": 5935,
+    "authored_single": 3000,
+    "authored_pair": 610,
+    "retail_dummy": 2325,
+    "invalid": []
+  },
+  "ace_characterization": {
+    "checks": 66,
+    "scope": "Actual source-extracted acceptance/placement methods with stubbed geometry, manager work and update internals; not a live server or complete packet-handler test",
+    "cases": [
+      "same-owner A-to-C shortcut",
+      "adjacent outdoor owner",
+      "same-owner indoor-to-outdoor",
+      "null/blocked/completed transition under normal and FastTick force placement",
+      "far-owner rejection",
+      "FastTick frozen/huge-quantum guards",
+      "indoor cross-owner validation rejection"
+    ],
+    "ace_commit": "c455c0097f62c15e2959b3f90855338fbe191be9",
+    "source_sha256": {
+      "ACE/Source/ACE.Server/WorldObjects/Player_Tick.cs": "210c8151b10e60d3f55056191a7180f96efd6ed5b0d2507d0f5770485e4ef584",
+      "ACE/Source/ACE.Server/Physics/PhysicsObj.cs": "ca612a6f41d0ba66db66698dd2c519e063466282402eb9dec0fcb2f775cfc452",
+      "ACE/Source/ACE.Server/Network/GameAction/Actions/GameActionAutonomousPosition.cs": "28230e991a886bb376d5761e846a11ace079655a961d5b46df8f66bd309110ce",
+      "ACE/Source/ACE.Server/WorldObjects/Player.cs": "b47f7576e84f5100c6ad0befdb42eb26d13080dbb74671385fe8a4a8bbf44df3"
+    },
+    "subsequent_live_finding": "One-shot reports exposed RequestPos cell mutation omitted by the source fixture. Follow-up bounded interpolation, including existing cell-change/2 m/one-second publication thresholds, reached the destination correctly; see cli-navigation-interpolated-ace.json. Physics residency uses primary-sphere center, so equality with root-point cell containment is not a universal invariant."
+  },
+  "verification": {
+    "navigation_container_tests": 10,
+    "existing_position_publication_tests": 7,
+    "existing_autonomous_position_tests": 6,
+    "clippy": "content library/tests and envelope census: warnings denied, passed"
+  }
+}

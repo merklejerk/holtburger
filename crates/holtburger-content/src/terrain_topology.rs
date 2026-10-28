@@ -81,6 +81,22 @@ impl TerrainCellDiagonals {
             .map(|&cut| u8::from(cut))
             .collect()
     }
+
+    /// Restores prepared row-major diagonal choices without rerunning the source hash.
+    pub fn from_cell_bytes(bytes: &[u8]) -> Option<Self> {
+        let bytes: &[u8; TERRAIN_GRID_CELLS * TERRAIN_GRID_CELLS] = bytes.try_into().ok()?;
+        let mut southwest_to_northeast = [false; TERRAIN_GRID_CELLS * TERRAIN_GRID_CELLS];
+        for (cut, byte) in southwest_to_northeast.iter_mut().zip(bytes) {
+            *cut = match byte {
+                0 => false,
+                1 => true,
+                _ => return None,
+            };
+        }
+        Some(Self {
+            southwest_to_northeast,
+        })
+    }
 }
 
 /// Reproduces retail's wrapping 32-bit terrain-diagonal hash (`acclient.c:339448`).

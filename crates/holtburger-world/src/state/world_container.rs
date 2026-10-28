@@ -1,6 +1,8 @@
 //! Confirmed external storage access, independent of roster hydration and window state.
 
+use holtburger_common::position::WorldPosition;
 use holtburger_common::{Guid, properties::WorldObjectExt};
+use holtburger_content::SetupDimensions;
 use serde::{Deserialize, Serialize};
 
 use crate::WorldState;
@@ -79,30 +81,55 @@ impl WorldState {
     /// unknown geometry neither grants access nor restores previously revoked access.
     pub fn within_use_radius(&self, actor: Guid, target: Guid) -> Option<bool> {
         let target_entity = self.get_visible_entity(target)?;
-        let distance = self.physical_cylinder_distance(actor, target)?;
+        let distance = self.cylinder_distance(actor, target)?;
         // ACE WorldObject_Use.cs::IsWithinUseRadiusOf supplies 0.6 when not authored.
         Some(f64::from(distance) <= target_entity.use_radius().unwrap_or(0.6))
     }
 
-    /// ACE-compatible separation between two prepared physical cylinders.
+    /// ACE-compatible separation between two authored setup cylinders.
     ///
     /// This is a shared geometry fact. Callers choose the interaction-specific reach threshold.
-    pub fn physical_cylinder_distance(&self, actor: Guid, target: Guid) -> Option<f32> {
-        let actor_body = self.scene.body_for_guid(actor)?;
-        let target_body = self.scene.body_for_guid(target)?;
-        let actor_geometry = actor_body.physical.as_ref()?.dynamic.as_ref()?;
-        let target_geometry = target_body.physical.as_ref()?.dynamic.as_ref()?;
-        let actor_setup = &actor_geometry.collision.target_geometry;
-        let target_setup = &target_geometry.collision.target_geometry;
+    pub fn cylinder_distance(&self, actor: Guid, target: Guid) -> Option<f32> {
+        let (actor_pose, actor_setup) = self.interaction_cylinder(actor)?;
+        let (target_pose, target_setup) = self.interaction_cylinder(target)?;
         Some(use_cylinder_distance(
-            actor_body.pose.distance_to(&target_body.pose),
-            actor_body.pose.coords.z,
-            actor_setup.setup_radius * actor_geometry.object_scale,
-            actor_setup.setup_height * actor_geometry.object_scale,
-            target_body.pose.coords.z,
-            target_setup.setup_radius * target_geometry.object_scale,
-            target_setup.setup_height * target_geometry.object_scale,
+            actor_pose.distance_to(&target_pose),
+            actor_pose.coords.z,
+            actor_setup.radius,
+            actor_setup.height,
+            target_pose.coords.z,
+            target_setup.radius,
+            target_setup.height,
         ))
+    }
+
+    /// Keeps physical instances' existing geometry/scale semantics. Pose-only bodies query the
+    /// same authored setup facts through reference data, without allocating collision targets.
+    pub(super) fn interaction_cylinder(
+        &self,
+        guid: Guid,
+    ) -> Option<(WorldPosition, SetupDimensions)> {
+        let body = self.scene.body_for_guid(guid)?;
+        let dimensions = if let Some(dynamic) = body
+            .physical
+            .as_ref()
+            .and_then(|physical| physical.dynamic.as_ref())
+        {
+            let setup = &dynamic.collision.target_geometry;
+            SetupDimensions {
+                radius: setup.setup_radius * dynamic.object_scale,
+                height: setup.setup_height * dynamic.object_scale,
+            }
+        } else {
+            let entity = self.entities.get(guid)?;
+            let setup = self.setup_dimensions.get(entity.csetup_id()?.0)?;
+            let scale = entity.scale.effective();
+            SetupDimensions {
+                radius: setup.radius * scale,
+                height: setup.height * scale,
+            }
+        };
+        Some((body.pose, dimensions))
     }
 
     /// Retire access before storage links disappear so pending descendants are released too.
@@ -168,6 +195,96 @@ mod tests {
     const ROOT: Guid = Guid(0x80000001);
     const PACK: Guid = Guid(0x80000002);
     const ITEM: Guid = Guid(0x80000003);
+
+    #[test]
+    fn pose_only_cylinders_use_authored_dimensions_live_scale_and_canonical_positions() {
+        use crate::entity::Entity;
+        use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut};
+        use holtburger_common::{Quaternion, Vector3};
+        use holtburger_content::SetupDimensionCatalog;
+        use std::sync::Arc;
+
+        let mut world = WorldState::synthetic();
+        let start = WorldPosition {
+            landblock_id: Guid(0x1234_0100),
+            coords: Vector3::zero(),
+            rotation: Quaternion::identity(),
+        };
+        world.seed_local_player_entity(PLAYER, "Player", start);
+        world.add_entity(Entity::new(
+            ROOT,
+            "Target".to_owned(),
+            WorldPosition {
+                coords: Vector3::new(5.0, 0.0, 0.0),
+                ..start
+            },
+        ));
+        let actor_setup = 0x0200_0001;
+        let target_setup = 0x0200_0002;
+        world.setup_dimensions = Arc::new(SetupDimensionCatalog::new([
+            (
+                actor_setup,
+                SetupDimensions {
+                    radius: 0.5,
+                    height: 1.8,
+                },
+            ),
+            (
+                target_setup,
+                SetupDimensions {
+                    radius: 0.75,
+                    height: 1.0,
+                },
+            ),
+        ]));
+        world
+            .entities
+            .get_mut(PLAYER)
+            .unwrap()
+            .set_did_prop(PropertyDataId::Setup, Guid(actor_setup));
+        assert_eq!(world.cylinder_distance(PLAYER, ROOT), None);
+        world
+            .entities
+            .get_mut(ROOT)
+            .unwrap()
+            .set_did_prop(PropertyDataId::Setup, Guid(target_setup));
+        assert_eq!(world.cylinder_distance(PLAYER, ROOT), Some(3.75));
+        world
+            .entities
+            .get_mut(PLAYER)
+            .unwrap()
+            .scale
+            .reconcile(2.0)
+            .unwrap();
+        assert_eq!(world.cylinder_distance(PLAYER, ROOT), Some(3.25));
+        world.set_local_player_runtime_pose(WorldPosition {
+            coords: Vector3::new(1.5, 0.0, 0.0),
+            ..start
+        });
+        assert_eq!(world.cylinder_distance(PLAYER, ROOT), Some(1.75));
+        assert_eq!(
+            world
+                .server_directed_target(PLAYER, ROOT)
+                .unwrap()
+                .cylinder_distance,
+            Some(1.75)
+        );
+        assert!(
+            world
+                .scene
+                .body_for_guid(PLAYER)
+                .unwrap()
+                .physical
+                .is_none()
+        );
+        assert!(world.scene.body_for_guid(ROOT).unwrap().physical.is_none());
+        world
+            .entities
+            .get_mut(ROOT)
+            .unwrap()
+            .set_did_prop(PropertyDataId::Setup, Guid(target_setup + 1));
+        assert_eq!(world.cylinder_distance(PLAYER, ROOT), None);
+    }
 
     fn event(world: &mut WorldState, event: GameEvent) -> Vec<WorldEvent> {
         world.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {

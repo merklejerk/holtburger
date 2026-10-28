@@ -6,23 +6,21 @@ command: holtburger-cli
 modules:
   - name: holtburger-cli
     buildsystem: simple
+    build-options:
+      no-debuginfo: true
     build-commands:
-      # We build the binary outside the sandbox to avoid internet issues
-      - install -D holtburger-cli /app/bin/holtburger-cli
-      - install -D assets.hba /app/share/holtburger/dats/assets.hba
-      - install -d /app/share/holtburger/scripts
-      - cp scripts/fighter.js scripts/mage.js scripts/mage.data.json scripts/mage.data.bin /app/share/holtburger/scripts/
-      - install -D io.github.merklejerk.holtburger-cli.desktop /app/share/applications/io.github.merklejerk.holtburger-cli.desktop
-      - install -D io.github.merklejerk.holtburger-cli.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-cli.metainfo.xml
-      - install -D io.github.merklejerk.holtburger-cli.svg /app/share/icons/hicolor/scalable/apps/io.github.merklejerk.holtburger-cli.svg
+      - mkdir -p /app/lib/holtburger /app/bin
+      - cp -a bundle/. /app/lib/holtburger/
+      - ln -s /app/lib/holtburger/holtburger-cli /app/bin/holtburger-cli
+      - ln -s /app/lib/holtburger/dat2hba /app/bin/dat2hba
+      - ln -s /app/lib/holtburger/dat-tool /app/bin/dat-tool
+      - install -Dm644 io.github.merklejerk.holtburger-cli.desktop /app/share/applications/io.github.merklejerk.holtburger-cli.desktop
+      - install -Dm644 io.github.merklejerk.holtburger-cli.metainfo.xml /app/share/metainfo/io.github.merklejerk.holtburger-cli.metainfo.xml
+      - install -Dm644 io.github.merklejerk.holtburger-cli.svg /app/share/icons/hicolor/scalable/apps/io.github.merklejerk.holtburger-cli.svg
     sources:
-      - type: file
-        path: ../../../target/release/holtburger-cli
-      - type: file
-        path: ../../../dats/assets.hba
       - type: dir
-        path: ../../../scripts
-        dest: scripts
+        path: ../../../.holtburger-local/cli-native
+        dest: bundle
       - type: file
         path: io.github.merklejerk.holtburger-cli.desktop
       - type: file
@@ -31,6 +29,6 @@ modules:
         path: io.github.merklejerk.holtburger-cli.svg
 finish-args:
   - --share=network
-  - --env=HOLTBURGER_DATS=/app/share/holtburger/dats
+  - --env=HOLTBURGER_CONTENT=/app/lib/holtburger/content
   - --env=SCRIPT_DIR=/var/data/holtburger/scripts
-  - --env=SCRIPT_BUNDLE_DIR=/app/share/holtburger/scripts
+  - --env=SCRIPT_BUNDLE_DIR=/app/lib/holtburger/scripts

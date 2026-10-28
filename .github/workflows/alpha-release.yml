@@ -1,9 +1,25 @@
 name: Alpha Release Candidate
 
 on:
-  workflow_dispatch:
   push:
     tags: ['alpha-[0-9]*']
+  workflow_dispatch:
+    inputs:
+      purpose:
+        description: Build a draft candidate or diagnostic artifacts (neither publishes)
+        type: choice
+        options: [candidate, diagnostic]
+        default: candidate
+      product:
+        description: Product selection (candidates require both)
+        type: choice
+        options: [both, cli, 3d]
+        default: both
+      target:
+        description: Native target selection (candidates require all)
+        type: choice
+        options: [all, x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc, aarch64-apple-darwin]
+        default: all
 
 permissions:
   contents: read
@@ -25,6 +41,9 @@ jobs:
       tag: ${{ steps.identity.outputs.tag }}
       version: ${{ steps.identity.outputs.version }}
       commit: ${{ steps.identity.outputs.commit }}
+      product: ${{ steps.identity.outputs.product }}
+      linux_enabled: ${{ steps.identity.outputs.linux_enabled }}
+      desktop_enabled: ${{ steps.identity.outputs.desktop_enabled }}
       linux_matrix: ${{ steps.identity.outputs.linux_matrix }}
       desktop_matrix: ${{ steps.identity.outputs.desktop_matrix }}
     steps:
@@ -39,9 +58,13 @@ jobs:
         with:
           toolchain: 1.95.0
           components: rustfmt
-      - name: Resolve one clean source identity and native matrix
+      - name: Resolve source identity and selected native matrix
         id: identity
-        run: python .github/scripts/alpha_release.py plan
+        env:
+          REQUEST_PURPOSE: ${{ inputs.purpose || 'candidate' }}
+          REQUEST_PRODUCT: ${{ inputs.product || 'both' }}
+          REQUEST_TARGET: ${{ inputs.target || 'all' }}
+        run: python .github/scripts/alpha_release.py plan --purpose "$REQUEST_PURPOSE" --product "$REQUEST_PRODUCT" --target "$REQUEST_TARGET"
       - name: Check release tooling
         run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
       - name: Check Rust formatting
@@ -57,32 +80,39 @@ jobs:
           path: .github/licenses/THIRD_PARTY_NOTICES.html
           if-no-files-found: error
       - name: Create the manually requested candidate tag
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && steps.identity.outputs.tag != ''
         env:
           GH_TOKEN: ${{ github.token }}
           ALPHA_TAG: ${{ steps.identity.outputs.tag }}
         run: python .github/scripts/alpha_release.py create-tag "$ALPHA_TAG"
 
   validation:
-    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/3d-next'
+    needs: plan
     uses: ./.github/workflows/alpha-checks.yml
+    with:
+      product: ${{ needs.plan.outputs.product }}
 
   linux:
     needs: plan
+    if: needs.plan.outputs.linux_enabled == 'true'
     uses: ./.github/workflows/alpha-native.yml
     with:
       commit: ${{ needs.plan.outputs.commit }}
       matrix: ${{ needs.plan.outputs.linux_matrix }}
+      product: ${{ needs.plan.outputs.product }}
 
   desktop:
     needs: plan
+    if: needs.plan.outputs.desktop_enabled == 'true'
     uses: ./.github/workflows/alpha-native.yml
     with:
       commit: ${{ needs.plan.outputs.commit }}
       matrix: ${{ needs.plan.outputs.desktop_matrix }}
+      product: ${{ needs.plan.outputs.product }}
 
   flatpak:
     needs: [plan, linux]
+    if: needs.plan.outputs.linux_enabled == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -97,133 +127,119 @@ jobs:
         with:
           python-version: '3.12'
       - uses: actions/setup-node@v4
+        if: needs.plan.outputs.product != 'cli'
         with:
           node-version: '24.13.1'
           cache: npm
           cache-dependency-path: apps/holtburger-3d/package-lock.json
       - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.product != 'cli'
         with:
           name: verification-linux-electron
           path: apps/holtburger-3d/dist-electron
-      - name: Install locked inspection and probe dependencies
+      - name: Install locked 3D inspection and probe dependencies
+        if: needs.plan.outputs.product != 'cli'
         working-directory: apps/holtburger-3d
-        # Package inspection uses @electron/asar; skip Electron's binary install and rebuilds.
         run: npm ci --ignore-scripts
       - uses: actions/download-artifact@v4
         with:
-          name: alpha-notices
-          path: .holtburger-local/alpha-notices
-      - name: Fetch pinned standalone micro
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python .github/scripts/fetch_alpha_content.py .holtburger-local/alpha-content
-      - uses: actions/download-artifact@v4
-        with:
-          name: alpha-x86_64-unknown-linux-gnu
+          pattern: alpha-*-x86_64-unknown-linux-gnu
           path: .holtburger-local/alpha-native-linux
+          merge-multiple: true
       - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.product != '3d'
         with:
           name: verification-linux-bootstrap
           path: .holtburger-local/alpha-linux-probes
-      - name: Install Flatpak tooling and runtime
+      - name: Install Flatpak tooling and shared runtime
         run: |
-          # GitHub's Ubuntu sources use this mirror list; retain the official archive/security entries.
           sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
-          cat /etc/apt/apt-mirrors.txt
           sudo apt-get update
-          # Keep builder helpers, SVG decoding and Xvfb authentication without optional media stacks.
           sudo apt-get install --yes --no-install-recommends \
-            flatpak flatpak-builder appstream-compose desktop-file-utils elfutils ostree librsvg2-common \
-            dbus-x11 xvfb xauth xdg-desktop-portal xdg-desktop-portal-gtk
+            flatpak flatpak-builder appstream-compose desktop-file-utils elfutils ostree librsvg2-common dbus-x11
           sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
           RUNTIME_VERSION=$(python -c 'import json; print(json.load(open(".github/flatpak/io.github.merklejerk.holtburger-alpha.json"))["runtime-version"])')
           sudo flatpak install --noninteractive --assumeyes flathub "org.freedesktop.Platform/x86_64/$RUNTIME_VERSION" "org.freedesktop.Sdk/x86_64/$RUNTIME_VERSION"
-      - name: Materialize the recipe from the verified Linux archive
+      - name: Install 3D probe display and portal helpers
+        if: needs.plan.outputs.product != 'cli'
+        run: sudo apt-get install --yes --no-install-recommends xvfb xauth xdg-desktop-portal xdg-desktop-portal-gtk
+      - name: Materialize CLI recipe from its native archive
+        if: needs.plan.outputs.product != '3d'
         run: |
-          SUITE=$(python .github/scripts/alpha_release.py prepare-suite-flatpak \
-            --artifacts .holtburger-local/alpha-native-linux \
-            --output .holtburger-local/alpha-suite-flatpak.json)
-          echo "HOLTBURGER_FLATPAK_SUITE=$SUITE" >> "$GITHUB_ENV"
+          NATIVE=$(python .github/scripts/alpha_release.py prepare-flatpak --product cli \
+            --artifacts .holtburger-local/alpha-native-linux --output .holtburger-local/alpha-cli-flatpak.json)
+          echo "HOLTBURGER_CLI_NATIVE=$NATIVE" >> "$GITHUB_ENV"
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
-        with:
-          bundle: holtburger-alpha.flatpak
-          build-dir: .holtburger-local/flatpak-suite-build
-          repo-dir: .holtburger-local/flatpak-suite-repo
-          state-dir: .holtburger-local/flatpak-suite-state
-          cache-key: alpha-suite-${{ runner.arch }}-${{ hashFiles('.github/flatpak/**', 'apps/holtburger-cli/dist/**') }}
-          upload-artifact: false
-          manifest-path: .holtburger-local/alpha-suite-flatpak.json
-          cache: true
-      - name: Verify installed bootstrap, tools, portals, private host, and renderer assets
-        run: |
-          flatpak install --user --noninteractive --assumeyes holtburger-alpha.flatpak
-          chmod +x .holtburger-local/alpha-linux-probes/content_bootstrap
-          # Portal services inherit their display from the D-Bus activation environment.
-          xvfb-run --auto-servernum dbus-run-session -- \
-            .github/flatpak/verify-installed \
-            "$GITHUB_WORKSPACE/.holtburger-local/alpha-linux-probes/content_bootstrap"
-      - name: Inspect installed bytes and stage the full-suite Flatpak
-        run: |
-          mkdir -p .holtburger-local/alpha-artifacts
-          BUNDLE='.holtburger-local/alpha-artifacts/holtburger-alpha-${{ needs.plan.outputs.version }}-x86_64.flatpak'
-          cp holtburger-alpha.flatpak "$BUNDLE"
-          LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-alpha)
-          python .github/scripts/alpha_release.py record-suite-flatpak \
-            --files "$LOCATION/files" --suite "$HOLTBURGER_FLATPAK_SUITE" \
-            --bundle "$BUNDLE" \
-            --output .holtburger-local/alpha-artifacts/metadata-holtburger-alpha-flatpak.json
-      - name: Reuse inspected Linux inputs for the TUI recipe
-        run: |
-          mkdir -p target/release dats
-          cp "$HOLTBURGER_FLATPAK_SUITE/holtburger-cli" target/release/holtburger-cli
-          cp "$HOLTBURGER_FLATPAK_SUITE/dats/assets.hba" dats/assets.hba
-      - name: Add alpha notices to the shared Flatpak recipe
-        run: |
-          python .github/scripts/alpha_release.py flatpak-manifest \
-            --notices .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html \
-            --output .holtburger-local/alpha-flatpak.json
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        if: needs.plan.outputs.product != '3d'
         with:
           bundle: holtburger-cli.flatpak
-          build-dir: .holtburger-local/flatpak-tui-build
-          repo-dir: .holtburger-local/flatpak-tui-repo
-          state-dir: .holtburger-local/flatpak-tui-state
-          cache-key: alpha-tui-${{ runner.arch }}-${{ hashFiles('.github/flatpak/**', 'apps/holtburger-cli/dist/**') }}
+          build-dir: .holtburger-local/flatpak-cli-build
+          repo-dir: .holtburger-local/flatpak-cli-repo
+          state-dir: .holtburger-local/flatpak-cli-state
+          cache-key: alpha-cli-${{ runner.arch }}-${{ hashFiles('apps/holtburger-cli/dist/**') }}
           upload-artifact: false
-          manifest-path: .holtburger-local/alpha-flatpak.json
+          manifest-path: .holtburger-local/alpha-cli-flatpak.json
           cache: true
-      - name: Load production bootstrap inside the Flatpak runtime
+      - name: Probe and record CLI Flatpak
+        if: needs.plan.outputs.product != '3d'
         run: |
           flatpak install --user --noninteractive --assumeyes holtburger-cli.flatpak
-          dbus-run-session -- flatpak run \
-            --filesystem="$GITHUB_WORKSPACE/.holtburger-local/alpha-linux-probes:ro" \
-            --command="$GITHUB_WORKSPACE/.holtburger-local/alpha-linux-probes/content_bootstrap" \
-            io.github.merklejerk.holtburger-cli /app/share/holtburger/dats/assets.hba
-          EXPECTED=$(sha256sum .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html)
-          ACTUAL=$(dbus-run-session -- flatpak run --command=sha256sum io.github.merklejerk.holtburger-cli /app/share/licenses/holtburger/THIRD_PARTY_NOTICES.html)
-          test "${ACTUAL%% *}" = "${EXPECTED%% *}"
-          EXPECTED=$(sha256sum "$HOLTBURGER_FLATPAK_SUITE/dats/assets.hba")
-          ACTUAL=$(dbus-run-session -- flatpak run --command=sha256sum io.github.merklejerk.holtburger-cli /app/share/holtburger/dats/assets.hba)
-          test "${ACTUAL%% *}" = "${EXPECTED%% *}"
-      - name: Stage Flatpak and standalone micro
-        run: |
-          mkdir -p .holtburger-local/alpha-artifacts
-          cp holtburger-cli.flatpak '.holtburger-local/alpha-artifacts/holtburger-cli-${{ needs.plan.outputs.version }}-x86_64.flatpak'
-          cp .holtburger-local/alpha-content/micro-hba.zip '.holtburger-local/alpha-artifacts/holtburger-micro-${{ needs.plan.outputs.version }}.zip'
+          chmod +x .holtburger-local/alpha-linux-probes/content_bootstrap
+          dbus-run-session -- .github/flatpak/verify-cli-installed "$GITHUB_WORKSPACE/.holtburger-local/alpha-linux-probes/content_bootstrap"
+          mkdir -p .holtburger-local/alpha-artifacts/cli
+          BUNDLE='.holtburger-local/alpha-artifacts/cli/holtburger-cli-${{ needs.plan.outputs.version }}-x86_64.flatpak'
+          cp holtburger-cli.flatpak "$BUNDLE"
           LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-cli)
-          python .github/scripts/alpha_release.py record-tui-flatpak \
-            --files "$LOCATION/files" \
-            --bundle '.holtburger-local/alpha-artifacts/holtburger-cli-${{ needs.plan.outputs.version }}-x86_64.flatpak' \
-            --output .holtburger-local/alpha-artifacts/metadata-holtburger-cli-flatpak.json
+          python .github/scripts/alpha_release.py record-flatpak --files "$LOCATION/files" \
+            --native "$HOLTBURGER_CLI_NATIVE" --bundle "$BUNDLE" \
+            --output .holtburger-local/alpha-artifacts/cli/metadata-cli-flatpak.json
       - uses: actions/upload-artifact@v4
+        if: needs.plan.outputs.product != '3d'
         with:
-          name: alpha-flatpaks
-          path: .holtburger-local/alpha-artifacts/*
+          name: alpha-cli-flatpak
+          path: .holtburger-local/alpha-artifacts/cli/*
+          if-no-files-found: error
+          compression-level: 0
+      - name: Materialize 3D recipe from its native archive
+        if: needs.plan.outputs.product != 'cli'
+        run: |
+          NATIVE=$(python .github/scripts/alpha_release.py prepare-flatpak --product 3d \
+            --artifacts .holtburger-local/alpha-native-linux --output .holtburger-local/alpha-3d-flatpak.json)
+          echo "HOLTBURGER_3D_NATIVE=$NATIVE" >> "$GITHUB_ENV"
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        if: needs.plan.outputs.product != 'cli'
+        with:
+          bundle: holtburger-3d.flatpak
+          build-dir: .holtburger-local/flatpak-3d-build
+          repo-dir: .holtburger-local/flatpak-3d-repo
+          state-dir: .holtburger-local/flatpak-3d-state
+          cache-key: alpha-3d-${{ runner.arch }}-${{ hashFiles('.github/flatpak/**') }}
+          upload-artifact: false
+          manifest-path: .holtburger-local/alpha-3d-flatpak.json
+          cache: true
+      - name: Probe and record 3D Flatpak
+        if: needs.plan.outputs.product != 'cli'
+        run: |
+          flatpak install --user --noninteractive --assumeyes holtburger-3d.flatpak
+          xvfb-run --auto-servernum dbus-run-session -- .github/flatpak/verify-installed
+          mkdir -p .holtburger-local/alpha-artifacts/3d
+          BUNDLE='.holtburger-local/alpha-artifacts/3d/holtburger-3d-${{ needs.plan.outputs.version }}-x86_64.flatpak'
+          cp holtburger-3d.flatpak "$BUNDLE"
+          LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-alpha)
+          python .github/scripts/alpha_release.py record-flatpak --files "$LOCATION/files" \
+            --native "$HOLTBURGER_3D_NATIVE" --bundle "$BUNDLE" \
+            --output .holtburger-local/alpha-artifacts/3d/metadata-3d-flatpak.json
+      - uses: actions/upload-artifact@v4
+        if: needs.plan.outputs.product != 'cli'
+        with:
+          name: alpha-3d-flatpak
+          path: .holtburger-local/alpha-artifacts/3d/*
           if-no-files-found: error
           compression-level: 0
 
   stage:
     needs: [plan, validation, linux, desktop, flatpak]
+    if: needs.plan.outputs.tag != ''
     runs-on: ubuntu-22.04
     permissions:
       contents: write

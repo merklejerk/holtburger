@@ -65,6 +65,8 @@ pub struct WorldState {
     pub contract_catalog: Arc<holtburger_content::ContractCatalog>,
     pub soul_emote_catalog: Arc<SoulEmoteCatalog>,
     pub motion_sequences: Arc<MotionSequenceCatalog>,
+    /// Immutable setup cylinders for interaction queries without a physical-body dependency.
+    pub setup_dimensions: Arc<holtburger_content::SetupDimensionCatalog>,
     /// Authored-motion playback for every entity this client simulates.
     ///
     /// Advanced once per tick by `advance_authored_motion`; the solver basis reads the result
@@ -497,6 +499,7 @@ impl WorldState {
             contract_catalog: Arc::clone(&bootstrap.contracts),
             soul_emote_catalog: Arc::clone(&bootstrap.soul_emote_catalog),
             motion_sequences: Arc::clone(&bootstrap.motion_sequences),
+            setup_dimensions: Arc::clone(&bootstrap.setup_dimensions),
             motion_runtimes: MotionRuntimeRegistry::new(),
             scene: SpatialScene::new(),
             housing: crate::housing::HousingState::default(),

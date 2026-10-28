@@ -1627,6 +1627,7 @@ dependencies = [
  "ratatui-textarea",
  "reqwest",
  "serde_json",
+ "tempfile",
  "tokio",
  "unicode-width",
  "winresource",
@@ -1656,9 +1657,12 @@ dependencies = [
  "holtburger-dat",
  "holtburger-weenie-catalog",
  "log",
+ "rmp-serde",
  "serde",
+ "sha2",
  "tempfile",
  "thiserror 2.0.18",
+ "zstd",
 ]
 
 [[package]]

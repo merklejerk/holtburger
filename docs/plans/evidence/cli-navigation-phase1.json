@@ -1,0 +1,63 @@
+{
+  "production": {
+    "generator_version": "0.1.0-alpha.3",
+    "navigation_format": 1,
+    "source_sha256": "20fa252ad80b4daf314fd098d1f48a386ce6a8f326b4007f3f33561c38be75b7",
+    "bootstrap": {
+      "bytes": 3255862,
+      "sha256": "3bc9ee7aa408ed6dda9b2bebd16940a933bdce9c63f6de4cd2853f02d21f8a86"
+    },
+    "navigation": {
+      "bytes": 27981202,
+      "sha256": "e4eadaa04d567804719a7b8befb200a6f2fdf5d52a8e8e339641b65c4cbe7c35"
+    },
+    "owners": 65025,
+    "cells": 734976,
+    "room_structures": 3145
+  },
+  "metadata": {
+    "bytes": 473,
+    "sha256": "02d4a265368bd3189f4b7959ac8c8edf497f798db02bc920770013c2d5913b61"
+  },
+  "complete_content_bytes": 31237537,
+  "approved_input_zip": {
+    "bytes": 31237877,
+    "sha256": "08167e0347ccd19ff708b13fe65b0f7186e514d68b8306e77d642b08a7103f61"
+  },
+  "determinism": {
+    "scope": "Two fixed model-free 568-cell fixture generations; worldwide generated once",
+    "components": {
+      "content/bootstrap.hba": {
+        "bytes": 3235646,
+        "sha256": "6a5d1f1aecb5e6a3b9cb7cd991a2c27068f7abac7efcc733a57fc3c224e3bb36"
+      },
+      "content/navigation.hnav": {
+        "bytes": 75565,
+        "sha256": "bbfcdc732c9bb3fb8dfbb931fc25a02cdf752c2a88d33217ca891bf96a0de2ed"
+      },
+      "content/content-info.json": {
+        "bytes": 462,
+        "sha256": "52211a9e3fc9a0ad1746b69e29db8c98ee427c1e3c26a4a4e7d12413a150e3ae"
+      },
+      "cli-content.zip": {
+        "bytes": 3312013,
+        "sha256": "6ad5553e0f6f767e6a100ffc3db1b8bf7f9b9b1a052a3b9d30dc15ad6480c468"
+      }
+    }
+  },
+  "verification": {
+    "content_library_tests": 157,
+    "navigation_codec_and_scene_tests_included": 23,
+    "generator_tests": 3,
+    "warnings_denied_clippy": "content/tools library and tests, cli-content binary: passed",
+    "production_inspection": "passed",
+    "prepared_scene_probe": {
+      "owner": "8602FFFF",
+      "cells": 568,
+      "shells": 568,
+      "doorway": "0100 -> 0101 passed",
+      "wall_slide": "normal -0.8002 m, tangent 1.0000 m passed"
+    },
+    "limits": "No reduced TUI runtime cutover or live ACE wire/session verification yet."
+  }
+}

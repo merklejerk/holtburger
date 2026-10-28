@@ -156,11 +156,17 @@ impl CollisionBox {
     pub fn from_points(points: impl IntoIterator<Item = Vector3>) -> Option<Self> {
         let mut points = points.into_iter();
         let first = points.next()?;
+        if !vector_is_finite(first) {
+            return None;
+        }
         let mut bounds = Self {
             minimum: first,
             maximum: first,
         };
         for point in points {
+            if !vector_is_finite(point) {
+                return None;
+            }
             bounds.minimum.x = bounds.minimum.x.min(point.x);
             bounds.minimum.y = bounds.minimum.y.min(point.y);
             bounds.minimum.z = bounds.minimum.z.min(point.z);
@@ -873,23 +879,70 @@ impl LandblockColliderAssembler {
         landblock: &LandblockAsset,
         interior: &crate::LandblockInteriorSystemAsset,
     ) -> Result<LandblockColliders> {
-        let mut shapes: HashMap<(u32, u32), Option<Arc<CollisionShape>>> = HashMap::new();
+        let rooms = LandblockRoomShellAssembler.assemble(landblock, interior)?;
+        let mut shells = rooms.colliders.into_iter().peekable();
         let mut colliders = Vec::new();
-        // Indoor objects are ordinary placed models, so they resolve through the same reader and
-        // shape cache the outdoor path uses. Cell shells are keyed by Environment + selector and
-        // cached separately above; the two never share an identity.
         let mut reader = ContentSourceReader::with_decode_cache(content, decode_cache);
         let mut object_shapes = ShapeCache::default();
+        for cell in &interior.cells {
+            // Preserve the complete assembly's shell-then-objects order for each cell.
+            if let Some(shell) = shells.next_if(|shell| {
+                shell.source_placement
+                    == StaticColliderPlacement::EnvCellShell {
+                        cell_id: cell.env_cell_id,
+                    }
+            }) {
+                colliders.push(shell);
+            }
+            // EnvCell object placements are already landblock-local, not relative to the cell.
+            for object in &cell.static_objects {
+                append_placement(
+                    &mut reader,
+                    &mut object_shapes,
+                    &mut colliders,
+                    StaticPlacementInput {
+                        source_did: object.source_did,
+                        family: LandblockObjectSourceFamily::from_did(object.source_did),
+                        placement: object.placement,
+                        whole_object_scale: 1.0,
+                        identity: StaticColliderPlacement::IndoorStatic {
+                            source_cell_id: cell.env_cell_id,
+                            source_index: object.source_index,
+                        },
+                    },
+                )?;
+            }
+        }
+        Ok(LandblockColliders::new(colliders, rooms.cell_volumes))
+    }
+}
 
+/// Assembles room physics shells and cell topology without resolving object models.
+///
+/// The interior system already owns the decoded Environment records. Furniture, outdoor
+/// building models, and generated scenery are deliberately outside this product.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LandblockRoomShellAssembler;
+
+impl LandblockRoomShellAssembler {
+    /// Resolves room contact geometry and containment volumes from parsed interior facts.
+    pub fn assemble(
+        self,
+        landblock: &LandblockAsset,
+        interior: &crate::LandblockInteriorSystemAsset,
+    ) -> Result<LandblockColliders> {
+        let mut shapes: HashMap<(u32, u32), Option<Arc<CollisionShape>>> = HashMap::new();
+        let mut colliders = Vec::new();
         let mut cell_volumes = Vec::new();
 
         for cell in &interior.cells {
-            let environment = decode_cache
-                .environment(content, cell.structure.environment_id)
+            let environment = interior
+                .environments
+                .get(&cell.structure.environment_id)
                 .with_context(|| {
                     format!(
-                        "Could not read Environment 0x{:08X} for interior collision",
-                        cell.structure.environment_id
+                        "Interior system is missing Environment 0x{:08X} for EnvCell 0x{:08X}",
+                        cell.structure.environment_id, cell.env_cell_id
                     )
                 })?;
             let structure = environment
@@ -943,28 +996,6 @@ impl LandblockColliderAssembler {
                         cell_id: cell.env_cell_id,
                     },
                 )?);
-            }
-
-            // Furniture, fixtures, and props inside the cell. These were never assembled, so every
-            // indoor object in the game was walk-through while the room around it was solid.
-            // An EnvCell supplies residency rather than a parent transform, so the authored
-            // placement is already landblock-local and composes with nothing.
-            for object in &cell.static_objects {
-                append_placement(
-                    &mut reader,
-                    &mut object_shapes,
-                    &mut colliders,
-                    StaticPlacementInput {
-                        source_did: object.source_did,
-                        family: LandblockObjectSourceFamily::from_did(object.source_did),
-                        placement: object.placement,
-                        whole_object_scale: 1.0,
-                        identity: StaticColliderPlacement::IndoorStatic {
-                            source_cell_id: cell.env_cell_id,
-                            source_index: object.source_index,
-                        },
-                    },
-                )?;
             }
 
             // The containment volume comes from the cell BSP, which is a different tree from the

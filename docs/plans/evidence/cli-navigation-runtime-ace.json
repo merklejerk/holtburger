@@ -1,0 +1,84 @@
+{
+  "probe": "live_navigation_probe",
+  "composition": "ClientRuntimeBuilder.navigation_content; prepared worldwide pair; production client run loop, scene preparation, navigation commitment, and position publisher",
+  "control": "Headless ClientDirected Acquire/Update at nominal 50ms, 0.2m budget, target_hint; Settle at <0.05m. Does not run the TUI navigation controller.",
+  "route": {
+    "start": {
+      "coords": {
+        "x": 155.8728790283203,
+        "y": 65.0,
+        "z": 10.800000190734863
+      },
+      "landblockId": 3960340743,
+      "rotation": {
+        "w": 0.24020561575889587,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.9707217812538147
+      }
+    },
+    "target": {
+      "coords": {
+        "x": 155.87826538085938,
+        "y": 64.75457763671875,
+        "z": 31.0049991607666
+      },
+      "landblockId": 3960340747,
+      "rotation": {
+        "w": 0.24020561575889587,
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.9707217812538147
+      }
+    }
+  },
+  "observed_cell_sequence": [
+    "EC0E0107",
+    "EC0E0108",
+    "EC0E0109",
+    "EC0E0033",
+    "EC0E010B"
+  ],
+  "arrival": {
+    "landblockId": 3960340747,
+    "coords": {
+      "x": 155.87701,
+      "y": 64.75458,
+      "z": 31.003536
+    },
+    "rotation": {
+      "w": 0.24020562,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.9707218
+    }
+  },
+  "server_arrival": {
+    "gameplay_cell": "EC0E010B",
+    "physics_cell": "EC0E010B",
+    "gameplay_coordinates": [
+      155.877014,
+      64.754578,
+      31.003536
+    ],
+    "physics_coordinates": [
+      155.87701,
+      64.75458,
+      31.003536
+    ]
+  },
+  "restoration": {
+    "authoritative_teleport": true,
+    "within_0_05m_of_original": true,
+    "disconnected": true,
+    "note": "ACE teleloc adds approximately 0.005m to gameplay root height; original pose restoration is tolerance checked, not bit identical."
+  },
+  "limitations": [
+    "No wire capture of intermediate position reports in this live run; cell sequence comes from canonical client observations. Existing synthetic session capture covers cell-change publication.",
+    "No invalid-cell gap or ground-level doorway on this route.",
+    "Authoritative teleport exercised; forced rejection correction covered separately by synthetic packet fixture.",
+    "At the start after teleloc, ACE physics root was one metre below gameplay root; both matched at arrival. No claim of intermediate equality."
+  ],
+  "passed": true,
+  "log_sha256": "1bba8b9cef92ecef34e822c8d6d2d8c256885d439fc9aaf86ab783607fe380ff"
+}

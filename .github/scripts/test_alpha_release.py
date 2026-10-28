@@ -1,27 +1,97 @@
 """Exercise native archive contracts and release refusal paths with temporary synthetic inputs."""
 
 import hashlib
+from contextlib import redirect_stdout
+from argparse import Namespace
 import io
 import json
 import os
 from pathlib import Path
 import stat
+import shutil
 import struct
 import tempfile
 import unittest
 from unittest.mock import patch
 import zipfile
-from contextlib import redirect_stdout
 
 from alpha_release import (
-    TARGETS, archive_suite, digest, executable_architecture, extract_suite,
-    create_tag, manifest, plan, stage, validate_tag,
-    record_suite_flatpak, suite_flatpak_manifest,
-    record_tui_flatpak,
-    flatpak_runtime_ref, SUITE_FLATPAK_RECIPE,
+    TARGETS, archive_bundle, digest, executable_architecture, extract_bundle,
+    assemble, create_tag, manifest, plan, stage, validate_tag, verify_bundle,
+    record_flatpak, flatpak_manifest,
+    flatpak_runtime_ref, THREED_FLATPAK_RECIPE,
 )
-from fetch_alpha_content import unpack_micro
+from cli_content_input import CONTENT_FILES, unpack_cli_content
+from test_cli_content_input import archive as cli_archive, components as cli_components
 from release_version import check_versions, validate_version
+from alpha_changes import documentation_only
+
+
+class ReleasePlanTests(unittest.TestCase):
+    """Manual selections stay bounded; release tags retain the complete product/target contract."""
+
+    def test_manual_selection_emits_only_the_requested_native_matrix(self):
+        for product, target in (("both", "all"), ("cli", TARGETS[0].triple), ("3d", TARGETS[-1].triple)):
+            with self.subTest(product=product, target=target), \
+                 patch.dict("os.environ", {"GITHUB_REF_TYPE": "branch"}, clear=True), \
+                 patch("alpha_release.source_identity", return_value=("a" * 40, False)):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    plan(product, target, "diagnostic")
+                result = json.loads(output.getvalue())
+                selected = result["linux_matrix"]["include"] + result["desktop_matrix"]["include"]
+                self.assertEqual(result["product"], product)
+                self.assertEqual({entry["triple"] for entry in selected}, {entry.triple for entry in TARGETS if target == "all" or entry.triple == target})
+                self.assertEqual(result["linux_enabled"], str(any(entry["platform"] == "linux" for entry in selected)).lower())
+                self.assertEqual(result["desktop_enabled"], str(any(entry["platform"] != "linux" for entry in selected)).lower())
+
+    def test_partial_release_tag_selection_is_refused(self):
+        for product, target in (("cli", "all"), ("both", TARGETS[0].triple)):
+            with self.subTest(product=product), \
+                 patch.dict("os.environ", {"GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": "alpha-20261028-aaaaaaaa"}, clear=True), \
+                 patch("alpha_release.source_identity", return_value=("a" * 40, False)), \
+                 patch("alpha_release.subprocess.run"):
+                with self.assertRaisesRegex(ValueError, "both products and every supported native target"):
+                    plan(product, target, "diagnostic")
+
+    def test_diagnostic_dispatch_has_no_candidate_tag_or_release_ancestry_work(self):
+        with (
+            patch.dict(os.environ, {
+                "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF_TYPE": "branch",
+                "GITHUB_REF": "refs/heads/feature-navigation",
+            }, clear=True),
+            patch("alpha_release.source_identity", return_value=("a" * 40, False)),
+            patch("alpha_release.run") as external,
+            patch("alpha_release.subprocess.run") as ancestry,
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            plan("cli", TARGETS[0].triple, "diagnostic")
+        result = json.loads(output.getvalue())
+        self.assertEqual(result["tag"], "")
+        self.assertEqual(result["product"], "cli")
+        self.assertEqual(result["desktop_enabled"], "false")
+        external.assert_not_called()
+        ancestry.assert_not_called()
+
+    def test_partial_manual_candidate_is_refused_before_deriving_or_creating_a_tag(self):
+        for product, target in (("3d", "all"), ("both", TARGETS[0].triple)):
+            with (
+                self.subTest(product=product, target=target),
+                patch.dict(os.environ, {
+                    "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF_TYPE": "branch",
+                    "GITHUB_REF": "refs/heads/3d-next",
+                }, clear=True),
+                patch("alpha_release.source_identity", return_value=("a" * 40, False)),
+                patch("alpha_release.run") as external,
+            ):
+                with self.assertRaisesRegex(ValueError, "both products and every supported native target"):
+                    plan(product, target, "candidate")
+                external.assert_not_called()
+
+    def test_shipped_product_quickstarts_are_build_inputs(self):
+        self.assertTrue(documentation_only("docs/plans/investigation.md"))
+        for path in ("docs/ALPHA_CLI_QUICKSTART.md", "docs/ALPHA_3D_QUICKSTART.md"):
+            self.assertFalse(documentation_only(path))
 
 
 class NativeArchiveTests(unittest.TestCase):
@@ -49,67 +119,120 @@ class NativeArchiveTests(unittest.TestCase):
     def test_zip_encodes_framework_links_instead_of_copying_targets(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            suite = root / "suite"
-            (suite / "Versions/A").mkdir(parents=True)
-            (suite / "Versions/A/library").write_bytes(b"library")
-            (suite / "Versions/Current").symlink_to("A", target_is_directory=True)
-            destination = root / "suite.zip"
+            bundle = root / "bundle"
+            (bundle / "Versions/A").mkdir(parents=True)
+            (bundle / "Versions/A/library").write_bytes(b"library")
+            (bundle / "Versions/Current").symlink_to("A", target_is_directory=True)
+            destination = root / "bundle.zip"
             target = next(target for target in TARGETS if target.platform == "darwin")
-            archive_suite(suite, destination, target)
+            archive_bundle(bundle, destination, target)
             with zipfile.ZipFile(destination) as archive:
-                entry = archive.getinfo("suite/Versions/Current")
+                entry = archive.getinfo("bundle/Versions/Current")
                 self.assertTrue(stat.S_ISLNK(entry.external_attr >> 16))
                 self.assertEqual(archive.read(entry), b"A")
 
     def test_tar_round_trip_preserves_executable_mode(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            suite = root / "suite"
-            suite.mkdir()
-            executable = suite / "client"
+            bundle = root / "bundle"
+            bundle.mkdir()
+            executable = bundle / "client"
             executable.write_bytes(b"native executable")
             executable.chmod(0o755)
-            archive = root / "suite.tar.gz"
+            archive = root / "bundle.tar.gz"
             target = next(target for target in TARGETS if target.platform == "linux")
-            archive_suite(suite, archive, target)
+            archive_bundle(bundle, archive, target)
             extracted = root / "extracted"
             extracted.mkdir()
-            result = extract_suite(archive, extracted)
+            result = extract_bundle(archive, extracted)
             self.assertTrue((result / "client").stat().st_mode & stat.S_IXUSR)
 
 
-class MicroInputTests(unittest.TestCase):
-    """Verify archive integrity before any content reaches a staging directory."""
+class NativeProductTests(unittest.TestCase):
+    """Each assembler works with the other product's inputs completely absent."""
 
-    @staticmethod
-    def archive(entries: dict[str, bytes]) -> bytes:
-        buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, "w") as archive:
-            for name, payload in entries.items():
-                archive.writestr(name, payload)
-        return buffer.getvalue()
+    def assemble_product(self, root: Path, product: str) -> Path:
+        target = next(target for target in TARGETS if target.platform == "linux")
+        version, commit = check_versions(), "a" * 40
+        binaries = root / "target" / target.triple / "release"
+        binaries.mkdir(parents=True)
+        (root / "docs").mkdir()
+        (root / f"docs/ALPHA_{product.upper()}_QUICKSTART.md").write_text("Product instructions")
+        (root / "LICENSE.md").write_text("License")
+        notices = root / "notices.html"
+        notices.write_text("Notices")
+        header = bytearray(64)
+        header[:6] = b"\x7fELF\x02\x01"
+        struct.pack_into("<H", header, 18, 62)
 
-    def test_digest_mismatch_does_not_extract(self):
+        def executable(path: Path):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(header)
+            path.chmod(0o755)
+
+        content, package = None, None
+        descriptor = root / "cli-content.json"
+        if product == "cli":
+            for binary in ("tui", "dat2hba", "dat-tool"):
+                executable(binaries / binary)
+            (root / "scripts").mkdir()
+            for name in ("fighter.js", "mage.js", "mage.data.json", "mage.data.bin"):
+                (root / "scripts" / name).write_bytes(b"script or sidecar")
+            data, checksum = cli_archive(cli_components())
+            content = root / "staged-content"
+            unpack_cli_content(data, checksum, content)
+            descriptor.write_text(json.dumps({"sha256": checksum}))
+        else:
+            package = root / "electron"
+            executable(binaries / "holtburger-3d-host")
+            executable(package / "holtburger-3d")
+            executable(package / "resources/holtburger-3d-host")
+        args = Namespace(product=product, target=target.triple, content=content,
+                         package=package, notices=notices, output=root / "output")
+        with patch("alpha_release.ROOT", root), \
+             patch("alpha_release.CLI_CONTENT_DESCRIPTOR", descriptor), \
+             patch("alpha_release.sys.platform", "linux"), \
+             patch("alpha_release.check_versions", return_value=version), \
+             patch("alpha_release.source_identity", return_value=(commit, False)), \
+             patch("alpha_release.inspect_linkage", return_value={}), \
+             patch("alpha_release.run", return_value=json.dumps({"version": version, "revision": commit[:8], "modified": False})) as command:
+            assemble(args)
+            if product == "cli":
+                command.assert_not_called()
+            else:
+                self.assertTrue(all(call.args[:2] == ("node", "scripts/verify-electron-package.mjs") for call in command.call_args_list))
+            metadata = json.loads((args.output / f"metadata-{product}-{target.triple}.json").read_text())
+            extracted = root / "extracted"
+            extracted.mkdir()
+            bundle = extract_bundle(args.output / metadata["archive"], extracted)
+            self.assertEqual(verify_bundle(bundle)["product"], product)
+        return bundle
+
+    def test_cli_archive_has_complete_content_tools_and_scripts_without_electron(self):
         with tempfile.TemporaryDirectory() as temporary:
-            output = Path(temporary) / "content"
-            with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
-                unpack_micro(b"untrusted", "0" * 64, output)
-            self.assertFalse(output.exists())
+            bundle = self.assemble_product(Path(temporary), "cli")
+            self.assertEqual({path.name for path in bundle.iterdir()}, {
+                "holtburger-cli", "dat2hba", "dat-tool", "content", "scripts",
+                "QUICKSTART.md", "LICENSE.md", "THIRD_PARTY_NOTICES.html", "build-info.json",
+            })
+            self.assertEqual({path.name for path in (bundle / "content").iterdir()}, set(CONTENT_FILES))
+            info = json.loads((bundle / "build-info.json").read_text())
+            self.assertEqual(set(info["contentFiles"]), set(CONTENT_FILES))
+            (bundle / "content/bootstrap.hba").write_bytes(b"substituted")
+            with self.assertRaisesRegex(ValueError, "CLI content digest mismatch"):
+                verify_bundle(bundle)
 
-    def test_zip_paths_are_not_used_as_extraction_destinations(self):
-        data = self.archive({"../assets.hba": b"HBA\0"})
+    def test_3d_archive_contains_only_the_application_and_common_documents(self):
         with tempfile.TemporaryDirectory() as temporary:
-            with self.assertRaisesRegex(ValueError, "exactly assets.hba"):
-                unpack_micro(data, hashlib.sha256(data).hexdigest(), Path(temporary) / "content")
-
-    def test_verified_payload_and_original_zip_are_retained(self):
-        payload = b"HBA\0" + bytes(20)
-        data = self.archive({"assets.hba": payload})
-        with tempfile.TemporaryDirectory() as temporary:
-            output = Path(temporary) / "content"
-            unpack_micro(data, hashlib.sha256(data).hexdigest(), output)
-            self.assertEqual((output / "assets.hba").read_bytes(), payload)
-            self.assertEqual((output / "micro-hba.zip").read_bytes(), data)
+            bundle = self.assemble_product(Path(temporary), "3d")
+            self.assertEqual({path.name for path in bundle.iterdir()}, {
+                "h3d", "QUICKSTART.md", "LICENSE.md", "THIRD_PARTY_NOTICES.html", "build-info.json",
+            })
+            info = json.loads((bundle / "build-info.json").read_text())
+            self.assertEqual(info["product"], "3d")
+            (bundle / "content").mkdir()
+            with self.assertRaisesRegex(ValueError, "3d bundle root entries"):
+                verify_bundle(bundle)
 
 
 class ReleaseVersionTests(unittest.TestCase):
@@ -172,7 +295,7 @@ class CandidatePlanningTests(unittest.TestCase):
                 patch("alpha_release.subprocess.run") as ancestry,
                 redirect_stdout(io.StringIO()) as stdout,
             ):
-                plan()
+                plan("both", "all", "candidate")
             result = json.loads(stdout.getvalue())
             self.assertEqual(result["commit"], commit)
             self.assertEqual(result["tag"], f"alpha-20261027-{commit[:9]}")
@@ -191,7 +314,7 @@ class CandidatePlanningTests(unittest.TestCase):
             patch("alpha_release.source_identity", return_value=("a" * 40, False)),
         ):
             with self.assertRaisesRegex(ValueError, "3d-next branch"):
-                plan()
+                plan("both", "all", "candidate")
 
     def test_tag_plan_preserves_the_requested_tag(self):
         commit = "a" * 40
@@ -203,7 +326,7 @@ class CandidatePlanningTests(unittest.TestCase):
             patch("alpha_release.subprocess.run"),
             redirect_stdout(io.StringIO()) as stdout,
         ):
-            plan()
+            plan("both", "all", "candidate")
         self.assertEqual(json.loads(stdout.getvalue())["tag"], tag)
 
     def test_tag_creation_ignores_longer_prefix_matches(self):
@@ -245,176 +368,179 @@ class CandidatePlanningTests(unittest.TestCase):
 
 
 class ReleaseManifestTests(unittest.TestCase):
-    """Aggregate metadata must describe one complete candidate, including shared notices."""
+    """Aggregate metadata requires both products, shared source identity, and exact inputs."""
 
-    def test_complete_matrix_and_shared_notices_are_required(self):
-        version = check_versions()
-        commit = "a" * 40
+    def test_complete_products_targets_content_and_notices_are_required(self):
+        version, commit = check_versions(), "a" * 40
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            micro = root / f"holtburger-micro-{version}.zip"
-            micro.write_bytes(b"synthetic micro")
             notices = root / "THIRD_PARTY_NOTICES.html"
             notices.write_text("original notices")
-            hba_sha256 = hashlib.sha256(b"synthetic HBA").hexdigest()
-            for target in TARGETS:
-                archive = root / f"suite-{target.triple}.zip"
-                archive.write_bytes(target.triple.encode())
-                record = {
-                    "commit": commit, "version": version, "modified": False,
-                    "target": target.triple, "microSha256": digest(micro),
-                    "microHbaSha256": hba_sha256,
-                    "noticesSha256": digest(notices), "archive": archive.name,
-                    "sha256": digest(archive),
-                }
-                (root / f"metadata-{target.triple}.json").write_text(json.dumps(record))
-            for stem in ("holtburger-cli", "holtburger-alpha"):
-                bundle = root / f"{stem}-{version}-x86_64.flatpak"
-                bundle.write_bytes(stem.encode())
-                record = {
-                    "commit": commit, "version": version, "modified": False,
-                    "target": next(target.triple for target in TARGETS if target.platform == "linux"),
-                    "microSha256": digest(micro), "microHbaSha256": hba_sha256,
-                    "noticesSha256": digest(notices), "appId": f"io.github.merklejerk.{stem}",
-                    "archive": bundle.name, "sha256": digest(bundle),
-                    "runtime": flatpak_runtime_ref(json.loads(SUITE_FLATPAK_RECIPE.read_text())),
-                }
-                (root / f"metadata-{stem}-flatpak.json").write_text(json.dumps(record))
-            (root / ".github").mkdir()
-            descriptor = root / ".github/alpha-content.json"
-            descriptor.write_text(json.dumps({"sha256": digest(micro)}))
+            content = {"contentSha256": "c" * 64,
+                       "contentFiles": {name: hashlib.sha256(name.encode()).hexdigest() for name in CONTENT_FILES}}
+            identity = {"commit": commit, "version": version, "modified": False,
+                        "noticesSha256": digest(notices)}
+            for product in ("cli", "3d"):
+                for target in TARGETS:
+                    extension = ".tar.gz" if target.platform == "linux" else ".zip"
+                    archive = root / f"holtburger-{product}-{version}-{target.triple}{extension}"
+                    archive.write_bytes(f"{product}/{target.triple}".encode())
+                    record = {**identity, "product": product, "target": target.triple,
+                              "archive": archive.name, "sha256": digest(archive)}
+                    if product == "cli":
+                        record.update(content)
+                    (root / f"metadata-{product}-{target.triple}.json").write_text(json.dumps(record))
+                bundle = root / f"holtburger-{product}-{version}-x86_64.flatpak"
+                bundle.write_bytes(product.encode())
+                record = {**identity, "product": product,
+                          "target": next(target.triple for target in TARGETS if target.platform == "linux"),
+                          "appId": f"io.github.merklejerk.holtburger-{'cli' if product == 'cli' else 'alpha'}",
+                          "archive": bundle.name, "sha256": digest(bundle),
+                          "runtime": flatpak_runtime_ref(json.loads(THREED_FLATPAK_RECIPE.read_text()))}
+                if product == "cli":
+                    record.update(content)
+                (root / f"metadata-{product}-flatpak.json").write_text(json.dumps(record))
+            descriptor = root / "cli-content.json"
+            descriptor.write_text(json.dumps({"sha256": content["contentSha256"]}))
             with patch("alpha_release.source_identity", return_value=(commit, False)), \
-                 patch("alpha_release.ROOT", root):
+                 patch("alpha_release.CLI_CONTENT_DESCRIPTOR", descriptor):
                 files = manifest(root)
-                self.assertIn(notices, files)
+                expected_downloads = {notices.name, "release-manifest.json", "SHA256SUMS"}
+                expected_downloads.update(record["archive"] for record in json.loads((root / "release-manifest.json").read_text())["native"])
+                expected_downloads.update(f"holtburger-{product}-{version}-x86_64.flatpak" for product in ("cli", "3d"))
+                self.assertEqual({path.name for path in files}, expected_downloads)
                 self.assertIn("THIRD_PARTY_NOTICES.html", (root / "SHA256SUMS").read_text())
-                full_suite = root / f"holtburger-alpha-{version}-x86_64.flatpak"
-                self.assertIn(full_suite, files)
-                self.assertEqual(len(files), 9)
-                full_suite.write_bytes(b"substituted bundle")
+                threed = root / f"holtburger-3d-{version}-x86_64.flatpak"
+                threed.write_bytes(b"substituted bundle")
                 with self.assertRaisesRegex(ValueError, "Flatpak release archive mismatch"):
                     manifest(root)
-                full_suite.unlink()
+                threed.unlink()
                 with self.assertRaises(FileNotFoundError):
                     manifest(root)
-                full_suite.write_bytes(b"holtburger-alpha")
-                receipt = root / "metadata-holtburger-alpha-flatpak.json"
+                threed.write_bytes(b"3d")
+                receipt = root / "metadata-3d-flatpak.json"
                 record = json.loads(receipt.read_text())
-                receipt.write_text(json.dumps({**record, "commit": "b" * 40}))
-                with self.assertRaisesRegex(ValueError, "Flatpak release identity mismatch"):
-                    manifest(root)
-                receipt.write_text(json.dumps({**record, "runtime": "org.example.Other/x86_64/test"}))
-                with self.assertRaisesRegex(ValueError, "Flatpak release identity mismatch"):
-                    manifest(root)
+                for change in ({"commit": "b" * 40}, {"runtime": "org.example.Other/x86_64/test"},
+                               {"appId": "io.github.merklejerk.holtburger-3d"}):
+                    receipt.write_text(json.dumps({**record, **change}))
+                    with self.subTest(change=change), self.assertRaisesRegex(ValueError, "Flatpak release identity mismatch"):
+                        manifest(root)
                 receipt.write_text(json.dumps(record))
+                cli_receipt = root / f"metadata-cli-{TARGETS[-1].triple}.json"
+                cli_record = json.loads(cli_receipt.read_text())
+                cli_receipt.write_text(json.dumps({**cli_record, "contentFiles": {**content["contentFiles"], "navigation.hnav": "d" * 64}}))
+                with self.assertRaisesRegex(ValueError, "different content companions"):
+                    manifest(root)
+                cli_receipt.write_text(json.dumps(cli_record))
                 notices.write_text("different notices")
                 with self.assertRaisesRegex(ValueError, "Release identity mismatch"):
                     manifest(root)
                 notices.write_text("original notices")
-                (root / f"metadata-{TARGETS[-1].triple}.json").unlink()
+                (root / f"metadata-3d-{TARGETS[-1].triple}.json").unlink()
                 with self.assertRaises(FileNotFoundError):
                     manifest(root)
 
 
-class SuiteFlatpakTests(unittest.TestCase):
-    """A second package format must preserve the inspected candidate's identity and bytes."""
+class ProductFlatpakTests(unittest.TestCase):
+    """Both formats preserve the selected native product's identity and payload bytes."""
 
     def setUp(self):
         self.commit = "a" * 40
         self.info = {
             "commit": self.commit, "version": check_versions(), "modified": False,
             "target": next(target.triple for target in TARGETS if target.platform == "linux"),
+            "product": "3d",
         }
 
-    def test_manifest_binds_the_inspected_suite_and_resolves_source_paths(self):
-        recipe = {"modules": [{
-            "name": "helper", "sources": [{"type": "patch", "path": "helper.patch"}],
-        }, {
-            "name": "holtburger-alpha", "build-commands": [],
-            "sources": [{"type": "file", "path": "launcher"}],
-        }]}
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            suite, output = root / "inspected suite", root / "generated/manifest.json"
-            with patch("alpha_release.verify_suite", return_value=self.info), \
-                 patch("alpha_release.source_identity", return_value=(self.commit, False)), \
-                 patch("alpha_release.run", return_value=json.dumps(recipe)):
-                suite_flatpak_manifest(suite, output)
-            modules = json.loads(output.read_text())["modules"]
-            self.assertTrue(Path(modules[0]["sources"][0]["path"]).is_absolute())
-            sources = modules[1]["sources"]
-            self.assertTrue(Path(sources[0]["path"]).is_absolute())
-            self.assertEqual(sources[-1], {"type": "dir", "path": str(suite.resolve()), "dest": "suite"})
+    def test_manifests_bind_only_the_selected_native_payload(self):
+        for product in ("cli", "3d"):
+            recipe = {"modules": [{
+                "name": "helper", "sources": [{"type": "patch", "path": "helper.patch"}],
+            }, {
+                "name": f"holtburger-{product}", "build-commands": [],
+                "sources": [{"type": "file", "path": "launcher"},
+                            {"type": "dir", "path": "placeholder", "dest": "bundle"}],
+            }]}
+            with self.subTest(product=product), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                native, output = root / "inspected native", root / "generated/manifest.json"
+                with patch("alpha_release.verify_bundle", return_value={**self.info, "product": product}), \
+                     patch("alpha_release.source_identity", return_value=(self.commit, False)), \
+                     patch("alpha_release.flatpak_recipe", return_value=recipe):
+                    flatpak_manifest(native, output)
+                modules = json.loads(output.read_text())["modules"]
+                self.assertTrue(Path(modules[0]["sources"][0]["path"]).is_absolute())
+                sources = modules[1]["sources"]
+                self.assertTrue(Path(sources[0]["path"]).is_absolute())
+                self.assertEqual(sources[-1], {"type": "dir", "path": str(native.resolve()), "dest": "bundle"})
 
     def test_wrong_commit_modified_input_and_wrong_platform_are_refused(self):
         for change in ({"commit": "b" * 40}, {"modified": True}, {"target": "other-target"}):
             with self.subTest(change=change), \
-                 patch("alpha_release.verify_suite", return_value={**self.info, **change}), \
+                 patch("alpha_release.verify_bundle", return_value={**self.info, **change}), \
                  patch("alpha_release.source_identity", return_value=(self.commit, False)), \
-                 patch("alpha_release.run") as command:
+                 patch("alpha_release.flatpak_recipe") as recipe:
                 with self.assertRaises(ValueError):
-                    suite_flatpak_manifest(Path("suite"), Path("manifest.json"))
-                command.assert_not_called()
+                    flatpak_manifest(Path("native"), Path("manifest.json"))
+                recipe.assert_not_called()
 
     def test_changed_installed_executable_is_refused_even_with_matching_build_info(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            suite, files = root / "native", root / "files"
+            native, files = root / "native", root / "files"
             installed = files / "lib/holtburger"
-            suite.mkdir()
+            native.mkdir()
             installed.mkdir(parents=True)
-            (suite / "executable").write_bytes(b"inspected native executable")
+            (native / "build-info.json").write_text(json.dumps(self.info))
+            (installed / "build-info.json").write_text(json.dumps(self.info))
+            (native / "executable").write_bytes(b"inspected native executable")
             (installed / "executable").write_bytes(b"changed executable")
-            with patch("alpha_release.verify_suite", return_value=self.info), \
+            with patch("alpha_release.verify_bundle", return_value=self.info), \
                  patch("alpha_release.source_identity", return_value=(self.commit, False)):
-                with self.assertRaisesRegex(ValueError, "suite file differs"):
-                    record_suite_flatpak(files, suite, root / "bundle", root / "receipt")
+                with self.assertRaisesRegex(ValueError, "Flatpak file differs"):
+                    record_flatpak(files, native, root / "bundle", root / "receipt")
 
-
-class TuiFlatpakTests(unittest.TestCase):
-    """Installed TUI receipts must bind the binary and data, not just a bundle filename."""
-
-    def test_installed_inputs_are_hashed_and_substitution_is_refused(self):
-        commit = "a" * 40
-        version = check_versions()
-        recipe = {"id": "io.github.merklejerk.holtburger-cli",
-                  "runtime": "org.example.Runtime", "runtime-version": "test"}
+    def test_installed_cli_contains_the_full_native_inventory_with_bound_receipt(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            files = root / "app/files"
-            binary = files / "bin/holtburger-cli"
-            binary.parent.mkdir(parents=True)
-            elf = bytearray(64)
-            elf[:6] = b"\x7fELF\x02\x01"
-            struct.pack_into("<H", elf, 18, 62)
-            binary.write_bytes(elf)
-            micro = files / "share/holtburger/dats/assets.hba"
-            micro.parent.mkdir(parents=True)
-            micro.write_bytes(b"synthetic content")
-            notices = files / "share/licenses/holtburger/THIRD_PARTY_NOTICES.html"
-            notices.parent.mkdir(parents=True)
-            notices.write_text("original notices")
-            runtime = "org.example.Runtime/x86_64/test"
-            (files.parent / "metadata").write_text(
-                f"[Application]\nname={recipe['id']}\nruntime={runtime}\n"
-            )
-            info = {"commit": commit, "version": version, "modified": False,
-                    "target": next(target.triple for target in TARGETS if target.platform == "linux"),
-                    "binarySha256": digest(binary), "microHbaSha256": digest(micro),
-                    "noticesSha256": digest(notices)}
-            (files / "share/holtburger/build-info.json").write_text(json.dumps(info))
-            bundle, output = root / "tui.flatpak", root / "receipt.json"
-            bundle.write_bytes(b"test bundle")
-            with patch("alpha_release.source_identity", return_value=(commit, False)), \
-                 patch("alpha_release.tui_flatpak_recipe", return_value=recipe):
-                record_tui_flatpak(files, bundle, output)
+            native = NativeProductTests().assemble_product(root, "cli")
+            files = root / "flatpak/files"
+            installed = files / "lib/holtburger"
+            shutil.copytree(native, installed)
+            (files / "bin").mkdir()
+            for tool in ("holtburger-cli", "dat2hba", "dat-tool"):
+                (files / "bin" / tool).symlink_to(f"/app/lib/holtburger/{tool}")
+            recipe = {"id": "io.github.merklejerk.holtburger-cli",
+                      "runtime": "org.freedesktop.Platform", "runtime-version": "26.08"}
+            runtime = flatpak_runtime_ref(recipe)
+            (files.parent / "metadata").write_text(f"[Application]\nname={recipe['id']}\nruntime={runtime}\n")
+            bundle = root / "cli.flatpak"
+            bundle.write_bytes(b"synthetic Flatpak container")
+            output = root / "record.json"
+            with patch("alpha_release.source_identity", return_value=(self.commit, False)), \
+                 patch("alpha_release.flatpak_recipe", return_value=recipe):
+                record_flatpak(files, native, bundle, output)
                 record = json.loads(output.read_text())
+                self.assertEqual(record["product"], "cli")
                 self.assertEqual(record["sha256"], digest(bundle))
                 self.assertEqual(record["runtime"], runtime)
-                self.assertEqual(record["appId"], recipe["id"])
-                micro.write_bytes(b"substituted content")
-                with self.assertRaisesRegex(ValueError, "Installed TUI Flatpak input differs"):
-                    record_tui_flatpak(files, bundle, output)
+                self.assertEqual(record["contentFiles"], json.loads((native / "build-info.json").read_text())["contentFiles"])
+                executable = installed / "dat-tool"
+                executable.chmod(0o644)
+                with self.assertRaisesRegex(ValueError, "executable has lost permissions"):
+                    record_flatpak(files, native, bundle, output)
+                executable.chmod(0o755)
+                metadata = files.parent / "metadata"
+                for field, value, message in (("name", "io.github.merklejerk.holtburger-alpha", "application ID"),
+                                               ("runtime", "org.example.Wrong/x86_64/test", "runtime differs")):
+                    values = {"name": recipe["id"], "runtime": runtime, field: value}
+                    metadata.write_text(f"[Application]\nname={values['name']}\nruntime={values['runtime']}\n")
+                    with self.subTest(field=field), self.assertRaisesRegex(ValueError, message):
+                        record_flatpak(files, native, bundle, output)
+                metadata.write_text(f"[Application]\nname={recipe['id']}\nruntime={runtime}\n")
+                (installed / "content/navigation.hnav").write_bytes(b"substituted")
+                with self.assertRaisesRegex(ValueError, "Flatpak file differs: content/navigation.hnav"):
+                    record_flatpak(files, native, bundle, output)
 
 
 class DraftPublicationTests(unittest.TestCase):
@@ -424,7 +550,7 @@ class DraftPublicationTests(unittest.TestCase):
         commit = "a" * 40
         tag = "alpha-20261027-" + commit[:8]
         with tempfile.TemporaryDirectory() as temporary:
-            artifact = Path(temporary) / "suite.zip"
+            artifact = Path(temporary) / "bundle.zip"
             artifact.write_bytes(b"verified candidate")
             calls = []
 
@@ -492,7 +618,7 @@ class DraftPublicationTests(unittest.TestCase):
         commit = "a" * 40
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            artifact = root / "suite.zip"
+            artifact = root / "bundle.zip"
             artifact.write_bytes(b"verified candidate")
             for draft, asset_digest, diagnostic in (
                 (False, None, "published release"),

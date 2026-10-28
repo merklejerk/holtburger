@@ -1,0 +1,17 @@
+#!/bin/sh
+# Exercise the selected CLI content and tools without launching the interactive TUI.
+set -eu
+if [ "$#" -ne 1 ]; then
+  printf '%s\n' 'Usage: verify-cli-installed /absolute/path/to/content_bootstrap' >&2
+  exit 1
+fi
+bootstrap=$1
+bootstrap_root=$(dirname "$bootstrap")
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+flatpak run --user --filesystem="$bootstrap_root":ro --command="$bootstrap" \
+  io.github.merklejerk.holtburger-cli /app/lib/holtburger/content
+flatpak run --user --command=dat-tool io.github.merklejerk.holtburger-cli --help
+flatpak run --user --command=dat2hba io.github.merklejerk.holtburger-cli --help
+flatpak run --user --command=sh io.github.merklejerk.holtburger-cli -c \
+  'test -r "$HOLTBURGER_CONTENT/bootstrap.hba" && test -r "$HOLTBURGER_CONTENT/navigation.hnav" && test -d "$SCRIPT_BUNDLE_DIR" && test ! -w "$SCRIPT_BUNDLE_DIR" && mkdir -p "$SCRIPT_DIR" && test -w "$SCRIPT_DIR"'
+python3 "$repo_root/.github/scripts/probe_flatpak_io.py" --product cli

@@ -1,6 +1,7 @@
 //! Resident static collision geometry and explicit query families.
 
 mod entity_surface_ray;
+mod point_placement;
 mod selection_ray;
 mod solid_recovery;
 mod static_sphere_sweep;
@@ -10,6 +11,7 @@ mod static_surface_ray;
 mod surface_ray_path;
 
 pub use entity_surface_ray::{CollisionSurfaceRayHit, EntitySurfaceRayHit};
+pub use point_placement::PointPlacement;
 pub use selection_ray::{
     AvailableEntitySelectionCandidates, EntitySelectionCandidateResult, EntitySelectionQueryError,
     EntitySelectionRayRequest, EntitySelectionUnavailable,
@@ -52,6 +54,9 @@ static NEXT_COLLISION_SCENE_LINEAGE: AtomicU64 = AtomicU64::new(1);
 /// Invalid collision-query geometry rejected before traversal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
 pub enum CollisionQueryError {
+    /// A point-placement query has no coordinate-frame identity.
+    #[error("point placement requires a non-null position")]
+    NullPlacement,
     /// A center contains NaN or infinity.
     #[error("collision query center must be finite")]
     NonFiniteCenter,

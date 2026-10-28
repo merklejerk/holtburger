@@ -128,6 +128,31 @@ pub fn retail_grounded_body_with_policy(
     })
 }
 
+/// Selects ordinary entity response from setup-owned motion geometry, without loading models.
+/// Both full and navigation preparation retain the same sphere roles and semantic physics flags.
+pub(crate) fn setup_movement_definition(
+    setup: &SetupModel,
+    spheres: PhysicalSphereSet,
+    physics: holtburger_world::EffectiveEntityPhysicsState,
+    response_policy: PhysicalBodyResponsePolicy,
+) -> Result<PhysicalBodyDefinition, SetupPhysicalShapeError> {
+    if setup.spheres.is_empty() {
+        return Ok(PhysicalBodyDefinition::fixed_position(spheres)?);
+    }
+    let edge_protection = if physics.response.edge_slide {
+        EdgeProtection::Creature
+    } else {
+        EdgeProtection::None
+    };
+    Ok(retail_grounded_body_with_policy(
+        spheres,
+        edge_protection,
+        if physics.response.gravity { -9.8 } else { 0.0 },
+        response_policy,
+    )?
+    .definition)
+}
+
 /// The retail player as a grounded body: the authored human sphere pair over
 /// [`retail_grounded_body`].
 ///

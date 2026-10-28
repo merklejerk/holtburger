@@ -16,6 +16,9 @@ binrw.workspace = true
 log.workspace = true
 directories.workspace = true
 thiserror.workspace = true
+zstd.workspace = true
+rmp-serde.workspace = true
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -21,19 +21,19 @@ use holtburger_dat::file_type::{
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use holtburger_world::{
     CollisionReportOutcome, DynamicBodyCollisionDefinition, DynamicBodyKinematics,
-    DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EdgeProtection,
-    EffectiveEntityPhysicsState, EntityAppearance, EntityPhysicsSetupFacts, EntityPlacement,
-    PhysicalBodyParticipation, PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome,
-    PhysicalBodyResponsePolicy, PhysicalBodyState, PhysicalCollisionFilter, PhysicalElasticity,
-    PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
-    PreparedEntityBspPart, PreparedEntityTargetGeometry, RuntimeSpatialBodyView, SpatialBody,
-    SpatialBodyId, SpatialMembership, SpatialScene, resolve_effective_entity_physics_state,
+    DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EffectiveEntityPhysicsState,
+    EntityAppearance, EntityPhysicsSetupFacts, EntityPlacement, PhysicalBodyParticipation,
+    PhysicalBodyReconfiguration, PhysicalBodyReconfigurationOutcome, PhysicalBodyResponsePolicy,
+    PhysicalBodyState, PhysicalCollisionFilter, PhysicalElasticity, PhysicalFriction,
+    PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion, PreparedEntityBspPart,
+    PreparedEntityTargetGeometry, RuntimeSpatialBodyView, SpatialBody, SpatialBodyId,
+    SpatialMembership, SpatialScene, resolve_effective_entity_physics_state,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::physical_body_definition::{
-    SetupPhysicalShapeError, resolve_setup_physical_spheres, retail_grounded_body_with_policy,
+    SetupPhysicalShapeError, resolve_setup_physical_spheres, setup_movement_definition,
 };
 
 pub use holtburger_world::entity_classification::{
@@ -859,32 +859,14 @@ fn prepare_dynamic_entity_physical_facts(
         surface_motion: PhysicalSurfaceMotion::Stable,
         align_path: physics.response.align_path,
     };
-    let edge_protection = if physics.response.edge_slide {
-        EdgeProtection::Creature
-    } else {
-        EdgeProtection::None
-    };
-    let gravity = if physics.response.gravity { -9.8 } else { 0.0 };
-    let movement = if setup.spheres.is_empty() {
-        holtburger_world::PhysicalBodyDefinition::fixed_position(movement_spheres)
-            .map_err(SetupPhysicalShapeError::from)
-    } else {
-        retail_grounded_body_with_policy(
-            movement_spheres,
-            edge_protection,
-            gravity,
-            response_policy,
-        )
-        .map(|profile| profile.definition)
-        .map_err(SetupPhysicalShapeError::from)
-    }
-    .map_err(
-        |source| DynamicEntityPhysicalPreparationError::MovementGeometry {
-            wcid,
-            setup_did,
-            source,
-        },
-    )?;
+    let movement = setup_movement_definition(&setup, movement_spheres, physics, response_policy)
+        .map_err(
+            |source| DynamicEntityPhysicalPreparationError::MovementGeometry {
+                wcid,
+                setup_did,
+                source,
+            },
+        )?;
     let mut target_geometry = prepare_target_geometry(
         wcid,
         setup_did,
@@ -1313,10 +1295,12 @@ fn world_position_is_finite(position: WorldPosition) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::physical_body_definition::retail_grounded_body_with_policy;
     use holtburger_common::properties::PhysicsState;
     use holtburger_content::{
         CollisionBall, LandblockColliders, LandblockCollisionAsset, TerrainCollisionSurface,
     };
+    use holtburger_world::EdgeProtection;
     use holtburger_world::{
         DynamicBodyCollisionDefinition, EntityCollisionParticipation, EntityPartChange,
         EntitySubPalette, EntityTextureChange, GroundedBodyActuation, LocalIntegrationDemand,

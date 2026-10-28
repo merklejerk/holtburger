@@ -300,6 +300,33 @@ The important boundary is that the core preserves protocol fidelity for motion-s
 
 ## Internal Data Flow
 
+### Movement composition and reduced clients
+
+The frontend owns steering: approach/follow targets, arrival distances, and input mapping.
+`ClientRuntimeBuilder` chooses the compatible simulation composition through
+`physical_movement_source` or `navigation_content`. `MovementSystem` executes that composition
+inside the same runtime, authoritative world, motion lifecycle, and packet publisher.
+
+Physical composition retains full local/remote collision behavior. Navigation composition uses
+point-valid local commitment and room-shell/terrain remote prediction. Core-owned
+`NavigationProgress` holds uncommitted intent progress across known voids; it never supplies world
+queries or packet positions. World receives only valid committed endpoints. Missing/ambiguous
+coverage waits without banking travel. An input pulse is consumed once; simulation ticks between
+pulses preserve progress. Intent cancellation, source replacement, correction, and world epochs
+retire/rebase that progress. Accepted cell changes retain the normal immediate publication trigger.
+
+For gameplay requests, a reduced client delegates eligibility decisions it cannot simulate to
+ACE rather than permanently rejecting requests for missing local physical results. Missile
+requests in navigation mode therefore reach ACE without a solved grounded-body requirement;
+physical mode retains its grounded gate. Existing target, busy, ownership, range, and available
+scene checks remain meaningful. This rule does not authorize invalid position reports, treat
+unavailable content as open space, or invent local capabilities: navigation still reports local
+jumping as unsupported because it cannot produce that movement.
+
+The content layer provides static products; world owns canonical bodies, containment queries,
+reconciliation, and interaction semantics. The execution policy does not fork those owners or
+weaken the physical composition to satisfy TUI presentation requirements.
+
 ```mermaid
 sequenceDiagram
     participant Net as Session (UDP Transport)

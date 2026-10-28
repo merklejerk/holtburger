@@ -83,7 +83,7 @@ pub(super) fn has_stop_navigation_command(result: &UpdateResult) -> bool {
         matches!(
             command,
             ClientCommand::DriveSelf(PlayerDriveIntent::ClientDirected(
-                ClientDirectedCommand::Settle { pose: None } | ClientDirectedCommand::Release
+                ClientDirectedCommand::Settle | ClientDirectedCommand::Release
             ))
         )
     })
@@ -94,7 +94,7 @@ pub(super) fn has_arrival_navigation_command(result: &UpdateResult) -> bool {
         matches!(
             command,
             ClientCommand::DriveSelf(PlayerDriveIntent::ClientDirected(
-                ClientDirectedCommand::Settle { pose: Some(_) }
+                ClientDirectedCommand::Settle
             ))
         )
     })

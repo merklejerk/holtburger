@@ -37,7 +37,7 @@ or sibling-extension probing, returning a repository and canonical selection ide
 `ResolvedContent::discover` tries an app-supplied portable directory followed by the shared platform
 data directory. Missing locations and directories without archives are skipped; invalid selected
 archives fail explicitly. Legacy `ContentRepository::discover` retains HBA/environment discovery
-for existing TUI and tooling consumers; h3d uses the explicit selection APIs.
+for tooling consumers; h3d uses the explicit selection APIs and TUI uses `NavigationContent`.
 
 Retail role identification uses header dataset/subset, allowing one base portal, optional highres
 portal, cell, and language archive per installation. Highres shares `eor/portal` and takes precedence
@@ -226,6 +226,34 @@ the shallow foundation by normalized landblock ID, and exposes generated and int
 that reacquire that exact foundation. Region-independent asset requests remain available without
 RegionDesc. Generated and interior results are not separately cached without measurements
 demonstrating a need.
+
+## Prepared navigation content
+
+`NavigationContent` opens exactly one prepared directory or one full HBA file. The app owns
+candidate precedence; this crate skips only absent candidates and reports existing malformed
+selections. A prepared directory contains an indexed `bootstrap.hba` and its digest-bound
+`navigation.hnav` companion. It does not layer other archives or discover retail DATs.
+
+Bootstrap reads expose parsed catalogs and authored setup dimensions without model preparation.
+The same indexed repository supplies complete character-generation choices and motion data.
+`SetupDimensionCatalog` carries authored radius/height; world applies current entity scale and
+canonical placement when deriving interaction ranges.
+
+`NavigationSceneSource` reads independently compressed owner blocks and shared Environment
+structures, then projects the existing cell/terrain/collision products. It retains immutable
+shared geometry through `Arc`. Full-HBA navigation uses `LandblockRoomShellAssembler` over the
+same shallow foundation/interior products. This assembler is also used by the full physical
+collision assembly; neither navigation storage path reads furniture, scenery, or visual models.
+
+The output contains room containment planes, physics shells, portal apertures/connections,
+resolved terrain, and building transition metadata. These are static products: movement intent,
+simulation policy, authoritative placement, and packet timing belong to core/world. The prepared
+format does not select how a client traverses cells. h3d retains its full-content asset service.
+
+See [navigation format](../../docs/navigation_format.md) for framing and version ownership.
+`cli-content` in `holtburger-tools` generates and inspects the approved distributable pair locally;
+release tooling validates its pinned ZIP and component identities. Runtime performs focused
+codec/companion validation rather than a source-corpus census.
 
 ## Dependencies
 

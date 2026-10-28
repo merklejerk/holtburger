@@ -56,6 +56,7 @@ mod map_teleport;
 mod messages;
 mod movement;
 pub mod movement_types;
+mod navigation_body;
 pub mod object_preview;
 mod party;
 pub mod player_visual;
@@ -487,6 +488,9 @@ impl ClientRuntime {
     }
 
     fn character_motion_capabilities(&self) -> Option<ClientCharacterMotionCapabilities> {
+        if self.movement.movement_policy() == movement_types::ClientMovementPolicy::Navigation {
+            return None;
+        }
         self.world.resolve_self_jump_capabilities().ok()?;
         let stance = self.world.resolve_player_motion_style().ok()?;
         Some(ClientCharacterMotionCapabilities {
@@ -514,6 +518,9 @@ impl ClientRuntime {
     pub fn body_readiness(&self) -> Option<collision::ClientBodyReadiness> {
         self.collision_coordinator
             .as_ref()
+            .filter(|_| {
+                self.movement.movement_policy() == movement_types::ClientMovementPolicy::Physical
+            })
             .map(collision::ClientCollisionCoordinator::body_readiness)
     }
 
@@ -653,25 +660,34 @@ impl ClientRuntime {
             };
         }
 
-        let (body_ready, destination_scene_ready) = match &self.collision_coordinator {
-            Some(coordinator) => (
-                coordinator.activation_body_ready(destination.player)?
-                    && self
-                        .world
-                        .scene
-                        .body(SpatialBodyId::LocalPlayer(player.guid))
-                        .is_some_and(|body| body.physical.is_some()),
-                coordinator.destination_scene_ready(destination.residency)?,
-            ),
+        let (player_ready, destination_scene_ready) = match &self.collision_coordinator {
+            Some(coordinator) => {
+                let destination_ready =
+                    coordinator.destination_scene_ready(destination.residency)?;
+                let player_ready = match self.movement.movement_policy() {
+                    movement_types::ClientMovementPolicy::Physical => {
+                        coordinator.activation_body_ready(destination.player)?
+                            && self
+                                .world
+                                .scene
+                                .body(SpatialBodyId::LocalPlayer(player.guid))
+                                .is_some_and(|body| body.physical.is_some())
+                    }
+                    movement_types::ClientMovementPolicy::Navigation => {
+                        destination_ready && coordinator.activation_point_ready(player.position)?
+                    }
+                };
+                (player_ready, destination_ready)
+            }
             None => (false, false),
         };
         let containment_ready = self.world.all_player_contained_objects_exist();
         let reveal_ready = activation.external_reveal_generation == Some(activation.generation);
 
-        // Body preparation and static residency complete independently. A registered camera may
+        // Player policy readiness and static residency complete independently. A registered camera may
         // arrive before either worker; seeding it against the retained prior/empty scene would
         // turn ordinary asynchronous loading into a terminal missing-cell failure.
-        if body_ready
+        if player_ready
             && destination_scene_ready
             && activation.camera_settlement == ClientActivationCameraSettlement::Pending
         {
@@ -700,7 +716,7 @@ impl ClientRuntime {
             }
         }
 
-        let presentation_ready = body_ready
+        let presentation_ready = player_ready
             && destination_scene_ready
             && containment_ready
             && activation.camera_settlement == ClientActivationCameraSettlement::Settled
@@ -2371,6 +2387,34 @@ mod tests {
             .world
             .set_self_movement_capabilities_override(capabilities.clone());
         capabilities
+    }
+
+    #[test]
+    fn reduced_navigation_does_not_advertise_jump_charge_capabilities() {
+        const TABLE: u32 = 0x0900_0020;
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        client.world.seed_local_player_entity(
+            Guid(0x5000_0001),
+            "Player",
+            WorldPosition {
+                landblock_id: Guid(0x1234_0001),
+                ..WorldPosition::default()
+            },
+        );
+        client
+            .world
+            .set_motion_sequences(local_authored_motion_catalog(TABLE));
+        client
+            .world
+            .player_entity_mut()
+            .unwrap()
+            .set_did_prop(PropertyDataId::MotionTable, Guid(TABLE));
+        seed_test_self_movement_capabilities(&mut client);
+        seed_test_jump_authority(&mut client);
+        assert!(client.character_motion_capabilities().is_some());
+        client.movement =
+            movement::MovementSystem::with_policy(movement_types::ClientMovementPolicy::Navigation);
+        assert!(client.character_motion_capabilities().is_none());
     }
 
     fn seed_test_jump_authority(client: &mut ClientRuntime) {

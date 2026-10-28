@@ -135,6 +135,8 @@ export class WebGL2Device {
 			alpha: false,
 			antialias: false,
 			depth: true,
+			// Prefer rendering performance on hybrid GPUs; the browser may ignore this hint.
+			powerPreference: "high-performance",
 			premultipliedAlpha: false,
 			stencil: true,
 		});

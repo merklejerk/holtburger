@@ -1,4 +1,5 @@
 const { rename } = require("node:fs/promises");
+const { execFileSync } = require("node:child_process");
 const { join, relative, resolve, sep } = require("node:path");
 
 const hostBinary =
@@ -44,6 +45,19 @@ function ignoreApplicationSource(path) {
 
 module.exports = {
 	hooks: {
+		postPackage(_config, { platform, outputPaths }) {
+			if (platform !== "win32") return;
+			for (const outputPath of outputPaths)
+				execFileSync(
+					"python",
+					[
+						join(__dirname, "scripts/windows_gpu_hints.py"),
+						"patch",
+						join(outputPath, "holtburger-3d.exe"),
+					],
+					{ stdio: "inherit" },
+				);
+		},
 		async packageAfterExtract(_config, buildPath, _version, platform) {
 			if (platform !== "darwin") return;
 			// The macOS ZIP maker retains only the .app. Keep original notices inside it.

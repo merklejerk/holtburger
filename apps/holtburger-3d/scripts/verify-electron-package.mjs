@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { extractFile, listPackage } from "@electron/asar";
+import { execFileSync } from "node:child_process";
 import { constants } from "node:fs";
 import {
 	access,
@@ -18,6 +19,12 @@ const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 /** Verify the native host and compiled application payload in one Forge package directory. */
 export async function verifyElectronPackage(packageRoot) {
 	const normalizedPackageRoot = resolve(packageRoot);
+	if (process.platform === "win32")
+		execFileSync("python", [
+			join(appRoot, "scripts/windows_gpu_hints.py"),
+			"verify",
+			join(normalizedPackageRoot, "holtburger-3d.exe"),
+		]);
 	const resourcesDirectory =
 		process.platform === "darwin"
 			? join(

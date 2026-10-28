@@ -184,6 +184,8 @@ export class WebGL2PreviewRenderer {
 			alpha: true,
 			antialias: true,
 			depth: true,
+			// Keep 3D previews aligned with the world's GPU preference.
+			powerPreference: "high-performance",
 			premultipliedAlpha: true,
 			preserveDrawingBuffer: dependencies.preserveDrawingBuffer ?? false,
 			stencil: false,

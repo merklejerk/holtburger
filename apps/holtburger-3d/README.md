@@ -8,13 +8,26 @@ it through the context-isolated Electron preload boundary.
 
 On Windows, Electron defaults to `--use-angle=gl` and `--disable-gpu-vsync` to work
 around low scene frame rates and sluggish UI scrolling. An explicit native
-`--use-angle=...` switch overrides the backend default. The app-owned `--enable-vsync`
+`--use-angle=...` switch overrides the backend default. Windows startup also supplies
+`--force-high-performance-gpu` to request the faster adapter on hybrid laptops, and the
+world and 3D preview contexts request `powerPreference: "high-performance"`. These hints
+may be ignored; Windows Graphics settings may still be needed to select the dedicated GPU.
+The app-owned `--enable-vsync`
 flag restores GPU vsync on any platform, overriding the Windows default, an explicit
 `--disable-gpu-vsync`, and `--uncapped` regardless of argument order. It also removes
 `--disable-frame-rate-limit`, because Chromium's frame-rate bypass implicitly disables
 GPU vsync. Chromium has no matching native enable switch; `--disable-gpu-vsync=false`
 does not restore vsync.
 These workarounds can cause transient startup presentation artifacts on some systems.
+
+Windows packaging also exports `NvOptimusEnablement = 1` and
+`AmdPowerXpressRequestHighPerformance = 1` from the unsigned Electron executable.
+Forge patches the final packaged executable with LIEF, preserving existing exports and section
+bytes; package/archive inspection requires both hints. This selected the dedicated GPU in an
+OpenGL test on an NVIDIA/Intel hybrid laptop, but is not a guarantee across drivers or machines.
+Before packaging on Windows, install Python 3.12 or newer and run
+`npm run setup:windows-packaging`; `npm run test:windows-packaging` checks synthetic PE fixtures.
+Alpha CI installs the pinned build dependency and runs these checks automatically.
 
 The Explorer runs the shared content, scene, runtime, and WebGL2 rendering architecture against real
 client data. Client mode is a separate first-cut composition: `ClientRuntime` owns the network,

@@ -57,6 +57,12 @@ jobs:
       - name: Install frontend dependencies
         working-directory: apps/holtburger-3d
         run: npm ci
+      - name: Install and test Windows executable packaging tools
+        if: runner.os == 'Windows'
+        working-directory: apps/holtburger-3d
+        run: |
+          npm run setup:windows-packaging
+          npm run test:windows-packaging
       - name: Check native branding generation
         working-directory: apps/holtburger-3d
         run: npm run check:branding

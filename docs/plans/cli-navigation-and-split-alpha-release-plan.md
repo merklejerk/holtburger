@@ -1,9 +1,9 @@
 # CLI navigation content and separate alpha distributions
 
-Status: implementation and formal-review corrections are locally verified. The two-file
-input is uploaded, pinned, and verified through a fresh download. The user authorized
-committing/pushing the pending source, selecting `0.1.0-alpha.6`, and running one full draft
-candidate. Publication and manual acceptance remain separate. Alpha.5 stays frozen.
+Status: alpha.6 built successfully on its first attempt and is frozen in an unpublished draft.
+All automated packaging/installed probes and downloaded-asset checks pass. Source is
+`41b638f8aff47151fe8458e8142d8b329288a0c4`. Manual acceptance of these exact bytes is
+pending; publication is not authorized. Alpha.5 remains unchanged.
 Updated: 2026-10-28.
 
 ## Current steer — One TUI source contract, simple discovery
@@ -240,10 +240,11 @@ these commits and dispatching one complete draft candidate. No publication is au
 - [x] Obtain explicit go-ahead to commit/push this follow-up to `claude` and `3d-next`.
   User authorized this step after the upload round trip; candidate dispatch remains separate.
 - [x] Select `0.1.0-alpha.6` and authorize the pending commits/push plus one full draft run.
-- [ ] Perform that candidate run after committing the version bump and pushing reviewed source.
+- [x] Perform that candidate run after committing the version bump and pushing reviewed source.
   Keep alpha.5's assets intact; no publication is authorized.
-- [ ] Verify/freeze the new candidate and collect user acceptance for the changed TUI path;
-  record exactly which native/Flatpak products and targets were tested.
+- [x] Verify and freeze alpha.6 after the successful candidate run and downloaded-asset checks.
+- [ ] Collect user acceptance for the changed TUI path; record exactly which native/Flatpak
+  products and targets were tested, including any deliberately deferred native acceptance.
 - [ ] Publish only with separate authorization, reusing the accepted candidate bytes.
 
 The preceding three-file format-2 ZIP is retained locally at
@@ -259,6 +260,27 @@ all 11 asset IDs, sizes, and digests against its frozen receipt: unchanged. Remo
 `3d-next` still match local base `97ae69d2847a920141296a629e23a626b1cce41d`; no additional
 rebase is currently required. No commit/push, application candidate dispatch, or publication
 was performed in this handoff.
+
+### Frozen alpha.6 candidate — awaiting manual acceptance
+
+- Version/source: `0.1.0-alpha.6`, `41b638f8aff47151fe8458e8142d8b329288a0c4`.
+- Tag: `alpha-20261028-41b638f8a`; draft release `427067199`.
+- [Draft](https://github.com/merklejerk/holtburger/releases/tag/untagged-92f7feaa41c2d3226903); [run 40747845992](https://github.com/merklejerk/holtburger/actions/runs/40747845992).
+- Run succeeded on its first attempt in 765 seconds (12m 45s). All nine jobs passed:
+  planning, three native packages, shared validation, both installed Flatpak probe sets,
+  and complete draft staging.
+- Downloaded all 11 release assets; GitHub digests and `SHA256SUMS` match. All six native
+  archive identities and executable architectures match the source/version/target. All
+  CLI archives carry the same two approved content files. Both Flatpak receipts match the
+  native inputs and Freedesktop 26.08 runtime.
+- CI-built headless bootstrap passes against the downloaded Linux CLI archive: 13 heritage
+  groups, 568 cells, 568 shells. No interactive TUI or agent visual acceptance was performed.
+- Release notes record verification and the pending manual acceptance matrix. Asset IDs,
+  sizes, and digests remain unchanged after the notes update. Local evidence/downloads:
+  `.holtburger-local/candidate-40747845992/`.
+- Manual acceptance is pending for both products on every alpha.6 package/target. Earlier
+  alpha.5 feedback is not acceptance of these new bytes. Publish only with separate approval,
+  promoting this frozen draft without rebuilding or replacing assets.
 
 ### Frozen baseline
 

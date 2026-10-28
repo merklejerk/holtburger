@@ -8,7 +8,7 @@ are not distributed.
 Both products have native Linux x86-64, Windows x86-64, and macOS Apple Silicon archives,
 and separate Linux x86-64 Flatpaks using Freedesktop 26.08. The 3D Flatpak retains the alpha
 app ID and saved settings: `io.github.merklejerk.holtburger-alpha`. Its download is named
-`holtburger-3d`; CLI uses `io.github.merklejerk.holtburger-cli`. Archive utilities belong to
+`holtburger-3d`; CLI uses `io.github.merklejerk.holtburger-cli-alpha`. Archive utilities belong to
 CLI, including its Flatpak's `--command=dat-tool` and `--command=dat2hba` entries.
 
 Read `QUICKSTART.md` inside each product. h3d defaults to client mode and accepts explicit

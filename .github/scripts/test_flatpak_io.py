@@ -19,7 +19,7 @@ class FlatpakIoTests(unittest.TestCase):
 
             def run_tool(arguments, *, check):
                 self.assertTrue(check)
-                self.assertIn("io.github.merklejerk.holtburger-cli", arguments)
+                self.assertIn("io.github.merklejerk.holtburger-cli-alpha", arguments)
                 self.assertIn(f"--filesystem={inputs}:ro", arguments)
                 self.assertIn(f"--filesystem={outputs}:rw", arguments)
                 if "--command=dat-tool" in arguments:

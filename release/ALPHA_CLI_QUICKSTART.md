@@ -52,10 +52,12 @@ read-only. Run `./dat-tool --help` or `./dat2hba --help` for the shipped utiliti
 
 ## Flatpak
 
-Install `holtburger-cli-VERSION-x86_64.flatpak`, then run:
+Install `holtburger-cli-VERSION-x86_64.flatpak`. It appears as **Holtburger CLI Alpha**
+and can coexist with main/nightly **Holtburger CLI**, with separate settings and writable
+scripts. No settings are migrated automatically. Then run:
 
 ```sh
-flatpak run io.github.merklejerk.holtburger-cli \
+flatpak run io.github.merklejerk.holtburger-cli-alpha \
   --host SERVER --port 9000 --account ACCOUNT --password PASSWORD
 ```
 
@@ -63,11 +65,14 @@ The CLI Flatpak has the same client, utilities, scripts, and prepared content. T
 utility, set its command before the application ID:
 
 ```sh
-flatpak run --command=dat-tool io.github.merklejerk.holtburger-cli --help
-flatpak run --command=dat2hba io.github.merklejerk.holtburger-cli --help
+flatpak run --command=dat-tool io.github.merklejerk.holtburger-cli-alpha --help
+flatpak run --command=dat2hba io.github.merklejerk.holtburger-cli-alpha --help
 ```
 
 Grant external input/output directories explicitly with `--filesystem=/absolute/input:ro`
 and `--filesystem=/absolute/output:rw` before the application ID. Quote paths containing
 spaces. Flatpak settings and writable preferences live under
-`~/.var/app/io.github.merklejerk.holtburger-cli/`.
+`~/.var/app/io.github.merklejerk.holtburger-cli-alpha/`.
+
+The frozen alpha.6 draft predates this identity change and still uses
+`io.github.merklejerk.holtburger-cli`. The new ID applies to the next candidate.

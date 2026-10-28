@@ -189,7 +189,7 @@ jobs:
           mkdir -p .holtburger-local/alpha-artifacts/cli
           BUNDLE='.holtburger-local/alpha-artifacts/cli/holtburger-cli-${{ needs.plan.outputs.version }}-x86_64.flatpak'
           cp holtburger-cli.flatpak "$BUNDLE"
-          LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-cli)
+          LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-cli-alpha)
           python .github/scripts/alpha_release.py record-flatpak --files "$LOCATION/files" \
             --native "$HOLTBURGER_CLI_NATIVE" --bundle "$BUNDLE" \
             --output .holtburger-local/alpha-artifacts/cli/metadata-cli-flatpak.json

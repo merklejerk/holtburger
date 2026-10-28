@@ -8,7 +8,7 @@ Choose the product you want:
 Both products have native Linux x86-64, Windows x86-64, and macOS Apple Silicon downloads,
 and separate Linux x86-64 Flatpaks. Each archive contains its own `QUICKSTART.md`.
 The 3D Flatpak retains `io.github.merklejerk.holtburger-alpha`; the CLI Flatpak uses
-`io.github.merklejerk.holtburger-cli`. There is no combined alpha package.
+`io.github.merklejerk.holtburger-cli-alpha`. There is no combined alpha package.
 
 Both clients use `-p` for port and `-P` for password. Client is h3d's default launch mode;
 Explorer is explicit. Connection/account arguments are supplied on the command line.

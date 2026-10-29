@@ -1866,14 +1866,18 @@ export class DynamicEntitySystem<
 	): AABB3 {
 		if (parts.length === 0)
 			throw new Error("Dynamic presentation has no bounded active parts.");
+		// With no visual-root modifier, each posed part is already in the entity's bounds frame.
+		const rootIsIdentity = isIdentityBoundsRoot(rootTransform);
 		let first = true;
 		for (const part of parts) {
 			const partBounds = transformAffineAABB3(
-				multiplyMat4(
-					rootTransform,
-					part.localToVisualRoot,
-					this.#boundsScratch.transform,
-				),
+				rootIsIdentity && hasFiniteBoundsCoefficients(part.localToVisualRoot)
+					? part.localToVisualRoot
+					: multiplyMat4(
+							rootTransform,
+							part.localToVisualRoot,
+							this.#boundsScratch.transform,
+						),
 				part.localBounds,
 				this.#boundsScratch.bounds,
 			);
@@ -2268,4 +2272,44 @@ function poseFor(
 
 function defaultPose(source: DynamicPresentationSource): ArticulatedPose {
 	return poseFor(source.presentation, source.placementFrame);
+}
+
+/** Numeric identity is sufficient for bounds geometry; signed zeros represent the same frame. */
+function isIdentityBoundsRoot(matrix: Mat4): boolean {
+	return (
+		matrix.m11 === 1 &&
+		matrix.m12 === 0 &&
+		matrix.m13 === 0 &&
+		matrix.m14 === 0 &&
+		matrix.m21 === 0 &&
+		matrix.m22 === 1 &&
+		matrix.m23 === 0 &&
+		matrix.m24 === 0 &&
+		matrix.m31 === 0 &&
+		matrix.m32 === 0 &&
+		matrix.m33 === 1 &&
+		matrix.m34 === 0 &&
+		matrix.m41 === 0 &&
+		matrix.m42 === 0 &&
+		matrix.m43 === 0 &&
+		matrix.m44 === 1
+	);
+}
+
+/** Keep the original composition/affine rejection for non-finite part coefficients. */
+function hasFiniteBoundsCoefficients(matrix: Mat4): boolean {
+	return (
+		Number.isFinite(matrix.m11) &&
+		Number.isFinite(matrix.m12) &&
+		Number.isFinite(matrix.m13) &&
+		Number.isFinite(matrix.m21) &&
+		Number.isFinite(matrix.m22) &&
+		Number.isFinite(matrix.m23) &&
+		Number.isFinite(matrix.m31) &&
+		Number.isFinite(matrix.m32) &&
+		Number.isFinite(matrix.m33) &&
+		Number.isFinite(matrix.m41) &&
+		Number.isFinite(matrix.m42) &&
+		Number.isFinite(matrix.m43)
+	);
 }

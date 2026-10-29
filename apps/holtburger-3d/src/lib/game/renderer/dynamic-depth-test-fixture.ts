@@ -17,6 +17,7 @@ export function createDynamicDepthTestFixture(
 		geometry: createObjectGeometryKey(`depth-fixture:${nodeId}`),
 		appearance: {
 			kind: "drawable",
+			rangeGroupsByPart: [],
 			table: {} as WebGLTexture,
 			indexBuffer: {} as WebGLBuffer,
 			// Pass tests consume the prepared spans, not cold material compilation (tested separately).
@@ -25,6 +26,7 @@ export function createDynamicDepthTestFixture(
 				batches: [],
 				ranges: [],
 				physicalRanges: [],
+				colorRanges: { opaque: [], additive: [] },
 			},
 		},
 		parts: [

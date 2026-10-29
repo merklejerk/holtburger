@@ -43,6 +43,29 @@ const TOPOLOGY_FRUSTUM = {
 } as const satisfies Frustum;
 
 describe("SceneGraph", () => {
+	it("returns owned root placements that follow updates and exclude child or retired nodes", () => {
+		const scene = new SceneGraph();
+		const root = scene.createNode(rootInput);
+		const child = scene.createNode({ ...boundedChildFields, parentId: root });
+		const first = scene.getRootPlacement(root);
+		if (first === undefined) throw new Error("Expected root placement.");
+		expect(first).toEqual(rootPlacement);
+		first.localTransform.m41 = 99;
+		expect(scene.getRootPlacement(root)?.localTransform.m41).toBe(0);
+		expect(scene.getRootPlacement(child)).toBeUndefined();
+		const replacement = {
+			envCellId: "0x00020100",
+			landblockId: "0x0002ffff",
+			localTransform: createTranslationMat4(new Vec3(3, 4, 5)),
+		};
+		scene.updateRootPlacement(root, replacement);
+		expect(scene.getRootPlacement(root)).toEqual(replacement);
+		expect(first.localTransform.m41).toBe(99);
+		scene.destroyNode(child);
+		scene.destroyNode(root);
+		expect(scene.getRootPlacement(root)).toBeUndefined();
+	});
+
 	it("returns inherited root placement beside selected bounded descendants", () => {
 		const scene = new SceneGraph();
 		const rootId = scene.createNode(rootInput);
@@ -1104,10 +1127,50 @@ describe("SceneGraph attachment dry run", () => {
 			createTranslationMat4(new Vec3(0, 0, 1)),
 		);
 		expect(queryScopes(scene, { kind: "outdoor" }).entries).toContain(held);
+		// A repeated local pose must retain movement/residency already propagated by its ancestor.
+		scene.updateRootPlacement(root, {
+			...rootPlacement,
+			landblockId: "0x0002ffff",
+			localTransform: createTranslationMat4(new Vec3(5, 0, 0)),
+		});
+		scene.updateLocalTransformWithChildren(
+			visual,
+			createTranslationMat4(new Vec3(2, 0, 0)),
+			[{ nodeId: hand, transform: createTranslationMat4(new Vec3(0, 3, 0)) }],
+		);
+		expect(scene.getResolvedOrigin(held)?.landblockId).toBe("0x0002ffff");
+		expect(scene.getResolvedOrigin(held)?.landblockOrigin).toEqual(
+			new Vec3(7, 3, 1),
+		);
+		// The visual root can stay fixed while an attachment part moves independently.
+		scene.updateLocalTransformWithChildren(
+			visual,
+			createTranslationMat4(new Vec3(2, 0, 0)),
+			[{ nodeId: hand, transform: createTranslationMat4(new Vec3(0, 4, 0)) }],
+		);
+		expect(scene.getResolvedOrigin(held)?.landblockOrigin).toEqual(
+			new Vec3(7, 4, 1),
+		);
 		scene.updateBounds(held, null);
 		expect(queryScopes(scene, { kind: "outdoor" }).entries).not.toContain(held);
 		scene.updateBounds(held, AABB3.zero());
 		expect(queryScopes(scene, { kind: "outdoor" }).entries).toContain(held);
+	});
+
+	it("validates unchanged attachment batches and preserves signed-zero transform updates", () => {
+		const scene = new SceneGraph();
+		const root = scene.createNode(rootInput);
+		const visual = scene.createNode({ ...boundedChildFields, parentId: root });
+		const sibling = scene.createNode({ ...boundedChildFields, parentId: root });
+		expect(() =>
+			scene.updateLocalTransformWithChildren(visual, Mat4.identity(), [
+				{ nodeId: sibling, transform: Mat4.identity() },
+			]),
+		).toThrow("not a direct child");
+		const transform = Mat4.identity();
+		transform.m41 = -0;
+		scene.updateLocalTransformWithChildren(visual, transform, []);
+		expect(scene.getNode(visual)?.localTransform.m41).toBe(-0);
 	});
 
 	it("moves an attached node with its wielder without touching the node itself", () => {

@@ -55,7 +55,8 @@ export class DynamicBatchedRanges {
 		const { ranges, pool } = storage;
 		let previousBatch: (typeof plan.batches)[number] | null = null;
 		let end = -1;
-		for (const [rangeIndex, range] of plan.physicalRanges.entries()) {
+		for (const range of plan.colorRanges[this.#phase]) {
+			const rangeIndex = range.physicalOrdinal;
 			const part = parts[range.source.partSelector];
 			if (part === undefined)
 				throw new Error(

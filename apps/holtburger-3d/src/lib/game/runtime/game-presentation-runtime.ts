@@ -3902,14 +3902,8 @@ export class GamePresentationRuntime {
 	spawnedEntityPlacement(guid: number): ScenePlacement | null {
 		const nodeId = this.#spawnedPresentations.get(guid)?.nodeId;
 		if (nodeId === undefined) return null;
-		const node = this.#scene.getNode(nodeId);
 		// Only a root carries residency, and every spawned entity is realized as one.
-		if (!node || node.parentId !== null) return null;
-		return {
-			envCellId: node.envCellId,
-			landblockId: node.landblockId,
-			localTransform: node.localTransform,
-		};
+		return this.#scene.getRootPlacement(nodeId) ?? null;
 	}
 
 	/** Snapshot the realized mesh center and physical membership once; never retain node/GPU identity. */

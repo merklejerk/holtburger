@@ -1100,10 +1100,6 @@ export class WebGL2Renderer implements Renderer {
 	} | null = null;
 	readonly #visibleStaticLayers = new Set<string>();
 	readonly #visibleEnvCellScopes = new Set<string>();
-	/** Source-range count scratch preserves diagnostic meaning without legacy draw expansion. */
-	readonly #dynamicSourceRangeGroups = new Set<
-		PreparedDynamicColor["appearance"]["plan"]["ranges"][number]["source"]["transparentSort"]
-	>();
 	/** Dynamic roots selected in any view of the frame, retained as production feedback. */
 	readonly #selectedDynamicNodeIds = new Set<SceneNodeId>();
 	/** Read-only runtime gateway used to collect this renderer's frame submissions. */
@@ -1836,10 +1832,6 @@ export class WebGL2Renderer implements Renderer {
 		const frame = pipeline.prepare(
 			this.#world.getPortalTopologyView(),
 			this.#createPortalScopeWindowCullInput(prepared, viewInput, rootScope),
-			prepared.anchorCoordinates,
-			prepared.clipFromAnchor,
-			this.#frameWidth,
-			this.#frameHeight,
 		);
 		if (profile && planningStartedAt !== undefined) {
 			profile.finishCpuPhase("portalPlanning", planningStartedAt);
@@ -1874,8 +1866,7 @@ export class WebGL2Renderer implements Renderer {
 		metrics.portalCompletedCullDepth += visibility.completedDepth;
 		metrics.portalPropagationDrawCount +=
 			atlas.commands.maskPropagationCommandCount;
-		metrics.portalProjectionPrimitiveCount +=
-			visibility.trace.projectionPrimitiveCount;
+		metrics.portalProjectionPrimitiveCount += frame.projectionPrimitiveCount;
 		metrics.portalAtlasTilePixelCount += atlas.trace.tilePixelCount;
 		metrics.portalFrontierRetreatCount += atlas.trace.frontierRetreatCount;
 		if (visibility.status === "truncated")
@@ -1959,10 +1950,6 @@ export class WebGL2Renderer implements Renderer {
 		const frame = pipeline.prepare(
 			this.#world.getPortalTopologyView(),
 			this.#createPortalScopeWindowCullInput(prepared, viewInput, rootScope),
-			prepared.anchorCoordinates,
-			prepared.clipFromAnchor,
-			this.#frameWidth,
-			this.#frameHeight,
 		);
 		const planningDurationMs = performance.now() - planningStartedAt;
 		this.#accumulatePortalScopeAtlasMetrics(frame);
@@ -2198,7 +2185,6 @@ export class WebGL2Renderer implements Renderer {
 			this.#gl.deleteProgram(program.program);
 		this.#dynamicBlendedPrograms.clear();
 		this.#dynamicPresentations.clear();
-		this.#dynamicSourceRangeGroups.clear();
 		this.#poseUploadParts.clear();
 		this.#preparedSelection = null;
 		this.#dynamicAppearances.destroy();
@@ -2437,7 +2423,8 @@ export class WebGL2Renderer implements Renderer {
 	): PortalScopeWindowCullInput {
 		const aspectRatio = this.#frameWidth / Math.max(1, this.#frameHeight);
 		return {
-			...prepared,
+			anchorCoordinates: prepared.anchorCoordinates,
+			clipFromAnchor: prepared.clipFromAnchor,
 			nearClipVolume: createCameraNearClipVolume(
 				viewInput.camera,
 				// Anchor-relative, matching the view matrix this volume is compared against.
@@ -2601,14 +2588,13 @@ export class WebGL2Renderer implements Renderer {
 				if (renderTarget !== null) {
 					retainOffset(renderTarget.landblockId);
 					const { presentation } = renderTarget;
-					admission = summarizeDynamicRangeAdmission(
-						presentation.visual.appearance,
-						presentation.visual.parts,
-						frameSettings.showRetailHiddenGeometry,
-						this.#dynamicSourceRangeGroups,
-					);
 					const appearance = this.#dynamicAppearances.get(
 						presentation.visual.appearance,
+					);
+					admission = summarizeDynamicRangeAdmission(
+						appearance.rangeGroupsByPart,
+						presentation.visual.parts,
+						frameSettings.showRetailHiddenGeometry,
 					);
 					if (
 						appearance.kind === "drawable" &&
@@ -3326,7 +3312,6 @@ export class WebGL2Renderer implements Renderer {
 		metrics.visibleSceneEntries = 0;
 		this.#visibleStaticLayers.clear();
 		this.#visibleEnvCellScopes.clear();
-		this.#dynamicSourceRangeGroups.clear();
 		this.#dynamicPresentations.clear();
 		this.#dynamicDepths.beginFrame();
 		this.#dynamicOpaqueRanges.beginFrame();

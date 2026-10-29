@@ -37,9 +37,16 @@ interface DynamicIndexPlan<TTexture, TSampler> {
 		readonly batch: DynamicIndexBatch<TTexture, TSampler>;
 		/** New first index inside the appearance's buffer. */
 		readonly indexStart: number;
+		/** Stable ordinal in physicalRanges, including ranges excluded from a color phase. */
+		readonly physicalOrdinal: number;
 	}[];
 	/** The same range records in physical index order for material-free depth and mask coalescing. */
 	readonly physicalRanges: DynamicIndexPlan<TTexture, TSampler>["ranges"];
+	/** Cold source-phase partitions; current opacity and retail visibility remain frame decisions. */
+	readonly colorRanges: {
+		readonly opaque: DynamicIndexPlan<TTexture, TSampler>["ranges"];
+		readonly additive: DynamicIndexPlan<TTexture, TSampler>["ranges"];
+	};
 }
 
 /** Cold physical batching: table-varying colors/rectangles/wrap do not split ordinary draws. */
@@ -139,14 +146,34 @@ export function compileDynamicIndexBatches<TTexture, TSampler>(
 				),
 				offset,
 			);
-			remapped.push({ ordinal, range: { source, batch, indexStart: offset } });
+			remapped.push({
+				ordinal,
+				range: {
+					source,
+					batch,
+					indexStart: offset,
+					physicalOrdinal: remapped.length,
+				},
+			});
 			offset += source.indexCount;
 		}
+	}
+	const physicalRanges = remapped.map(({ range }) => range);
+	const opaque: (typeof physicalRanges)[number][] = [];
+	const additive: (typeof physicalRanges)[number][] = [];
+	for (const range of physicalRanges) {
+		if (
+			range.source.ordering === "opaque" ||
+			range.source.ordering === "alpha-test"
+		)
+			opaque.push(range);
+		else if (range.source.ordering === "additive") additive.push(range);
 	}
 	return {
 		indices,
 		batches,
-		physicalRanges: remapped.map(({ range }) => range),
+		physicalRanges,
+		colorRanges: { opaque, additive },
 		ranges: remapped
 			.sort((left, right) => left.ordinal - right.ordinal)
 			.map(({ range }) => range),

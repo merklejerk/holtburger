@@ -2,7 +2,7 @@ import type { AABB3, Mat4, Vec3 } from "./types";
 import { multiplyMat4 } from "./matrices";
 
 /** One inward-facing normalized plane in an anchor-relative render frame. */
-interface FrustumPlane {
+export interface FrustumPlane {
 	x: number;
 	y: number;
 	z: number;
@@ -100,6 +100,46 @@ export function frustumIntersectsAABB(
 		if (plane.x * x + plane.y * y + plane.z * z + plane.constant < 0)
 			return false;
 	}
+	return true;
+}
+
+/**
+ * Reject a group box or retain only planes that may reject boxes contained by it.
+ *
+ * Member boxes must share the group's coordinate frame. Retained planes borrow the original
+ * objects in their original order; an empty result accepts every member. Output storage may
+ * alias the input plane array because writes never pass the current read position.
+ */
+export function filterFrustumPlanesForAABB(
+	frustum: Frustum,
+	bounds: AABB3,
+	offsetX: number,
+	offsetY: number,
+	offsetZ: number,
+	remainingPlanes: FrustumPlane[],
+): boolean {
+	let retainedCount = 0;
+	for (const plane of frustum.planes) {
+		const farX = (plane.x >= 0 ? bounds.max.x : bounds.min.x) + offsetX;
+		const farY = (plane.y >= 0 ? bounds.max.y : bounds.min.y) + offsetY;
+		const farZ = (plane.z >= 0 ? bounds.max.z : bounds.min.z) + offsetZ;
+		if (plane.x * farX + plane.y * farY + plane.z * farZ + plane.constant < 0) {
+			remainingPlanes.length = 0;
+			return false;
+		}
+		const nearX = (plane.x >= 0 ? bounds.min.x : bounds.max.x) + offsetX;
+		const nearY = (plane.y >= 0 ? bounds.min.y : bounds.max.y) + offsetY;
+		const nearZ = (plane.z >= 0 ? bounds.min.z : bounds.max.z) + offsetZ;
+		// Drop a plane only on proven containment; indeterminate arithmetic stays conservative.
+		if (
+			!(
+				plane.x * nearX + plane.y * nearY + plane.z * nearZ + plane.constant >=
+				0
+			)
+		)
+			remainingPlanes[retainedCount++] = plane;
+	}
+	remainingPlanes.length = retainedCount;
 	return true;
 }
 

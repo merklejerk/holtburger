@@ -1,5 +1,3 @@
-import type { LandblockCoordinates } from "../landblocks";
-import type { Mat4 } from "../math/types";
 import type {
 	SceneScope,
 	SceneScopeSelection,
@@ -17,6 +15,7 @@ import {
 	type PortalScopeAtlasResource,
 } from "./portal-scope-atlas-planner";
 import type { PortalScopeWindowCullInput } from "./portal-scope-window-culler";
+import { PortalScopeAtlasPlanInput } from "./portal-scope-atlas-plan-input";
 import { PORTAL_SCOPE_ATLAS_METADATA_BINDING_POINT } from "./portal-scope-atlas-metadata-glsl";
 import type { WebGL2PortalDeferredVisibilityUniforms } from "./portal-deferred-visibility-glsl";
 import { PORTAL_SCOPE_ATLAS_TEXTURE_UNITS } from "./portal-scope-atlas-command-model";
@@ -34,11 +33,13 @@ export interface WebGL2PortalScopeAtlasFrame extends SceneScopeSelection {
 	readonly atlas: PortalScopeAtlasFrameView;
 	/** View-owned submission diagnostics populated during execution. */
 	readonly opaqueRouting: PortalScopeAtlasOpaqueRoutingFrameView;
+	/** Projection work executed for this view this frame; retained plans execute none. */
+	readonly projectionPrimitiveCount: number;
 }
 
 class MutableWebGL2PortalScopeAtlasFrame implements WebGL2PortalScopeAtlasFrame {
 	/** Independent arenas prevent another camera from overwriting a prepared view. */
-	readonly planner = new PortalScopeAtlasPlanner(
+	readonly #planner = new PortalScopeAtlasPlanner(
 		PORTAL_RENDER_CAPACITY_POLICY.culler,
 		PORTAL_RENDER_CAPACITY_POLICY.maximumPathDepth,
 	);
@@ -58,11 +59,19 @@ class MutableWebGL2PortalScopeAtlasFrame implements WebGL2PortalScopeAtlasFrame 
 			PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas
 				.maximumCrossingTriangleVertexCount,
 	} satisfies PortalScopeAtlasResource;
-	#atlas: PortalScopeAtlasFrameView | null = null;
-	#opaqueRouting: PortalScopeAtlasOpaqueRoutingFrameView | null = null;
+	/** Borrowed publication expires at frame reset even when its preparation remains reusable. */
+	#frame: Pick<
+		WebGL2PortalScopeAtlasFrame,
+		"atlas" | "opaqueRouting" | "projectionPrimitiveCount"
+	> | null = null;
+	/** One coherent plan/stream per view; frame routing never mutates either retained result. */
+	#preparation: {
+		readonly input: PortalScopeAtlasPlanInput;
+		readonly atlas: PortalScopeAtlasFrameView;
+	} | null = null;
 
 	get atlas(): PortalScopeAtlasFrameView {
-		return this.#require(this.#atlas);
+		return this.#requireFrame().atlas;
 	}
 
 	get count(): number {
@@ -70,31 +79,51 @@ class MutableWebGL2PortalScopeAtlasFrame implements WebGL2PortalScopeAtlasFrame 
 	}
 
 	get opaqueRouting(): PortalScopeAtlasOpaqueRoutingFrameView {
-		return this.#require(this.#opaqueRouting);
+		return this.#requireFrame().opaqueRouting;
+	}
+
+	get projectionPrimitiveCount(): number {
+		return this.#requireFrame().projectionPrimitiveCount;
 	}
 
 	scopeAt(ordinal: number): SceneScope {
 		return this.atlas.visibility.selectedScope(ordinal);
 	}
 
-	set(
-		atlas: PortalScopeAtlasFrameView,
-		opaqueRouting: PortalScopeAtlasOpaqueRoutingFrameView,
+	prepare(
+		topology: SceneTopologyView,
+		input: PortalScopeWindowCullInput,
 	): void {
-		this.#atlas = atlas;
-		this.#opaqueRouting = opaqueRouting;
+		let projectionPrimitiveCount = 0;
+		if (!this.#preparation?.input.matches(topology, input, this.resource)) {
+			// A failed rebuild may have overwritten planner/stream storage. Never revive its old key.
+			this.#preparation = null;
+			const atlas = this.#planner.plan(topology, input, this.resource);
+			this.stream.prepare(atlas, input.anchorCoordinates, input.clipFromAnchor);
+			projectionPrimitiveCount =
+				atlas.visibility.trace.projectionPrimitiveCount;
+			this.#preparation = {
+				input: new PortalScopeAtlasPlanInput(topology, input, this.resource),
+				atlas,
+			};
+		}
+		const { atlas } = this.#preparation;
+		this.#frame = {
+			atlas,
+			opaqueRouting: this.router.beginFrame(atlas),
+			projectionPrimitiveCount,
+		};
 	}
 
 	clear(): void {
-		this.#atlas = null;
-		this.#opaqueRouting = null;
+		this.#frame = null;
 	}
 
-	#require<T>(value: T | null): T {
-		if (value === null) {
+	#requireFrame() {
+		if (this.#frame === null) {
 			throw new Error("Portal scope-atlas pipeline has no prepared frame.");
 		}
-		return value;
+		return this.#frame;
 	}
 }
 
@@ -129,21 +158,17 @@ export class WebGL2PortalScopeAtlasPipeline {
 		);
 	}
 
-	/** Expire prior plans while retaining their CPU arena capacity. */
+	/** Expire borrowed frame handles; each view retains its last camera/topology preparation. */
 	beginFrame(): void {
 		this.#active = null;
 		for (const view of this.#views) view.clear();
 		this.#viewCount = 0;
 	}
 
-	/** Plan and pack one camera without allocating targets or issuing GPU commands. */
+	/** Prepare or reuse one camera's exact plan/stream without issuing GPU commands. */
 	prepare(
 		topology: SceneTopologyView,
 		input: PortalScopeWindowCullInput,
-		anchorCoordinates: LandblockCoordinates,
-		clipFromAnchor: Mat4,
-		drawingBufferWidth: number,
-		drawingBufferHeight: number,
 	): WebGL2PortalScopeAtlasFrame {
 		let frame = this.#views[this.#viewCount];
 		if (frame === undefined) {
@@ -151,14 +176,13 @@ export class WebGL2PortalScopeAtlasPipeline {
 			this.#views.push(frame);
 		}
 		const scopeAtlas = PORTAL_RENDER_CAPACITY_POLICY.scopeAtlas;
+		const { width, height } = input.portalFootprint.drawingBuffer;
 		// Replace the cold-sized extent values, keeping all arena-backed output view-local.
-		frame.resource.atlas.width = drawingBufferWidth * scopeAtlas.columnCount;
-		frame.resource.atlas.height = drawingBufferHeight * scopeAtlas.rowCount;
-		frame.resource.drawingBuffer.width = drawingBufferWidth;
-		frame.resource.drawingBuffer.height = drawingBufferHeight;
-		const atlas = frame.planner.plan(topology, input, frame.resource);
-		frame.stream.prepare(atlas, anchorCoordinates, clipFromAnchor);
-		frame.set(atlas, frame.router.beginFrame(atlas));
+		frame.resource.atlas.width = width * scopeAtlas.columnCount;
+		frame.resource.atlas.height = height * scopeAtlas.rowCount;
+		frame.resource.drawingBuffer.width = width;
+		frame.resource.drawingBuffer.height = height;
+		frame.prepare(topology, input);
 		this.#viewCount += 1;
 		return frame;
 	}

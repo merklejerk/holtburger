@@ -140,6 +140,13 @@ export const HELP_COMMAND: ClientCommandDefinition = {
 };
 
 export const LOCAL_COMMANDS = {
+	version: {
+		...invocation(["version"], ""),
+		description: "Show the client version and build revision.",
+		details: [
+			"Reports the frontend build identity. Development builds describe the source checkout when Vite started.",
+		],
+	},
 	fps: {
 		...invocation(["fps"], ""),
 		description: "Toggle the FPS HUD.",

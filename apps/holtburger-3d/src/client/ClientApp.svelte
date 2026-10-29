@@ -21,6 +21,7 @@
 	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
 	import { ClientNavigationWaypointOwner } from "./client-navigation-waypoint";
 	import { runClientAssetsCommand } from "./client-assets-command";
+	import { runClientVersionCommand } from "./client-version-command";
 	import { isLogopolisCommand } from "./client-logopolis";
 	import { runClientLocationCommand } from "./client-location-command";
 	import { ClientDeathCommands } from "./client-death-commands";
@@ -1344,6 +1345,7 @@
 			return;
 		}
 		if (runClientHelpCommand(message, appendChatLine)) return;
+		if (runClientVersionCommand(message, appendChatLine)) return;
 		if (runClientAssetsCommand(message, contentLocation, appendChatLine))
 			return;
 		const currentSession = session;

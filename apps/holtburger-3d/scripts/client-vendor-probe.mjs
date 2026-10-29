@@ -56,18 +56,30 @@ export async function probeVendor(client, evaluateExpression, capture) {
 			`${api}.inventoryDragCommands().filter((entry) => entry.command === 'preview_client_inventory' || entry.command === 'submit_client_inventory').length`,
 		);
 	const currencies = await read(`${fixture}.currencies`);
-	const quote = async (buys, sells) => {
+	const quote = async (buys, sells, quotedCurrencies = currencies) => {
 		await read(
-			`${fixture}.reply(${JSON.stringify({ buys, sells, currencies, affordable: true })})`,
+			`${fixture}.reply(${JSON.stringify({ buys, sells, currencies: quotedCurrencies, affordable: true })})`,
 		);
 		await read(`${fixture}.settle()`);
 		await wait(
 			`document.querySelector(${JSON.stringify(offer)})?.disabled === false`,
 		);
 	};
+	const unchangedCurrencies = currencies.map((currency) => ({
+		...currency,
+		projected: currency.current,
+	}));
+	const assertBalances = async (expected) => {
+		const actual = await read(
+			`Array.from(document.querySelectorAll('.vendor-currencies .vendor-currency-amount'), element => element.getAttribute('aria-label'))`,
+		);
+		if (JSON.stringify(actual) !== JSON.stringify(expected))
+			throw new Error(`Unexpected vendor balances: ${JSON.stringify(actual)}`);
+	};
 	await read(`${fixture}.begin()`);
 	await wait("document.querySelector('[data-vendor-panel]') !== null");
-	await quote([], []);
+	await quote([], [], unchangedCurrencies);
+	await assertBalances(["500 Trade Tokens"]);
 	const inspectPoint = await point(offer);
 	for (const type of ["mousePressed", "mouseReleased"]) {
 		await client.send("Input.dispatchMouseEvent", {
@@ -207,13 +219,29 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	)
 		throw new Error("Vendor drag did not queue the whole offered stack");
 	const buys = [{ item: 7001, amount: 10, total: 100, merge_key: 500 }];
-	await quote(buys, []);
+	await quote(buys, [], [currencies[0], unchangedCurrencies[1]]);
+	await assertBalances(["500 to 400 (-100) Trade Tokens"]);
+	// A nonempty draft can have no net currency change; neither arrow nor delta belongs there.
+	await read(`${fixture}.refresh()`);
+	await quote(buys, [], unchangedCurrencies);
+	await assertBalances(["500 Trade Tokens"]);
+	await read(`${fixture}.refresh()`);
+	await quote(buys, [], [currencies[0], unchangedCurrencies[1]]);
 	const sells = [];
 	for (const item of [6001, 6002]) {
 		await drag(owned(item), queue);
 		sells.push({ item, amount: 80, total: 3500, merge_key: 500 });
 		await quote(buys, sells);
 	}
+	// Accepted currency stays visible when unchanged; an affected payout currency joins it.
+	await read(`${fixture}.refresh()`);
+	await quote(buys, sells, [unchangedCurrencies[0], currencies[1]]);
+	await assertBalances([
+		"500 Trade Tokens",
+		"3,000 to 10,000 (+7,000) Pyreals",
+	]);
+	await read(`${fixture}.refresh()`);
+	await quote(buys, sells);
 	await wait(
 		"document.querySelectorAll('.vendor-queue .sell .item-queue-cell').length === 1",
 	);

@@ -215,6 +215,8 @@ mod tests {
     use super::*;
     use holtburger_common::Guid;
     use holtburger_common::properties::PropertyBool;
+    use holtburger_protocol::messages::object::messages::description::PublicWeenieDescription;
+    use holtburger_protocol::messages::trade::events::VendorItemEventData;
 
     fn vendor(minimum: u32, maximum: u32) -> VendorState {
         VendorState {
@@ -331,6 +333,30 @@ mod tests {
             vendor.purchase_price(&offer, 6),
             Err(VendorQuoteError::WholeOfferRequired)
         );
+    }
+
+    #[test]
+    fn public_vendor_values_quote_without_appraisal_in_either_currency() {
+        let mut vendor = vendor(0, u32::MAX);
+        for currency in [0, 1234] {
+            vendor.alternate_currency_wcid = currency;
+            for (public_value, expected_value, expected_price) in
+                [(None, 0, 1), (Some(0), 0, 1), (Some(20), 20, 25)]
+            {
+                for supply in [u32::MAX, 1] {
+                    let offer = CoreVendorItem::from_protocol(&VendorItemEventData {
+                        packed_stack_size: supply,
+                        description: PublicWeenieDescription {
+                            item_type: ItemType::FOOD.bits(),
+                            value: public_value,
+                            ..Default::default()
+                        },
+                    });
+                    assert_eq!(offer.get_int_prop(PropertyInt::Value), Some(expected_value));
+                    assert_eq!(vendor.purchase_price(&offer, 1), Ok(expected_price));
+                }
+            }
+        }
     }
 
     #[test]

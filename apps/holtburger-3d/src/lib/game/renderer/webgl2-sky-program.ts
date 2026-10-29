@@ -100,24 +100,23 @@ uniform float uAlpha;
 in vec2 vTextureCoordinate;
 out vec4 fragmentColor;
 
-float paletteIndex() {
+int paletteIndex() {
 	ivec2 size = textureSize(uBase, 0);
 	// Indexed surfaces must not filter their index bytes, so address texels directly.
 	ivec2 texel = ivec2(floor(fract(vTextureCoordinate) * vec2(size)));
 	vec4 encoded = texelFetch(uBase, clamp(texel, ivec2(0), size - ivec2(1)), 0) * 255.0;
-	return uMaterialKind == ${SKY_MATERIAL_KIND.index8}
-		? floor(encoded.r + 0.5)
-		: floor(encoded.r + 0.5) + floor(encoded.g + 0.5) * 256.0;
+	ivec2 bytes = ivec2(floor(encoded.rg + vec2(0.5)));
+	return uMaterialKind == ${SKY_MATERIAL_KIND.index8} ? bytes.r : bytes.r + bytes.g * 256;
 }
 
-vec4 paletteColor(float index) {
-	if (uPalettedClipMap != 0 && index < 8.0) return vec4(0.0);
+vec4 paletteColor(int index) {
+	if (uPalettedClipMap != 0 && index < 8) return vec4(0.0);
 	ivec2 size = textureSize(uPalette, 0);
-	float width = float(size.x);
-	if (index >= width * float(size.y)) return vec4(0.0);
+	if (index >= size.x * size.y) return vec4(0.0);
+	// Keep discrete palette addresses exact across GPU implementations.
 	return texelFetch(
 		uPalette,
-		ivec2(int(mod(index, width)), int(floor(index / width))),
+		ivec2(index % size.x, index / size.x),
 		0
 	);
 }

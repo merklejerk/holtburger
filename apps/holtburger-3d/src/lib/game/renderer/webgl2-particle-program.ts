@@ -329,24 +329,24 @@ ${TRANSPARENT_CANVAS_EMISSION_GLSL}
  * Uses texelFetch rather than texture: indices must not be filtered directly, since interpolating
  * two palette indices produces a third unrelated colour.
  */
-float paletteIndexAt(ivec2 texel) {
+int paletteIndexAt(ivec2 texel) {
 	ivec2 size = textureSize(uBase, 0);
 	texel = clamp(texel, ivec2(0), size - ivec2(1));
 	vec4 encoded = texelFetch(uBase, texel, 0) * 255.0;
-	return uMaterialKind == 3
-		? floor(encoded.r + 0.5) + floor(encoded.g + 0.5) * 256.0
-		: floor(encoded.r + 0.5);
+	ivec2 bytes = ivec2(floor(encoded.rg + vec2(0.5)));
+	return uMaterialKind == 3 ? bytes.r + bytes.g * 256 : bytes.r;
 }
 
-vec4 paletteColor(float index) {
+vec4 paletteColor(int index) {
 	// Retail's indexed clip map: the first eight entries are cutout, not colour. Without this an
 	// alpha-tested sprite has no alpha to test and draws its backing opaque.
-	if (uPalettedClipMap != 0 && index < 8.0) return vec4(0.0);
+	if (uPalettedClipMap != 0 && index < 8) return vec4(0.0);
 	ivec2 size = textureSize(uPalette, 0);
-	if (index >= float(size.x * size.y)) return vec4(0.0);
+	if (index >= size.x * size.y) return vec4(0.0);
+	// Keep discrete palette addresses exact across GPU implementations.
 	return texelFetch(
 		uPalette,
-		ivec2(int(mod(index, float(size.x))), int(index) / size.x),
+		ivec2(index % size.x, index / size.x),
 		0
 	);
 }

@@ -211,10 +211,16 @@ describe("AnimationSystem", () => {
 				.map((entry) => entry.provenance.authoredPosition),
 		).toEqual([0, 0]);
 
+		const initialTransforms =
+			firstInitial.articulatedPose.partToObjectTransforms.map((matrix) =>
+				matrix.clone(),
+			);
 		advanceAndSample(first, 10);
 		const observationCount = observations().length;
 		const halfStep = requiredAt(advanceAndSample(first, 10 + 1 / 60), 0);
-		expect(halfStep.articulatedPose).not.toEqual(firstInitial.articulatedPose);
+		expect(halfStep.articulatedPose.partToObjectTransforms).not.toEqual(
+			initialTransforms,
+		);
 		expect(halfStep.effects.rootTransformModifier).not.toEqual(Mat4.identity());
 		expect(observations()).toHaveLength(observationCount);
 	});

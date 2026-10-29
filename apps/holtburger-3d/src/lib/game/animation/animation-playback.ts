@@ -2,7 +2,7 @@ import type {
 	PreparedAnimation,
 	PreparedAnimationFrame,
 } from "./animation-asset-repository";
-import { createRotationMat4 } from "../math/matrices";
+import { createRotationMat4FromQuaternionComponents } from "../math/matrices";
 import { Mat4, Quat, Vec3 } from "../math/types";
 
 /**
@@ -160,13 +160,9 @@ export function sampleAnimationPose(
 	);
 	const parts: Mat4[] = [];
 	for (let part = 0; part < animation.partCount; part += 1) {
-		const lower = animation.partFrames[lowerFrame * animation.partCount + part];
-		const upper = animation.partFrames[upperFrame * animation.partCount + part];
-		if (!lower || !upper)
-			throw new Error(
-				`Animation ${animation.id} has an incomplete sampled pose.`,
-			);
-		parts.push(interpolateRigidTransform(lower, upper, fraction));
+		parts.push(
+			sampleAnimationPart(animation, lowerFrame, upperFrame, fraction, part),
+		);
 	}
 	return parts;
 }
@@ -200,6 +196,88 @@ export function sampleAnimationPoseOver(
 		completePose.push(retainedPartToObjectTransforms[partIndex]!.clone());
 	}
 	return completePose;
+}
+
+/** A part's historical seed and its independently mutable current presentation. */
+interface SampledPosePart {
+	/** Installation/transition value preserved beneath partial clips. */
+	readonly seed: Mat4;
+	/** Playback-owned matrix reused only for current samples. */
+	readonly current: Mat4;
+}
+
+/**
+ * Own the distinction between historical clip seeds and current presentation storage.
+ * Frame sampling borrows the current pose; transitions explicitly request an independent snapshot.
+ * No matrix storage is shared between installations, tracks, seeds or snapshots.
+ */
+export class AnimationPoseSampler {
+	/** Seed/current pairs keep partial-part retention independent of mutable output. */
+	readonly #parts: readonly SampledPosePart[];
+	/** Stable setup-indexed view of the current matrices, borrowed by synchronous publication. */
+	readonly #current: readonly Mat4[];
+
+	constructor(initialPose: readonly Mat4[]) {
+		this.#parts = initialPose.map((matrix) => ({
+			seed: matrix.clone(),
+			current: matrix.clone(),
+		}));
+		this.#current = this.#parts.map((part) => part.current);
+	}
+
+	/** Update this playback's current pose; callers must snapshot any historical value they retain. */
+	updateCurrent(clip: PlayingClip, framePosition: number): readonly Mat4[] {
+		const { lowerFrame, upperFrame, fraction } = resolveFrameBlend(
+			clip,
+			framePosition,
+		);
+		let partIndex = 0;
+		for (const part of this.#parts) {
+			if (partIndex < clip.animation.partCount) {
+				sampleAnimationPart(
+					clip.animation,
+					lowerFrame,
+					upperFrame,
+					fraction,
+					partIndex,
+					part.current,
+				);
+			} else {
+				part.current.copy(part.seed);
+			}
+			partIndex++;
+		}
+		return this.#current;
+	}
+
+	/** Copy an exact projected pose for a successor without modifying current publication storage. */
+	snapshot(clip: PlayingClip, framePosition: number): readonly Mat4[] {
+		return sampleAnimationPoseOver(
+			clip,
+			framePosition,
+			this.#parts.map((part) => part.seed),
+		);
+	}
+}
+
+/** Sample one validated authored part, sharing interpolation between snapshots and current poses. */
+function sampleAnimationPart(
+	animation: PreparedAnimation,
+	lowerFrame: number,
+	upperFrame: number,
+	fraction: number,
+	partIndex: number,
+	targetMatrix?: Mat4,
+): Mat4 {
+	const lower =
+		animation.partFrames[lowerFrame * animation.partCount + partIndex];
+	const upper =
+		animation.partFrames[upperFrame * animation.partCount + partIndex];
+	if (!lower || !upper)
+		throw new Error(
+			`Animation ${animation.id} has an incomplete sampled pose.`,
+		);
+	return interpolateRigidTransform(lower, upper, fraction, targetMatrix);
 }
 
 /**
@@ -280,16 +358,21 @@ function normalizeClipFrame(clip: PlayingClip, framePosition: number): number {
 	return clip.lowFrame + modulo(framePosition - clip.lowFrame, span);
 }
 
-/** Interpolate translation linearly and orientation spherically between two rigid transforms. */
+/** Interpolate rigid transforms, optionally writing into caller-owned matrix storage. */
 export function interpolateRigidTransform(
 	from: PreparedAnimationFrame,
 	to: PreparedAnimationFrame,
 	fraction: number,
+	targetMatrix?: Mat4,
 ): Mat4 {
 	if (!Number.isFinite(fraction) || fraction < 0 || fraction > 1)
 		throw new Error("Rigid interpolation fraction must be within [0, 1].");
-	const rotation = slerpQuaternion(from.rotation, to.rotation, fraction);
-	const result = createRotationMat4(rotation);
+	const result = interpolateRotationMat4(
+		from.rotation,
+		to.rotation,
+		fraction,
+		targetMatrix,
+	);
 	result.m41 =
 		from.translation.x + (to.translation.x - from.translation.x) * fraction;
 	result.m42 =
@@ -336,36 +419,50 @@ export function multiplyQuaternion(left: Quat, right: Quat): Quat {
 	);
 }
 
-function slerpQuaternion(
+/** Interpolate directly into the owned result matrix; quaternion intermediates never escape. */
+function interpolateRotationMat4(
 	from: Readonly<Quat>,
 	to: Readonly<Quat>,
 	fraction: number,
-): Quat {
-	let target = to;
+	targetMatrix?: Mat4,
+): Mat4 {
+	let targetW = to.w;
+	let targetX = to.x;
+	let targetY = to.y;
+	let targetZ = to.z;
 	let dot = from.w * to.w + from.x * to.x + from.y * to.y + from.z * to.z;
 	if (dot < 0) {
 		dot = -dot;
-		target = new Quat(-to.w, -to.x, -to.y, -to.z);
+		targetW = -targetW;
+		targetX = -targetX;
+		targetY = -targetY;
+		targetZ = -targetZ;
 	}
 	if (dot > 0.9995) {
-		return normalizeQuaternion(
-			new Quat(
-				from.w + (target.w - from.w) * fraction,
-				from.x + (target.x - from.x) * fraction,
-				from.y + (target.y - from.y) * fraction,
-				from.z + (target.z - from.z) * fraction,
-			),
+		const w = from.w + (targetW - from.w) * fraction;
+		const x = from.x + (targetX - from.x) * fraction;
+		const y = from.y + (targetY - from.y) * fraction;
+		const z = from.z + (targetZ - from.z) * fraction;
+		const magnitude = Math.hypot(w, x, y, z);
+		if (magnitude === 0) throw new Error("Cannot normalize a zero quaternion.");
+		return createRotationMat4FromQuaternionComponents(
+			w / magnitude,
+			x / magnitude,
+			y / magnitude,
+			z / magnitude,
+			targetMatrix,
 		);
 	}
 	const angle = Math.acos(Math.min(1, dot));
 	const denominator = Math.sin(angle);
 	const fromWeight = Math.sin((1 - fraction) * angle) / denominator;
 	const toWeight = Math.sin(fraction * angle) / denominator;
-	return new Quat(
-		from.w * fromWeight + target.w * toWeight,
-		from.x * fromWeight + target.x * toWeight,
-		from.y * fromWeight + target.y * toWeight,
-		from.z * fromWeight + target.z * toWeight,
+	return createRotationMat4FromQuaternionComponents(
+		from.w * fromWeight + targetW * toWeight,
+		from.x * fromWeight + targetX * toWeight,
+		from.y * fromWeight + targetY * toWeight,
+		from.z * fromWeight + targetZ * toWeight,
+		targetMatrix,
 	);
 }
 

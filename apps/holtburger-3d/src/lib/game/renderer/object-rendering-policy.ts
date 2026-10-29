@@ -152,39 +152,12 @@ export function dynamicObjectPhase(
 const TRANSPARENT_NEAR_DISTANCE_SQUARED =
 	SHARED_FRONTEND_TUNING.rendering.transparentObjects.nearDistance ** 2;
 
-/**
- * Current-frame facts needed to classify one transparent range, paired with the range itself.
- *
- * Deliberately excludes camera depth: only the bounded near phase orders by it, so deriving it
- * for every candidate spends a view transform on the far majority that never reads the result.
- * Producers build this value directly, so classification allocates once per candidate.
- */
-export interface TransparentObjectRange<T> {
+/** Current-frame distance and stable identity; camera depth is derived only for near objects. */
+export interface TransparentObjectSortFacts {
 	/** Squared radial camera distance, used only to select the bounded near policy. */
 	readonly distanceSquared: number;
 	/** Stable physical identity used to break equal-depth ties deterministically. */
 	readonly stableId: string;
-	readonly range: T;
-}
-
-/** Far batchable and exactly depth-ordered near transparent phases for one view. */
-export interface OrderedTransparentObjectRanges<T> {
-	/** Candidates outside the near-policy radius, grouped by stable batching cohort. */
-	readonly far: readonly TransparentObjectRange<T>[];
-	/** Candidates inside the near-policy radius, ordered exactly back-to-front by camera depth. */
-	readonly near: readonly TransparentObjectRange<T>[];
-	/** Structural work performed by the bounded production ordering policy. */
-	readonly trace: TransparentObjectOrderingTrace;
-}
-
-/** Primitive CPU work performed while ordering one transparent population. */
-interface TransparentObjectOrderingTrace {
-	/** Stable cohort-key evaluations; exactly one per far physical candidate. */
-	readonly farBatchKeyEvaluationCount: number;
-	/** Far/near classifications; exactly one per physical candidate. */
-	readonly distanceClassificationCount: number;
-	/** Camera-depth derivations; exactly one per near candidate, none for far candidates. */
-	readonly cameraDepthEvaluationCount: number;
 }
 
 /** Renderer-resolved ordering class consumed by the frame submission partition. */
@@ -414,47 +387,14 @@ export function sourceOpacity(translucency: number): number {
 	return Math.max(0, Math.min(1, normalized));
 }
 
-/** Partition transparency into exact nearby depth order and stable distant batching cohorts. */
-export function orderTransparentObjectRanges<T>(
-	ranges: readonly TransparentObjectRange<T>[],
-	batchKey: (range: T) => string | null,
-	cameraDepth: (range: T) => number,
-): OrderedTransparentObjectRanges<T> {
-	const far: TransparentObjectRange<T>[] = [];
-	const near: NearTransparentObjectRange<T>[] = [];
-	for (const range of ranges) {
-		validateTransparentObjectRange(range);
-		if (range.distanceSquared > TRANSPARENT_NEAR_DISTANCE_SQUARED) {
-			far.push(range);
-			continue;
-		}
-		// Camera depth is derived only here, for the bounded near population that orders by it.
-		const depth = cameraDepth(range.range);
-		if (!Number.isFinite(depth)) {
-			throw new Error("Transparent object camera depth must be finite.");
-		}
-		near.push({ cameraDepth: depth, candidate: range });
-	}
-	near.sort(
-		(left, right) =>
-			right.cameraDepth - left.cameraDepth ||
-			compareStableIds(left.candidate.stableId, right.candidate.stableId),
-	);
-	return {
-		far: groupTransparentRanges(far, batchKey),
-		near: near.map(({ candidate }) => candidate),
-		trace: {
-			cameraDepthEvaluationCount: near.length,
-			distanceClassificationCount: ranges.length,
-			farBatchKeyEvaluationCount: far.length,
-		},
-	};
-}
-
-/** One near candidate paired with the camera depth derived only for the near phase. */
-interface NearTransparentObjectRange<T> {
+/** One near object paired with the sort facts needed until its view's phases are complete. */
+interface NearTransparentObject<T> {
+	/** Camera-space depth derived once for this view, used for back-to-front ordering. */
 	readonly cameraDepth: number;
-	readonly candidate: TransparentObjectRange<T>;
+	/** Borrowed prepared submission returned after ordering. */
+	readonly object: T;
+	/** Producer-owned identity copied from the validated facts for deterministic depth ties. */
+	readonly stableId: string;
 }
 
 function compareStableIds(left: string, right: string): number {
@@ -463,93 +403,90 @@ function compareStableIds(left: string, right: string): number {
 	return 0;
 }
 
-function validateTransparentObjectRange<T>(
-	range: TransparentObjectRange<T>,
+function validateTransparentObjectSortFacts(
+	facts: TransparentObjectSortFacts,
 ): void {
-	if (!Number.isFinite(range.distanceSquared) || range.distanceSquared < 0) {
+	if (!Number.isFinite(facts.distanceSquared) || facts.distanceSquared < 0) {
 		throw new Error(
 			"Transparent object camera distance must be finite and non-negative.",
 		);
 	}
-	if (range.stableId.length === 0) {
+	if (facts.stableId.length === 0) {
 		throw new Error("Transparent object stable identity must not be empty.");
 	}
 }
 
 /**
- * Partition one already-prepared physical object population without rediscovering material facts.
+ * Partition prepared objects directly into their depth-writing and deferred phases.
  *
- * Every input is inspected once. Only transparent values pay for camera-distance evaluation and
- * the existing bounded far/near ordering policy. Callers may then route the opaque array into the
- * scope atlas and defer the other arrays without preparing the source objects again.
+ * Only near transparency carries depth-sort records; far objects enter first-seen cohort groups
+ * immediately. Results own their arrays and borrow the prepared objects, so assembling another
+ * portal view cannot overwrite a deferred phase from the previous view.
  */
 export function createObjectSubmissionPhases<
 	T extends ObjectSubmissionOrderingInput,
 >(
 	objects: readonly T[],
-	transparentRange: (object: T) => TransparentObjectRange<T>,
+	transparentSortFacts: (object: T) => TransparentObjectSortFacts,
 	transparentBatchKey: (object: T) => string | null,
 	transparentCameraDepth: (object: T) => number,
 ): ObjectSubmissionPhases<T> {
 	const opaque: T[] = [];
-	const transparent: TransparentObjectRange<T>[] = [];
 	const additive: T[] = [];
+	const near: NearTransparentObject<T>[] = [];
+	const farGroups: T[][] = [];
+	const farGroupByKey = new Map<string, T[]>();
 	for (const object of objects) {
 		switch (object.ordering) {
 			case "opaque":
 			case "alpha-test":
 				opaque.push(object);
 				break;
-			case "transparent": {
-				transparent.push(transparentRange(object));
-				break;
-			}
 			case "additive":
 				additive.push(object);
 				break;
+			case "transparent": {
+				const facts = transparentSortFacts(object);
+				validateTransparentObjectSortFacts(facts);
+				if (facts.distanceSquared <= TRANSPARENT_NEAR_DISTANCE_SQUARED) {
+					const cameraDepth = transparentCameraDepth(object);
+					if (!Number.isFinite(cameraDepth)) {
+						throw new Error("Transparent object camera depth must be finite.");
+					}
+					near.push({ cameraDepth, object, stableId: facts.stableId });
+					break;
+				}
+				const key = transparentBatchKey(object);
+				// Unbatchable objects keep their own position among first-seen cohorts.
+				if (key === null) {
+					farGroups.push([object]);
+					break;
+				}
+				let group = farGroupByKey.get(key);
+				if (!group) {
+					group = [];
+					farGroupByKey.set(key, group);
+					farGroups.push(group);
+				}
+				group.push(object);
+				break;
+			}
 		}
 	}
-	const ordered = orderTransparentObjectRanges(
-		transparent,
-		transparentBatchKey,
-		transparentCameraDepth,
+	near.sort(
+		(left, right) =>
+			right.cameraDepth - left.cameraDepth ||
+			compareStableIds(left.stableId, right.stableId),
 	);
+	const far: T[] = [];
+	for (const group of farGroups) {
+		for (const object of group) far.push(object);
+	}
 	return {
 		additive,
 		opaque,
-		transparent: {
-			far: ordered.far.map(({ range }) => range),
-			near: ordered.near.map(({ range }) => range),
-		},
+		transparent: { far, near: near.map(({ object }) => object) },
 	};
-}
-
-/** Group repeated cohorts in first-seen order; null keys remain singleton submissions. */
-function groupTransparentRanges<T>(
-	ranges: readonly TransparentObjectRange<T>[],
-	batchKey: (range: T) => string | null,
-): readonly TransparentObjectRange<T>[] {
-	const groups: TransparentObjectRange<T>[][] = [];
-	const groupByKey = new Map<string, TransparentObjectRange<T>[]>();
-	for (const range of ranges) {
-		const key = batchKey(range.range);
-		if (key === null) {
-			groups.push([range]);
-			continue;
-		}
-		let group = groupByKey.get(key);
-		if (!group) {
-			group = [];
-			groupByKey.set(key, group);
-			groups.push(group);
-		}
-		group.push(range);
-	}
-	const ordered: TransparentObjectRange<T>[] = [];
-	for (const group of groups) {
-		for (const range of group) ordered.push(range);
-	}
-	return ordered;
 }
 
 /**

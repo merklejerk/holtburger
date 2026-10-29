@@ -7,15 +7,30 @@ presentation publication have measured reductions documented below. The 200 FPS
 target remains open; no controlled end-to-end gain is established.
 
 Current direction: the user retained and enabled distant visual sampling at
-64 units / 1/30 second. The enabled-cadence cost refresh below is current:
-foreground-policy captures put renderer CPU at 4.20–4.72 ms and visual sampling/
-publication at 0.51–0.67 ms. Contribution preparation and opaque submission remain
-the largest renderer buckets. Timing comparisons remain directional under
-concurrent desktop use; no controlled end-to-end gain is established.
+64 units / 1/30 second. The last full CPU-phase breakdown predates the allocation
+changes below: foreground-policy captures put renderer CPU at 4.20–4.72 ms and
+visual sampling/publication at 0.51–0.67 ms, with contribution preparation and
+opaque submission the largest renderer buckets. That breakdown has not been
+refreshed for the final allocation-reduced code. Timing comparisons remain
+directional under concurrent desktop use; no controlled end-to-end gain is established.
 
-Latest frame-consistency finding: two subsequent traces confirm 10–13 ms
+Initial frame-consistency finding: two traces confirm 10–13 ms
 main-thread major collections coincident with HUD dips. See the GC timing section;
 this supports an allocation/lifetime follow-up, not a claim that every dip is GC.
+
+Allocation follow-up at checkpoint `c8dcb982f`: two collected-inclusive samples
+estimate 1.82–1.83 MB of JavaScript allocations per gameplay frame. Animation
+sampling, renderer contribution preparation and other renderer submission work
+dominate. See the allocation section at the end for attribution, profiler-induced
+collection caveats and the next bounded experiments. Subsequent removal of
+quaternion intermediates and redundant renderer phase representations lowers
+sampled allocations by about 6% combined. Two ordinary follow-up traces still show
+major-GC-correlated HUD dips; frame-consistency improvement remains unproven. The
+subsequent playback-owned pose experiment separates preserved seeds from reusable
+current matrices. It reduces sampled total allocation about 11%; alternating
+ordinary-GC controls show about 86% less promotion per frame and 56% less GC wall
+time. Major pauses remain and frame-tail improvement is not established. See the
+last section for the explicit lifetime-contract trade-off and evidence.
 
 ## Context and boundaries
 
@@ -2710,3 +2725,681 @@ Pre-commit validation with that enabled setting: all **4,013 tests / 421 files**
 fixture pass. `git diff --check` passes. No agent visual acceptance performed.
 The next task begins after this checkpoint commit: measure allocation sites and
 object lifetimes behind the correlated GC pauses before choosing a fix.
+
+## Allocation investigation after checkpoint — 2026-10-29
+
+Checkpoint: `c8dcb982f` (`Reduce distant visual sampling and record performance
+investigation`). The requested code-quality review and commit are complete. This
+section is subsequent investigation, not an allocation fix in that commit.
+
+### Capture and interpretation
+
+Normal `dev:client`, saved login pose, enabled 64-unit / 1/30-second distant policy,
+visible client, no movement/camera input. Renderer phase/GPU profiling disabled.
+After scene settling and a five-second foreground-policy warm-up, sample V8 heap
+allocations at a 32,768-byte interval. Two consecutive windows include objects
+collected by both minor and major GC; a third excludes collected objects. Windows
+are 10.088 / 10.151 / 10.058 seconds, covering 1,436 / 1,433 / 1,424 gameplay
+frames. Poll heap usage once a second; capture full app diagnostics only at the
+window boundary. Restore the page-local focus input afterward. No OS focus change,
+screenshots or visual acceptance. No page/console warnings or errors.
+
+These are statistically scaled allocation estimates, not a census of every
+object or retained-memory measurements. Browser-engine attribution/inlining can
+charge helper allocations to their caller. Profile line numbers identify Vite's
+transformed JavaScript, not literal TypeScript lines. Per-frame figures divide all
+main-isolate allocations, including the independently scheduled minimap, by the
+gameplay frame count. Concurrent desktop use, profiler overhead, scene activity
+and the development bundle remain limitations. This is not a release comparison.
+
+Important profiler effect: although the probe sends no explicit collectGarbage
+command, Inspector startSampling sets kSamplingForceGC. stopSampling retrieves a
+profile, and V8's GetAllocationProfile performs a full collection under that flag.
+See the [Inspector implementation](https://github.com/v8/v8/blob/main/src/inspector/v8-heap-profiler-agent-impl.cc)
+and [sampling implementation](https://github.com/v8/v8/blob/main/src/profiler/sampling-heap-profiler.cc).
+These current upstream sources explain the observed capture-boundary heap drops;
+they are not a version-pinned audit of the embedded engine. Do not interpret those
+boundary drops or pauses as natural game behavior. The previous timing traces did
+not use heap sampling and remain the evidence for ordinary GC/frame-gap correlation.
+
+### Allocation breakdown
+
+The two collected-inclusive windows estimate **1.821 / 1.832 MB per gameplay
+frame**, about **259 / 259 MB per second** at the observed cadence. Units below
+are decimal KB. Attribution is disjoint by sampled call ancestry: minimap first,
+then contribution resolution, pose upload, animation sampling, entity publication,
+remaining renderer, host decoding, and remaining application/browser work. These
+are allocation owners, not the existing CPU timer buckets.
+
+| Call-path owner | Window A KB/frame | Window B KB/frame |
+| --- | ---: | ---: |
+| Animation visual sampling, including effect presentation | 403.8 | 403.8 |
+| Renderer scene contribution resolution | 385.3 | 389.3 |
+| Other renderer work, including phase ordering and scene queries | 480.7 | 479.7 |
+| Renderer pose packing/upload | 61.7 | 62.1 |
+| Entity presentation publication | 31.4 | 30.7 |
+| Minimap, outside gameplay renderer | 187.4 | 192.4 |
+| Host transport/decoding | 10.6 | 14.1 |
+| Other application/browser | 259.7 | 259.9 |
+
+Selected self-attributed sites, **not additive to the owner table**:
+
+| Site | A / B KB/frame | Source finding |
+| --- | ---: | --- |
+| sampleAnimationPose | 201.5 / 201.2 | Fresh pose array; rigid interpolation creates output matrices per part. Caller attribution can include inlined helpers. |
+| slerpQuaternion | 85.5 / 83.2 | New result quaternion; shortest-path sign adjustment and near-identical normalization also create temporary quaternions. |
+| createObjectSubmissionPhases | 92.9 / 93.4 | New phase arrays and transparent range records; ordering returns wrappers then maps back to submissions. |
+| groupTransparentRanges | 72.2 / 72.5 | Temporary map, cohort arrays and flattened output array. |
+| Renderer #resolveSceneContributions | 90.8 / 93.0 | Per-frame arrays, dynamic target records and per-landblock map; helpers add further inclusive cost. |
+| Renderer #retainsObjectFootprint | 73.6 / 73.2 | Creates coordinate/offset and projected-footprint input records per eligible candidate. |
+| SceneGraph #selectEntries | 69.5 / 71.4 | Allocation attribution persists despite the already-reused query output buffer; not evidence that output arrays need another cache. |
+| Runtime listPresentedSpawnedEntities | 62.6 / 64.0 | Minimap-facing enumeration yields identity/placement/span records, with placement-query work below it. |
+| Pose-page upload | 54.7 / 54.8 | Fresh entity-address map/records; per-part textureScrollPhase produces a tuple despite retained upload staging storage. |
+| Math.hypot | 48.8 / 49.9 | Most sampled bytes occur under quaternion interpolation/normalization; effect advancement and particle rotation also contribute. Engine allocation mechanism is not yet isolated. |
+| mapBlipFillStyle | 48.6 / 52.4 | Re-normalizes the category color and formats an rgba string for each draw. |
+| selectMapBlips | 42.7 / 42.5 | Rebuilds projected blips and appearance records. |
+
+Logical checks explain why these allocations persist after the earlier CPU work:
+reused GPU staging storage does not remove CPU address/UV records; reused scene
+query output does not remove internal selection work; reduced animation cadence
+does not make a sampled pose allocation-free. The minimap's overlay still runs on
+its own requestAnimationFrame even when its GPU map draw is unchanged or throttled.
+None is evidence that the earlier reductions were undone.
+
+### Lifetime limits and next experiments
+
+The third, collected-excluding window reports only **2.23 MB total** of sampled
+allocation estimates after profile retrieval's collection, compared with about
+2.62 GB allocated per collected-inclusive window. This is consistent with heavy
+transient churn. It is a separate window, not a paired retention ratio, heap
+snapshot, leak exclusion or proof of particular promotion paths. It only samples
+allocations made during that window, not the previously resident scene. Heap
+polls grow and fall during the windows, but cannot identify old-generation owners.
+No claim that one listed function causes the major pause is established.
+
+The strongest next candidate is the animation interpolation path: keep ownership
+of published pose matrices intact while removing intermediate quaternion churn.
+A new destination-writing contract, if needed, must remain readable and explicit;
+do not globally share scratch objects that retained presentation samples can alias.
+First compare numerical poses, including shortest-path, near-identical, layered
+and partial-coverage clips, then repeat allocation sampling. Math.hypot deserves a
+small isolated engine experiment before changing arithmetic; its allocation
+attribution is measured, but boxing/argument handling is still an unproven cause.
+
+A second bounded candidate is renderer phase assembly: collapse temporary
+representations or let the renderer own synchronous frame scratch without changing
+transparent ordering. Preserve near-depth ordering, far cohort stability and
+submission lifetimes across portal views and passes. Avoid a generic object pool
+or another visibility cache. The footprint wrapper and minimap color conversion
+are narrower follow-ups; lowering minimap refresh cadence would be a separate
+work/fidelity decision, not an allocation-only optimization.
+
+For any accepted change, demonstrate bytes/frame reduction under the same workload
+first. Then repeat the earlier lighter GC/frame trace **without heap sampling**
+to evaluate pause time and frame-gap tails. Allocation savings alone do not prove
+fewer major collections, smoother HUD readings or a specific FPS gain. No
+production allocation change was made in this investigation, so app tests were
+not rerun after the checkpoint's passing validation.
+
+Raw profiles, reports, analyzer, exact probe and relevant production snapshots are
+retained under `docs/plans/evidence/h3d-allocation-stability-2026-10-29/`, ignored by
+Git. Artifact checksums and credential scans include decompressed profiles and
+archive members. The client disconnected and diagnostic launchers exited. Only
+this working document changes after the checkpoint; no second commit is made.
+
+
+## Remove quaternion intermediates from pose interpolation — 2026-10-29
+
+Implemented a bounded follow-up in the frontend animation/math layer. Rigid pose
+interpolation used to construct a quaternion, sometimes a sign-adjusted endpoint
+and a second normalized quaternion, only to immediately convert the result into
+an owned matrix. It now keeps the four interpolation components local and creates
+that matrix directly. The matrix conversion formula has one implementation:
+createRotationMat4 delegates to createRotationMat4FromQuaternionComponents, and
+animation interpolation calls the component-based factory. Both require normalized
+quaternion input. No shared scratch object, pool, cache, publication mutation,
+animation-cadence change or fidelity reduction is introduced.
+
+The extra scalar locals and small matrix factory add 24 implementation lines net.
+This is an explicit readability trade-off to remove a measured intermediate
+representation, rather than adding a destination-writing lifetime contract.
+Spherical interpolation, shortest-path sign correction, near-identical normalized
+linear interpolation, translation arithmetic and fresh result matrices remain.
+The existing quaternion normalizer still serves quaternion-valued effect math;
+it is not dead code and its behavior has not changed. Math.hypot stays unchanged:
+its allocation mechanism is still a separate unproven engine question.
+
+Validation: a temporary comparison against the exact pre-change implementation
+checks **50,000 transforms** (10,000 deterministic normalized endpoint pairs × five
+fractions), including identical and antipodal endpoints. Every matrix compares
+exactly equal. The diagnostic copy/test is archived and removed from the app.
+Existing tests cover the axis/sign seam, near-identical rotations, partial coverage
+and layered/sequence playback. A retained unit test checks frozen authored inputs
+and independence of earlier results from subsequent samples.
+
+All **4,014 tests / 421 files** pass, along with npm run check (zero Svelte
+errors/warnings), lint:ts, focused Prettier and git diff --check. Initial validation
+found an unused import, which was removed. The first full-suite attempt also timed
+out a client-main startup test under concurrent full validation; the complete
+suite then passes with maxWorkers=4, without changing tests or timeout limits.
+
+### Repeated live allocation result
+
+Same saved login pose and normal dev:client, renderer profiling off, identical
+32,768-byte heap-sampling method and collected-object flags as the preceding
+allocation investigation. The first attempted capture was discarded: source
+cleanup triggered a Vite reload during entry and the readiness observer lost its
+event stream. The replacement capture starts with source stable, after validation.
+It completes without page/console warning/error/exception and disconnects normally.
+No screenshots, visual acceptance or camera/movement input.
+
+| Measurement | Before A / B | After A / B |
+| --- | ---: | ---: |
+| Main gameplay frame count | 1,436 / 1,433 | 1,443 / 1,442 |
+| Window duration seconds | 10.088 / 10.151 | 10.056 / 10.070 |
+| All main-isolate estimated MB/gameplay frame | 1.821 / 1.832 | 1.778 / 1.758 |
+| Animation-sampling owner estimated KB/gameplay frame | 403.8 / 403.8 | 346.7 / 351.9 |
+| Pose interpolation subtree estimated KB/gameplay frame | 317.1 / 315.1 | 243.9 / 249.6 |
+
+Decimal units. The pose subtree counts each self allocation once under either
+sampleAnimationPose or interpolateRotationMat4, avoiding double counting when
+inlining moves attribution between helpers. Do not subtract old and new function
+self rows to infer savings. Animation owner includes other effect/sample work;
+its reduction is about **52–57 KB/frame (13–14%)**. Whole-isolate mean reduction
+is about **3.2%**, a useful small churn reduction rather than another large
+throughput win. Remaining quaternion allocations in effect math are intentional.
+
+Workload bounds: the 1717×1071 drawing buffer is unchanged. Before windows end at
+169–170 selected dynamic entities / 695–696 object draws; after ends at 169 / 673.
+Scene/effect state evolves between captures and sample counts per clip are not
+instrumented here. Similar gameplay frame counts do not establish identical
+animation work. Two repeated windows and exact numerical comparison support the
+bounded allocation result; they do not make this a controlled byte census or
+prove that every whole-isolate difference came from this change. Per-frame
+normalization includes the independently scheduled minimap. No FPS, CPU-time,
+major-collection frequency, promotion or tail-latency improvement is established.
+The collected-excluding control and retrieval-induced GC caveats remain the same.
+
+Decision: retain this small, ownership-preserving allocation reduction. No new
+commit is requested or made. The next larger structural candidate remains renderer
+phase assembly: collapse temporary partition/group representations while retaining
+transparent ordering. For a frame-stability claim, repeat the lighter ordinary
+GC/frame-gap trace with heap sampling off; do not use profiler-induced collections
+as evidence of natural pause behavior.
+
+Evidence: docs/plans/evidence/h3d-allocation-interpolation-2026-10-29/ contains the
+successful after capture and profiles, derived analysis, diagnostic sources,
+before/after production snapshots, numerical-comparison source/log and validation
+logs. The preceding allocation archive is the before capture. Credential scans
+cover raw and decompressed artifacts and checksums verify stored files.
+
+## Assemble renderer object phases directly — 2026-10-29
+
+The next bounded allocation change is in the frontend renderer's pure submission
+policy. Previously createObjectSubmissionPhases built a transparent population,
+passed it through orderTransparentObjectRanges, then mapped wrapped results back
+to prepared objects. That intermediate API's only production caller was the phase
+assembler; its other consumers were tests. It also returned a trace record that
+production never read. This was a concrete redundant path, not a reason to retain
+a general ordering framework or add another cache.
+
+The assembler now classifies each object directly. Opaque/alpha-test and additive
+objects enter their final arrays; far transparent objects enter first-seen cohort
+groups; near objects retain only one depth/identity/submission record until sorting.
+Far groups are flattened once and near records are mapped once to final objects.
+TransparentObjectSortFacts replaces the wrapper that also carried the object
+already available to the assembler. The renderer's callback/name now reflect that
+contract. The intermediate ordering API, result/trace types, grouping helper and
+unused structural trace fields are removed from surviving code/tests.
+
+The grouping map and ordinary cohort arrays remain: they express the required
+stable grouping policy clearly. Null keys retain independent singleton positions;
+matching non-null cohorts can cross those positions exactly as before. This change
+does not replace them with linked indices, pooling or a lifetime cache. Each call
+still owns its final arrays, so preparing a later portal view cannot overwrite
+transparency deferred from an earlier view. No selected work, pass order, batching
+compatibility, near radius or fidelity policy changes. No shared-crate change.
+
+Production implementation decreases by **64 lines net** across policy and renderer.
+Classification and ordering callbacks are now interleaved in one pass; renderer
+callbacks derive facts from immutable prepared submissions/current view and do not
+depend on the former evaluation schedule. Each transparent candidate is classified
+once; only near candidates derive depth and only far candidates evaluate cohort
+keys. A near object at the exact radius remains near. Equal depths still break ties
+by stable physical identity; equal identities retain stable sort behavior.
+
+Validation: a temporary comparison loads the exact prior policy and checks all
+phase arrays against the new implementation over **10,000 deterministic mixed
+populations**, with frozen input arrays/objects, mixed material phases, duplicate
+identities, depth ties, multiple cohorts and null keys. All results match exactly.
+The diagnostic source is archived and removed from the app. Durable tests now
+exercise the production assembler directly, including boundary/tie order,
+first-seen/null grouping, lazy callback counts, invalid facts/depth, mixed-phase
+partitioning and retained results across calls. Tests of the removed intermediate
+API and its production-unused trace are replaced rather than preserving it.
+
+All **4,012 tests / 421 files** pass, as do npm run check (zero Svelte errors/warnings),
+lint:ts, focused Prettier, git diff --check and the canonical real-GPU entity-selection
+fixture. Browser stderr includes the known GCM/shutdown messages while the fixture
+exits successfully; no agent visual acceptance is performed.
+
+### Repeated live allocation result, relative to the quaternion change
+
+Same saved login pose, enabled distant policy, 1717×1071 drawing buffer, normal
+dev:client and 32,768-byte collected-inclusive sampler. Source stays stable during
+capture. Baseline is the immediately preceding quaternion-intermediate removal,
+not the earlier pre-allocation checkpoint. Two after windows complete without
+page/console warning/error/exception; the client disconnects normally. No camera,
+movement, OS focus change or screenshot input. The collected-excluding third
+control is retained with the same profiler-induced GC caveats as before.
+
+| Measurement | Before A / B | After A / B |
+| --- | ---: | ---: |
+| Gameplay frame count | 1,443 / 1,442 | 1,420 / 1,417 |
+| Window duration seconds | 10.056 / 10.070 | 10.050 / 10.073 |
+| Phase assembler inclusive estimated KB/frame | 182.7 / 179.7 | 110.7 / 109.8 |
+| Other renderer owner estimated KB/frame | 473.9 / 460.8 | 401.9 / 401.5 |
+| Whole main-isolate estimated MB/gameplay frame | 1.778 / 1.758 | 1.713 / 1.709 |
+
+Decimal units; inclusive assembler bytes count its descendants once, not the sum
+of overlapping function rows. This is about **70–72 KB/frame (39%) less allocation
+in phase assembly**, with roughly **3.2% lower mean whole-isolate allocation** than
+the preceding capture. Both allocation changes together put sampled mean total
+allocation about 6% below the original allocation capture. These remain sampled,
+evolving-scene observations, not an exact byte census or a controlled FPS gain.
+
+Before endpoints show 169 selected dynamic entities / 673 object draws; after
+shows 172 / 689, 480 selected scene entries and 41 static nodes. More selected
+objects do not explain away the localized allocation reduction, but the changed
+scene/effect workload prevents attributing every whole-client byte difference to
+this change. Cadence, minimap scheduling, concurrent desktop use and sampler
+overhead remain limitations. No natural GC-pause, promotion or frame-tail benefit
+is inferred from these heap profiles; retrieving them itself causes a collection.
+
+Decision: retain the simpler assembler and measured allocation reduction. Working
+changes remain uncommitted. Evidence and exact before/after sources are retained
+in docs/plans/evidence/h3d-allocation-phases-2026-10-29/; the preceding interpolation
+archive is its allocation baseline. Raw/decompressed artifact credential scans and
+checksums pass. Ordinary heap-sampler-free GC traces are a separate follow-up to
+check the original FPS-dip concern after both changes.
+
+### Ordinary GC check after both allocation changes
+
+Repeated the previous B/lighter trace method twice with the new production code:
+20-second marked windows after ten seconds of foreground-policy warm-up, existing
+HUD/frame sampler observation and native V8 CPU sampling at 1 ms. **No heap sampling
+or explicit GC command**, no screenshots or visual acceptance, no movement/camera
+input. Page-local focus input restored, clients disconnected, and both probes
+complete without page/console warnings/errors. These are independently launched
+runs with different heap ages, not paired GC cycles or a controlled desktop test.
+
+| Ordinary trace measurement | Earlier B | After C | After D |
+| --- | ---: | ---: | ---: |
+| Window seconds | 20.010 | 20.008 | 20.005 |
+| Gameplay frames | 2,822 | 2,840 | 2,672 |
+| Main-thread minor / major collections | 180 / 1 | 181 / 1 | 156 / 2 |
+| Major collection wall duration ms | 10.472 | 10.547 | 11.263, 10.593 |
+| Main-thread GC union ms, including marking | 480.6 | 510.4 | 491.5 |
+| Frame interval p95 / p99 ms | 9.1 / 11.0 | 9.1 / 10.7 | 10.2 / 12.4 |
+
+The original symptom remains. C's major collection at 8.419 seconds coincides with
+a **27.0 ms** frame interval; the HUD's estimated rate drops about 35 from the prior
+second's peak to 132.9, while delivered-rate display reads 121.2. D's major pauses
+at 4.333 and 18.894 seconds coincide with **23.5 / 25.0 ms** intervals; after the
+second, HUD estimated/delivered readings reach 116.5 / 113.0. Major-collection heap
+falls from roughly 958–990 MB to 251–253 MB. These are the trace's observed heap
+figures, not retained-object ownership or a leak diagnosis.
+
+Conclusion: the allocation reductions are measured and the simpler code is retained,
+but **no frame-consistency improvement is demonstrated**, and they do not resolve
+the major-GC-correlated dips. Small allocation savings need not shorten a remaining
+major collection. Collection counts in short, differently aged runs cannot establish
+a change in collection frequency; concurrent desktop and trace/profiler overhead
+remain. Do not present the nearly unchanged C p99 or D's slower frames as a causal
+performance gain/regression. The largest raw interval also includes trace startup,
+so it is not used to characterize ordinary steady-state hitches.
+
+A more targeted next investigation would distinguish allocations collected while
+young from allocations surviving into, or made directly in, major-collected space.
+The current all-collected versus collected-excluding profiles cannot do that. A
+major-collected-inclusive / minor-collected-excluding sample can rank that traffic,
+with explicit allowance for direct old-space allocations and retrieval-induced full
+GC. Follow the resulting owners rather than assuming the largest total allocator
+is the source of old-generation pauses. No new instrumentation, pooling or cache
+is added merely to support that hypothesis.
+
+Trace reports, compressed traces/profiles, aligned analysis and exact diagnostic
+sources are retained in docs/plans/evidence/h3d-post-allocation-gc-2026-10-29/.
+Artifact checksums and credential scans pass. No further production edits or commit.
+
+## Allocation lifetime filtering and pose ownership — 2026-10-29
+
+This follow-up changes **diagnostic tools only**, not production code. It narrows
+which owners merit an ownership/lifetime investigation after the two small churn
+reductions failed to demonstrate smoother ordinary frames.
+
+### Filter out objects observed dying in minor GC
+
+Normal dev:client, stable source, saved login pose and enabled distant policy.
+After settling and foreground-policy warm-up, collect four consecutive ten-second
+heap-sampling windows at the existing 32,768-byte interval. Windows 0/3 include
+objects collected by minor and major GC. Windows 1/2 include major-collected objects
+but exclude minor-collected objects. This brackets the filtered pair with total
+allocation estimates within the same live session rather than relying only on the
+previous session's scene state. No renderer timing/GPU profiling, camera/movement
+input, screenshots or OS focus change. Restore page-local focus input and disconnect.
+All captures complete without page/console warnings/errors/exceptions.
+
+| Measurement | Total 0 | Filtered 1 | Filtered 2 | Total 3 |
+| --- | ---: | ---: | ---: | ---: |
+| Window ms | 10,082 | 10,065 | 10,064 | 10,068 |
+| Gameplay frames | 1,344 | 1,388 | 1,393 | 1,419 |
+| Estimated MB/frame in profile | 1.795 | 0.371 | 0.368 | 1.759 |
+| Animation-sampling owner KB/frame | 372.6 | 248.3 | 241.2 | 364.3 |
+| Contribution-resolution owner KB/frame | 418.4 | 64.3 | 67.6 | 424.5 |
+| Other renderer owner KB/frame | 407.8 | 43.1 | 43.9 | 406.9 |
+| Minimap owner KB/frame | 192.6 | 1.0 | 1.7 | 191.7 |
+| Phase assembler inclusive KB/frame | 111.8 | 0.7 | 1.1 | 112.1 |
+| Pose interpolation inclusive KB/frame | 262.2 | 195.9 | 190.2 | 259.8 |
+| Effect samplePresentation inclusive KB/frame | 85.1 | 43.3 | 41.6 | 81.7 |
+
+Decimal units. Owner categories are disjoint; the last three inclusive rows overlap
+owners and are not additional costs. Filtered animation sampling contributes
+**65.5–67.0%** of the filtered bytes. Map.set and Set.add self sites together account
+for about **83–85 KB/frame** of filtered bytes, principally under contribution
+preparation, dynamic range preparation, scene selection and shadow preparation.
+Their attribution does not separately identify backing tables, boxed inputs or
+other inlined allocations.
+
+Interpretation: much of minimap/phase-assembly traffic is observed dying while
+young; total allocation volume alone would have given those paths too much weight
+for this major-GC investigation. Animation sampling remains prominent after that
+filter. The filtered 0.37 MB/frame is **not** an exact promotion rate, retained-heap
+size, paired lifetime ratio or leak result. It also includes direct old-space
+allocation, currently live samples and young allocations collected by the forced
+full GC during profile retrieval before another minor collection could remove them.
+Inlining can attribute helper/boxed-number allocations to a caller. Sampling and
+its weak handles can perturb collection behavior. These flags rank candidates;
+they do not prove that each attributed byte is a long-lived pose matrix or explain
+the pause duration by themselves.
+
+Workload: unchanged 1717×1071 drawing buffer; endpoints show 174–175 selected dynamic
+entities. The scene, effects and frame cadence evolve between windows. The total
+windows are consequently different from earlier sessions; do not interpret the
+higher absolute total versus the previous phase capture as a proven regression.
+
+### Independently check promotion and fresh matrix generation
+
+Re-analysis of the earlier detailed ordinary trace A's **main-thread**
+V8.GCTraceGCNVP records finds 166 scavenges and one major collection inside the
+existing marked window. Scavenges report **588,379,832 promoted bytes in 20.0074s**,
+about **29.4 MB/s**. This is aggregate engine-reported promotion, independent of
+allocation-site sampling, and contextual evidence of substantial promotion
+traffic. It predates the two recent changes and is not a current before/after
+promotion comparison or attribution to matrices.
+
+To distinguish promotion from direct old allocation of the result objects, use
+an isolated diagnostic Vite transform immediately after interpolateRotationMat4
+returns. It passes the fresh result to a counter that calls V8's
+[InYoungGeneration intrinsic](https://github.com/v8/v8/blob/main/src/runtime/runtime-test.cc).
+Launch that diagnostic browser with allow-natives-syntax; no production config or
+source changes. The counter never stores matrix references, changes numbers or
+forces GC. It does change code shape/inlining and is therefore an observation of
+the diagnostic path, not a proof of the uninstrumented allocation strategy.
+
+After warm-up, four five-second windows count **2,010,752 fresh result matrices**,
+all classified young immediately after construction; zero classified otherwise.
+A second independent run enables the filtered heap sampler for its first ten
+seconds, retrieves/stops it, then observes ten seconds without heap sampling.
+Counts are **1,000,665 young / zero other** during sampling and **1,005,472 young /
+zero other** afterward. A fresh plain-object control also classifies young. Both
+runs use Electron 44.0.0 / Chrome 152.0.7977.54, restore focus input, disconnect and
+report no page/console failures. No screenshots or visual acceptance.
+
+This argues against assuming that fresh Mat4 results are simply born old in this
+observed path. It does **not** locate every intermediate/boxed allocation, measure
+how long each result survives, or prove its eventual retainer. The second run's GC
+trace includes retrieval's explicit sampling-profiler collection (**75.2 ms**),
+which must not be reported as an ordinary gameplay hitch or regression. Diagnostic
+intrinsics and heap profiling remain absent from production. No product-facing
+instrumentation or new public profiling API is added.
+
+### Source-level ownership finding and next bounded design
+
+The pose references genuinely cross frames: DynamicEntitySystem.#applySample
+retains sample.articulatedPose on the entity. AnimationSystem.#createRecord also
+retains its initial part-to-object transform array as the clip seed; the runtime
+obtains that array from DynamicEntitySystem.getPartToObjectTransforms. Partial
+clips preserve parts they do not author using that earlier pose. Layer transitions
+can seed their successor from the finishing pose. These are functional ownership
+requirements, not demonstrated leaks. AnimationSequence independently clones its
+setup seed on installation.
+
+Therefore a shared scratch matrix or blindly overwriting the entity's published
+pose could corrupt historical seed values and partial/layered animation behavior.
+A justified next experiment would make the distinction explicit: immutable seeds
+copied at clip/layer installation or transition, separately owned reusable sampled
+output, and consumers borrowing the current output until the next publication.
+Audit attachment publication, layered composition and sequence/partial coverage
+before changing that lifetime contract. Verify historical seeds and held outputs
+with behavior tests, compare poses numerically, then measure filtered allocation
+and ordinary GC again. Keep the experiment limited to these demonstrated ownership needs; avoid a
+general pool, global cache or fidelity reduction.
+
+Decision: prioritize pose/effect sample ownership over further minimap or phase
+micro-optimizations for the major-GC concern. No additional production fix or pause
+improvement is claimed in this step; the prior uncommitted changes remain intact.
+No app test rerun is needed for these external diagnostic transforms and working
+notes. Evidence is retained in docs/plans/evidence/h3d-allocation-lifetimes-2026-10-29/:
+four profiles/reports, native generation checks, promotion re-analysis, exact
+sources and relevant production snapshots. Credential scans include decompressed
+profiles/traces/archive members; checksums pass. Diagnostic launchers have exited.
+
+## Playback-owned current pose storage — 2026-10-29
+
+The user authorized trying reuse provided human understandability remained a
+first-class constraint. This implementation keeps the distinction in one frontend
+animation owner, AnimationPoseSampler: each part has a private preserved seed and
+an independently mutable current matrix. updateCurrent updates the current pose;
+snapshot produces an independent projected pose for a transition. Neither exposes
+seeds. There is no pool, lease, rotating buffer, global cache or renderer-owned
+scratch contract. Storage remains bounded by installed tracks and their part counts.
+
+ClipAnimationRecord owns the sampler. Existing installation/transition paths now
+request snapshots explicitly; initial input copying is centralized in the sampler
+rather than split between callers. Partial clips restore unauthored parts from
+preserved seeds. Gesture composition reads each track's current pose; historical
+successors use snapshots. Sequence sampling remains unchanged in this bounded
+pass, as do fresh standalone sampling for previews/model fitting and authored-root
+sampling. Rendering cadence, selected content, fidelity, hooks, clocks and effects
+are unchanged. No shared Rust or world authority boundary changes.
+
+The intentional contract change is stated on DynamicPresentationSample: current
+clip matrices belong to playback and are updated by later sampling; retaining that
+sample does not create historical storage. Publication/composition is synchronous
+in the existing runtime. Renderer/entity consumers do not allocate or rotate
+buffers. One existing phase-comparison test retained an old sample as though it
+were a snapshot; it now explicitly saves the earlier numerical values. This is a
+real lifetime change, not a claim of immutable output compatibility.
+
+The frontend math layer accepts caller-owned output for rigid interpolation and
+the quaternion-component matrix factory, following existing matrix writer idioms.
+Frame interpolation is shared between fresh and reusable sampling, avoiding a
+second quaternion/matrix formula. A private part helper validates authored frame
+availability. The implementation adds about **85 production lines** net relative
+to the preceding experiment, principally the local ownership class and comments.
+This is additional state worth accepting only with a substantial measured result.
+
+### Numerical and lifecycle checks
+
+A temporary comparison against the exact prior sampler checks **45,000 poses**
+(5,000 deterministic generated cases × nine frame positions), including arbitrary
+normalized rotations/translations, forward/reverse clips, and authored part counts
+both smaller and larger than setup counts. Every matrix compares exactly equal.
+The diagnostic test/source is archived and removed from the app.
+
+Durable tests check independent installation inputs, preserved partial-part seeds,
+current matrix reuse, transition snapshots surviving later updates, snapshot-taking
+not moving the published current pose, and complete writes into a supplied matrix.
+Existing full/partial/full transitions, pending gesture retirement, layered motion,
+attachments, staged owners and dynamic publication remain covered by the full suite.
+All **4,014 tests / 421 files**, npm run check (zero Svelte errors/warnings), lint:ts,
+focused Prettier and git diff --check pass on the final source. Real live captures
+render the populated saved view and report no page/console failures. No screenshots
+or agent visual acceptance.
+
+### Normal-client allocation captures
+
+Repeat the previous total / filtered / filtered / total ten-second windows in
+normal dev:client, with 32,768-byte heap sampling and stable source. Filtered means
+major-collected-inclusive and minor-collected-excluding, with the same lifetime and
+retrieval-induced-GC limitations as the preceding section.
+
+| Estimated allocation per gameplay frame | Before | Reuse |
+| --- | ---: | ---: |
+| Total-window main-isolate MB/frame | 1.795 / 1.759 | 1.585 / 1.562 |
+| Filtered-window main-isolate MB/frame | 0.371 / 0.368 | 0.206 / 0.195 |
+| Total-window animation-owner KB/frame | 372.6 / 364.3 | 157.1 / 160.9 |
+| Filtered-window animation-owner KB/frame | 248.3 / 241.2 | 47.7 / 45.3 |
+
+Decimal units. Roughly **11% lower mean total allocation**, **46% lower filtered
+allocation**, and **81% lower filtered animation-owner allocation**. These independent
+sessions have evolving effects/scene work, so this is not an exact paired byte
+census. New windows cover 1,427 / 1,410 / 1,427 / 1,409 frames in about ten seconds
+each, with 174–175 selected dynamic entities. The drawing buffer remains 1717×1071.
+No promotion rate, natural pause benefit or release comparison is inferred from
+heap-sampling profiles alone.
+
+### One-session fresh / reuse / reuse / fresh GC control
+
+A separate isolated diagnostic Vite transform makes the sampler's current-output
+operation call snapshot when a diagnostic fresh flag is enabled. This switch exists
+only in the external probe, not production. It compares storage policy within the
+same running session and the same math/renderer code. The fresh control uses the
+current interpolator and makes one extra temporary seed-reference array in snapshot;
+it does not exactly recreate every allocation instruction of the previous build.
+Both modes retain the same bounded sampler storage. No numeric/fidelity differences
+are introduced by the control.
+
+After initial warm-up, capture four 20-second windows in **fresh / reuse / reuse /
+fresh** order, with five seconds settling after each switch. Existing frame/HUD
+observation and ordinary GC/NVP trace categories are enabled equally in all windows.
+There is **no heap sampling, CPU sampling profiler or forced-GC command**. Collection
+records contain no sampling-profiler reason. Source stays stable throughout. Page
+focus input is restored and the client disconnects normally with no page/console
+warning/error/exception. No movement, camera, screenshot or OS focus input.
+
+| Ordinary GC measurement | Fresh A | Reuse B | Reuse C | Fresh D |
+| --- | ---: | ---: | ---: | ---: |
+| Gameplay frames | 2,871 | 2,872 | 2,853 | 2,842 |
+| Minor-GC promoted MB in 20s | 615.46 | 87.70 | 87.79 | 612.94 |
+| Minor-GC promoted KB/gameplay frame | 214.4 | 30.5 | 30.8 | 215.7 |
+| Minor-GC promoted MB/s | 30.75 | 4.38 | 4.39 | 30.63 |
+| Main-thread minor / major count | 186 / 1 | 147 / 0 | 143 / 1 | 183 / 1 |
+| Main-thread GC union ms including marking | 459.8 | 196.9 | 210.3 | 457.8 |
+| Steady frame interval p99 ms | 9.70 | 9.00 | 10.09 | 10.30 |
+| Steady frame intervals above 16.7ms | 2 | 1 | 2 | 2 |
+
+NVP promoted-byte sums filter to the marked renderer main thread and include minor
+collections only. They are engine counters, independent of heap-sampling estimates.
+GC wall totals merge nested blocking spans; concurrent worker work is excluded.
+Steady frame metrics omit the first second of each trace to avoid startup artifacts.
+The 16.7ms threshold represents a frame longer than roughly one 60Hz refresh.
+Endpoint workload is 172–173 selected dynamic entities / 692–697 object draws,
+unchanged drawing dimensions and saved pose. Natural scene activity, concurrent
+desktop use and tracing still limit timing conclusions.
+
+The reversal supports a substantial ownership-related improvement: about **86%
+less minor-GC promotion per frame**, and roughly **56% less measured main-thread GC
+wall time** in these matched reuse windows. Both fresh windows return to essentially
+the same promotion rate, strengthening the result beyond a one-way timing comparison.
+This does not identify every boxed/intermediate object attributed to a pose function,
+but it directly tests the changed storage policy without an allocation profiler.
+
+The FPS-dip concern is **not resolved**. Reuse C still includes a **9.149ms major
+collection**. Frame p99 values overlap and long-frame counts are too small to
+establish a tail-latency win. Heap age carries across windows and collections may
+occur in the five-second unmeasured settling gaps; short-window major counts cannot
+establish collection frequency or elimination of major collections. No fixed FPS
+gain or promise of a smoother HUD is made.
+
+### Final decision and evidence
+
+Retain this bounded implementation: the measured reduction in promotion/GC work
+justifies the explicit seed/current distinction. The remaining understandability
+cost is the live-current-versus-snapshot contract at one animation boundary, plus
+a small owner class. Do not spread buffer management into renderer/UI callers.
+Future consumers requiring history must request/copy snapshots deliberately.
+
+After measurement, the sampler's mutating method was renamed from sample to
+updateCurrent to make that distinction visible at call sites; only the name and
+formatting changed, not sampling/storage logic. Exact measured source snapshots and
+probe transforms are retained for replay; final tests/types/lint/format checks use
+the explicit name. Working changes remain uncommitted.
+
+Evidence: docs/plans/evidence/h3d-pose-storage-2026-10-29/ contains normal allocation
+captures, alternating-control traces/reports/analysis, exact prior/measured/final
+sources, numerical comparison and final check logs. Credential scans include raw
+and decompressed profiles/traces/archive members; checksums pass. No new app-local
+profiling flag or native V8 intrinsic is present in production.
+
+
+## Code-quality review and allocation checkpoint — 2026-10-29
+
+Verdict: **ready within the reviewed scope**. Baseline: c8dcb982f (the previous
+reviewed distant-cadence checkpoint). This review covers all accumulated allocation
+changes in interpolation/math, clip pose ownership, renderer phase assembly,
+associated tests and this investigation document. Earlier committed renderer
+architecture is context, not a new whole-engine audit. ACE/ACViewer submodule
+working contents and ignored raw diagnostic archives are outside this commit.
+
+Ownership/seams inspected: prepared animation endpoints → quaternion interpolation
+→ matrix writer; initial/transition seed → AnimationPoseSampler current/snapshot
+→ AnimationSystem selection/layer composition → synchronous runtime publication →
+dynamic part transforms/bounds/attachment frames and renderer consumption. Also
+inspect staged owner creation across awaited particle-mesh preparation: staged
+samplers are separate and cannot be advanced through the active record map before
+commit. Installation failure/release leaves active playback untouched. Replacement,
+retime, hidden playback, partial clips, gesture retirement and sequence exclusion
+retain their respective owners. No renderer/UI caller gains buffer lifecycle work.
+
+Transparent submission seam: renderer supplies existing prepared sort/cohort facts;
+the pure assembler owns near/far classification and ordering, with independently
+owned output arrays for portal/deferred consumers. Near depth ties and far first-seen
+cohorts/null-key positions remain explicit. Removed ordering wrappers/trace types
+have no surviving production callers or compatibility aliases. Temporary flags,
+native intrinsics, profiling transforms and numerical-oracle copies are absent
+from application source; only ignored evidence retains them.
+
+Consolidation decisions: retain one quaternion-to-matrix formula and one part
+interpolation helper; keep current/seed storage together in a bounded playback
+owner; retain fresh snapshots for historical transitions, standalone sampling and
+sequence semantics. Do not unify those distinct lifetimes into a shared scratch
+buffer or generic pool. The derived current matrix array is built once from fixed
+seed/current pairs and has no independent invalidation lifecycle. Additional
+installation/transition copies are accepted cold-path cost for a simpler ownership
+contract. The measured promotion reduction justifies the bounded retained storage.
+No new policy cache or cross-layer quality setting is introduced.
+
+Review improvements: split matrix-writer acceptance from pose-sampler tests and
+initialize nonzero perspective destination fields before each write, asserting
+that rigid output clears them. This closes a real coverage gap without production
+logic changes. Correct the status text that had called the pre-allocation CPU
+phase breakdown current; no refreshed final-code CPU bucket measurement is claimed.
+
+Accepted trade-off: current presentation samples are live views, not immutable
+historical snapshots. The operation name updateCurrent, snapshot API and sample
+contract make that explicit at the animation boundary. Source tracing and tests
+support the existing synchronous consumer order, not arbitrary future retention
+or asynchronous sampling. Future history consumers must obtain snapshots rather
+than keep the borrowed matrices. Invalid runtime/content errors still fail loudly;
+this review does not promise rollback of partial sampling after an unexpected error.
+
+Verification: fresh full suite **4,015 tests / 421 files**, npm run check (zero
+Svelte errors/warnings), lint:ts, focused Prettier and git diff --check pass. Prior
+numerical comparison, populated live-client allocation captures and alternating
+ordinary-GC controls apply unchanged: production logic is unchanged by this review.
+No new live benchmark or visual acceptance is performed merely for a test/doc edit.
+No reliable FPS/tail-latency gain, elimination of major GC, or release performance
+claim is added. Effect-sampling temporaries remain a bounded follow-up, not a
+blocker for this checkpoint.

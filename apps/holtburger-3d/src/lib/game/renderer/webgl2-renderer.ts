@@ -244,7 +244,7 @@ import {
 	type ObjectFrameSubmission,
 	type ObjectSubmissionPhases,
 	type PreparedObjectTextureBinding,
-	type TransparentObjectRange,
+	type TransparentObjectSortFacts,
 	EMPTY_DYNAMIC_RANGE_ADMISSION,
 	summarizeDynamicRangeAdmission,
 } from "./object-rendering-policy";
@@ -4949,7 +4949,7 @@ export class WebGL2Renderer implements Renderer {
 		try {
 			const phases = createObjectSubmissionPhases(
 				view.objects,
-				(object) => this.#transparentRange(object, view),
+				(object) => this.#transparentSortFacts(object, view),
 				(object) =>
 					object.drawKind === "merged"
 						? object.transparentCohortKey
@@ -4978,10 +4978,10 @@ export class WebGL2Renderer implements Renderer {
 	 * Every producer publishes its sort center in landblock space, so placing it in the view's
 	 * anchored frame is one offset add: no per-candidate matrix work survives here.
 	 */
-	#transparentRange(
+	#transparentSortFacts(
 		object: ObjectColorSubmission,
 		view: PreparedViewGeometry,
-	): TransparentObjectRange<ObjectColorSubmission> {
+	): TransparentObjectSortFacts {
 		const facts = object.transparentSort;
 		if (!facts) {
 			throw new Error(
@@ -4998,7 +4998,6 @@ export class WebGL2Renderer implements Renderer {
 		const z = facts.center.z + offset.z - view.cameraPosition.z;
 		return {
 			distanceSquared: x * x + y * y + z * z,
-			range: object,
 			stableId: facts.stableId,
 		};
 	}

@@ -3,6 +3,7 @@ import { createRotationMat4, transformPoint3 } from "../math/matrices";
 import { Mat4, Quat, Vec3 } from "../math/types";
 import {
 	advancePlayingFrame,
+	AnimationPoseSampler,
 	clipEntryFrame,
 	interpolateRigidTransform,
 	playingClip,
@@ -186,6 +187,54 @@ describe("sampleAuthoredRootTransform", () => {
 });
 
 describe("interpolateRigidTransform", () => {
+	it("overwrites a caller-owned matrix including its perspective fields", () => {
+		const target = Mat4.zero();
+		for (const fraction of [0, 0.25, 0.5, 0.75, 1]) {
+			const from = {
+				rotation: Quat.identity(),
+				translation: new Vec3(1, 2, 3),
+			};
+			const to = {
+				rotation: new Quat(0, 0, 0, -1),
+				translation: new Vec3(4, 5, 6),
+			};
+			// A general destination may carry perspective terms from its previous use.
+			target.m14 = 1;
+			target.m24 = 1;
+			target.m34 = 1;
+			target.m44 = 0;
+			expect(interpolateRigidTransform(from, to, fraction, target)).toBe(
+				target,
+			);
+			expect(target).toEqual(interpolateRigidTransform(from, to, fraction));
+			expect(target).toEqual(
+				expect.objectContaining({ m14: 0, m24: 0, m34: 0, m44: 1 }),
+			);
+		}
+	});
+
+	it("keeps earlier results and authored endpoints independent of later samples", () => {
+		const from = Object.freeze({
+			rotation: Object.freeze(Quat.identity()),
+			translation: Object.freeze(Vec3.zero()),
+		});
+		// Antipodal endpoints represent the same rotation and exercise sign correction.
+		const to = Object.freeze({
+			rotation: Object.freeze(new Quat(-1, 0, 0, 0)),
+			translation: Object.freeze(new Vec3(8, 4, -2)),
+		});
+		const first = interpolateRigidTransform(from, to, 0.25);
+		const retained = first.clone();
+		const second = interpolateRigidTransform(from, to, 0.75);
+		expect(first).toEqual(retained);
+		expect(second).not.toBe(first);
+		expect(first.m41).toBe(2);
+		expect(second.m41).toBe(6);
+		expect(transformPoint3(first, new Vec3(1, 0, 0))).toEqual(
+			new Vec3(3, 1, -0.5),
+		);
+	});
+
 	it("smoothly interpolates rigid translation and orientation", () => {
 		const from = { rotation: Quat.identity(), translation: new Vec3(0, 0, 0) };
 		const to = {
@@ -337,6 +386,44 @@ describe("sampleAnimationPose", () => {
 					wholeAnimationClip(withoutRootFrames),
 					framePosition,
 				),
+			);
+		}
+	});
+});
+
+describe("AnimationPoseSampler", () => {
+	it("separates preserved seeds, mutable current poses and independent transition snapshots", () => {
+		const firstSeed = Mat4.identity();
+		const retainedSeed = Mat4.identity();
+		retainedSeed.m41 = 9;
+		const sampler = new AnimationPoseSampler([firstSeed, retainedSeed]);
+		const clip = wholeAnimationClip(testAnimation(3));
+		// Installation must own the seed, even when the source was another playback's current pose.
+		retainedSeed.m41 = 99;
+		const current = sampler.updateCurrent(clip, 0.5);
+		const matrices = [...current];
+		expect(current.map(({ m41 }) => m41)).toEqual([5, 9]);
+		const snapshot = sampler.snapshot(clip, 1.5);
+		expect(snapshot.map(({ m41 }) => m41)).toEqual([15, 9]);
+		// Taking a future transition snapshot must not move the currently published pose.
+		expect(current.map(({ m41 }) => m41)).toEqual([5, 9]);
+		expect(sampler.updateCurrent(clip, 2)).toBe(current);
+		current.forEach((matrix, index) => expect(matrix).toBe(matrices[index]));
+		expect(current.map(({ m41 }) => m41)).toEqual([20, 9]);
+		expect(snapshot.map(({ m41 }) => m41)).toEqual([15, 9]);
+		const successor = new AnimationPoseSampler(snapshot);
+		sampler.updateCurrent(clip, 0);
+		expect(successor.updateCurrent(clip, 0.25).map(({ m41 }) => m41)).toEqual([
+			2.5, 9,
+		]);
+	});
+
+	it("matches fresh pose sampling across frame positions", () => {
+		const clip = wholeAnimationClip(testAnimation(3));
+		const sampler = new AnimationPoseSampler([Mat4.identity()]);
+		for (const frame of [0, 0.5, 1, 1.5, 2]) {
+			expect(sampler.updateCurrent(clip, frame)).toEqual(
+				sampleAnimationPose(clip, frame),
 			);
 		}
 	});

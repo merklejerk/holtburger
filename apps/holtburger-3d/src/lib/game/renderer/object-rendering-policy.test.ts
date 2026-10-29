@@ -7,7 +7,6 @@ import {
 	formAdjacentObjectInstanceRuns,
 	formGroupedObjectInstanceRuns,
 	objectBlendPolicy,
-	orderTransparentObjectRanges,
 	type PreparedStaticObjectDrawCompatibility,
 } from "./object-rendering-policy";
 import {
@@ -49,107 +48,106 @@ describe("dynamicObjectPhase", () => {
 	);
 });
 
-describe("orderTransparentObjectRanges", () => {
-	it("orders nearby ranges exactly back-to-front by camera depth", () => {
-		const ordered = orderTransparentObjectRanges(
-			[
-				entry("radially-farther", 12, 4),
-				entry("depth-farther", 10, 9),
-				entry("depth-nearer", 8, 2),
-			],
-			() => null,
-			depthOf,
+describe("transparent submission ordering", () => {
+	it("sorts near objects by camera depth, breaks ties by identity and retains input ownership", () => {
+		const radius = TRANSPARENT_TUNING.nearDistance;
+		const objects = [
+			{ id: "radially-farther", distance: radius * 0.9, depth: 4 },
+			{ id: "z", distance: radius * 0.7, depth: 9 },
+			{ id: "a", distance: radius * 0.5, depth: 9 },
+			// The exact radius belongs to the near phase.
+			{ id: "boundary", distance: radius, depth: 2 },
+		].map((value) =>
+			Object.freeze({ ...value, ordering: "transparent" as const }),
 		);
-
-		expect(ordered.near.map(({ range }) => range)).toEqual([
-			"depth-farther",
-			"radially-farther",
-			"depth-nearer",
+		Object.freeze(objects);
+		const phases = createObjectSubmissionPhases(
+			objects,
+			(value) => ({ distanceSquared: value.distance ** 2, stableId: value.id }),
+			() => {
+				throw new Error("Near objects must not derive a batch key.");
+			},
+			(value) => value.depth,
+		);
+		expect(phases.transparent.near).toEqual([
+			objects[2],
+			objects[1],
+			objects[0],
+			objects[3],
 		]);
-		expect(ordered.far).toEqual([]);
-		expect(ordered.trace).toEqual({
-			cameraDepthEvaluationCount: 3,
-			distanceClassificationCount: 3,
-			farBatchKeyEvaluationCount: 0,
-		});
-	});
-
-	it("breaks equal-depth ties by stable physical identity", () => {
-		const ordered = orderTransparentObjectRanges(
-			[entry("z", 4, 3), entry("a", 4, 3)],
+		expect(phases.transparent.far).toEqual([]);
+		const retained = [...phases.transparent.near];
+		createObjectSubmissionPhases(
+			objects.slice(0, 1),
+			(value) => ({ distanceSquared: value.distance ** 2, stableId: value.id }),
 			() => null,
-			depthOf,
+			(value) => value.depth,
 		);
-
-		expect(ordered.near.map(({ range }) => range)).toEqual(["a", "z"]);
+		expect(phases.transparent.near).toEqual(retained);
 	});
 
-	it("groups far ranges by first-seen batching cohort", () => {
-		depthEvaluations.length = 0;
-		const ordered = orderTransparentObjectRanges(
-			[
-				{ ...entry("a-2", 40), range: { cohort: "a", id: "a-2" } },
-				{ ...entry("b-1", 20), range: { cohort: "b", id: "b-1" } },
-				{ ...entry("a-1", 30), range: { cohort: "a", id: "a-1" } },
-			],
-			({ cohort }) => cohort,
-			({ id }) => depthOf(id),
+	it("keeps far cohorts in first-seen order, including independent null-key objects", () => {
+		const objects = [
+			{ id: "a1", cohort: "a" },
+			{ id: "single1", cohort: null },
+			{ id: "b1", cohort: "b" },
+			{ id: "a2", cohort: "a" },
+			{ id: "single2", cohort: null },
+			{ id: "b2", cohort: "b" },
+		].map((value) =>
+			Object.freeze({ ...value, ordering: "transparent" as const }),
 		);
-
-		expect(ordered.far.map(({ range }) => range.id)).toEqual([
-			"a-2",
-			"a-1",
-			"b-1",
+		const batchCalls: string[] = [];
+		const phases = createObjectSubmissionPhases(
+			objects,
+			(value) => ({
+				distanceSquared: (TRANSPARENT_TUNING.nearDistance + 1) ** 2,
+				stableId: value.id,
+			}),
+			(value) => {
+				batchCalls.push(value.id);
+				return value.cohort;
+			},
+			() => {
+				throw new Error("Far objects must not derive camera depth.");
+			},
+		);
+		expect(phases.transparent.far.map(({ id }) => id)).toEqual([
+			"a1",
+			"a2",
+			"single1",
+			"b1",
+			"b2",
+			"single2",
 		]);
-		expect(ordered.near).toEqual([]);
-		expect(ordered.trace.farBatchKeyEvaluationCount).toBe(3);
-		// The far majority is the whole population here; none of it may pay for a camera depth.
-		expect(depthEvaluations).toEqual([]);
-		expect(ordered.trace.cameraDepthEvaluationCount).toBe(0);
-	});
-
-	it("derives camera depth only for near candidates", () => {
-		depthEvaluations.length = 0;
-		const ordered = orderTransparentObjectRanges(
-			[
-				entry("far", TRANSPARENT_TUNING.nearDistance + 1),
-				entry("near", TRANSPARENT_TUNING.nearDistance - 1),
-			],
-			() => null,
-			depthOf,
-		);
-
-		expect(depthEvaluations).toEqual(["near"]);
-		expect(ordered.trace.cameraDepthEvaluationCount).toBe(1);
-	});
-
-	it("separates far candidates from the near camera-sorted phase", () => {
-		const ordered = orderTransparentObjectRanges(
-			[
-				entry("near-first", TRANSPARENT_TUNING.nearDistance - 1),
-				entry("far-second", TRANSPARENT_TUNING.nearDistance + 1),
-			],
-			() => null,
-			depthOf,
-		);
-
-		expect(ordered.far.map(({ range }) => range)).toEqual(["far-second"]);
-		expect(ordered.near.map(({ range }) => range)).toEqual(["near-first"]);
+		expect(phases.transparent.near).toEqual([]);
+		expect(batchCalls).toEqual(objects.map(({ id }) => id));
 	});
 
 	it.each([
-		["camera distance", { ...entry("range", 1), distanceSquared: -1 }],
-		["stable identity", { ...entry("range", 1), stableId: "" }],
-	])("rejects invalid transparent %s", (_label, range) => {
+		{ label: "camera distance", distanceSquared: -1, stableId: "valid" },
+		{
+			label: "camera distance",
+			distanceSquared: Number.NaN,
+			stableId: "valid",
+		},
+		{ label: "stable identity", distanceSquared: 0, stableId: "" },
+	])("rejects invalid transparent $label", ({ label, ...facts }) => {
 		expect(() =>
-			orderTransparentObjectRanges([range], () => null, depthOf),
-		).toThrow(`Transparent object ${_label}`);
+			createObjectSubmissionPhases(
+				[{ ordering: "transparent" }],
+				() => facts,
+				() => null,
+				() => 0,
+			),
+		).toThrow(`Transparent object ${label}`);
 	});
 
-	it("rejects a near candidate whose derived camera depth is not finite", () => {
+	it("rejects non-finite camera depth for a near object", () => {
 		expect(() =>
-			orderTransparentObjectRanges(
-				[entry("near", TRANSPARENT_TUNING.nearDistance - 1)],
+			createObjectSubmissionPhases(
+				[{ ordering: "transparent" }],
+				() => ({ distanceSquared: 0, stableId: "near" }),
 				() => null,
 				() => Number.NaN,
 			),
@@ -175,7 +173,6 @@ describe("createObjectSubmissionPhases", () => {
 			const phases = createObjectSubmissionPhases(
 				objects,
 				(value) => ({
-					range: value,
 					stableId: value.id,
 					distanceSquared: (value.x - cameraOffset * radius) ** 2,
 				}),
@@ -213,7 +210,6 @@ describe("createObjectSubmissionPhases", () => {
 		const phases = createObjectSubmissionPhases(
 			objects,
 			(object) => ({
-				range: object,
 				stableId: object.id,
 				distanceSquared: (TRANSPARENT_TUNING.nearDistance / 2) ** 2,
 			}),
@@ -273,7 +269,6 @@ describe("createObjectSubmissionPhases", () => {
 				sortFactCalls.push(object.id);
 				return {
 					distanceSquared: object.distance ** 2,
-					range: object,
 					stableId: object.id,
 				};
 			},
@@ -638,37 +633,6 @@ describe("objectBlendPolicy", () => {
 		});
 	});
 });
-
-/**
- * One classified candidate plus the depth the lazy near-phase callback would derive for it.
- *
- * Depth is carried beside the range rather than inside it, mirroring production: classification
- * never sees a camera depth, and only near candidates ever have one derived.
- */
-function entry(
-	stableId: string,
-	radialDistance: number,
-	cameraDepth = radialDistance,
-) {
-	cameraDepths.set(stableId, cameraDepth);
-	return {
-		distanceSquared: radialDistance * radialDistance,
-		range: stableId,
-		stableId,
-	};
-}
-
-const cameraDepths = new Map<string, number>();
-
-/** Lazy depth source recording which candidates the ordering policy actually asked about. */
-function depthOf(range: string): number {
-	depthEvaluations.push(range);
-	const depth = cameraDepths.get(range);
-	if (depth === undefined) throw new Error(`No camera depth for ${range}.`);
-	return depth;
-}
-
-const depthEvaluations: string[] = [];
 
 interface TestIdentity {
 	readonly name: string;

@@ -9,13 +9,13 @@
 		readonly display: UiIconDisplay | undefined;
 		/** Current price, balance, or queue total. */
 		readonly amount: number;
-		/** Balance after the queued trade, if a draft exists. */
+		/** Balance after the quoted trade; unchanged balances omit the projection. */
 		readonly projected?: number;
 	}
 	const { name, display, amount, projected }: Props = $props();
 	const summary = $derived.by(() => {
 		const current = amount.toLocaleString();
-		if (projected === undefined)
+		if (projected === undefined || projected === amount)
 			return { current, change: null, label: `${current} ${name}` };
 		const after = projected.toLocaleString();
 		const deltaValue = projected - amount;

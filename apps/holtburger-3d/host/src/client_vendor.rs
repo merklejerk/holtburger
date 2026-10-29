@@ -113,9 +113,45 @@ mod tests {
         VendorTradeResult,
     };
     use holtburger_core::{BusyOperationKind, ClientViewEvent};
+    use holtburger_protocol::messages::object::messages::description::PublicWeenieDescription;
+    use holtburger_protocol::messages::trade::events::VendorItemEventData;
     use holtburger_world::vendor::{
         CoreVendorItem, VendorCurrencyQuote, VendorDraftQuote, VendorLineQuote, VendorValueLimits,
     };
+
+    #[test]
+    fn zero_count_nonstackable_offer_projects_one_purchasable_item() {
+        let vendor = VendorState {
+            vendor_guid: Guid(100),
+            items: vec![CoreVendorItem::from_protocol(&VendorItemEventData {
+                packed_stack_size: 0xff00_0000,
+                description: PublicWeenieDescription {
+                    guid: Guid(1000),
+                    item_type: ItemType::GEM.bits(),
+                    ..Default::default()
+                },
+            })],
+            buy_multiplier: 1.0,
+            sell_multiplier: 1.0,
+            merchandise_item_types: ItemType::GEM.bits(),
+            value_limits: VendorValueLimits::default(),
+            alternate_currency_wcid: 0,
+            alternate_currency_amount: 0,
+            alternate_currency_name: String::new(),
+        };
+        let snapshot = ClientVendorSnapshot::from(vendor);
+        let offer = &snapshot.offers[0];
+        assert_eq!(offer.supply, Some(1));
+        assert_eq!(offer.stack_count, 1);
+        assert!(!offer.stackable);
+        assert!(matches!(
+            offer.price,
+            ClientVendorPrice::Quoted {
+                amount: 1,
+                quantity: 1
+            }
+        ));
+    }
 
     #[test]
     fn projected_vendor_events_match_the_browser_owner_fixture() {

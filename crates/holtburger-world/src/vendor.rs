@@ -3,7 +3,8 @@ use crate::identify::{self, IdentifyTarget};
 use crate::inspection::InspectionSupplement;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
-    HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PropertyUpdate, WorldObjectProperties,
+    HasProperties, HasPropertiesMut, ObjectDescriptionFlag, PropertyUpdate, WorldObjectExt,
+    WorldObjectProperties,
 };
 use holtburger_protocol::messages::object::events::IdentifyObjectResponseEventData;
 use holtburger_protocol::messages::object::types::{
@@ -22,6 +23,7 @@ pub use draft::{
 pub struct CoreVendorItem {
     pub guid: Guid,
     pub wcid: u32,
+    /// Purchasable supply for a draft; retail permits one zero-count non-stackable offer.
     pub vendor_supply: Option<u32>,
     pub properties: WorldObjectProperties,
     /// Server public classification retained for the same inspection semantics as live entities.
@@ -63,11 +65,19 @@ impl CoreVendorItem {
     ) -> Self {
         let mut properties = WorldObjectProperties::default();
         properties.hydrate_from_vendor_item(item);
+        let vendor_supply = match decode_vendor_item_supply(item.packed_stack_size) {
+            // RETAIL QUIRK: acclient.c:233720-233766,236400-236409,235249-235260:
+            // retail queues one zero-count non-stackable, then removes the offer.
+            // Treating zero as sold out blocks authored offers: a live vendor census
+            // found all 89 offers non-stackable with zero counts (2026-10-28).
+            Some(0) if !properties.is_stackable() => Some(1),
+            supply => supply,
+        };
 
         Self {
             guid: item.description.guid,
             wcid: item.description.wcid,
-            vendor_supply: decode_vendor_item_supply(item.packed_stack_size),
+            vendor_supply,
             properties,
             public_flags: item.description.obj_desc_flags,
             public_workmanship: item.description.workmanship,

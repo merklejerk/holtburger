@@ -274,6 +274,8 @@ mod tests {
     use holtburger_common::properties::{
         InventoryEntryKind, ItemType, WorldObjectPropertyAccessorsMut,
     };
+    use holtburger_protocol::messages::object::messages::description::PublicWeenieDescription;
+    use holtburger_protocol::messages::trade::events::VendorItemEventData;
 
     const PLAYER: Guid = Guid(1);
     const VENDOR: Guid = Guid(2);
@@ -343,6 +345,60 @@ mod tests {
         assert_eq!(quote.sells[0].amount, 7);
         assert_eq!(quote.currencies[0].current, 3000);
         assert_eq!(quote.currencies[0].projected, 0);
+    }
+
+    #[test]
+    fn zero_count_nonstackable_offer_can_be_bought_once_per_draft() {
+        let mut world = world(0);
+        let offer = CoreVendorItem::from_protocol(&VendorItemEventData {
+            packed_stack_size: 0xff00_0000,
+            description: PublicWeenieDescription {
+                guid: OFFER,
+                item_type: ItemType::GEM.bits(),
+                ..Default::default()
+            },
+        });
+        assert_eq!(offer.vendor_supply, Some(1));
+        world.vendor.as_mut().unwrap().items = vec![offer];
+        let mut draft = VendorDraft {
+            vendor: VENDOR,
+            sells: vec![],
+            buys: vec![VendorPurchase {
+                item: OFFER,
+                amount: 1,
+            }],
+        };
+        let quote = world.quote_vendor_draft(&draft).unwrap();
+        assert_eq!(quote.buys[0].amount, 1);
+        assert_eq!(quote.buys[0].total, 1);
+        assert!(quote.affordable);
+        draft.buys[0].amount = 2;
+        assert!(
+            world
+                .quote_vendor_draft(&draft)
+                .unwrap_err()
+                .contains("requested quantity exceeds vendor supply")
+        );
+    }
+
+    #[test]
+    fn vendor_supply_hydration_preserves_stackable_and_positive_limits() {
+        for (packed_stack_size, max_stack_size, expected) in [
+            (0xff00_0000, Some(100), Some(0)),
+            (0xff00_0003, None, Some(3)),
+            (0xff00_0003, Some(100), Some(3)),
+            (u32::MAX, None, None),
+            (u32::MAX, Some(100), None),
+        ] {
+            let offer = CoreVendorItem::from_protocol(&VendorItemEventData {
+                packed_stack_size,
+                description: PublicWeenieDescription {
+                    max_stack_size,
+                    ..Default::default()
+                },
+            });
+            assert_eq!(offer.vendor_supply, expected);
+        }
     }
 
     #[test]

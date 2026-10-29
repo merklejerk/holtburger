@@ -50,7 +50,8 @@ export function createVendorFixture(options: {
 		currency: { wcid: 38234, name: "Trade Tokens" },
 		offers: [
 			offer(7001, "Lead Scarabs", 0x1000, 10),
-			offer(7002, "Steel Sword", 1, 1),
+			// Host projects zero-count non-stackables as one purchasable item.
+			{ ...offer(7002, "Steel Sword", 1, 1), supply: 1 },
 			{
 				...offer(7003, "Garnet of Excess", 0x800, 1),
 				price: { kind: "quoted", amount: 600, quantity: 1 },

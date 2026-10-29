@@ -256,14 +256,12 @@
 									>{current.problem ?? "Loading balances…"}</span
 								>
 							{:else}
-								{#each current.quote.currencies as currency (currency.wcid)}
+								{#each current.quote.currencies.filter((currency) => currency.wcid === current.currency.wcid || currency.projected !== currency.current) as currency (currency.wcid)}
 									<ClientVendorCurrencyAmount
 										name={currency.name}
 										display={currencyDisplay(current, currency.wcid)}
 										amount={currency.current}
-										projected={current.queue.length > 0
-											? currency.projected
-											: undefined}
+										projected={currency.projected}
 									/>
 								{/each}
 								{#if current.pending}<span>Updating…</span>{/if}

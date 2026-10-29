@@ -246,6 +246,11 @@ impl WorldObjectPropertiesHydrationExt for WorldObjectProperties {
 
     fn hydrate_from_vendor_item(&mut self, data: &VendorItemEventData) {
         self.hydrate_from_pwd(&data.description);
+        // acclient.c:449682,450151: public descriptions default omitted value to zero.
+        // ACE omits zero values from vendor descriptions; pricing still applies its minimum.
+        if data.description.value.is_none() {
+            self.ints.insert(PropertyInt::Value, 0);
+        }
     }
 
     fn hydrate_from_physics_state(&mut self, pstate: PhysicsState) {

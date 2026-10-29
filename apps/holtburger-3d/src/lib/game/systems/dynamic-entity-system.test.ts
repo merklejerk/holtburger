@@ -1903,6 +1903,31 @@ describe("DynamicEntitySystem authored ownership", () => {
 		).toBe(0);
 	});
 
+	it("rejects non-finite part transforms even under an identity visual root", async () => {
+		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
+		const installation = system.replaceOwner("layer", [source("invalid-pose")]);
+		expect(await installation.ready).toBe("ready");
+		const sample = presentationSample(
+			requiredAt(installation.getPreparedEntities(), 0),
+			0,
+		);
+		installation.prepareCommit([sample], []);
+		installation.commit();
+		const invalid = Mat4.identity();
+		invalid.m11 = Number.POSITIVE_INFINITY;
+		expect(() =>
+			system.publishPresentation([
+				{
+					...sample,
+					articulatedPose: {
+						...sample.articulatedPose,
+						partToObjectTransforms: [invalid],
+					},
+				},
+			]),
+		).toThrow("Affine bounds require an affine transform.");
+	});
+
 	it("retains conservative scene coverage when pose-local bounds shrink", async () => {
 		const { scene, system } = createSystem(
 			new InlineObjectVisualTemplatePreparer(),
@@ -1980,6 +2005,22 @@ describe("DynamicEntitySystem authored ownership", () => {
 		);
 		expect(scene.getNode(nodeId)?.localBounds).toEqual(sweptBounds);
 		expect(system.setupSidewaysSpan(nodeId)).toEqual(setupSpan);
+		// Returning from an identity modifier to an authored root offset must compose it again.
+		const authoredRoot = Mat4.identity();
+		authoredRoot.m41 = 4;
+		system.publishPresentation([
+			{
+				...sample,
+				articulatedPose: {
+					...sample.articulatedPose,
+					authoredRootTransform: authoredRoot,
+				},
+			},
+		]);
+		expectBounds(
+			system.getPublishedRigidPresentationBounds(nodeId),
+			new AABB3(new Vec3(4, 0, -4), new Vec3(16, 3, 8)),
+		);
 	});
 
 	it("applies an absolute root scale without replacing prepared visual resources", async () => {

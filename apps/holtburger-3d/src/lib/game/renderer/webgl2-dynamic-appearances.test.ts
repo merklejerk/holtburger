@@ -148,6 +148,7 @@ describe("template-retained dynamic appearance resources", () => {
 		resources.retain(layout, b);
 		const beforeA = resources.get(a),
 			beforeB = resources.get(b);
+		const groupsA = beforeA.rangeGroupsByPart;
 		prepare.mockImplementationOnce(() => ({
 			material: { kind: "solid-color", color: [0, 1, 0, 1] },
 			alphaTest: 0,
@@ -165,6 +166,7 @@ describe("template-retained dynamic appearance resources", () => {
 		resources.rebuild();
 		expect(resources.get(a)).not.toBe(beforeA);
 		expect(resources.get(b)).not.toBe(beforeB);
+		expect(resources.get(a).rangeGroupsByPart).toBe(groupsA);
 		resources.destroy();
 		expect(gl.deleteTexture).toHaveBeenCalledTimes(5);
 	});
@@ -212,7 +214,10 @@ describe("template-retained dynamic appearance resources", () => {
 		const { gl, resources } = setup();
 		const empty: DynamicAppearance = { materials: [], ranges: [] };
 		const releaseEmpty = resources.retain(layout, empty);
-		expect(resources.get(empty)).toEqual({ kind: "empty" });
+		expect(resources.get(empty)).toEqual({
+			kind: "empty",
+			rangeGroupsByPart: [],
+		});
 		expect(gl.createTexture).not.toHaveBeenCalled();
 		const release = resources.retain(layout, appearance());
 		resources.destroy();

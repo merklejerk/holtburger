@@ -1,8 +1,16 @@
+/**
+ * Numeric fields stay type-only until their constructors assign the first values.
+ * Preinitializing them to undefined makes in-place arithmetic allocate in Electron.
+ * Keep these assignments explicit so caller-owned output objects remain effective.
+ */
 export class Vec2 {
-	constructor(
-		public x: number,
-		public y: number,
-	) {}
+	declare x: number;
+	declare y: number;
+
+	constructor(x: number, y: number) {
+		this.x = x;
+		this.y = y;
+	}
 	static zero(): Vec2 {
 		return new Vec2(0, 0);
 	}
@@ -17,11 +25,15 @@ export class Vec2 {
 }
 
 export class Vec3 {
-	constructor(
-		public x: number,
-		public y: number,
-		public z: number,
-	) {}
+	declare x: number;
+	declare y: number;
+	declare z: number;
+
+	constructor(x: number, y: number, z: number) {
+		this.x = x;
+		this.y = y;
+		this.z = z;
+	}
 	static zero(): Vec3 {
 		return new Vec3(0, 0, 0);
 	}
@@ -48,24 +60,58 @@ export class Vec3 {
 }
 
 export class Mat4 {
+	declare m11: number;
+	declare m12: number;
+	declare m13: number;
+	declare m14: number;
+	declare m21: number;
+	declare m22: number;
+	declare m23: number;
+	declare m24: number;
+	declare m31: number;
+	declare m32: number;
+	declare m33: number;
+	declare m34: number;
+	declare m41: number;
+	declare m42: number;
+	declare m43: number;
+	declare m44: number;
+
 	constructor(
-		public m11: number,
-		public m12: number,
-		public m13: number,
-		public m14: number,
-		public m21: number,
-		public m22: number,
-		public m23: number,
-		public m24: number,
-		public m31: number,
-		public m32: number,
-		public m33: number,
-		public m34: number,
-		public m41: number,
-		public m42: number,
-		public m43: number,
-		public m44: number,
-	) {}
+		m11: number,
+		m12: number,
+		m13: number,
+		m14: number,
+		m21: number,
+		m22: number,
+		m23: number,
+		m24: number,
+		m31: number,
+		m32: number,
+		m33: number,
+		m34: number,
+		m41: number,
+		m42: number,
+		m43: number,
+		m44: number,
+	) {
+		this.m11 = m11;
+		this.m12 = m12;
+		this.m13 = m13;
+		this.m14 = m14;
+		this.m21 = m21;
+		this.m22 = m22;
+		this.m23 = m23;
+		this.m24 = m24;
+		this.m31 = m31;
+		this.m32 = m32;
+		this.m33 = m33;
+		this.m34 = m34;
+		this.m41 = m41;
+		this.m42 = m42;
+		this.m43 = m43;
+		this.m44 = m44;
+	}
 	static zero(): Mat4 {
 		return new Mat4(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 	}
@@ -143,12 +189,17 @@ export class AABB2 {
 }
 
 export class Quat {
-	constructor(
-		public w: number,
-		public x: number,
-		public y: number,
-		public z: number,
-	) {}
+	declare w: number;
+	declare x: number;
+	declare y: number;
+	declare z: number;
+
+	constructor(w: number, x: number, y: number, z: number) {
+		this.w = w;
+		this.x = x;
+		this.y = y;
+		this.z = z;
+	}
 	static zero(): Quat {
 		return new Quat(0, 0, 0, 0);
 	}

@@ -5,10 +5,17 @@ import {
 	createObjectMaterialTable,
 	OBJECT_MATERIAL_TEXELS,
 } from "./object-material-table";
-import type { PreparedObjectSurface } from "./object-rendering-policy";
+import {
+	compileDynamicPartRangeGroups,
+	type DynamicPartRangeGroups,
+	type PreparedObjectSurface,
+} from "./object-rendering-policy";
 
 /** Physical resources and draw plan for one retained appearance, or explicit empty geometry. */
-export type PreparedDynamicAppearance =
+export type PreparedDynamicAppearance = {
+	/** Immutable source facts retained across physical index/table rebuilds. */
+	readonly rangeGroupsByPart: readonly DynamicPartRangeGroups[];
+} & (
 	| { readonly kind: "empty" }
 	| {
 			readonly kind: "drawable";
@@ -20,7 +27,8 @@ export type PreparedDynamicAppearance =
 			readonly plan: ReturnType<
 				typeof compileDynamicIndexBatches<WebGLTexture, WebGLSampler>
 			>;
-	  };
+	  }
+);
 
 /** Renderer-supplied material policy and physical atlas resolution. */
 type PrepareSurface = (
@@ -56,7 +64,11 @@ export class WebGL2DynamicAppearances {
 			entry = {
 				layout,
 				references: 0,
-				resource: this.#compile(layout, appearance),
+				resource: this.#compile(
+					layout,
+					appearance,
+					compileDynamicPartRangeGroups(appearance),
+				),
 			};
 			this.#entries.set(appearance, entry);
 		} else if (entry.layout.key !== layout.key) {
@@ -95,7 +107,11 @@ export class WebGL2DynamicAppearances {
 			for (const [appearance, entry] of this.#entries)
 				replacements.push({
 					entry,
-					resource: this.#compile(entry.layout, appearance),
+					resource: this.#compile(
+						entry.layout,
+						appearance,
+						entry.resource.rangeGroupsByPart,
+					),
 				});
 		} catch (cause) {
 			for (const replacement of replacements)
@@ -133,8 +149,10 @@ export class WebGL2DynamicAppearances {
 	#compile(
 		layout: DynamicLayout,
 		appearance: DynamicAppearance,
+		rangeGroupsByPart: readonly DynamicPartRangeGroups[],
 	): PreparedDynamicAppearance {
-		if (appearance.ranges.length === 0) return { kind: "empty" };
+		if (appearance.ranges.length === 0)
+			return { kind: "empty", rangeGroupsByPart };
 		const orderings = new Map(
 			appearance.ranges.map((range) => [
 				range.materialSelector,
@@ -187,7 +205,7 @@ export class WebGL2DynamicAppearances {
 			gl.bindVertexArray(null);
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
 			gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, plan.indices, gl.STATIC_DRAW);
-			return { kind: "drawable", table, indexBuffer, plan };
+			return { kind: "drawable", table, indexBuffer, plan, rangeGroupsByPart };
 		} catch (cause) {
 			gl.deleteTexture(table);
 			gl.deleteBuffer(indexBuffer);

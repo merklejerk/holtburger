@@ -6,7 +6,12 @@ import {
 	transformAABB3,
 } from "../math/matrices";
 import { containsPoint, translateBounds } from "../math/geometry-utils";
-import { frustumIntersectsAABB, type Frustum } from "../math/frustum";
+import {
+	frustumIntersectsAABB,
+	filterFrustumPlanesForAABB,
+	type Frustum,
+	type FrustumPlane,
+} from "../math/frustum";
 import {
 	createLandblockWorldOrigin,
 	createLandblockOffset,
@@ -89,8 +94,6 @@ interface CullingGroup {
 	bounds: AABB3 | null;
 	/** Whether the retained aggregate must be rebuilt before its next query. */
 	dirty: boolean;
-	/** Root-landblock coordinate frame shared by all member entry bounds. */
-	readonly landblockId: ScenePlacement["landblockId"];
 }
 
 export class SceneGraph {
@@ -123,6 +126,8 @@ export class SceneGraph {
 	readonly #selectedScopeKeys = new Set<string>();
 	/** Reused landblock translation during frustum testing. */
 	readonly #queryOffset = Vec3.zero();
+	/** Group containment leaves only intersecting planes for its member tests. */
+	readonly #queryPlanes: FrustumPlane[] = [];
 	/** Monotonic source revision for retained renderer-facing topology facts. */
 	#topologyRevision = 0;
 	/** Lazily rebuilt only after scope or crossing publication changes. */
@@ -168,6 +173,17 @@ export class SceneGraph {
 			localBounds: node.localBounds?.clone() ?? null,
 			localTransform: node.localTransform.clone(),
 			parentId: node.parentId,
+		};
+	}
+
+	/** Copy only a root's current placement, without inspection-only bounds or membership data. */
+	getRootPlacement(nodeId: SceneNodeId): ScenePlacement | undefined {
+		const node = this.#nodes.get(nodeId);
+		if (node === undefined || node.parentId !== null) return undefined;
+		return {
+			envCellId: node.envCellId,
+			landblockId: node.landblockId,
+			localTransform: node.localTransform.clone(),
 		};
 	}
 
@@ -340,6 +356,23 @@ export class SceneGraph {
 					`Scene node ${child.nodeId} is not a direct child of ${nodeId}.`,
 				);
 		}
+		let changed = !samePublishedTransform(node.localTransform, transform);
+		if (!changed) {
+			for (const child of children) {
+				if (
+					!samePublishedTransform(
+						this.#requireNode(child.nodeId).localTransform,
+						child.transform,
+					)
+				) {
+					changed = true;
+					break;
+				}
+			}
+		}
+		// Ancestor/residency changes already synchronize descendants at their owning mutation.
+		// An identical local batch adds no spatial change, but still requires the validation above.
+		if (!changed) return;
 		node.localTransform.copy(transform);
 		for (const child of children)
 			this.#requireNode(child.nodeId).localTransform.copy(child.transform);
@@ -527,22 +560,34 @@ export class SceneGraph {
 		cullingGroupFilter: SceneCullingGroupFilter,
 		nodeFilter: SceneNodeFilter | null,
 	): void {
+		const anchorCoordinates = getLandblockCoordinates(anchorLandblockId);
+		const memberFrustum: Frustum = {
+			cameraPosition: frustum.cameraPosition,
+			planes: this.#queryPlanes,
+		};
 		this.#visibleEntries.length = 0;
 		this.#visibleEntryIds.clear();
 		for (const scope of this.#selectedScopeKeys) {
 			const landblockGroups = this.#cullingGroups.get(scope);
 			if (!landblockGroups) continue;
-			for (const groups of landblockGroups.values()) {
+			for (const [landblockId, groups] of landblockGroups) {
+				const offset = createLandblockOffset(
+					getLandblockCoordinates(landblockId),
+					anchorCoordinates,
+					this.#queryOffset,
+				);
 				for (const [cullingGroup, group] of groups) {
 					if (!cullingGroupFilter(cullingGroup)) continue;
 					const bounds = this.#resolveCullingGroupBounds(group);
 					if (
 						!bounds ||
-						!this.#frustumIntersectsLandblockBounds(
+						!filterFrustumPlanesForAABB(
 							frustum,
-							anchorLandblockId,
-							group.landblockId,
 							bounds,
+							offset.x,
+							offset.y,
+							offset.z,
+							this.#queryPlanes,
 						)
 					)
 						continue;
@@ -552,7 +597,13 @@ export class SceneGraph {
 						if (
 							entry &&
 							!this.#visibleEntryIds.has(nodeId) &&
-							this.#frustumIntersectsEntry(frustum, anchorLandblockId, entry)
+							frustumIntersectsAABB(
+								memberFrustum,
+								entry.landblockBounds,
+								offset.x,
+								offset.y,
+								offset.z,
+							)
 						) {
 							this.#visibleEntryIds.add(nodeId);
 							this.#visibleEntries.push(nodeId);
@@ -828,7 +879,6 @@ export class SceneGraph {
 					bounds: null,
 					dirty: true,
 					entries: new Set(),
-					landblockId: entry.placement.landblockId,
 				}),
 			);
 		group.entries.add(entry.nodeId);
@@ -883,33 +933,28 @@ export class SceneGraph {
 			);
 		}
 	}
+}
 
-	#frustumIntersectsEntry(
-		frustum: Frustum,
-		anchorLandblockId: ScenePlacement["landblockId"],
-		entry: SpatialEntry,
-	): boolean {
-		return this.#frustumIntersectsLandblockBounds(
-			frustum,
-			anchorLandblockId,
-			entry.placement.landblockId,
-			entry.landblockBounds,
-		);
-	}
-
-	#frustumIntersectsLandblockBounds(
-		frustum: Frustum,
-		anchorLandblockId: ScenePlacement["landblockId"],
-		landblockId: ScenePlacement["landblockId"],
-		bounds: AABB3,
-	): boolean {
-		const offset = createLandblockOffset(
-			getLandblockCoordinates(landblockId),
-			getLandblockCoordinates(anchorLandblockId),
-			this.#queryOffset,
-		);
-		return frustumIntersectsAABB(frustum, bounds, offset.x, offset.y, offset.z);
-	}
+/** Component identity preserves publication values, including the sign of zero. */
+function samePublishedTransform(left: Mat4, right: Mat4): boolean {
+	return (
+		Object.is(left.m11, right.m11) &&
+		Object.is(left.m12, right.m12) &&
+		Object.is(left.m13, right.m13) &&
+		Object.is(left.m14, right.m14) &&
+		Object.is(left.m21, right.m21) &&
+		Object.is(left.m22, right.m22) &&
+		Object.is(left.m23, right.m23) &&
+		Object.is(left.m24, right.m24) &&
+		Object.is(left.m31, right.m31) &&
+		Object.is(left.m32, right.m32) &&
+		Object.is(left.m33, right.m33) &&
+		Object.is(left.m34, right.m34) &&
+		Object.is(left.m41, right.m41) &&
+		Object.is(left.m42, right.m42) &&
+		Object.is(left.m43, right.m43) &&
+		Object.is(left.m44, right.m44)
+	);
 }
 
 function createSceneNodeRecord(

@@ -5,7 +5,10 @@ import type { SceneNodeId } from "../scene";
 import type { DynamicAppearance } from "../systems/dynamic-appearance";
 import { TextureWrapMode } from "../textures/types";
 import { compileDynamicIndexBatches } from "./dynamic-index-batches";
-import { summarizeDynamicRangeAdmission } from "./object-rendering-policy";
+import {
+	compileDynamicPartRangeGroups,
+	summarizeDynamicRangeAdmission,
+} from "./object-rendering-policy";
 import { DynamicDepthPreparations } from "./dynamic-depth-preparation";
 
 const NODE_ID = "scene-node:selection-test" as SceneNodeId;
@@ -86,15 +89,58 @@ function fixture(
 		table: {} as WebGLTexture,
 		indexBuffer: {} as WebGLBuffer,
 		plan,
+		rangeGroupsByPart: compileDynamicPartRangeGroups(appearance),
 	}));
 	return { pass, read, parts, appearance };
 }
 
 describe("DynamicDepthPreparations", () => {
+	it("counts split source cohorts once and reads opacity changes from compiled part facts", () => {
+		const { appearance, parts } = fixture();
+		const first = appearance.ranges[0];
+		if (first === undefined)
+			throw new Error("Fixture requires a source range.");
+		const compiled = compileDynamicPartRangeGroups({
+			...appearance,
+			ranges: [
+				{ ...first, ordering: "alpha-test" },
+				{ ...first, ordering: "opaque", retailVisibility: "degrade-hidden" },
+			],
+		});
+		expect(summarizeDynamicRangeAdmission(compiled, parts, false)).toEqual({
+			sourceRangeGroupCount: 1,
+			hasMaterialFreeShadowGeometry: false,
+		});
+		expect(summarizeDynamicRangeAdmission(compiled, parts, true)).toEqual({
+			sourceRangeGroupCount: 1,
+			hasMaterialFreeShadowGeometry: true,
+		});
+		for (const part of parts) part.frameInstance.color.a = 0;
+		expect(summarizeDynamicRangeAdmission(compiled, parts, true)).toEqual({
+			sourceRangeGroupCount: 0,
+			hasMaterialFreeShadowGeometry: false,
+		});
+		for (const part of parts) part.frameInstance.color.a = 0.25;
+		expect(summarizeDynamicRangeAdmission(compiled, parts, true)).toEqual({
+			sourceRangeGroupCount: 1,
+			hasMaterialFreeShadowGeometry: true,
+		});
+	});
+
+	it("rejects source cohorts that mix geometry-local parts", () => {
+		const { appearance } = fixture();
+		const first = appearance.ranges[0];
+		if (first === undefined)
+			throw new Error("Fixture requires a source range.");
+		expect(() =>
+			compileDynamicPartRangeGroups({
+				...appearance,
+				ranges: [first, { ...first, partSelector: first.partSelector + 1 }],
+			}),
+		).toThrow("Dynamic source cohort spans multiple parts.");
+	});
+
 	it("derives grounding geometry admission from logical ranges with the exact depth policy", () => {
-		const groups = new Set<
-			DynamicAppearance["ranges"][number]["transparentSort"]
-		>();
 		for (const ordering of [
 			"opaque",
 			"alpha-test",
@@ -111,10 +157,9 @@ describe("DynamicDepthPreparations", () => {
 					]);
 					for (const part of parts) part.frameInstance.color.a = opacity;
 					const admission = summarizeDynamicRangeAdmission(
-						appearance,
+						compileDynamicPartRangeGroups(appearance),
 						parts,
 						showHidden,
-						groups,
 					);
 					expect(admission.hasMaterialFreeShadowGeometry).toBe(
 						pass.prepare(NODE_ID, showHidden) !== null,
@@ -122,17 +167,15 @@ describe("DynamicDepthPreparations", () => {
 					expect(admission.sourceRangeGroupCount).toBe(
 						opacity === 0 ? 0 : showHidden ? 4 : 3,
 					);
-					expect(groups.size).toBe(0);
 				}
 			}
 		}
 		const { appearance, parts } = fixture();
 		expect(
 			summarizeDynamicRangeAdmission(
-				{ ...appearance, ranges: [] },
+				compileDynamicPartRangeGroups({ ...appearance, ranges: [] }),
 				parts,
 				false,
-				groups,
 			),
 		).toEqual({
 			sourceRangeGroupCount: 0,
@@ -142,22 +185,30 @@ describe("DynamicDepthPreparations", () => {
 		if (first === undefined) throw new Error("Fixture requires a range.");
 		expect(() =>
 			summarizeDynamicRangeAdmission(
-				{
+				compileDynamicPartRangeGroups({
 					...appearance,
-					ranges: [first, { ...first, partSelector: parts.length }],
-				},
+					ranges: [
+						first,
+						{
+							...first,
+							transparentSort: { ...first.transparentSort },
+							partSelector: parts.length,
+						},
+					],
+				}),
 				parts,
 				false,
-				groups,
 			),
 		).toThrow("Dynamic appearance references a missing part.");
 		// Cohort identity is shared when several source ranges came from the same authored draw.
 		expect(
 			summarizeDynamicRangeAdmission(
-				{ ...appearance, ranges: [first, { ...first }] },
+				compileDynamicPartRangeGroups({
+					...appearance,
+					ranges: [first, { ...first }],
+				}),
 				parts,
 				false,
-				groups,
 			),
 		).toEqual({
 			sourceRangeGroupCount: 1,

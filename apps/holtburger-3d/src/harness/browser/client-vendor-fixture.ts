@@ -61,6 +61,7 @@ export function createVendorFixture(options: {
 			),
 		],
 	};
+	const approach = () => emit("client-vendor-approached", snapshot);
 	function named(
 		guid: number,
 		name: string,
@@ -118,8 +119,9 @@ export function createVendorFixture(options: {
 				upserts: [named(vendor, "Festival Merchant", {}), ...sources],
 				removed: [],
 			});
-			emit("client-vendor-snapshot", snapshot);
+			approach();
 		},
+		approach,
 		refresh() {
 			emit("client-vendor-snapshot", snapshot);
 		},

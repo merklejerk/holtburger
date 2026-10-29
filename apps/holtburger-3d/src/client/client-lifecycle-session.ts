@@ -98,6 +98,7 @@ import {
 import {
 	vendorRequestSchema,
 	vendorSnapshotSchema,
+	vendorApproachedSchema,
 	vendorPreviewSchema,
 	vendorResultSchema,
 	vendorPhaseSchema,
@@ -342,6 +343,7 @@ type ClientEventName = Extract<
 	| "client-connection-updated"
 	| "client-inventory-preview"
 	| "client-vendor-snapshot"
+	| "client-vendor-approached"
 	| "client-housing-updated"
 	| "client-housing-payment-preview"
 	| "client-housing-payment-finished"
@@ -492,6 +494,10 @@ export type ClientLifecycleSessionEvent =
 			readonly crystal: HousingCrystal;
 	  }
 	| { readonly type: "vendor-snapshot"; readonly vendor: VendorSnapshot }
+	| {
+			readonly type: "vendor-approached";
+			readonly vendor: NonNullable<VendorSnapshot>;
+	  }
 	| { readonly type: "trade-snapshot"; readonly trade: TradeSnapshot }
 	| { readonly type: "vendor-preview"; readonly result: VendorPreview }
 	| { readonly type: "vendor-result"; readonly result: VendorResult }
@@ -1767,6 +1773,11 @@ export class ClientLifecycleSession {
 					const crystal = housingCrystalSchema.parse(payload);
 					this.#housing = { ...this.#housing, crystal };
 					this.#emit({ type: "housing-crystal-received", crystal });
+				}),
+				await listen("client-vendor-approached", (payload) => {
+					const vendor = vendorApproachedSchema.parse(payload);
+					this.#vendor = vendor;
+					this.#emit({ type: "vendor-approached", vendor });
 				}),
 				await listen("client-vendor-snapshot", (payload) => {
 					this.#vendor = vendorSnapshotSchema.parse(payload);

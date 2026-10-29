@@ -2634,10 +2634,7 @@ it("delivers host-projected vendor contracts through the real session into the d
 		return vendorRequestSchema.parse(args.request);
 	};
 	try {
-		transport.emit(
-			vendorFixture.snapshot.event,
-			vendorFixture.snapshot.payload,
-		);
+		transport.emit("client-vendor-approached", vendorFixture.snapshot.payload);
 		model.read();
 		const opening = latest();
 		transport.emit(vendorFixture.preview.event, {
@@ -2675,6 +2672,15 @@ it("delivers host-projected vendor contracts through the real session into the d
 		});
 		expect(failures).toEqual(["Purchase failed. Purchase refused"]);
 		expect(latest().draft.buys).toEqual(submitted.draft.buys);
+		model.close();
+		transport.emit(
+			vendorFixture.snapshot.event,
+			vendorFixture.snapshot.payload,
+		);
+		expect(session.vendorSnapshot()).toEqual(vendorFixture.snapshot.payload);
+		expect(model.read()).toBeNull();
+		transport.emit("client-vendor-approached", vendorFixture.snapshot.payload);
+		expect(model.read()?.vendor).toBe(100);
 		transport.emit(vendorFixture.closed.event, vendorFixture.closed.payload);
 		expect(model.read()).toBeNull();
 	} finally {

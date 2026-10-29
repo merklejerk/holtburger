@@ -141,7 +141,10 @@ export class ClientVendorState {
 	) {
 		this.#owner = icons.createOwner("persistent");
 		this.#unsubscribe = session.subscribe((event) => this.#receive(event));
-		this.#replaceSnapshot(session.vendorSnapshot());
+		const snapshot = session.vendorSnapshot();
+		// Initial hydration recovers an interaction that arrived before this owner mounted.
+		this.#visible = snapshot !== null;
+		this.#replaceSnapshot(snapshot);
 	}
 
 	read(): VendorView | null {
@@ -451,7 +454,7 @@ export class ClientVendorState {
 	#replaceSnapshot(snapshot: VendorSnapshot): void {
 		const changed = snapshot?.vendor !== this.#snapshot?.vendor;
 		this.#snapshot = snapshot;
-		this.#visible = snapshot !== null;
+		if (snapshot === null) this.#visible = false;
 		this.#view = null;
 		if (changed) {
 			this.#hadVendorPose = false;
@@ -479,7 +482,8 @@ export class ClientVendorState {
 				return [offer.guid, { name: offer.name, iconKey, offer }];
 			}),
 		);
-		if (this.#draft !== null && this.#execution === null) {
+		// Hidden catalogs stay current without quoting a dismissed draft on each appraisal.
+		if (this.#visible && this.#draft !== null && this.#execution === null) {
 			const pending = this.#preview;
 			this.#request(
 				pending?.draft ?? this.#draft,
@@ -492,7 +496,10 @@ export class ClientVendorState {
 	#receive(event: ClientLifecycleSessionEvent): void {
 		if (event.type === "trade-snapshot" && event.trade.trade !== null)
 			this.close();
-		else if (event.type === "vendor-snapshot")
+		else if (event.type === "vendor-approached") {
+			this.#visible = true;
+			this.#replaceSnapshot(event.vendor);
+		} else if (event.type === "vendor-snapshot")
 			this.#replaceSnapshot(event.vendor);
 		else if (event.type === "vendor-preview") {
 			const pending = this.#preview;

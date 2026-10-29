@@ -1337,7 +1337,9 @@ pub enum ClientHostEvent {
     BookOpened(ClientBookOpenedWire),
     /// Retained page text update for an already open reader.
     BookUpdated(ClientBookWire),
-    /// Complete vendor stock and terms needed by the app-local catalog.
+    /// Server approach response supplies the complete catalog and permits opening the window.
+    VendorApproached(crate::client_vendor::ClientVendorSnapshot),
+    /// Complete retained vendor stock and terms, independent of window visibility.
     VendorSnapshot(Option<crate::client_vendor::ClientVendorSnapshot>),
     /// Confirmed P2P state; all window policy belongs to the frontend.
     TradeSnapshot(holtburger_core::client::trade::TradeSnapshot),
@@ -1710,6 +1712,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         )),
         ClientViewEvent::TradeStateUpdated(snapshot) => {
             Some(ClientHostEvent::TradeSnapshot(snapshot))
+        }
+        ClientViewEvent::VendorApproached { vendor } => {
+            Some(ClientHostEvent::VendorApproached(vendor.into()))
         }
         ClientViewEvent::VendorStateUpdated { vendor } => {
             Some(ClientHostEvent::VendorSnapshot(vendor.map(Into::into)))

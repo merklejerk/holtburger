@@ -498,7 +498,7 @@ export class ClientHouseCrystalState {
 			event.type === "current-state" ||
 			event.type === "exit-requested" ||
 			(event.type === "lifecycle" && event.lifecycle.kind !== "in-world") ||
-			(event.type === "vendor-snapshot" && event.vendor !== null) ||
+			event.type === "vendor-approached" ||
 			(event.type === "trade-snapshot" && event.trade.trade !== null)
 		) {
 			if (event.type === "current-state") {

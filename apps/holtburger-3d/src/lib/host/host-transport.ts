@@ -261,6 +261,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-current-state",
 	"client-inventory-preview",
 	"client-vendor-snapshot",
+	"client-vendor-approached",
 	"client-housing-updated",
 	"client-housing-payment-preview",
 	"client-housing-payment-finished",
@@ -372,6 +373,7 @@ export interface HostEventPayloadMap {
 	"client-object-preview-result": ObjectPreviewResult;
 	"client-inventory-preview": ClientInventoryPreviewResult;
 	"client-vendor-snapshot": VendorSnapshot;
+	"client-vendor-approached": NonNullable<VendorSnapshot>;
 	"client-housing-updated": HousingSnapshot;
 	"client-housing-payment-preview": HousingPreviewResult;
 	"client-housing-payment-finished": HousingPaymentResult;

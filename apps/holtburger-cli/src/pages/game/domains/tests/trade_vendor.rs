@@ -2,6 +2,36 @@ use super::test_support::*;
 use super::*;
 
 #[test]
+fn vendor_dismissal_survives_catalog_recovery_until_another_approach() {
+    let player = Guid(0x50000001);
+    let mut state = GameState::new(player, "Player".into(), "World".into());
+    let vendor = VendorState {
+        vendor_guid: Guid(0x60000001),
+        items: vec![],
+        buy_multiplier: 1.0,
+        sell_multiplier: 1.0,
+        merchandise_item_types: 0,
+        value_limits: Default::default(),
+        alternate_currency_wcid: 0,
+        alternate_currency_amount: 0,
+        alternate_currency_name: String::new(),
+    };
+    state.handle_view_event(ClientViewEvent::VendorApproached {
+        vendor: vendor.clone(),
+    });
+    assert!(state.view.vendor.is_some());
+    state.handle_action(AppAction::ClearVendor).unwrap();
+    state.handle_view_event(ClientViewEvent::VendorStateUpdated {
+        vendor: Some(vendor.clone()),
+    });
+    assert!(state.view.vendor.is_none());
+    state.handle_view_event(ClientViewEvent::VendorApproached { vendor });
+    assert!(state.view.vendor.is_some());
+    state.handle_view_event(ClientViewEvent::VendorStateUpdated { vendor: None });
+    assert!(state.view.vendor.is_none());
+}
+
+#[test]
 fn vendor_assessment_waits_for_the_world_populated_inspection_result() {
     let player_guid = Guid(0x50000001);
     let vendor_guid = Guid(0x60000001);

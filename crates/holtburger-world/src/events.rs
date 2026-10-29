@@ -237,7 +237,8 @@ pub enum WorldEvent {
     UseDone {
         error: WeenieError,
     },
-    VendorStateUpdated(Option<vendor::VendorState>),
+    /// A server ApproachVendor response supplies a complete interaction, including trade refreshes.
+    VendorApproached(vendor::VendorState),
     VendorItemIdentified(Box<vendor::CoreVendorItem>),
     /// The retained character friend list changed.
     FriendsStateUpdated,

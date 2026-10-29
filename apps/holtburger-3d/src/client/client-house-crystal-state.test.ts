@@ -531,6 +531,21 @@ describe("crystal draft ownership", () => {
 		expect(f.model.read()).toBeNull();
 	});
 
+	it("keeps the housing interaction open through passive vendor snapshots", () => {
+		const f = fixture();
+		f.emit({ type: "housing-crystal-received", crystal: profile() });
+		f.answer();
+		f.emit({
+			type: "vendor-snapshot",
+			vendor: {
+				vendor: 999,
+				currency: { wcid: 273, name: "Pyreals" },
+				offers: [],
+			},
+		});
+		expect(f.model.read()).not.toBeNull();
+	});
+
 	it("retires interaction on recovery, travel, and vendor opening", () => {
 		const f = fixture();
 		for (const event of [
@@ -544,7 +559,7 @@ describe("crystal draft ownership", () => {
 				},
 			},
 			{
-				type: "vendor-snapshot",
+				type: "vendor-approached",
 				vendor: {
 					vendor: 999,
 					currency: { wcid: 273, name: "Pyreals" },

@@ -1694,6 +1694,6 @@ impl WorldState {
         };
 
         self.vendor = Some(vendor_state.clone());
-        events.push(WorldEvent::VendorStateUpdated(Some(vendor_state)));
+        events.push(WorldEvent::VendorApproached(vendor_state));
     }
 }

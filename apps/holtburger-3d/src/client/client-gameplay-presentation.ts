@@ -80,7 +80,6 @@ import type {
 } from "../lib/game/runtime/types";
 import type { ResolvedSceneOrigin } from "../lib/game/scene";
 import type { NameplateContent } from "../lib/game/systems/dynamic-presentation-source";
-import { OPENED_CONTAINER_NAMEPLATE_ICON_ID } from "../lib/game/renderer/nameplate-icon-source";
 import type { RenderExtent } from "../lib/game/renderer/render-extent";
 import type {
 	SceneActivationReceipt,
@@ -1519,9 +1518,7 @@ export class ClientGameplayPresentation {
 		if (runtime === undefined || entities.kind !== "current") return;
 		const opened = entities.level.entities.get(guid)?.corpse === "opened";
 		runtime.setDynamicEntityNameplateDecoration(guid, {
-			indicators: opened
-				? [{ kind: "icon", iconId: OPENED_CONTAINER_NAMEPLATE_ICON_ID }]
-				: [],
+			indicators: [],
 			strikeThrough: opened,
 		});
 	}

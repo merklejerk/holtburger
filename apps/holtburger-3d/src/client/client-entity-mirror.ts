@@ -13,11 +13,13 @@ export const NEARBY_ENTITY_CATEGORIES = [
 	"monster",
 	"npc",
 	"player",
+	"corpse",
 	"container",
 	"item",
 	"portal",
 	"lifestone",
-	"door-or-switch",
+	"door",
+	"switch",
 ] as const;
 /** Shared classification; frontend labels and filter combinations remain app policy. */
 export type NearbyEntityCategory = (typeof NEARBY_ENTITY_CATEGORIES)[number];

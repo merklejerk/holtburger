@@ -20,11 +20,13 @@ export const NEARBY_CATEGORY_DETAILS = {
 	monster: { label: "Monsters" },
 	npc: { label: "NPCs" },
 	player: { label: "Players" },
+	corpse: { label: "Corpses" },
 	container: { label: "Containers" },
 	item: { label: "Items" },
 	portal: { label: "Portals" },
 	lifestone: { label: "Lifestones" },
-	"door-or-switch": { label: "Doors & Switches" },
+	door: { label: "Doors" },
+	switch: { label: "Switches" },
 } as const satisfies Record<NearbyEntityCategory, { readonly label: string }>;
 
 /** Shared category order also provides stable pill and sort order. */

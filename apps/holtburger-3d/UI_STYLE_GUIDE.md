@@ -426,7 +426,7 @@ Entity category icons use `--ui-entity-category-icon-size`. New vector artwork h
 `ui-vector-icon` on its SVG root and uses `--ui-icon-stroke-width`; authored fills
 and strokes are presentation attributes, so normal CSS rules can override them.
 The category icon, label pill, and filter button expose `data-entity-category`
-with the stable category key, such as `monster` or `door-or-switch`. For example:
+with the stable category key, such as `monster`, `corpse`, `door`, or `switch`. For example:
 
 ```css
 @layer overrides {

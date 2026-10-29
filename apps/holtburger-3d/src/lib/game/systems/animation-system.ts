@@ -5,7 +5,7 @@ import { AnimationSequence } from "../animation/animation-sequence";
 import {
 	advancePlayingFrame,
 	clipEntryFrame,
-	sampleAnimationPoseOver,
+	AnimationPoseSampler,
 	sampleAuthoredRootTransform,
 	wholeAnimationClip,
 	type PlayingClip,
@@ -47,8 +47,8 @@ interface ClipAnimationRecord extends AnimationClock {
 	/** Replaced wholesale when a host projection names a different clip. */
 	clip: PlayingClip;
 	framePosition: number;
-	/** Complete setup pose retained beneath whichever prefix the current clip authors. */
-	readonly retainedPartToObjectTransforms: readonly Mat4[];
+	/** Owns preserved clip seeds separately from reusable current part matrices. */
+	readonly pose: AnimationPoseSampler;
 }
 
 interface SequenceAnimationRecord extends AnimationClock {
@@ -194,7 +194,11 @@ export interface AdvancedAnimationFrame {
 	readonly [advancedAnimationFrameBrand]: true;
 }
 
-/** Complete render-cadence presentation produced without mutating entity or scene state. */
+/**
+ * Current render-cadence presentation for synchronous scene publication.
+ * Clip part matrices belong to playback and update on its next sample. Historical clip seeds
+ * are owned snapshots; retaining a presentation sample does not make its matrices a snapshot.
+ */
 export interface DynamicPresentationSample {
 	readonly articulatedPose: ArticulatedPose;
 	readonly effects: EffectPresentationSample;
@@ -355,25 +359,31 @@ export class AnimationSystem<TOwnerId extends string> {
 				return existing;
 			case "install": {
 				const retained =
-					existing === null
-						? cloneCompletePose(initialPose)
-						: this.#samplePartPose(existing);
+					existing === null ? initialPose : this.#snapshotPartPose(existing);
 				return this.#createRecord(target, update.clip, 0, retained);
 			}
 		}
 	}
 
-	/** Snapshot this track's complete current pose for a partial-part successor. */
+	/** Snapshot this track's projected pose for a partial-part successor. */
+	#snapshotPartPose(record: ClipAnimationRecord): readonly Mat4[] {
+		return record.pose.snapshot(record.clip, this.#visualFramePosition(record));
+	}
+
+	/** Update playback-owned current storage for immediate scene publication/composition. */
 	#samplePartPose(record: ClipAnimationRecord): readonly Mat4[] {
-		return sampleAnimationPoseOver(
+		return record.pose.updateCurrent(
 			record.clip,
-			advancePlayingFrame(
-				record.clip,
-				record.framePosition,
-				record.fractionalSeconds,
-			).framePosition,
-			record.retainedPartToObjectTransforms,
+			this.#visualFramePosition(record),
 		);
+	}
+
+	#visualFramePosition(record: ClipAnimationRecord): number {
+		return advancePlayingFrame(
+			record.clip,
+			record.framePosition,
+			record.fractionalSeconds,
+		).framePosition;
 	}
 
 	#consumeFraction(record: ClipAnimationRecord, visible: boolean): void {
@@ -444,7 +454,7 @@ export class AnimationSystem<TOwnerId extends string> {
 								pending.target,
 								pending.clip,
 								0,
-								this.#samplePartPose(ordinary.current),
+								this.#snapshotPartPose(ordinary.current),
 							);
 				if (successor !== null) successor.lastTimeSeconds = timeSeconds;
 				const next = composePlayback(
@@ -571,7 +581,7 @@ export class AnimationSystem<TOwnerId extends string> {
 									installation.residentIdentity,
 									installation.animation,
 								),
-								cloneCompletePose(installation.initialPartToObjectTransforms),
+								installation.initialPartToObjectTransforms,
 							);
 				records.set(
 					nodeId,
@@ -685,21 +695,16 @@ export class AnimationSystem<TOwnerId extends string> {
 				effects: this.#effects.samplePresentation(nodeId),
 				nodeId,
 			};
-		const visualAdvance = advancePlayingFrame(
-			record.clip,
-			record.framePosition,
-			record.fractionalSeconds,
-		);
+		const framePosition = this.#visualFramePosition(record);
 		return {
 			articulatedPose: {
 				authoredRootTransform: sampleAuthoredRootTransform(
 					record.clip,
-					visualAdvance.framePosition,
+					framePosition,
 				),
-				partToObjectTransforms: sampleAnimationPoseOver(
+				partToObjectTransforms: record.pose.updateCurrent(
 					record.clip,
-					visualAdvance.framePosition,
-					record.retainedPartToObjectTransforms,
+					framePosition,
 				),
 			},
 			effects: this.#effects.samplePresentation(nodeId),
@@ -718,7 +723,7 @@ export class AnimationSystem<TOwnerId extends string> {
 		target: BehaviorTarget,
 		clip: PlayingClip,
 		phaseSeconds: number,
-		retainedPartToObjectTransforms: readonly Mat4[],
+		initialPartToObjectTransforms: readonly Mat4[],
 	): ClipAnimationRecord {
 		const nodeId = requireSceneNodeId(target.targetId, "AnimationSystem");
 		const record: ClipAnimationRecord = {
@@ -727,7 +732,7 @@ export class AnimationSystem<TOwnerId extends string> {
 			fractionalSeconds: 0,
 			framePosition: clipEntryFrame(clip),
 			lastTimeSeconds: null,
-			retainedPartToObjectTransforms,
+			pose: new AnimationPoseSampler(initialPartToObjectTransforms),
 			target,
 		};
 		let remainingSeconds = phaseSeconds;
@@ -793,11 +798,6 @@ export class AnimationSystem<TOwnerId extends string> {
 			mode,
 		);
 	}
-}
-
-/** Clone caller-owned matrices so animation retention cannot alias entity presentation state. */
-function cloneCompletePose(transforms: readonly Mat4[]): readonly Mat4[] {
-	return transforms.map((transform) => transform.clone());
 }
 
 /** Stable FNV-1a phase keeps entities reproducible without sharing playback clocks. */

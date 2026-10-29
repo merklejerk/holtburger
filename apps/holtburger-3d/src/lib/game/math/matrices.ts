@@ -532,25 +532,40 @@ export function transformAABB3(
 
 /** Create a rigid rotation matrix from a normalized quaternion. */
 export function createRotationMat4(rotation: Quat): Mat4 {
-	const { w, x, y, z } = rotation;
-	return new Mat4(
-		1 - 2 * (y * y + z * z),
-		2 * (x * y + w * z),
-		2 * (x * z - w * y),
-		0,
-		2 * (x * y - w * z),
-		1 - 2 * (x * x + z * z),
-		2 * (y * z + w * x),
-		0,
-		2 * (x * z + w * y),
-		2 * (y * z - w * x),
-		1 - 2 * (x * x + y * y),
-		0,
-		0,
-		0,
-		0,
-		1,
+	return createRotationMat4FromQuaternionComponents(
+		rotation.w,
+		rotation.x,
+		rotation.y,
+		rotation.z,
 	);
+}
+
+/** Build a rotation from normalized components, optionally updating caller-owned matrix storage. */
+export function createRotationMat4FromQuaternionComponents(
+	w: number,
+	x: number,
+	y: number,
+	z: number,
+	targetMatrix?: Mat4,
+): Mat4 {
+	const target = targetMatrix ?? Mat4.zero();
+	target.m11 = 1 - 2 * (y * y + z * z);
+	target.m12 = 2 * (x * y + w * z);
+	target.m13 = 2 * (x * z - w * y);
+	target.m14 = 0;
+	target.m21 = 2 * (x * y - w * z);
+	target.m22 = 1 - 2 * (x * x + z * z);
+	target.m23 = 2 * (y * z + w * x);
+	target.m24 = 0;
+	target.m31 = 2 * (x * z + w * y);
+	target.m32 = 2 * (y * z - w * x);
+	target.m33 = 1 - 2 * (x * x + y * y);
+	target.m34 = 0;
+	target.m41 = 0;
+	target.m42 = 0;
+	target.m43 = 0;
+	target.m44 = 1;
+	return target;
 }
 
 /** Extract the normalized quaternion carried by a transform, removing per-axis scale. */

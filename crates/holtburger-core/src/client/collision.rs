@@ -1002,6 +1002,11 @@ impl ClientCollisionCoordinator {
         }
         let entity = world.player_entity()?;
         let position = entity.position;
+        // Login can establish the entity before its position arrives. Only the complete cell
+        // ID zero means unpositioned; cells in landblock region zero remain valid.
+        if position.landblock_id == Guid::NULL {
+            return None;
+        }
         Some(ClientSceneTarget {
             player: ClientPlayerIdentity {
                 guid,
@@ -1955,6 +1960,77 @@ mod tests {
         assert_eq!(scenes.prepared.load(Ordering::SeqCst), 0);
         assert!(bodies.loaded.lock().unwrap().is_empty());
         assert_eq!(bodies.prepared.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn collision_preparation_waits_for_position_and_accepts_region_zero() {
+        for destination in [Guid(0x1234_0001), Guid(0x0000_0001)] {
+            let mut world = WorldState::synthetic();
+            let guid = Guid(0x5000_0001);
+            world.seed_local_player_entity(guid, "Player", WorldPosition::default());
+            facts(&mut world, guid);
+            let source = Arc::new(FakeSource::default());
+            let mut coordinator = ClientCollisionCoordinator::new(source.clone());
+
+            coordinator.observe(&mut world);
+            coordinator.poll(&mut world, Instant::now());
+            assert!(coordinator.scene_context.is_none());
+            assert!(coordinator.scene_worker.is_none());
+            assert!(coordinator.body_worker.is_none());
+            assert!(source.loaded.lock().unwrap().is_empty());
+            assert_eq!(source.prepared.load(Ordering::SeqCst), 0);
+            assert!(matches!(
+                coordinator.body_readiness(),
+                ClientBodyReadiness::Waiting
+            ));
+
+            world.sync_player_position(position(destination.0));
+            coordinator.observe(&mut world);
+            wait_for_scene_revision(&mut coordinator, &mut world, 1).await;
+            wait_for_readiness(&mut coordinator, &mut world, |readiness| {
+                matches!(readiness, ClientBodyReadiness::Ready { .. })
+            })
+            .await;
+            assert!(coordinator.destination_scene_ready(destination).unwrap());
+            assert_eq!(source.prepared.load(Ordering::SeqCst), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn classification_completion_waits_for_a_positioned_player() {
+        let mut world = WorldState::synthetic();
+        let guid = Guid(0x5000_0001);
+        world.seed_local_player_entity(guid, "Player", position(0x0000_0001));
+        let source = Arc::new(FakeSource::default());
+        let mut coordinator = ClientCollisionCoordinator::new(source.clone());
+        let owner = Guid(0x0000_ffff);
+        // Deliver classification directly to exercise publication after the live pose is lost.
+        coordinator.scene_context = Some(ClientSceneContext {
+            owner,
+            state: ClientSceneContextState::Pending,
+        });
+        coordinator
+            .completion_tx
+            .send(ClientSpatialCompletion::Context(
+                ClientSceneContextCompletion {
+                    generation: coordinator.scene_generation,
+                    owner,
+                    result: Ok(LandblockSceneClass::OutdoorOnly),
+                },
+            ))
+            .unwrap();
+        world.entities.get_mut(guid).unwrap().position = WorldPosition::default();
+
+        coordinator.poll(&mut world, Instant::now());
+        assert!(matches!(
+            coordinator.scene_context,
+            Some(ClientSceneContext {
+                state: ClientSceneContextState::Pending,
+                ..
+            })
+        ));
+        assert!(coordinator.scene_worker.is_none());
+        assert!(source.loaded.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

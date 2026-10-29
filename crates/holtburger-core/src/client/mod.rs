@@ -1358,10 +1358,10 @@ impl ClientRuntime {
                     .client_view_event_tx
                     .send(ClientViewEvent::CombatModeUpdated { mode: *mode });
             }
-            WorldEvent::VendorStateUpdated(vendor) => {
+            WorldEvent::VendorApproached(vendor) => {
                 let _ = self
                     .client_view_event_tx
-                    .send(ClientViewEvent::VendorStateUpdated {
+                    .send(ClientViewEvent::VendorApproached {
                         vendor: vendor.clone(),
                     });
             }

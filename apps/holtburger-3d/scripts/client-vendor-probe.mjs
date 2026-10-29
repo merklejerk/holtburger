@@ -99,6 +99,27 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	await wait(
 		`${api}.objectInspectionProbe().snapshot().state.kind === 'ready'`,
 	);
+	const appraisalRequests = `${api}.inventoryDragCommands().filter(entry => entry.command === 'examine_client_entity' && entry.args.guid === 7001).length`;
+	const requestsBeforeClose = await read(appraisalRequests);
+	await click('button[aria-label="Close Festival Merchant"]');
+	await wait("document.querySelector('[data-vendor-panel]') === null");
+	// Let the real inspector refresh timer request another appraisal while its shop is dismissed.
+	await wait(`${appraisalRequests} > ${requestsBeforeClose}`);
+	await read(`${fixture}.refresh()`);
+	await read(`${api}.objectInspectionProbe().respond('item', 7001)`);
+	await read(`${fixture}.settle()`);
+	if (await read("document.querySelector('[data-vendor-panel]') !== null"))
+		throw new Error(
+			"Inspector appraisal or catalog recovery reopened the dismissed vendor",
+		);
+	if (
+		(await read(`${api}.objectInspectionProbe().snapshot().state.kind`)) !==
+		"ready"
+	)
+		throw new Error("Dismissing the vendor interrupted its item inspector");
+	await read(`${fixture}.approach()`);
+	await wait("document.querySelector('[data-vendor-panel]') !== null");
+	await quote([], [], unchangedCurrencies);
 	await read(`${api}.objectInspectionProbe().end()`);
 	const inputSettings = await read(`${api}.bindingSettings.read()`);
 	await read(
@@ -120,6 +141,8 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	);
 	if (remappedExamine?.args?.guid !== 7001)
 		throw new Error("Remapped vendor Examine did not capture the offer");
+	// Complete this wire request before the next shortcut test; cancellation retains it for deduplication.
+	await read(`${api}.objectInspectionProbe().respond('item', 7001)`);
 	await read(`${api}.objectInspectionProbe().end()`);
 	await read(
 		`${api}.bindingSettings.replace(${JSON.stringify(inputSettings)})`,
@@ -632,5 +655,9 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		)
 	)
 		await click('button[aria-label="Close Inventory"]');
-	return { ...summary, negativeBalanceHighlighted };
+	return {
+		...summary,
+		negativeBalanceHighlighted,
+		dismissalSurvivesAppraisal: true,
+	};
 }

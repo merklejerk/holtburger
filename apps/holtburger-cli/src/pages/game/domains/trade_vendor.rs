@@ -116,21 +116,25 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
     let mut result = UpdateResult::new();
 
     match event {
-        ClientViewEvent::VendorStateUpdated { vendor } => {
+        ClientViewEvent::VendorApproached { vendor } => {
             if state.data.trade.is_some() {
                 return result;
             }
-            let vendor_guid = vendor.as_ref().map(|v| v.vendor_guid);
-            state.view.vendor = vendor.clone();
-            if let Some(v_guid) = vendor_guid
-                && let Some((last_time, target_guid)) = state.runtime.last_trade_initiation
-                && target_guid == v_guid
+            state.view.vendor = Some(vendor.clone());
+            if let Some((last_time, target_guid)) = state.runtime.last_trade_initiation
+                && target_guid == vendor.vendor_guid
                 && last_time.elapsed() < std::time::Duration::from_secs(5)
             {
                 result
                     .actions
                     .push(AppUiAction::SetDashboardActiveTab(DashboardTab::Trade).into());
             }
+        }
+        ClientViewEvent::VendorStateUpdated { vendor }
+            if state.data.trade.is_none() && state.view.vendor.is_some() =>
+        {
+            // Recovery and appraisal catalogs refresh an open shop without undoing dismissal.
+            state.view.vendor = vendor.clone();
         }
         ClientViewEvent::VendorItemIdentified(item) => {
             if let Some(vendor) = state.view.vendor.as_mut()

@@ -157,6 +157,99 @@ function buy(model: ClientVendorState, item: number, amount?: number): void {
 }
 
 describe("vendor draft presentation", () => {
+	it.each([
+		{
+			type: "exit-requested",
+			exit: { cause: "explicit-disconnect", diagnostic: "Disconnected" },
+		},
+		{
+			type: "lifecycle",
+			lifecycle: {
+				kind: "portal-space",
+				worldGeneration: 2,
+				cause: "teleport",
+			},
+		},
+		{
+			type: "trade-snapshot",
+			trade: {
+				trade: {
+					revision: 1,
+					partner_guid: 2,
+					initiator_guid: 1,
+					trade_stamp: 0,
+					self_side: { guid: 1, accepted: false, items: [] },
+					partner_side: { guid: 2, accepted: false, items: [] },
+				},
+				pending_items: [],
+			},
+		},
+	] satisfies ClientLifecycleSessionEvent[])(
+		"keeps $type closure through passive catalog updates",
+		(event) => {
+			const f = fixture();
+			f.emit(event);
+			expect(f.model.read()).toBeNull();
+			f.emit({ type: "vendor-snapshot", vendor: catalog });
+			expect(f.model.read()).toBeNull();
+		},
+	);
+
+	it("keeps dismissal across catalog and recovery updates, then reopens on approach", () => {
+		const f = fixture();
+		expect(f.model.read()?.vendor).toBe(vendorId);
+		f.model.close();
+		const requestsBeforeRefresh = f.previewVendor.mock.calls.length;
+		const updated = {
+			...catalog,
+			offers: [{ ...singleOffer, name: "Appraised Sword" }],
+		};
+		for (let refresh = 0; refresh < 3; refresh++) {
+			f.emit({ type: "vendor-snapshot", vendor: updated });
+			expect(f.previewVendor).toHaveBeenCalledTimes(requestsBeforeRefresh);
+			expect(f.model.read()).toBeNull();
+		}
+		f.emit({ type: "vendor-approached", vendor: updated });
+		expect(f.previewVendor).toHaveBeenCalledTimes(requestsBeforeRefresh + 1);
+		f.answer(blank);
+		expect(
+			f.model.read()?.sections.flatMap((section) => section.cells),
+		).toMatchObject([{ name: "Appraised Sword" }]);
+	});
+
+	it("preserves an open draft through approach and snapshot refreshes", () => {
+		const f = fixture();
+		buy(f.model, stackOffer.guid);
+		const quote = {
+			...blank,
+			buys: [{ item: stackOffer.guid, amount: 10, total: 20, merge_key: 500 }],
+		};
+		f.answer(quote);
+		for (const type of ["vendor-snapshot", "vendor-approached"] as const) {
+			f.emit({ type, vendor: catalog });
+			expect(f.pending().draft.buys).toEqual([
+				{ item: stackOffer.guid, amount: 10 },
+			]);
+			f.answer(quote);
+			expect(f.model.read()?.queue).toHaveLength(1);
+		}
+	});
+
+	it("retires the catalog on null and opens a new interaction after switching vendors", () => {
+		const f = fixture();
+		f.emit({ type: "vendor-snapshot", vendor: null });
+		expect(f.model.read()).toBeNull();
+		f.emit({ type: "vendor-snapshot", vendor: catalog });
+		expect(f.model.read()).toBeNull();
+		f.emit({
+			type: "vendor-approached",
+			vendor: { ...catalog, vendor: vendorId + 1 },
+		});
+		f.answer(blank);
+		expect(f.model.read()?.vendor).toBe(vendorId + 1);
+		expect(f.pending().draft.buys).toEqual([]);
+	});
+
 	it("closes at the reach limit and checks again when Trade is pressed", () => {
 		const f = fixture();
 		f.model.queueSell(10);

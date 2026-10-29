@@ -210,6 +210,12 @@ mod tests {
         };
         for (name, source) in [
             (
+                "approached",
+                ClientViewEvent::VendorApproached {
+                    vendor: vendor.clone(),
+                },
+            ),
+            (
                 "snapshot",
                 ClientViewEvent::VendorStateUpdated {
                     vendor: Some(vendor),
@@ -256,11 +262,15 @@ mod tests {
             let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
                 panic!("Expected event frame")
             };
-            assert_eq!(
-                serde_json::to_value(event).unwrap(),
-                fixture[name],
-                "{name}"
-            );
+            let expected = if name == "approached" {
+                serde_json::json!({
+                    "event": "client-vendor-approached",
+                    "payload": fixture["snapshot"]["payload"],
+                })
+            } else {
+                fixture[name].clone()
+            };
+            assert_eq!(serde_json::to_value(event).unwrap(), expected, "{name}");
         }
     }
 }

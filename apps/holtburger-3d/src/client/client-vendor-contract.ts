@@ -41,15 +41,17 @@ const vendorOfferSchema = z
 	})
 	.strict();
 
-/** Complete catalog; same-vendor updates preserve the frontend draft. */
-export const vendorSnapshotSchema = z
+/** Complete server approach catalog; its presence permits opening the vendor window. */
+export const vendorApproachedSchema = z
 	.object({
 		vendor: unsigned,
 		offers: z.array(vendorOfferSchema),
 		currency: z.object({ wcid: unsigned, name: z.string() }).strict(),
 	})
-	.strict()
-	.nullable();
+	.strict();
+
+/** Retained catalog or retirement; snapshots do not grant permission to reopen a window. */
+export const vendorSnapshotSchema = vendorApproachedSchema.nullable();
 
 const lineQuoteSchema = z
 	.object({

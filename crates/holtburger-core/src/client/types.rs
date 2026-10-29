@@ -1218,6 +1218,11 @@ pub enum ClientViewEvent {
     },
     /// Replacement level for the shared targeted-attack owner.
     CombatStatusUpdated(ClientCombatStatus),
+    /// Server ApproachVendor response; frontends may open the supplied interaction.
+    VendorApproached {
+        vendor: VendorState,
+    },
+    /// Retained catalog replacement or retirement, without an instruction to open a window.
     VendorStateUpdated {
         vendor: Option<VendorState>,
     },

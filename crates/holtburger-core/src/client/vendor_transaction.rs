@@ -510,6 +510,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn vendor_approach_is_distinct_from_appraisal_and_recovery_snapshots() {
+        let mut client = builder::build_test_client(ClientState::Connected);
+        let mut events = client.subscribe_client_view_events();
+        event(
+            &mut client,
+            GameEvent::ApproachVendor(Box::new(ApproachVendorEventData {
+                vendor_guid: VENDOR,
+                items: vec![VendorItemEventData::default()],
+                ..Default::default()
+            })),
+        )
+        .await;
+        let mut approached = false;
+        while let Ok(event) = events.try_recv() {
+            match event {
+                ClientViewEvent::VendorApproached { vendor } => {
+                    assert_eq!(vendor.vendor_guid, VENDOR);
+                    approached = true;
+                }
+                ClientViewEvent::VendorStateUpdated { .. } => {
+                    panic!("An approach must not be projected as a passive snapshot");
+                }
+                _ => {}
+            }
+        }
+        assert!(approached);
+
+        let item = client.world.vendor.as_ref().unwrap().items[0].clone();
+        client.handle_world_event(&holtburger_world::WorldEvent::VendorItemIdentified(
+            Box::new(item),
+        ));
+        for recovery in [false, true] {
+            if recovery {
+                client.emit_current_application_snapshot();
+            }
+            let mut snapshot = false;
+            while let Ok(event) = events.try_recv() {
+                match event {
+                    ClientViewEvent::VendorApproached { .. } => {
+                        panic!("Appraisal and recovery must not grant permission to reopen");
+                    }
+                    ClientViewEvent::VendorStateUpdated { vendor } => {
+                        assert_eq!(vendor.unwrap().vendor_guid, VENDOR);
+                        snapshot = true;
+                    }
+                    _ => {}
+                }
+            }
+            assert!(snapshot);
+        }
+    }
+
+    #[tokio::test]
     async fn quoted_command_attempts_purchase_after_partial_sale_across_stock_refresh() {
         const OFFER: Guid = Guid(300);
         for complete_sale in [false, true] {

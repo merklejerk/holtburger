@@ -359,35 +359,27 @@ vec4 sampleRepeatingPixelRect(
 
 ivec2 resolveIndexedCoordinate(ivec2 coordinate, ivec2 size) {
 	if (uWrapRepeat != 0) {
-		return ivec2(
-			((coordinate.x % size.x) + size.x) % size.x,
-			((coordinate.y % size.y) + size.y) % size.y
-		);
+		// Bilinear neighbors lie in [-1, size]: sourceUv already clamps or repeats the UV.
+		// Shift into the non-negative range before %, whose negative operands are undefined in ESSL.
+		return (coordinate + size) % size;
 	}
 	return clamp(coordinate, ivec2(0), size - ivec2(1));
 }
 
-float paletteIndexAt(ivec2 sourceCoordinate) {
+int paletteIndexAt(ivec2 sourceCoordinate) {
 	ivec2 atlasCoordinate = ivec2(uBaseRect.xy) + sourceCoordinate;
 	vec4 encoded = texelFetch(uBase, atlasCoordinate, 0) * 255.0;
-	return uMaterialKind == 2
-		? floor(encoded.r + 0.5)
-		: floor(encoded.r + 0.5) + floor(encoded.g + 0.5) * 256.0;
+	ivec2 bytes = ivec2(floor(encoded.rg + vec2(0.5)));
+	return uMaterialKind == 2 ? bytes.r : bytes.r + bytes.g * 256;
 }
 
-vec4 paletteColor(float index) {
-	if (uPalettedClipMap != 0 && index < 8.0) return vec4(0.0);
-	vec2 paletteSize = max(uPaletteRect.zw, vec2(1.0));
+vec4 paletteColor(int index) {
+	if (uPalettedClipMap != 0 && index < 8) return vec4(0.0);
+	ivec2 paletteSize = max(ivec2(uPaletteRect.zw), ivec2(1));
 	if (index >= paletteSize.x * paletteSize.y) return vec4(0.0);
-	vec2 paletteCoordinate = vec2(
-		mod(index, paletteSize.x),
-		floor(index / paletteSize.x)
-	);
-	return texelFetch(
-		uPalette,
-		ivec2(uPaletteRect.xy + paletteCoordinate),
-		0
-	);
+	// Palette entries are discrete addresses: floating mod/division can cross a row boundary.
+	ivec2 paletteCoordinate = ivec2(index % paletteSize.x, index / paletteSize.x);
+	return texelFetch(uPalette, ivec2(uPaletteRect.xy) + paletteCoordinate, 0);
 }
 
 vec4 indexedColorAt(ivec2 coordinate, ivec2 sourceSize) {

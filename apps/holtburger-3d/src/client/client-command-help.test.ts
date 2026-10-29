@@ -43,6 +43,7 @@ describe("h3d command help", () => {
 		expect(commands).toEqual(
 			expect.arrayContaining([
 				"/help [command]",
+				"/version",
 				"/corpse",
 				"/corpses",
 				"/permit <player>",

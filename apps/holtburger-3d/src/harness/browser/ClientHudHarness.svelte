@@ -24,6 +24,7 @@
 	import { RenderSceneInterestController } from "../../lib/game/runtime/render-scene-interest-controller";
 	import { nearbySceneInterest } from "../../client/client-nearby.test-support";
 	import { runClientHelpCommand } from "../../client/client-command-help";
+	import { runClientVersionCommand } from "../../client/client-version-command";
 	import {
 		PARTY_HUD_PREVIEW,
 		PARTY_HUD_MAXIMUM_COLUMNS,
@@ -6161,6 +6162,8 @@
 						} else if (isLogopolisCommand(message)) {
 							logopolisLaunchRevision += 1;
 						} else if (runClientHelpCommand(message, appendChat)) {
+							return;
+						} else if (runClientVersionCommand(message, appendChat)) {
 							return;
 						} else if (waypointProbeEnabled) submitWaypointChat(message);
 						else if (message.startsWith("/"))

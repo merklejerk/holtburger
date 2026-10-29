@@ -228,11 +228,16 @@ pub enum NearbyEntityCategory {
     Player,
     Npc,
     Monster,
+    /// Public corpse identity, distinct from ordinary storage containers.
+    Corpse,
     Container,
     Item,
     Portal,
     Lifestone,
-    DoorOrSwitch,
+    /// Door identity, independent of direct-use capability.
+    Door,
+    /// Native switch identity.
+    Switch,
 }
 
 /// Minimal public-description projection, with no dependency on appraisal property storage.
@@ -260,7 +265,7 @@ fn nearby_category(
     use NearbyEntityCategory as Category;
     use holtburger_common::properties::{ItemType, ObjectDescriptionFlag as Flag, Usable};
     if flags.contains(Flag::CORPSE) && !flags.intersects(Flag::PLAYER | Flag::VENDOR) {
-        return Category::Container;
+        return Category::Corpse;
     }
     // Catalog grouping collapses both door-usability variants. No invented useability
     // fact escapes this classification call.
@@ -275,9 +280,8 @@ fn nearby_category(
         MapCategory::Mob => Category::Monster,
         MapCategory::Portal => Category::Portal,
         MapCategory::Lifestone => Category::Lifestone,
-        MapCategory::Door | MapCategory::DoorNoDirectUse | MapCategory::Switch => {
-            Category::DoorOrSwitch
-        }
+        MapCategory::Door | MapCategory::DoorNoDirectUse => Category::Door,
+        MapCategory::Switch => Category::Switch,
         MapCategory::Other if item_type.contains(ItemType::CONTAINER) => Category::Container,
         MapCategory::Other => Category::Item,
     }
@@ -717,6 +721,12 @@ mod tests {
                 ObjectDescriptionFlag::CORPSE,
                 ItemType::CONTAINER,
                 None,
+                NearbyEntityCategory::Corpse,
+            ),
+            (
+                ObjectDescriptionFlag::empty(),
+                ItemType::CONTAINER,
+                None,
                 NearbyEntityCategory::Container,
             ),
             (
@@ -735,13 +745,13 @@ mod tests {
                 ObjectDescriptionFlag::DOOR,
                 ItemType::MISC,
                 None,
-                NearbyEntityCategory::DoorOrSwitch,
+                NearbyEntityCategory::Door,
             ),
             (
                 ObjectDescriptionFlag::empty(),
                 ItemType::MISC,
                 Some(WeenieType::Switch),
-                NearbyEntityCategory::DoorOrSwitch,
+                NearbyEntityCategory::Switch,
             ),
             (
                 ObjectDescriptionFlag::empty(),

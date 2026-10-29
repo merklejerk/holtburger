@@ -6,10 +6,16 @@ preparation reuse, appearance-owned classification, placement reads and
 presentation publication have measured reductions documented below. The 200 FPS
 target remains open; no controlled end-to-end gain is established.
 
-Current direction: begin a visibility/distance census of presentation and renderer
-work, then select a bounded work-reduction experiment. Smaller in-place
-opportunities remain, but they no longer block this exploration. No new fidelity,
-visibility or animation-cadence policy is enabled.
+Current direction: the user retained and enabled distant visual sampling at
+64 units / 1/30 second. The enabled-cadence cost refresh below is current:
+foreground-policy captures put renderer CPU at 4.20–4.72 ms and visual sampling/
+publication at 0.51–0.67 ms. Contribution preparation and opaque submission remain
+the largest renderer buckets. Timing comparisons remain directional under
+concurrent desktop use; no controlled end-to-end gain is established.
+
+Latest frame-consistency finding: two subsequent traces confirm 10–13 ms
+main-thread major collections coincident with HUD dips. See the GC timing section;
+this supports an allocation/lifetime follow-up, not a claim that every dip is GC.
 
 ## Context and boundaries
 
@@ -104,7 +110,7 @@ decision, not proof that every in-place opportunity is exhausted. Continue takin
 small, readable efficiency improvements when evidence supports them, without
 requiring them all to finish before exploring workload reduction.
 
-### Next step: measure eligibility before changing behavior
+### Census scope: measure eligibility before changing behavior
 
 Build a diagnostic census at the browser presentation/renderer boundary. Keep the
 saved login view and existing behavior while attributing work to entity distance,
@@ -1831,3 +1837,876 @@ these are verification results, not a fresh performance comparison. No productio
 source changed during this review. The commit includes the reviewed app source,
 tests and this working document, excluding unrelated submodule contents and
 ignored evidence archives.
+
+
+## Visibility and distance work census — 2026-10-29
+
+Status: behavior-preserving census complete. No production policy or code changed
+in this follow-up. The next experiment should test conservative rejection of
+hidden dynamic color work; whole-pose throttling requires a separate dependency
+contract. Distance-based fidelity remains a candidate, rather than the automatic
+first implementation.
+
+### Existing policy and ownership findings
+
+The browser runtime already owns `AnimationPresentationScheduler`. Its configured
+offscreen interval is **0.1 seconds**. `AnimationSystem.advance` advances playback
+semantics before selection; `sample` produces visual poses only for selected
+active identities. The scheduler uses previous-frame renderer feedback: selected
+active roots receive full visual cadence, others receive timed samples. This
+already avoids much offscreen pose work without a second scheduler.
+
+Renderer feedback is broader than visible pixels. Dynamic scene contributions
+enter it after footprint admission, even if they have no admitted color ranges;
+PSSM mapped and analytic casters and rigid selection-mask targets also enter it.
+A color-occluded entity can consequently receive full visual cadence. Replacing
+that shared feedback with color-query results would change shadow, particle and
+selection behavior, not just mesh drawing.
+
+The entity system projects every part bound when applying a sample and publishes
+requested part frames to the scene. The scene's broadphase uses prepared animation
+bounds expanded by sampled poses and particle envelopes; the renderer's footprint
+uses the current published presentation envelope. Runtime particle creation can
+resolve a named part frame. A skip must therefore address more than the mesh's
+last color visibility. Root movement continues through the authoritative placement
+path; that alone does not guarantee current attachment frames or visual envelopes.
+
+Relevant owners are browser runtime scheduling, browser entity presentation,
+browser scene selection, and browser renderer pass preparation. No shared Rust
+change is indicated by this census.
+
+### Measurement method and definitions
+
+Saved login view, no movement/camera input, 1717 × 1071 drawing buffer, camera
+landblock `0xc6a8ffff`, shadow mode `shadow-maps`. The primary capture contains two
+windows of **120 actual `drawFrame` calls** each. Counts are attributed to the
+same frame's publication and renderer feedback, rather than to rAF callbacks.
+Distance is 3D camera-to-resolved-visual-root distance in canonical scene space.
+The 32/64/128-unit bands are diagnostic partitions, not proposed quality thresholds.
+
+Temporary Vite transforms count applied samples, dense part work, renderer
+publication reads and prepared color indices. Each applied part executes pose
+composition and rigid-bound projection in the inspected path. These counts do
+not include every possible installation/replacement or semantic pose operation.
+Prepared color indices include view/domain routing; they describe submitted work,
+not unique asset geometry. The static census only counts tested contributions;
+this experiment does not characterize static occlusion or all renderer work.
+
+On 24 of those frames, `ANY_SAMPLES_PASSED_CONSERVATIVE` queries wrap actual dynamic
+color draws. Results are collected asynchronously and combined by root across
+that frame's color draws. Zero means no passing samples in those draws; a positive
+can still be covered later. Queries do not measure shadow, particle, nameplate or
+final-composite contributions. No query result changes selection or presentation.
+
+### Primary census results
+
+The population is 625 resident dynamic roots, 371 active animated identities,
+173–174 renderer-selected roots, and 133–134 roots with prepared color work.
+Previously selected active roots account for 96 visual samples/frame; offscreen
+due samples average 20.6–22.9/frame. The offscreen interval remains 0.1 seconds.
+
+| Distance band | Selected roots/frame | Selected parts/frame | Applied selected parts/frame | Prepared color triangles/frame |
+| --- | ---: | ---: | ---: | ---: |
+| Under 32 | 4 | 70 | 68 | 1,266 |
+| 32–64 | 19.0–19.1 | 178.0–178.1 | 172 | 7,800–7,809 |
+| 64–128 | 112 | 1,743 | 1,700 | 52,333–52,335 |
+| 128 and beyond | 38 | 38 | 0 | 0 |
+
+Selected roots account for **1,940 applied parts/frame**, versus **98.7–109.7**
+on unselected roots. Unselected work is about **4.8–5.4%** of this applied-part
+population. Selected roots 64–128 units away account for about **83%** of all
+applied parts. More aggressive offscreen throttling has a much smaller eligible
+population than selected-root work in this view. These are operation shares,
+not CPU-time shares or predicted FPS savings.
+
+The 38 far selected roots have no prepared color indices and no applied samples
+in these windows. Their feedback count alone would overstate a pose-throttling
+opportunity. No cause for that population is inferred from its distance alone.
+Projected footprint areas were also collected, but those are enclosing rectangles,
+including presentation envelopes, not mesh pixel coverage or a quality judgment.
+
+Of approximately 133.5 color-submitted roots/query frame, **96.5–96.6 produce no
+passing color samples**. They account for about **1,590 of 1,989 submitted dense
+parts** and **48,045–48,052 of 61,400–61,407 prepared triangles** per query frame.
+Across the 24 query frames, **96 roots (1,589 parts)** are queried every time and
+never produce a passing sample. This is strong eligibility evidence, not yet a
+conservative visibility algorithm that can avoid doing that work.
+
+### Depth-disabled control: distinguish occlusion from other rejection
+
+A separate repeat issues a second query for each color span with depth testing
+disabled and color/depth/stencil writes disabled, preserving the shader, geometry,
+portal routing and other tests. GL state is restored after each control draw.
+This control asks whether removing depth rejection makes any samples pass; it
+cannot attribute the occluder or establish that an enclosing box is hidden.
+
+In two further 120-render windows, 24 query frames show **80.5–81.3 roots/frame**
+with zero ordinary samples but positive depth-disabled samples. These roots
+account for **1,460–1,491 dense parts** and **45,213–46,167 prepared triangles**
+per query frame. Depth rejection explains most of the zero-sample color work.
+Among 96 roots with zero ordinary samples in all 24 frames, **79 pass the
+depth-disabled control every time**, 16 never pass it, and one varies. Do not
+label the latter groups as proven depth occlusion.
+
+The control is deliberately expensive: per-draw state reads, extra submissions
+and many queries perturb elapsed time enough that all offscreen roots become due
+on each captured render. Its publication counts are **not** representative of
+normal cadence and are not pooled with the primary capture. The control supports
+only the paired depth-rejection observation and framebuffer equivalence. It is
+not a candidate implementation or a throughput benchmark.
+
+A synchronous same-input render comparison with and without query/control draws
+matches exactly: framebuffer hash `6cb48cc7`, **zero differing bytes**. GL error is
+zero; live browser messages contain only Vite connection messages. The client
+disconnects cleanly. No visual acceptance was performed.
+
+### Dependency limits and next decision
+
+The control's consistently zero-sample population includes **29 outdoor shadow
+roots**, **86 requested part frames**, and **34 roots with positive particle
+envelopes**. These are observed dependency indicators, not an exhaustive list of
+consumers. Requested frames may serve held geometry or particle anchors; absence
+of a positive envelope does not prove an entity can never emit particles.
+Most consistently zero-sample roots have outdoor membership, so tightening only
+indoor portal scope selection cannot be assumed to remove most of this work.
+
+**Experiment selected from this census (completed below): conservative occlusion
+eligibility for renderer color work.**
+First test whether a cheaper conservative bound/group test can recover a useful
+fraction of the depth-rejected population. Compare against actual color queries
+and account for test/submission overhead. Keep current pose publication, shadow
+selection, particle routing, names and selection outlines intact for this first
+experiment. Actual mesh queries already pay the geometry cost and cannot by
+themselves deliver the measured work reduction.
+
+A usable skip needs a current conservative envelope and an explicit answer for
+camera changes, root/attachment movement, changing occluders, portal transitions,
+multi-view rendering and delayed query results. A previous hidden result alone
+is insufficient. Do not introduce a general cache/scheduler or synchronous GPU
+readback to turn this census into an optimization. Reject a prototype if the test
+cost or ownership complexity consumes the benefit.
+
+Only after color rejection is established should feedback distinguish color
+visibility from other pose consumers and consider throttling eligible poses.
+Distant visible animation cadence is the next alternative if conservative
+occlusion offers poor economics; its smoothness trade-off still requires user
+acceptance. No fidelity threshold or cadence change is selected by this census.
+
+Evidence is retained in `docs/plans/evidence/h3d-visibility-work-2026-10-29/` under
+the existing ignored rule: primary and depth-control reports, isolated diagnostic
+sources, relevant production snapshots, logs and SHA-256 manifests. No production
+hooks or code changes were needed; full TypeScript tests were not rerun for this
+diagnostic/doc-only follow-up. Archive contents are checked against configured
+credentials. No files were staged or committed.
+
+
+## Outdoor bound-query prototype — 2026-10-29
+
+Status: isolated prototype and controls complete; **not promoted to production**.
+The box tests recover substantial hidden color work, with exact pixels in the
+saved-view controls. A net throughput benefit is not established. There is no
+new live visibility cache, stale-result policy, pose throttling or fidelity change.
+
+### Test placement and scope
+
+The renderer submits terrain and opaque static objects before dynamic opaque
+meshes. The prototype inserts conservative box queries at that boundary, using
+only the depth already written by those earlier passes. Other dynamic meshes do
+not become occluders for these tests. This deliberately avoids depending on a
+moving actor's last pose as an occluder.
+
+Only roots with exclusively outdoor color submissions are eligible. Indoor and
+mixed-domain roots remain untouched. The prototype uses current published
+presentation bounds and root placement, and renders solid enclosing boxes with
+color/depth writes disabled and culling disabled. A box intersecting or ambiguous
+at the near plane is retained. Portal atlas routing uses the ordinary outdoor
+tile transform. A small diagnostic bounds expansion guards the sampled geometry
+against rounding; it is not a universal precision guarantee or a quality setting.
+General numeric conservatism remains a production requirement.
+
+Two variants were tested:
+
+- Individual object-local boxes transformed by current placement.
+- Groups formed from outdoor objects' anchor-relative axis-aligned boxes, using
+  16-unit spatial bins and enclosing every group member. The bin size is a probe
+  parameter, not a proposed product threshold or persistent spatial index.
+
+No query result drives ordinary gameplay rendering. Temporary Vite transforms
+and a page probe run the experiments, restore GL state and clean up resources.
+Production source is unchanged. The helpers allocate maps, box descriptions and
+query objects for diagnostics; their measured cost is not a lower bound for all
+possible implementations.
+
+### Same-scene eligibility and numerical proof
+
+Final saved-view configuration: 1717 × 1071, camera/anchor `0xc6a8ffff`, FOV 75,
+shadow mode `shadow-maps`. The final prepared color population contains 130 roots;
+50 indoor/mixed-domain roots are excluded. Earlier live sessions have different
+populations, so their raw draw counts are not compared as paired measurements.
+
+| Same-scene result | Individual boxes | Grouped boxes |
+| --- | ---: | ---: |
+| Queries | 80 | 27 |
+| Hidden roots | 72 | 63 |
+| Dense parts in hidden roots | 1,371 | 1,211 |
+| Prepared color triangles in hidden roots | 41,789 | 37,062 |
+| Removable physical color draws | 222 | 204 |
+
+Grouped rejection is a checked subset of individual rejection in this comparison.
+It uses about one third as many queries while recovering about 89% of the
+individual test's hidden triangle work. This establishes a useful geometric
+population, not a measured CPU percentage saved.
+
+The probe records one complete frame's GL commands, copying mutable typed-array
+arguments. After queries resolve, it replays that captured frame both intact and
+with only hidden roots' dynamic color draws omitted. Other draw commands remain
+in order. A magenta framebuffer clear provides a negative control before replay.
+Baseline, query-instrumented, complete replay and grouped-filtered replay all
+match hash **`e40f084a`**, with **zero differing bytes**. The paired individual
+filter also matches exactly. GL error is zero.
+
+That replay bypasses CPU preparation, so a second control gates only the renderer's
+dynamic **color construction** block. Appearance admission remains available to
+shadows and names; dynamic selection feedback still records the original selected
+roots. Shadow preparation, particles, names, selection outlines and published
+poses continue through their original paths. This avoids treating an entity as
+wholly invisible just because its mesh color is hidden.
+
+After asynchronous waits, the control first establishes a fresh ordinary image,
+then compares all variants within one synchronous frozen-renderer window. All six
+normal/grouped/individual windows match hash **`ab63c55c`**, zero differing bytes,
+and exactly the same ordered selected-dynamic identities. This is a saved-view
+counterfactual, not validation for camera motion or future occluder changes.
+
+### Cost controls and what they establish
+
+All wall times retain the concurrent-desktop caveat. These are frozen repeated
+renderer/command controls, not normal FPS measurements. No fixed gain or frame-time
+stability claim follows.
+
+Earlier warmed individual-query windows observe approximately 0.8 ms in the query
+helper. Grouping reduces query count substantially, but warmed grouped helper
+medians remain roughly 0.7–0.8 ms across the retained runs. Bounds construction,
+state capture/restoration, uniforms and query submission still cost CPU work.
+Diagnostic implementation overhead is included; no allocation/stall improvement
+is established for a hypothetical production version.
+
+In the final early-color control, a supplied hidden set costs nothing to obtain.
+Normal windows observe 4.517 and 3.858 ms/renderer call; grouped rejection observes
+3.367 and 3.650 ms; individual rejection observes 3.075 and 3.233 ms. A preceding
+repeat also shows a directionally useful preparation-saving ceiling. This supports
+investigating early classification, but it does not price a complete live culler.
+
+The final combined control retains the complete reference query population even
+when color preparation is omitted. It recomputes current group bounds and issues
+all **27 queries/render**; it does not claim to pay the test cost while quietly
+querying only the few remaining drawn objects. The hidden set used for early
+rejection is still an oracle supplied by the frozen experiment; current query
+results do not arrive early enough to create that same frame's hidden set.
+
+| Combined control | Normal A | Query + early rejection A | Query + early rejection B | Normal B |
+| --- | ---: | ---: | ---: | ---: |
+| CPU ms/renderer call | 3.450 | 4.392 | 4.983 | 8.600 |
+| Queries/render | 0 | 27 | 27 | 0 |
+
+All combined windows retain exact pixels and selected identities. The strong
+drift in the final normal window prevents a trustworthy net-gain conclusion.
+The command-only replay timings also fail to establish a stable submission gain;
+they are retained rather than presented as an FPS improvement. Do not subtract
+independent window timings and promote the result as a measured live saving.
+
+### Asynchrony and corrected diagnostic controls
+
+The paired individual queries require one later rAF turn before results are
+available. An initial probe incorrectly expected diagnostic `gl.finish` to make
+query results immediately readable in the same JavaScript turn; that probe fails
+explicitly and is excluded from accepted results. Production must poll readiness
+and handle pending results without blocking or assuming completion.
+
+Another attempted early-color comparison fails even in its ordinary baseline:
+poses advanced during the asynchronous wait while the renderer's GPU uploads were
+held. Comparing a later full renderer call to the earlier captured image was an
+invalid frozen-world assumption. The accepted control refreshes its ordinary
+reference **after** those waits. Frozen GL-command replay keeps its separate,
+original reference. Neither failed attempt is treated as a culling failure or
+suppressed from the investigation record.
+
+### Review and decision
+
+The useful seam is browser renderer color admission, downstream of scene selection
+and separate from pose consumers. Tests of that narrow skip preserve selected
+identities and full pixels in the sampled view. The prototype does not justify
+changing the runtime scheduler's shared visibility feedback.
+
+**Do not land this per-frame GPU-query path as an optimization.** It has not shown
+a reliable net benefit, and its results arrive after the current CPU preparation
+has already happened. A production early-rejection path needs both a profitable
+test and a bounded visibility contract covering:
+
+- The exact view/projection and portal routing for which the result is valid.
+- Occluder geometry, placement, material/depth behavior and resource changes.
+- A conservative tested volume that still contains the current target after
+  movement, animation, scale, attachments and envelope changes.
+- Pending results, re-entry after camera changes, teardown and multiple views.
+
+A previous hidden bit or unchanged camera alone does not provide that proof.
+Building a general retained-depth/cache framework to bypass those ownership
+questions would exceed the evidence and readability budget of this experiment.
+The prototype is not a proof that occlusion cannot pay off; it identifies the
+eligibility ceiling and the missing early-visibility contract.
+
+The next smaller candidate is distance-dependent visual sampling using the
+existing runtime scheduler. It targets the measured concentration of posed-part
+work while retaining semantic clocks and explicit pose-consumer requirements.
+Its visible smoothness trade-off must be stated and left to user acceptance;
+no interval, distance threshold or quality change is enabled here. Occlusion can
+be revisited when a narrow CPU-usable visibility contract and a convincing cost
+control justify the additional lifecycle state.
+
+Evidence is retained in
+`docs/plans/evidence/h3d-occlusion-box-prototype-2026-10-29/`: final paired, early
+and combined controls; earlier individual/grouped reports; failed-probe summaries;
+isolated diagnostic source snapshots; relevant production source; final live log
+and SHA-256 manifests. Configured credentials are checked against artifacts and
+archive members. Live runs complete with no page/console warnings or errors and
+GL error zero. No visual acceptance was performed. Full app tests are not rerun
+for this isolated diagnostic/doc follow-up. No production hooks, staging or
+commits are introduced.
+
+
+## Opt-in distant visual sampling — 2026-10-29
+
+Status at the end of this implementation pass: implemented and validated,
+**initially disabled by default**. The user subsequently retained and enabled it;
+see the following cost refresh for the current setting. The trial adds a
+selected-pose interval to the existing scheduler; it does not add another scheduler,
+renderer visibility cache, interpolation system or shared-crate policy. No agent
+visual acceptance check was performed.
+
+### Why strict consumer exclusions were not useful
+
+A first census excludes protected entities, attached roots, requested part frames
+and any prepared/live emitter. That leaves only **15 selected distant roots / 63
+parts** eligible in this view. Refining the prepared-emitter exclusion to only
+body-part `CreateParticle` commands still pins **61 selected distant roots / 1,603
+parts**: their staged motion/script closures contain those commands. The closures
+cover possible future playback, not just the current idle clip. Treating every
+potential part consumer as a permanent full-rate requirement misses the measured
+heavy population.
+
+These diagnostic runs do not establish a throughput benefit for that restrictive
+policy. Their actual frame cadence also makes every interval due in the first
+capture, so its simulated-sample totals do not demonstrate a reduction. Preserve
+the eligibility counts, rather than presenting that capture as a cadence win.
+
+The resulting trial makes a deliberate fidelity trade-off instead. A distant
+entity's complete visual sample is held between updates, including its geometry
+pose, visual-root effects, part effect state, tight bounds, particle envelope
+publication and requested attachment frames. Shadows and dependent held objects
+observe that same published pose. Part-attached emitters and pose-dependent event
+origins can therefore use an older frame. This is **not** a claim that particle
+spawn transforms, fades, sound origins on held descendants, or shadow motion match
+full-cadence playback.
+
+Authoritative root placement, animation/physics-script clocks, hook dispatch and
+particle simulation continue through their existing unconditional paths. Held
+pose ancestry still receives authoritative root movement each frame. The feature
+changes visual sampling, not server authority or event scheduling.
+
+### Small ownership change
+
+`AnimationPresentationScheduler` still owns active identities, last sample times,
+ordinary selected/offscreen cadence and feedback age. A constructor-supplied
+runtime policy receives each root's identity, previous selection and ordinary
+interval. It may override that interval. The scheduler retains duplicate checking,
+clock-regression handling and lifecycle cleanup; it validates returned intervals.
+
+`GamePresentationRuntime` owns the optional distance policy and the current camera.
+For selected roots it reads current scene placement and compares the root's
+scene-space distance to the configured threshold. This avoids using last-frame
+camera distance when an entity approaches. The distance is root-to-camera,
+not projected size or distance to the nearest surface of a large model.
+
+The player, selected and hovered models are exempt from the new distance limit.
+The exemption includes their scene ancestors and descendants. In particular, an
+inspected held object keeps its animated parent current even if the parent's own
+mesh was absent from renderer feedback. This protection applies to offscreen
+members of that ancestry too while the opt-in policy is enabled. Other offscreen
+roots retain the existing configured offscreen interval.
+
+`SceneGraph` exposes its existing ancestry walk, also used by attachment cycle
+validation, rather than retaining a second relationship index. Current placement
+is borrowed only synchronously; one reusable scene-space origin supplies distance
+arithmetic. The policy adds no per-frame placement copies or distance arrays.
+Policy inputs are validated and copied at construction/assignment so caller
+mutation cannot change a validated configuration.
+
+No renderer visibility, shadow, selection or particle-routing contract changes.
+The renderer continues to select and draw current published geometry every frame;
+this does not remove draw calls or all renderer contribution work. Fewer pose
+samples remove corresponding part construction/publication work and allocations,
+but no allocated-byte or GC-pause reduction has been measured for this trial.
+
+### Configuration and quality boundary
+
+The tuning input is `SHARED_FRONTEND_TUNING.animationPresentation.distantSampling`
+in `apps/holtburger-3d/src/lib/frontend-tuning.ts`. It was `null` for the following
+trial evidence; the user has since enabled the concrete configuration below:
+
+```ts
+distantSampling: {
+  minimumDistance: 64,
+  sampleIntervalSeconds: 1 / 30,
+},
+```
+
+`GamePresentationRuntime.setDistantAnimationSampling(...)` accepts the same
+configuration for a bounded trial, or `null` to restore ordinary cadence. Invalid
+inputs fail before changing the active policy. Algorithm tests set their own
+policies explicitly; they do not assert that today's tuning values are invariants.
+
+The interval is a **minimum time between samples**, not an exact update frequency.
+Updates happen at render boundaries, so a 1/30-second interval can yield fewer
+than 30 samples/second when frame timestamps land just below the threshold.
+There is no interpolation or deadline accumulator. A held pose can persist for
+the interval plus a render gap. Roots can also become due together; this trial
+does not stagger their work. Fewer samples do not establish smoother frame pacing
+or improved tail latency. Existing first-visible feedback latency and
+ordinary offscreen sampling remain relevant; this does not make newly entering
+objects sample before the renderer first selects them.
+
+Near selected roots resume at full cadence on the next selection decision using
+current camera/entity placement. Disabling the policy restores ordinary cadence
+on the next decision. Threshold crossing does not alter root movement or resource
+ownership. Smoother transitions, effects sampled separately from poses, sparse
+full-rate part consumers and screen-size policy are possible later work, not
+features claimed by this implementation.
+
+### Live and deterministic count evidence
+
+The accepted live trial uses the real client and saved view, enables the above
+policy, then restores the configured default. Each phase contains 16 actual
+runtime renders. No movement/camera input or visual acceptance is performed.
+The final client reports no page/console warnings or errors and disconnects cleanly.
+
+| Live window | Requested visual samples | Parts in those samples | Selected-root omissions |
+| --- | ---: | ---: | ---: |
+| Ordinary | 2,329 | 33,900 | 0 |
+| Trial | 1,504 | 15,948 | 825 |
+| Restored | 2,054 | 32,584 | 0 |
+
+These are observed sample counts, not timings or all presentation work. Offscreen
+batches fall in different phases of the windows, so do not derive a general total
+saving from the before/after ratio. The final trial diagnostics report 94 selected
+active roots, 75 omitted selected roots in that decision, and maximum selected
+pose age about 0.0333 seconds. Ordinary/restored selected pose age is zero. No live
+FPS improvement is established.
+
+To remove focus/desktop render-rate dependence from the work-count comparison,
+the probe also captures one active/selected population and replays it through two
+instances of the **production scheduler**, using timestamps from 0 through 2
+seconds at 120 Hz (241 decisions). This does not advance live clocks or render
+synthetic images. It holds distance, selection and population fixed; it does not
+predict gameplay with moving entities or different visibility.
+
+Captured population: 369 active roots, comprising 75 selected distant roots with
+1,632 parts, 19 selected exempt/near roots with 240 parts, and 275 ordinary
+offscreen roots with 1,316 parts.
+
+| Fixed-population scheduler count | Ordinary | Trial |
+| --- | ---: | ---: |
+| Decisions | 241 | 241 |
+| Requested samples | 28,429 | 14,929 |
+| Parts in requested samples | 478,788 | 185,028 |
+| Distant selected-root samples | 18,075 | 4,575 |
+| Exempt/near selected-root samples | 4,579 | 4,579 |
+| Ordinary offscreen samples | 5,775 | 5,775 |
+
+This removes **293,760 sampled-part updates, about 61.4%**, in that fixed scenario.
+Distant selected-root samples fall about 74.7%; the initial/end decisions are
+included. Counts for near/exempt and ordinary offscreen populations match. This
+is the supported work reduction. Rendering, semantic advancement, effects/particle
+simulation and other publication paths remain; it is not a 61% CPU saving or FPS
+claim. No new CPU/GC/tail-latency budget is established.
+
+### Validation and review
+
+All **4,013 TypeScript tests** pass across 421 files. Coverage includes visual
+interval changes, immediate restoration, clock regression, current camera and
+entity approach, player/selection/hover exemptions, protected offscreen parent and
+held child, current ancestry after reparenting, invalid policy rejection and
+caller mutation of policy inputs. A paired real-animation test advances both
+clocks at identical times, omits visual samples in one run, and verifies identical
+nonempty hook dispatch sequences and semantic step counts. This verifies clock
+and event dispatch preservation, not identical pose-dependent event transforms.
+
+`npm run check` reports zero Svelte errors/warnings and passes TypeScript checks;
+`npm run lint:ts`, focused formatting and `git diff --check` pass. The canonical
+real-GPU `entity-selection` fixture passes. Live policy enable/restore completes
+without page errors. Default-disabled behavior remains in place for user review.
+No screenshot/visual acceptance check was performed.
+
+Review boundary: tuning input → runtime policy → existing scheduler → animation
+sampling/publication, plus scene ancestry → protected consumers. The design uses
+one existing timestamp map and a cold policy object. Readability is preferred over
+another retained visibility graph or per-entity quality registry. Remaining
+limitations are explicit: held visual/effect/part frames, root-distance threshold,
+render-grid snapping and lack of visual acceptance. Do not enable the tuning by
+default based only on operation counts.
+
+Evidence is retained in
+`docs/plans/evidence/h3d-distant-animation-cadence-2026-10-29/`: strict-exclusion
+censuses, final live/fixed-rate scheduler report, isolated diagnostic sources,
+production/test snapshots, checks and GPU log, and SHA-256 manifests. Configured
+credentials are checked against raw artifacts and archive members. All diagnostic
+launchers exit; no diagnostic hook, staging or commit is introduced.
+
+
+## Enabled-cadence cost refresh — 2026-10-29
+
+Status: refresh complete against current source and the user's retained setting:
+`distantSampling: { minimumDistance: 64, sampleIntervalSeconds: 1 / 30 }`. No
+application code or tuning was changed during this refresh. The earlier initial
+null-policy evidence remains historical; this section is the current cost map.
+
+### Capture controls and accounting
+
+Same saved login view, no movement/camera input, 1717 × 1071 drawing buffer,
+player `0xc6a9ffff`, camera `0xc6a8ffff`. Both accepted foreground-policy captures
+use `dev:client`, opt-in renderer CPU/GPU profiling and V8 sampling at 100 µs.
+The instrumentation and concurrent desktop caveats apply to every timing here.
+
+The first ordinary capture (A) executes only 96 rendered frames in 10.052 seconds.
+Inspection proves the app's presentation loop uses a 100 ms minimum interval when
+`document.hasFocus()` is false. At roughly 10 renders/second, both the 1/30-second
+distant interval and ordinary offscreen interval are due each render: about 369
+roots / 3,201 parts are sampled per rendered frame. This is a background workload,
+not evidence that the new cadence policy fails or a useful foreground cost map.
+The minimap also has its own rAF loop, so normalizing its cost by those few main
+frames can be misleading. Capture A is retained as a control, not pooled below.
+
+For B/C the probe temporarily overrides only the page-local `document.hasFocus`
+input, following the existing preview-cadence harness technique. It does not focus
+the OS window or move the camera. The descriptor is restored at window end.
+B originally reports unfocused, C focused; both pages remain visible. This selects
+the foreground scheduling policy without requiring the user to stop using the
+computer. It does not remove OS/browser contention or promise a particular rate.
+
+B covers **1,219 frames / 10.409 s**; C **1,370 frames / 10.095 s**. Each has equal
+main callback, renderer-profile and aggregate-runtime sample counts. A temporary
+wrapper collects each completed runtime profiler sample, so the runtime numbers
+below use the **whole same window**, not its ordinary trailing 60-sample mean.
+Wrappers also count dynamic sampling, presentation reads and pose-page payloads;
+they do not compare or cache data. Their small overhead is present in these
+profiled observations. V8 starts/stops just outside the snapshot boundary, so its
+per-frame attribution is sampled evidence rather than exact phase accounting.
+
+### Current CPU breakdown
+
+| Whole-window quantity, ms/rendered frame | B | C |
+| --- | ---: | ---: |
+| Main gameplay callback | 6.718 | 5.878 |
+| Runtime total, inside that callback | 6.269 | 5.480 |
+| Renderer CPU total, inside runtime render | 4.723 | 4.199 |
+| Callback work outside runtime | 0.449 | 0.398 |
+
+These are nested spans, not additive line items. In particular, renderer and
+runtime render include the same draw work.
+
+| Runtime phase, ms/rendered frame | B | C |
+| --- | ---: | ---: |
+| Script/effect advance | 0.191 | 0.152 |
+| Particle/audio advance | 0.246 | 0.221 |
+| Animation semantic advance and sample selection | 0.205 | 0.202 |
+| Visual sampling and presentation publication | 0.666 | 0.507 |
+| Particle range publication | 0.134 | 0.120 |
+| Frame-input assembly and renderer call | 4.766 | 4.236 |
+| Frame completion | 0.059 | 0.040 |
+
+The sampling/publication phase includes `AnimationSystem.sample` as well as
+`DynamicEntitySystem.publishPresentation`. It must not be interpreted as entity
+publication alone. Script/effect and particle/audio phase names reflect the code
+between existing marks. Runtime total differs from the phase sum by less than
+0.002 ms/frame in both captures.
+
+| Renderer phase, ms/rendered frame | B | C |
+| --- | ---: | ---: |
+| Contribution preparation | 1.378 | 1.180 |
+| Opaque submission | 0.791 | 0.796 |
+| Outdoor shadow maps | 0.552 | 0.480 |
+| Other renderer work | 0.543 | 0.464 |
+| Particle submission | 0.322 | 0.298 |
+| Main scene query | 0.298 | 0.256 |
+| Transparent ordering | 0.274 | 0.235 |
+| Terrain submission | 0.157 | 0.151 |
+| Blended submission | 0.107 | 0.096 |
+| Instance upload | 0.089 | 0.074 |
+| Setup | 0.063 | 0.052 |
+| Instance-run preparation | 0.059 | 0.052 |
+| Portal composition CPU | 0.058 | 0.044 |
+| Portal preparation | 0.017 | 0.013 |
+| View preparation | 0.008 | 0.006 |
+| Finalization | 0.006 | 0.004 |
+| **Renderer total** | **4.723** | **4.199** |
+
+Named renderer phases plus `otherMs` account for the renderer total. The other
+bucket is still real, but it is not all mysterious work: dynamic pose packing/
+upload occurs outside the named upload span (that span measures the separate
+instance buffer). V8 attributes about **0.22–0.26 ms inclusive** to pose-page
+upload, within this existing renderer budget. Do not add that sampled attribution
+to the table as another disjoint phase or call all of `otherMs` pose upload.
+
+Cumulative renderer means also drift within B: approximately 4.3 ms near 947
+frames, rising to 4.72 by the end. C ends near 4.20. Their ranges describe observed
+variation, not a controlled confidence interval or a regression/improvement.
+
+### Work counts and scene context
+
+| Same-window work per rendered frame | B | C |
+| --- | ---: | ---: |
+| Requested animated-root samples | 58.07 | 54.29 |
+| Parts in those samples | 722.52 | 677.45 |
+| Dynamic presentation reads | 170.06 | 170.06 |
+| Parts composed by those reads | 1,960.06 | 1,960.06 |
+| Pose-page upload calls | 1.00 | 1.00 |
+| Roots packed into pose pages | 130.56 | 130.56 |
+| Pose rows packed/uploaded | 1,920.06 | 1,920.07 |
+| Pose payload bytes | 184,326 | 184,326 |
+
+Pose payload is about **180 KiB/rendered frame**. The source confirms each
+`getVisiblePresentation` call composes one source-to-landblock matrix per returned
+part, and pose upload repacks/transfers the populated prefix every frame. The
+existing per-frame renderer cache already deduplicates publication across passes.
+These counts do **not** measure how many rows or matrices have identical values
+across frames, nor whether root placement or texture scroll changed.
+
+Cadence reduces sample-side work while substantial render-side work remains.
+That supports examining it, but the pose upload's measured attribution is much
+smaller than the whole contribution bucket. A held pose does not make a complete
+row immutable: rows also carry color/opacity and time-derived UV scroll, and page
+addresses are packed from current selected roots. Safe cross-frame reuse needs
+those inputs and authoritative placement accounted for; it is not already proved
+by the cadence setting.
+
+At the final snapshots both windows report 478 visible scene entries, 41 static
+nodes / 74 layers, 169 selected dynamic entities and 3,951 dynamic source ranges.
+Static triangles are 340,428 in both. Object draws differ (668 / 691), as do dynamic
+draws (333 / 339) and particle batches (257 / 262). The population and material
+state are therefore not byte-identical across captures. Pose work remains nearly
+constant, but raw draw totals should not be treated as a matched on/off experiment.
+
+### V8 attribution and GPU context
+
+V8 corroborates contribution preparation as distributed work. Selected self
+attributions under `#resolveSceneContributions`, in ms/main-frame equivalent:
+
+| Sampled function self time | B | C |
+| --- | ---: | ---: |
+| Contribution loop itself | 0.208 | 0.178 |
+| Dynamic batched span preparation | 0.158 | 0.146 |
+| Footprint classification | 0.131 | 0.114 |
+
+B also attributes about 0.110 to matrix multiplication and 0.081 to the visible
+presentation function's own work within that contribution subtree. Inclusive
+whole-function visible publication is about **0.26–0.30 ms**, already contained
+in renderer preparation and shadow consumers. Static opaque submission is about
+**0.51–0.53 ms inclusive**, dynamic opaque about **0.29–0.30**. These sampled
+figures corroborate a cost distribution; they do not prove a cache would remove
+the entire function or that its inputs are unchanged.
+
+The separate minimap rAF loop consumes approximately **0.52–0.57 ms per main-frame
+equivalent** in V8 attribution; it is outside the main gameplay callback. This is
+window-normalized work, not a measured duration per minimap draw. Sampled GC time
+also varies widely (about 0.37 / 0.08 ms per main-frame equivalent); it is not a
+GC pause, allocation-byte estimate or frame-stability comparison.
+
+GPU phase sum is about **1.39 / 1.32 ms**. Portal composition is about 0.433,
+opaque about 0.344–0.345, terrain about 0.255–0.262 and SAO about 0.136–0.137.
+CPU and GPU overlap; these are not added to CPU to predict FPS, and they exclude
+parts of browser/compositor work. This remains predominantly a CPU preparation/
+submission investigation for this scene, rather than evidence for reducing pixel
+resolution or shader fidelity next.
+
+### Decision and validation
+
+The current priority is still renderer contribution preparation and physical
+submission. Visual sampling/publication is now a smaller bucket in this map.
+The earlier broad suggestion to cache/reuse held poses should not be treated as
+an automatic major optimization: some reuse is already present, the unmeasured
+cross-frame portion has correctness inputs beyond pose, and pose-page upload is
+only about 0.22–0.26 ms inclusive here. No implementation candidate is promoted
+solely from these profiles.
+
+No application code, tests or quality settings changed during the refresh, so no
+app test suite was rerun. All three live captures have no page/console warnings
+or errors and disconnect cleanly. Temporary wrappers and the page focus override
+are restored; diagnostic launchers exit. No visual acceptance check or screenshot
+capture was performed. The user's enabled cadence setting is preserved.
+
+Evidence is retained in
+`docs/plans/evidence/h3d-enabled-cadence-cost-refresh-2026-10-29/`: background control,
+two foreground reports and V8 profiles, derived analysis, exact diagnostic sources,
+relevant production snapshots and checksums. Configured credentials are checked
+against raw files and decompressed archive members. No staging or commits.
+
+
+## Periodic FPS dips and GC timing — 2026-10-29
+
+Status: GC is a confirmed contributor to observed dips. Two live timeline
+captures correlate main-thread collections with long inter-frame gaps and actual
+HUD readings. This does not establish that every fluctuation, or a literal
+recurring two-second cycle, is GC. No app code or tuning changed in this follow-up.
+
+### What the display measures
+
+`ClientFpsCounter.svelte` reads the existing sampler every 250 ms and displays
+`capped / uncapped`: delivered cadence followed by estimated uncapped capacity.
+`frame-rate-sampler.ts` applies an elapsed-time-weighted exponential average with
+a 1,000 ms time constant. The estimate also charges callback-start delay beyond
+the minimum of the last 30 rAF intervals, so main-thread work outside the gameplay
+callback can lower it. A brief interruption can therefore produce a dip that
+recovers over subsequent seconds rather than appearing as one instantaneous bad
+frame. This smoothing is not itself evidence of periodic GC.
+
+### Measurement and controls
+
+Same saved view, user's enabled 64-unit / 1/30-second distant sampling policy,
+no movement/camera input. The diagnostic Vite transform records the sampler's
+already-created per-frame samples and its actual HUD reads. It does not poll the
+full performance snapshot every frame, force garbage collection or change the
+sampler algorithm. Retaining these small records adds some diagnostic overhead.
+
+A 20-second Chrome trace and native V8 profile (1 ms sampling) run together.
+`performance.mark` events align performance.now samples to the trace clock. GC
+analysis filters to the marked page's renderer **main thread**, excluding worker
+and concurrent background-thread collection work. Nested GC stages are merged
+before totaling their wall intervals, rather than counted repeatedly.
+
+A uses detailed GC/task categories. B repeats with lighter categories
+(`devtools.timeline,v8,blink.user_timing`) to reduce trace overhead. B also lets
+the foreground-policy sampler settle for 10 seconds before measuring; A's earlier
+one-second foreground warm-up leaves a startup FPS-average recovery in its first
+several seconds, excluded from the steady-state interpretation. Both temporarily
+override only page-local focus input, restore it and disconnect cleanly; they do
+not take OS window focus. Renderer phase/GPU profiling stays disabled.
+
+Concurrent desktop activity and trace/profiler overhead still apply. Collection
+wall duration is an actual main-thread unavailability interval in these captures,
+not an isolated measurement of V8 compute time. No screenshot or product visual
+acceptance check was performed.
+
+### Results
+
+| Twenty-second capture | A: detailed trace | B: lighter trace |
+| --- | ---: | ---: |
+| Recorded main frames | 2,698 | 2,822 |
+| Recorded HUD reads | 81 | 81 |
+| Main-thread minor collections | 166 | 180 |
+| Main-thread major collections | 1 | 1 |
+| Median minor/major collection wall duration | 2.918 ms | 2.428 ms |
+| 95th percentile collection wall duration | 3.868 ms | 3.557 ms |
+| Longest collection | 12.916 ms | 10.472 ms |
+| Median inter-start frame interval | 7.10 ms | 7.00 ms |
+| 99th percentile inter-start frame interval | 12.30 ms | 11.00 ms |
+
+There are roughly 8–9 minor collections/second, not one collection every two
+seconds. Each capture includes a larger major cleanup and nearby incremental
+marking activity. A's largest minor pause is also 10.209 ms wall time despite only
+1.149 ms recorded main-thread CPU time, illustrating the importance of parallel
+work/waiting and desktop scheduling when interpreting pause durations.
+
+In A, the major collection begins at 10.378 seconds and occupies 12.916 ms of
+main-thread wall time. A nearby main-frame interval reaches 28.9 ms. Actual HUD
+estimated capacity falls from about **142 at 10.29 s to 116 at 10.55 s** and then
+recovers. The delivered cadence display falls too. A separate no-GC startup gap
+near 0.03 seconds is not attributed to GC or treated as steady-state gameplay.
+
+In B, the major collection begins at 12.155 seconds and occupies **10.472 ms**
+(8.692 ms recorded main-thread CPU). The frame interval ending at 12.167 seconds
+is **19.7 ms**, with about **10.8 ms overlapping main-thread GC**, most of it
+outside the previous gameplay callback. Another 16.7 ms interval just beforehand
+contains about 10.6 ms of incremental-marking work outside that callback. This is
+why callback work alone does not account for the displayed hitch.
+
+B's estimated-capacity HUD read moves from **158.4 at 11.809 s to 132.4 at
+12.310 s**; delivered cadence moves from **137.3 to 123.1**. Subsequent estimated
+reads recover through approximately 140.1 and 146.3. Thus this is not solely an
+artifact of the uncapped estimate: an actual scheduling interruption accompanies
+the smoothed display dip. Other slower frames have no GC overlap, so the evidence
+does not attribute every dip to collection.
+
+The major cleanup reduces reported JS heap from about **939 MB to 251 MB** in A
+and **969 MB to 251 MB** in B (decimal). These are trace heap counters, not retained
+heap snapshots or allocation-site profiles. They show a large amount reclaimed;
+they do not prove a leak or identify which code allocated it. Including main-thread
+incremental stages, merged GC wall spans total roughly 534 / 481 ms across the
+two windows. Average cost obscures the larger individual interruptions.
+
+A timeline chart of B is retained as `fps-gc-timeline.svg` in the evidence directory:
+actual delivered/estimated HUD values above minor and major collection durations.
+It is diagnostic plotting, not a visual acceptance check of the client.
+
+### Decision
+
+The periodic-dip concern is a justified **frame-consistency / allocation** follow-up
+even though the average-throughput optimization pass reached diminishing returns.
+The next useful investigation is allocation lifetimes and promotion/old-generation
+churn behind these collections, with pause/frame-gap correlation as the success
+criterion. Do not select an allocation culprit solely from the last CPU self-time
+table, claim all pauses occur on a two-second timer, or change the FPS display to
+hide the interruption. No allocation-site finding or GC fix is claimed here.
+
+Evidence is retained in
+`docs/plans/evidence/h3d-fps-dips-gc-2026-10-29/`: frame/HUD samples, aligned traces,
+V8 profiles, derived frame/GC analysis, chart and exact diagnostic sources, relevant
+production snapshots and checksums. Configured credentials are checked against
+raw/decompressed artifacts. Both live probes complete without page/console
+warnings/errors, restore the page focus input, and exit. No application change,
+app test rerun, staging or commit.
+
+
+## Code-quality review before allocation follow-up — 2026-10-29
+
+Verdict: **ready within the reviewed scope** after correcting stale cadence contract
+comments. Baseline: `52121c786d8f299b66beb5a791bcffcacfd37012`; review covers the
+uncommitted distant-sampling feature, its tests and the accumulated investigation
+notes. Earlier committed numeric, range, portal and publication optimizations are
+context, not a new whole-renderer audit. Unrelated ACE/ACViewer submodule contents
+and ignored diagnostic archives are excluded from the commit.
+
+Seams inspected: frontend tuning/input validation → runtime distance/protection
+policy → scheduler interval selection → animation sampling/entity publication;
+renderer feedback → next-frame cadence and diagnostics; scene ancestry → player,
+selection/hover protection including offscreen parents. Installation, retirement,
+clock regression, policy replacement, current placement, reparenting and invalid
+inputs are covered by source review and focused behavior tests. No shared Rust,
+renderer ownership or asynchronous GPU contract changes are introduced.
+
+Consolidation/promotion decisions: keep one scheduler and existing timestamp map;
+reuse the scene's existing ancestry walk for cycle checks and protected models;
+keep view-distance and inspected-model policy in the browser runtime. Do not add
+a relationship cache, a second visual scheduler or a retained GPU-visibility
+framework. The runtime quality setter follows the existing offscreen-cadence
+control pattern, validates/owns input atomically, and is not a profiling hook.
+Constructor validation and live assignment share one helper. Generic scheduler
+callback validation remains justified by its independently supplied policy input.
+
+Review fix: selection counts and interval comments still described the former
+binary visible/offscreen scheduler, including an incorrect claim that selected
+roots always sample at render cadence. Comments now describe runtime overrides,
+protected offscreen sampling and ordinary feedback cadence. The enabled tuning's
+comment describes its behavior rather than an unfinished experimental status.
+No demonstrated architecture or lifecycle blocker remains in this scope.
+
+Accepted trade-offs remain explicit: root-distance threshold, held visual/effect
+and attachment/particle frames, render-grid snapping and potentially aligned
+sample batches. This review does not establish visual equivalence, smoother frame
+pacing, a live FPS gain, or that every GC dip is explained. The user retained the
+enabled 64-unit / 1/30-second setting.
+
+Pre-commit validation with that enabled setting: all **4,013 tests / 421 files**,
+`npm run check` (zero Svelte errors/warnings plus TypeScript checks),
+`npm run lint:ts`, focused Prettier check and the canonical real-GPU entity-selection
+fixture pass. `git diff --check` passes. No agent visual acceptance performed.
+The next task begins after this checkpoint commit: measure allocation sites and
+object lifetimes behind the correlated GC pauses before choosing a fix.

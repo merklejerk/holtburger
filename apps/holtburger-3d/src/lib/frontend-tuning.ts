@@ -19,6 +19,8 @@ export const SHARED_FRONTEND_TUNING = {
 		chestLocomotionWeight: 0.5,
 		/** Visual sampling cadence for animated roots omitted by the previous rendered frame. */
 		offscreenSampleIntervalSeconds: 0.1,
+		/** Distant visual cadence; includes held poses, shadows and particle part anchors. */
+		distantSampling: { minimumDistance: 64, sampleIntervalSeconds: 1 / 30 },
 	},
 	audio: {
 		/** Cadence for listener-relative ambient weighting and live voice placement updates. */

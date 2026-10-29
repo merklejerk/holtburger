@@ -332,11 +332,19 @@ interface FrontendRenderingTuning {
 	};
 }
 
+/** Optional distance limit for selected visual poses; logical clocks remain unchanged. */
+export interface DistantAnimationSamplingPolicy {
+	/** Root-to-camera distance at which the visual interval applies, in world units. */
+	readonly minimumDistance: number;
+	/** Minimum time between visual samples; held parts, shadows and part anchors share the pose. */
+	readonly sampleIntervalSeconds: number;
+}
+
 /** Exhaustive contract for values shared by the browser frontend compositions. */
 export interface FrontendTuning {
 	/** Finite positive multiplier for the authored minimum distance between particle births. */
 	readonly particleDistanceSpacingMultiplier: number;
-	/** Sampling policy for animated roots omitted by the previous frame. */
+	/** Visual sampling policy for selected and offscreen animated roots. */
 	readonly animationPresentation: {
 		/** Enable humanoid player gesture and locomotion pose composition. */
 		readonly splitPlayerBody: boolean;
@@ -344,6 +352,8 @@ export interface FrontendTuning {
 		readonly chestLocomotionWeight: number;
 		/** Maximum interval between offscreen animation samples. */
 		readonly offscreenSampleIntervalSeconds: number;
+		/** Null preserves full selected-pose cadence; enable only after visual acceptance. */
+		readonly distantSampling: DistantAnimationSamplingPolicy | null;
 	};
 	/** Shared authored-audio behavior. */
 	readonly audio: FrontendAudioTuning;

@@ -7,17 +7,17 @@ const TIME_EPSILON_SECONDS = 1e-9;
 
 /** One frame's cadence decision, computed once for animation sampling and diagnostics. */
 export interface AnimationPresentationSelection {
-	/** Offscreen roots whose configured interval elapsed during this frame. */
+	/** Offscreen roots selected by ordinary timing or a runtime protection override. */
 	readonly offscreenNodeCount: number;
 	/** Unique active roots selected for presentation sampling. */
 	readonly selectedNodeIds: readonly SceneNodeId[];
-	/** Previously visible roots selected at render cadence. */
+	/** Previously visible roots sampled after applying the runtime cadence policy. */
 	readonly visibleNodeCount: number;
 }
 
 /** Runtime cadence facts with distinct consumers in the harness and Explorer diagnostics. */
 export interface AnimationPresentationSchedulerDiagnostics {
-	/** Current offscreen sampling interval; zero means full cadence. */
+	/** Ordinary offscreen interval; runtime protection may request full cadence. */
 	readonly offscreenSampleIntervalSeconds: number;
 	/** Offscreen roots selected by the latest cadence decision. */
 	readonly lastOffscreenSampleCount: number;
@@ -35,8 +35,22 @@ export interface AnimationPresentationSchedulerDiagnostics {
 	readonly trackedPlaybackCount: number;
 }
 
-/** Owns binary previous-frame-visible versus timed-offscreen presentation cadence. */
+/** Runtime may override ordinary selected/offscreen cadence without changing playback clocks. */
+type AnimationSampleIntervalPolicy = (
+	nodeId: SceneNodeId,
+	previouslySelected: boolean,
+	ordinaryIntervalSeconds: number,
+) => number;
+
+/** Selects visual samples after semantics advance, independently of playback clocks. */
 export class AnimationPresentationScheduler {
+	/** Frontend overrides can protect a pose dependency even when the model itself is offscreen. */
+	readonly #sampleIntervalPolicy: AnimationSampleIntervalPolicy;
+
+	constructor(sampleIntervalPolicy: AnimationSampleIntervalPolicy) {
+		this.#sampleIntervalPolicy = sampleIntervalPolicy;
+	}
+
 	readonly #lastSampleTimeSeconds = new Map<SceneNodeId, number>();
 	#activeNodeIds = new Set<SceneNodeId>();
 	#offscreenSampleIntervalSeconds: number =
@@ -68,7 +82,7 @@ export class AnimationPresentationScheduler {
 		};
 	}
 
-	/** Select presentations after semantics advance, using only the prior frame's feedback. */
+	/** Select after semantics advance; prior feedback supplies ordinary visibility cadence. */
 	select(
 		frame: AdvancedAnimationFrame,
 		timeSeconds: number,
@@ -90,14 +104,23 @@ export class AnimationPresentationScheduler {
 		for (const nodeId of frame.activeNodeIds) {
 			const visible = this.#previousVisibleNodeIds.has(nodeId);
 			const lastSampleTime = this.#lastSampleTimeSeconds.get(nodeId);
-			const offscreenDue =
-				!visible &&
-				(this.#offscreenSampleIntervalSeconds === 0 ||
-					lastSampleTime === undefined ||
-					timeSeconds < lastSampleTime ||
-					timeSeconds - lastSampleTime + TIME_EPSILON_SECONDS >=
-						this.#offscreenSampleIntervalSeconds);
-			if (!visible && !offscreenDue) continue;
+			const intervalSeconds = this.#sampleIntervalPolicy(
+				nodeId,
+				visible,
+				visible ? 0 : this.#offscreenSampleIntervalSeconds,
+			);
+			if (!Number.isFinite(intervalSeconds) || intervalSeconds < 0) {
+				throw new Error(
+					"Visual animation sample interval must be finite and non-negative.",
+				);
+			}
+			if (
+				intervalSeconds > 0 &&
+				lastSampleTime !== undefined &&
+				timeSeconds >= lastSampleTime &&
+				timeSeconds - lastSampleTime + TIME_EPSILON_SECONDS < intervalSeconds
+			)
+				continue;
 			selectedNodeIds.push(nodeId);
 			this.#lastSampleTimeSeconds.set(nodeId, timeSeconds);
 			if (visible) visibleNodeCount += 1;

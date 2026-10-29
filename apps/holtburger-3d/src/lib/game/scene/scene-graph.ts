@@ -301,7 +301,7 @@ export class SceneGraph {
 			throw new Error(`Scene node ${nodeId} is already attached.`);
 		}
 		this.#requireNode(parentNodeId);
-		if (this.#isSelfOrDescendant(parentNodeId, nodeId)) {
+		if (this.isSelfOrDescendant(parentNodeId, nodeId)) {
 			throw new Error(
 				`Cannot attach scene node ${nodeId} to its own descendant ${parentNodeId}.`,
 			);
@@ -727,8 +727,8 @@ export class SceneGraph {
 		return this.#envCellScopes.get(envCellId)?.seenOutside ?? null;
 	}
 
-	/** Guard the acyclic invariant required by parent-first subtree resolution. */
-	#isSelfOrDescendant(
+	/** Test live ancestry, including self; also guards attachment cycles. */
+	isSelfOrDescendant(
 		candidateId: SceneNodeId,
 		ancestorId: SceneNodeId,
 	): boolean {

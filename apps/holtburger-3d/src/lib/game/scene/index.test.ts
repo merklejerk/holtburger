@@ -43,6 +43,25 @@ const TOPOLOGY_FRUSTUM = {
 } as const satisfies Frustum;
 
 describe("SceneGraph", () => {
+	it("tracks self and both sides of live ancestry across reparenting", () => {
+		const scene = new SceneGraph();
+		const first = scene.createNode(rootInput);
+		const second = scene.createNode(rootInput);
+		const child = scene.createNode({ ...boundedChildFields, parentId: first });
+		const grandchild = scene.createNode({
+			...boundedChildFields,
+			parentId: child,
+		});
+		expect(scene.isSelfOrDescendant(first, first)).toBe(true);
+		expect(scene.isSelfOrDescendant(grandchild, first)).toBe(true);
+		expect(scene.isSelfOrDescendant(first, grandchild)).toBe(false);
+		expect(scene.isSelfOrDescendant(grandchild, second)).toBe(false);
+		scene.detachToPlacement(child, rootPlacement);
+		scene.attachToPart(child, second, Mat4.identity());
+		expect(scene.isSelfOrDescendant(grandchild, first)).toBe(false);
+		expect(scene.isSelfOrDescendant(grandchild, second)).toBe(true);
+	});
+
 	it("returns owned root placements that follow updates and exclude child or retired nodes", () => {
 		const scene = new SceneGraph();
 		const root = scene.createNode(rootInput);

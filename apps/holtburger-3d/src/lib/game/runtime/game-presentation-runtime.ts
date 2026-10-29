@@ -1,3 +1,4 @@
+import type { DistantAnimationSamplingPolicy } from "../../frontend-tuning-contract";
 import type { RuntimeLight } from "../environment/runtime-lights";
 import { completePresentationOperations } from "./presentation-teardown";
 import { placementKey } from "./attachment-contract";
@@ -791,8 +792,17 @@ export class GamePresentationRuntime {
 	readonly #envCells: EnvCellSystem<OwnerId, ResourceOwnerId>;
 	/** Rigid-part pose updates sequenced before visibility and drawing. */
 	readonly #animation: AnimationSystem<ResourceOwnerId>;
-	/** Binary previous-frame-visible versus timed-offscreen presentation policy. */
-	readonly #animationPresentation = new AnimationPresentationScheduler();
+	/** Optional selected-pose quality policy; offscreen scheduling remains independent. */
+	#distantAnimationSampling = copyDistantAnimationSamplingPolicy(
+		SHARED_FRONTEND_TUNING.animationPresentation.distantSampling,
+	);
+	/** Reused scene-space origin for synchronous distance decisions. */
+	readonly #animationDistanceOrigin = sceneVec3(Vec3.zero());
+	/** One visual scheduler; all animation semantics advance before it selects samples. */
+	readonly #animationPresentation = new AnimationPresentationScheduler(
+		(nodeId, selected, ordinaryInterval) =>
+			this.#animationSampleIntervalSeconds(nodeId, selected, ordinaryInterval),
+	);
 	/** Persistent visual-effect state advanced only by the authored behavior clock. */
 	readonly #effects: EffectSystem;
 	/** Routes animation plus browser-scale static and sky script consequences. */
@@ -3637,6 +3647,61 @@ export class GamePresentationRuntime {
 		);
 	}
 
+	/**
+	 * Opt into held distant visual poses, including shadows, attachments and particle part anchors.
+	 * Null restores selected roots to render cadence; world movement and event clocks are unaffected.
+	 */
+	setDistantAnimationSampling(
+		policy: DistantAnimationSamplingPolicy | null,
+	): void {
+		this.#distantAnimationSampling = copyDistantAnimationSamplingPolicy(policy);
+	}
+
+	/** Protect inspected models, their descendants and the ancestry positioning held objects. */
+	#protectsAnimationPose(nodeId: SceneNodeId, guid: number | null): boolean {
+		if (guid === null) return false;
+		const installed = this.#spawnedPresentations.get(guid);
+		return (
+			installed !== undefined &&
+			(this.#scene.isSelfOrDescendant(installed.nodeId, nodeId) ||
+				this.#scene.isSelfOrDescendant(nodeId, installed.nodeId))
+		);
+	}
+
+	/** Read current placement rather than renderer feedback distance, so approaching roots resume now. */
+	#animationSampleIntervalSeconds(
+		nodeId: SceneNodeId,
+		selected: boolean,
+		ordinaryIntervalSeconds: number,
+	): number {
+		const policy = this.#distantAnimationSampling;
+		if (policy === null) return ordinaryIntervalSeconds;
+		if (
+			this.#protectsAnimationPose(nodeId, this.#viewerEntityGuid) ||
+			this.#protectsAnimationPose(nodeId, this.#selectedEntityGuid) ||
+			this.#protectsAnimationPose(nodeId, this.#hoveredEntityGuid)
+		)
+			return 0;
+		if (!selected) return ordinaryIntervalSeconds;
+		const resolved = this.#scene.readResolvedState(nodeId);
+		if (resolved === undefined)
+			throw new Error(`Animated scene node ${nodeId} does not exist.`);
+		const { placement } = resolved;
+		const origin = createLandblockWorldOrigin(
+			placement.landblockId,
+			this.#animationDistanceOrigin,
+		);
+		const matrix = placement.localToLandblock;
+		const camera = this.#camera.placement.position;
+		const x = origin.x + matrix.m41 - camera.x;
+		const y = origin.y + matrix.m42 - camera.y;
+		const z = origin.z + matrix.m43 - camera.z;
+		return x * x + y * y + z * z >=
+			policy.minimumDistance * policy.minimumDistance
+			? policy.sampleIntervalSeconds
+			: 0;
+	}
+
 	/** Return one consistent read of the active renderer's optional diagnostics capability. */
 	getRendererFrameDiagnostics(): RendererFrameDiagnosticsSnapshot | null {
 		return this.#renderer?.frameDiagnostics?.snapshot() ?? null;
@@ -5163,4 +5228,28 @@ function createLandblockPlacement(
 function releaseCueAssets(assets: DynamicCueAssets): void {
 	for (const handle of assets.emitterHandles) handle.release();
 	assets.closure.release();
+}
+
+/** Validate and own cold policy input once, before frame-time consumers read it. */
+function copyDistantAnimationSamplingPolicy(
+	policy: DistantAnimationSamplingPolicy | null,
+): DistantAnimationSamplingPolicy | null {
+	if (policy === null) {
+		return null;
+	}
+	if (!Number.isFinite(policy.minimumDistance) || policy.minimumDistance < 0) {
+		throw new Error(
+			"Distant animation distance must be finite and non-negative.",
+		);
+	}
+	if (
+		!Number.isFinite(policy.sampleIntervalSeconds) ||
+		policy.sampleIntervalSeconds <= 0
+	) {
+		throw new Error("Distant animation interval must be finite and positive.");
+	}
+	return {
+		minimumDistance: policy.minimumDistance,
+		sampleIntervalSeconds: policy.sampleIntervalSeconds,
+	};
 }

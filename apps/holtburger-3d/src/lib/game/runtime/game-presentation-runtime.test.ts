@@ -3784,6 +3784,240 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 	});
 });
 
+describe("opt-in distant animation sampling", () => {
+	async function buildCadenceRuntime() {
+		const publication = vi.spyOn(
+			DynamicEntitySystem.prototype,
+			"publishPresentation",
+		);
+		onTestFinished(() => publication.mockRestore());
+		let selectedNodeIds: readonly SceneNodeId[] = [];
+		let rendererShowsRoot = true;
+		const runtime = await buildSpawnRuntime(
+			{
+				load: async () => {
+					const visual = spawnedVisual();
+					return {
+						...visual,
+						presentation: {
+							...visual.presentation,
+							holdingLocations: new Map([
+								[
+									"right-hand",
+									{
+										location: "right-hand",
+										partIndex: 0,
+										offsetTransform: Mat4.identity(),
+									},
+								],
+							]),
+						},
+					};
+				},
+			},
+			MOTION_TABLE_ANIMATION_SOURCE,
+			testRenderer({
+				drawFrame: () => {
+					if (selectedNodeIds.length === 0) {
+						const samples = publication.mock.calls.at(-1)?.[0];
+						if (!samples || samples.length !== 1)
+							throw new Error("Cadence fixture requires one animated root.");
+						selectedNodeIds = samples.map((sample) => sample.nodeId);
+					}
+					return {
+						...EMPTY_RENDERER_FRAME_FEEDBACK,
+						selectedDynamicNodeIds: rendererShowsRoot ? selectedNodeIds : [],
+					};
+				},
+			}),
+		);
+		runtime.setDistantAnimationSampling(null);
+		runtime.setOffscreenAnimationSampleIntervalSeconds(1);
+		const entity = motionDrivenEntity(7, {
+			kind: "playing",
+			animationId: Number(IDLE_ANIMATION_ID),
+			lowFrame: 0,
+			highFrame: 0,
+			completion: "loop",
+			framerate: 30,
+		});
+		await runtime.upsertDynamicEntity(entity);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		runtime.render(0);
+		return {
+			runtime,
+			entity,
+			hideRoots: () => {
+				rendererShowsRoot = false;
+			},
+		};
+	}
+
+	it("holds distant poses, follows current placement, and resumes immediately when disabled", async () => {
+		const { runtime } = await buildCadenceRuntime();
+		runtime.setDistantAnimationSampling({
+			minimumDistance: 10,
+			sampleIntervalSeconds: 1,
+		});
+		runtime.render(0.01);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
+				.lastVisibleSampleCount,
+		).toBe(0);
+		const origin = runtime.dynamicEntityOrigin(7);
+		if (origin === null) throw new Error("Cadence entity has no origin.");
+		const world = createLandblockWorldOrigin(origin.landblockId);
+		world.x += origin.landblockOrigin.x;
+		world.y += origin.landblockOrigin.y;
+		world.z += origin.landblockOrigin.z;
+		setTestCamera(runtime, {
+			...SPAWN_TEST_CAMERA,
+			placement: { ...SPAWN_TEST_CAMERA.placement, position: sceneVec3(world) },
+		});
+		runtime.render(0.02);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
+				.lastVisibleSampleCount,
+		).toBe(1);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		runtime.render(0.03);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
+				.lastVisibleSampleCount,
+		).toBe(0);
+		runtime.setDistantAnimationSampling(null);
+		runtime.render(0.04);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
+				.lastVisibleSampleCount,
+		).toBe(1);
+		await runtime.destroy();
+	});
+
+	it("resumes an approaching entity using its current authoritative placement", async () => {
+		const { runtime, entity } = await buildCadenceRuntime();
+		const origin = runtime.dynamicEntityOrigin(7);
+		if (origin === null || entity.placement.kind !== "world")
+			throw new Error("Expected placed cadence entity.");
+		const camera = createLandblockWorldOrigin(origin.landblockId);
+		camera.x += origin.landblockOrigin.x + 20;
+		camera.y += origin.landblockOrigin.y;
+		camera.z += origin.landblockOrigin.z;
+		setTestCamera(runtime, {
+			...SPAWN_TEST_CAMERA,
+			placement: {
+				...SPAWN_TEST_CAMERA.placement,
+				position: sceneVec3(camera),
+			},
+		});
+		runtime.setDistantAnimationSampling({
+			minimumDistance: 10,
+			sampleIntervalSeconds: 1,
+		});
+		runtime.render(0.01);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
+				.lastVisibleSampleCount,
+		).toBe(0);
+		await runtime.upsertDynamicEntity({
+			...entity,
+			placement: {
+				...entity.placement,
+				pose: {
+					...entity.placement.pose,
+					coords: {
+						...entity.placement.pose.coords,
+						x: entity.placement.pose.coords.x + 15,
+					},
+				},
+			},
+		});
+		runtime.render(0.02);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
+				.lastVisibleSampleCount,
+		).toBe(1);
+		await runtime.destroy();
+	});
+
+	it("keeps an animated parent current when its held child is inspected", async () => {
+		const { runtime, hideRoots } = await buildCadenceRuntime();
+		await runtime.upsertDynamicEntity(attachedEntity(8, 1, 7));
+		runtime.setDistantAnimationSampling({
+			minimumDistance: 0,
+			sampleIntervalSeconds: 1,
+		});
+		runtime.setSelectedEntityGuid(8);
+		hideRoots();
+		runtime.render(0.01);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
+				.lastVisibleSampleCount,
+		).toBe(1);
+		runtime.render(0.02);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
+				.lastOffscreenSampleCount,
+		).toBe(2);
+		runtime.setSelectedEntityGuid(null);
+		runtime.render(0.03);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
+				.lastOffscreenSampleCount,
+		).toBe(0);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
+				.lastVisibleSampleCount,
+		).toBe(0);
+		await runtime.destroy();
+	});
+
+	it.each(["viewer", "selected", "hovered"] as const)(
+		"exempts the %s entity from the distance limit",
+		async (protection) => {
+			const { runtime } = await buildCadenceRuntime();
+			runtime.setDistantAnimationSampling({
+				minimumDistance: 0,
+				sampleIntervalSeconds: 1,
+			});
+			if (protection === "viewer") runtime.setViewerEntity(7);
+			else if (protection === "selected") runtime.setSelectedEntityGuid(7);
+			else runtime.setHoveredEntityGuid(7);
+			runtime.render(0.01);
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
+					.lastVisibleSampleCount,
+			).toBe(1);
+			await runtime.destroy();
+		},
+	);
+
+	it("validates policy before replacing the active configuration", async () => {
+		const { runtime } = await buildCadenceRuntime();
+		const policy = { minimumDistance: 0, sampleIntervalSeconds: 1 };
+		runtime.setDistantAnimationSampling(policy);
+		policy.minimumDistance = Infinity;
+		expect(() =>
+			runtime.setDistantAnimationSampling({
+				minimumDistance: -1,
+				sampleIntervalSeconds: 1,
+			}),
+		).toThrow("distance must be finite");
+		expect(() =>
+			runtime.setDistantAnimationSampling({
+				minimumDistance: 0,
+				sampleIntervalSeconds: 0,
+			}),
+		).toThrow("interval must be finite");
+		runtime.render(0.01);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
+				.lastVisibleSampleCount,
+		).toBe(0);
+		await runtime.destroy();
+	});
+});
+
 async function buildSpawnRuntime(
 	setupVisualSource: SetupVisualSource,
 	animationSource: AnimationAssetSource = ANIMATION_SOURCE,

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { contentsFeedback } from "./client-contents-feedback";
 	import type { Snippet } from "svelte";
 	import ItemGridCell from "../app/ItemGridCell.svelte";
 	import ItemGridStrip from "../app/ItemGridStrip.svelte";
@@ -72,6 +73,7 @@
 
 <div
 	class="contents-view"
+	use:contentsFeedback={{ sections, pending }}
 	data-orientation={orientation}
 	data-contents-root={sections[0]?.container.guid}
 >

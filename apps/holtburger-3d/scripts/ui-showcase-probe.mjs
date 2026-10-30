@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { probeItemCellPulse } from "./item-cell-pulse-probe.mjs";
 import { probeLayoutResizing } from "./layout-resize-probe.mjs";
 import { probeUiShowcasePanels } from "./ui-showcase-panels-probe.mjs";
 
@@ -483,6 +484,7 @@ export async function probeUiShowcase(client, evaluate) {
 	);
 	await click("Hide control samples");
 	const layoutResizing = await probeLayoutResizing(client, evaluate);
+	const itemCellPulse = await probeItemCellPulse(client, evaluate);
 	const panels = await probeUiShowcasePanels(client, evaluate);
 	await click("Show control samples");
 	await wait(
@@ -581,6 +583,7 @@ export async function probeUiShowcase(client, evaluate) {
 		dialogAndSharedTabs: true,
 		dropdowns: true,
 		panels,
+		itemCellPulse,
 		baseRestored: true,
 		frameResizeTargets: true,
 		layoutResizing,

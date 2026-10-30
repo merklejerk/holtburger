@@ -231,6 +231,10 @@
 		/* Spell/action bar cells; their measured geometry also determines HUD bounds. */
 		--ui-shortcut-cell-size: 40px;
 		--ui-item-cell-padding: 1px;
+		/* One-shot game interaction and contents-arrival feedback. */
+		--ui-item-pulse-duration: 240ms;
+		--ui-item-pulse-peak-scale: 1.18;
+		--ui-item-pulse-easing: cubic-bezier(0.34, 1.56, 0.64, 1);
 		/* Shared horizontal/vertical cursor clearance for item, loadout, and spell drag previews. */
 		--ui-drag-ghost-offset: 12px;
 		/* Feathered loadout emoji backing: tint and peak opacity; outer stops scale with it. */
@@ -1636,5 +1640,46 @@
 	}
 	.ui-stat-action[data-direction="down"] .ui-stat-action-shape {
 		transform: translateX(-50%) rotate(180deg);
+	}
+}
+
+/* A visual-only top-layer copy escapes the cell's scrolling ancestors. */
+@keyframes ui-item-cell-pulse {
+	0%,
+	100% {
+		scale: 1;
+	}
+	40% {
+		scale: var(--ui-item-pulse-peak-scale);
+	}
+}
+/* Animate opacity rather than changing it, so restoration cannot start the dimming transition. */
+@keyframes ui-item-cell-pulse-source {
+	from,
+	to {
+		opacity: 0;
+	}
+}
+@layer components {
+	/* The real button retains hit testing and focus while its copy is visible. */
+	.ui-theme .ui-item-cell[data-ui-cell-pulsing] {
+		animation: ui-item-cell-pulse-source var(--ui-item-pulse-duration) step-end;
+	}
+	.ui-theme .ui-item-cell-pulse {
+		position: fixed;
+		inset: auto;
+		margin: 0;
+		visibility: visible;
+		pointer-events: none;
+		animation: ui-item-cell-pulse var(--ui-item-pulse-duration)
+			var(--ui-item-pulse-easing);
+	}
+	.ui-item-cell-pulse::backdrop {
+		display: none;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.ui-theme .ui-item-cell-pulse {
+			animation: none;
+		}
 	}
 }

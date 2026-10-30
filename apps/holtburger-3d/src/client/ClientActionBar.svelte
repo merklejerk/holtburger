@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { pulseItemCell } from "../app/item-cell-pulse";
 	import { loadoutLabel } from "./client-loadout";
 	import { presentClientBinding } from "./client-binding-catalog";
 	import { sameConsumableIdentity } from "./client-action-item";
@@ -133,6 +134,12 @@
 	);
 	function activate(slot: ActionSlotIndex, alternate: boolean) {
 		keyboard.returnToGame();
+		if (bar.slots[slot] !== null) {
+			const cell = surface.querySelector<HTMLElement>(
+				`[data-action-cell="${(slot + 1) % ACTION_SLOT_INDICES.length}"]`,
+			);
+			if (cell !== null) pulseItemCell(cell, "interaction");
+		}
 		onactivate(slot, alternate);
 	}
 	function keydown(event: KeyboardEvent) {

@@ -1,3 +1,4 @@
+import { pulseItemCell } from "../app/item-cell-pulse";
 import type { ClientSalvageState } from "./client-salvage-state";
 import { showUiDragGhost, positionUiDragGhost } from "../app/ui-drag-ghost";
 import { filterDraggedEquipment } from "./client-equipment-strip-filter";
@@ -1087,6 +1088,16 @@ export class ClientItemDrag {
 			);
 		}
 		if (!rejected && result.preview.kind !== "noop") {
+			// Background/container drops wait for arrival instead of pulsing an unrelated child.
+			const cell =
+				target.element.matches(".ui-item-cell") &&
+				(intent.target.kind !== "container" ||
+					Number(target.element.dataset.itemGuid) === intent.target.guid)
+					? target.element
+					: target.element.matches("[data-equipment-slot]")
+						? target.element.querySelector<HTMLElement>(".ui-item-cell")
+						: null;
+			if (cell !== null) pulseItemCell(cell, "interaction");
 			if (intent.target.kind === "give") {
 				this.give(intent.item, intent.target.guid);
 				return;

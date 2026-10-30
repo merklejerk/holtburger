@@ -1,17 +1,7 @@
-import {
-	createLandblockOffset,
-	createLandblockWorldOrigin,
-	getLandblockCoordinates,
-} from "../lib/game/landblocks";
-import {
-	createPerspectiveMat4,
-	createViewMat4,
-	multiplyMat4,
-} from "../lib/game/math/matrices";
-import type { AABB3, Mat4 } from "../lib/game/math/types";
-import { Vec3 } from "../lib/game/math/types";
+import type { AABB3 } from "../lib/game/math/types";
 import type { PrimaryCameraView } from "../lib/game/runtime/types";
 import type { ResolvedScenePlacement } from "../lib/game/scene";
+import { createClientEntityProjector } from "./client-entity-projection";
 
 const CLIP_EPSILON = 1e-7;
 
@@ -36,46 +26,20 @@ export interface ClientTargetIndicatorProjectionInput {
 	readonly view: PrimaryCameraView;
 }
 
-interface ClipPoint {
-	readonly w: number;
-	readonly x: number;
-	readonly y: number;
-	readonly z: number;
-}
-
 /** Project one exact current rigid bound into an offscreen edge marker, or null while on-screen. */
 export function projectClientTargetIndicator(
 	input: ClientTargetIndicatorProjectionInput,
 ): ClientTargetIndicatorFrame | null {
 	validateInput(input);
-	const { camera, extent } = input.view;
-	const anchorLandblockId = camera.placement.landblockId;
-	const anchorOrigin = createLandblockWorldOrigin(anchorLandblockId);
-	const cameraPosition = new Vec3(
-		camera.placement.position.x - anchorOrigin.x,
-		camera.placement.position.y,
-		camera.placement.position.z - anchorOrigin.z,
+	return classifyProjectedBounds(
+		input,
+		createClientEntityProjector(input.view, input.placement),
 	);
-	const clipFromAnchor = multiplyMat4(
-		createPerspectiveMat4(
-			camera.fov,
-			extent.width / extent.height,
-			camera.near,
-			camera.far,
-		),
-		createViewMat4(cameraPosition, camera.placement.rotation),
-	);
-	const landblockOffset = createLandblockOffset(
-		getLandblockCoordinates(input.placement.landblockId),
-		getLandblockCoordinates(anchorLandblockId),
-	);
-	return classifyProjectedBounds(input, clipFromAnchor, landblockOffset);
 }
 
 function classifyProjectedBounds(
 	input: ClientTargetIndicatorProjectionInput,
-	clipFromAnchor: Mat4,
-	landblockOffset: Vec3,
+	project: ReturnType<typeof createClientEntityProjector>,
 ): ClientTargetIndicatorFrame | null {
 	let allOutsideLeft = true;
 	let allOutsideRight = true;
@@ -85,10 +49,7 @@ function classifyProjectedBounds(
 	let allOutsideFar = true;
 
 	for (let corner = 0; corner < 8; corner += 1) {
-		const point = projectLocalPoint(
-			input.placement.localToLandblock,
-			clipFromAnchor,
-			landblockOffset,
+		const point = project(
 			(corner & 1) === 0 ? input.bounds.min.x : input.bounds.max.x,
 			(corner & 2) === 0 ? input.bounds.min.y : input.bounds.max.y,
 			(corner & 4) === 0 ? input.bounds.min.z : input.bounds.max.z,
@@ -112,21 +73,17 @@ function classifyProjectedBounds(
 		allOutsideNear ||
 		allOutsideFar;
 	if (outside) {
-		return edgeIndicator(input, clipFromAnchor, landblockOffset);
+		return edgeIndicator(input, project);
 	}
 	return null;
 }
 
 function edgeIndicator(
 	input: ClientTargetIndicatorProjectionInput,
-	clipFromAnchor: Mat4,
-	landblockOffset: Vec3,
+	project: ReturnType<typeof createClientEntityProjector>,
 ): ClientTargetIndicatorFrame {
 	const bounds = input.bounds;
-	const center = projectLocalPoint(
-		input.placement.localToLandblock,
-		clipFromAnchor,
-		landblockOffset,
+	const center = project(
 		(bounds.min.x + bounds.max.x) / 2,
 		(bounds.min.y + bounds.max.y) / 2,
 		(bounds.min.z + bounds.max.z) / 2,
@@ -153,56 +110,6 @@ function edgeIndicator(
 		rotationRadians: Math.atan2(directionY, directionX) + Math.PI / 2,
 		x: input.cssWidth / 2 + directionX * scale,
 		y: input.cssHeight / 2 + directionY * scale,
-	};
-}
-
-function projectLocalPoint(
-	localToLandblock: Mat4,
-	clipFromAnchor: Mat4,
-	landblockOffset: Vec3,
-	x: number,
-	y: number,
-	z: number,
-): ClipPoint {
-	const anchorX =
-		localToLandblock.m11 * x +
-		localToLandblock.m21 * y +
-		localToLandblock.m31 * z +
-		localToLandblock.m41 +
-		landblockOffset.x;
-	const anchorY =
-		localToLandblock.m12 * x +
-		localToLandblock.m22 * y +
-		localToLandblock.m32 * z +
-		localToLandblock.m42 +
-		landblockOffset.y;
-	const anchorZ =
-		localToLandblock.m13 * x +
-		localToLandblock.m23 * y +
-		localToLandblock.m33 * z +
-		localToLandblock.m43 +
-		landblockOffset.z;
-	return {
-		w:
-			clipFromAnchor.m14 * anchorX +
-			clipFromAnchor.m24 * anchorY +
-			clipFromAnchor.m34 * anchorZ +
-			clipFromAnchor.m44,
-		x:
-			clipFromAnchor.m11 * anchorX +
-			clipFromAnchor.m21 * anchorY +
-			clipFromAnchor.m31 * anchorZ +
-			clipFromAnchor.m41,
-		y:
-			clipFromAnchor.m12 * anchorX +
-			clipFromAnchor.m22 * anchorY +
-			clipFromAnchor.m32 * anchorZ +
-			clipFromAnchor.m42,
-		z:
-			clipFromAnchor.m13 * anchorX +
-			clipFromAnchor.m23 * anchorY +
-			clipFromAnchor.m33 * anchorZ +
-			clipFromAnchor.m43,
 	};
 }
 

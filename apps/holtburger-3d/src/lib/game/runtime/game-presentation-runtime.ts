@@ -498,8 +498,8 @@ export const RETAIL_UNHIDE_PHYSICS_SCRIPT_CUE = 0x75;
 export const RETAIL_HIDDEN_PHYSICS_SCRIPT_CUE = 0x76;
 const INTRINSIC_STATE_CUE_INTENSITY = 1;
 
-/** Frame-hot realized identity and current rigid bound for selection presentation. */
-export interface SelectedDynamicEntityFrame {
+/** Frame-hot realized identity and current rigid bound for entity indicators. */
+export interface DynamicEntityPresentationFrame {
 	readonly guid: number;
 	/** Borrowed until the next dynamic presentation publication. */
 	readonly localBounds: AABB3;
@@ -507,9 +507,12 @@ export interface SelectedDynamicEntityFrame {
 	readonly placement: ResolvedScenePlacement;
 }
 
-/** Why a mirror-retained selected identity can or cannot currently participate in tracking. */
-export type SelectedDynamicEntityPresentationState =
-	| { readonly kind: "realized"; readonly frame: SelectedDynamicEntityFrame }
+/** Why a mirror-retained entity identity can or cannot currently participate in tracking. */
+export type DynamicEntityPresentationState =
+	| {
+			readonly kind: "realized";
+			readonly frame: DynamicEntityPresentationFrame;
+	  }
 	| { readonly kind: "frontend-evicted" }
 	| { readonly kind: "temporarily-unrealized" };
 
@@ -3554,9 +3557,7 @@ export class GamePresentationRuntime {
 	}
 
 	/** Distinguish explicit scene-interest eviction from recoverable realization gaps. */
-	selectedEntityPresentationState(
-		guid: number,
-	): SelectedDynamicEntityPresentationState {
+	dynamicEntityPresentationState(guid: number): DynamicEntityPresentationState {
 		if (this.#isDynamicEntityFrontendEvicted(guid))
 			return { kind: "frontend-evicted" };
 		const frame = this.#dynamicEntityFrame(guid);
@@ -3565,7 +3566,7 @@ export class GamePresentationRuntime {
 			: { frame, kind: "realized" };
 	}
 
-	#dynamicEntityFrame(guid: number): SelectedDynamicEntityFrame | null {
+	#dynamicEntityFrame(guid: number): DynamicEntityPresentationFrame | null {
 		const nodeId = this.#spawnedPresentations.get(guid)?.nodeId ?? null;
 		if (nodeId === null) return null;
 		const localBounds =
@@ -3588,7 +3589,7 @@ export class GamePresentationRuntime {
 			const currentGuid = record.entity.identity.guid;
 			if (visited.has(currentGuid))
 				throw new Error(
-					`Dynamic entity attachment cycle reached ${formatDynamicGuid(currentGuid)} while resolving selection residency.`,
+					`Dynamic entity attachment cycle reached ${formatDynamicGuid(currentGuid)} while resolving entity presentation residency.`,
 				);
 			visited.add(currentGuid);
 			if (record.entity.placement.kind === "world")

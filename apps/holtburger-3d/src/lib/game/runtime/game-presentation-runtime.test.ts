@@ -2377,7 +2377,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			};
 			await runtime.upsertDynamicEntity(changed);
 			runtime.render(0.01);
-			const replacedOwner = runtime.selectedEntityPresentationState(
+			const replacedOwner = runtime.dynamicEntityPresentationState(
 				current.identity.guid,
 			);
 			if (replacedOwner.kind !== "realized")
@@ -2506,7 +2506,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		setTestCamera(runtime, SPAWN_TEST_CAMERA);
 		runtime.setSelectedEntityGuid(7);
 		runtime.setHoveredEntityGuid(7);
-		expect(runtime.selectedEntityPresentationState(7).kind).toBe("realized");
+		expect(runtime.dynamicEntityPresentationState(7).kind).toBe("realized");
 
 		runtime.render(1);
 		expect(frames.at(-1)?.selectionTarget?.shape).toEqual({ kind: "rigid" });
@@ -2515,7 +2515,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		);
 		await runtime.replaceDynamicEntitySnapshot([portal]);
 		runtime.setSelectedEntityGuid(8);
-		expect(runtime.selectedEntityPresentationState(8).kind).toBe("realized");
+		expect(runtime.dynamicEntityPresentationState(8).kind).toBe("realized");
 		runtime.render(2);
 		expect(frames.at(-1)?.selectionTarget?.shape).toEqual({ kind: "rigid" });
 		expect(frames.at(-1)?.hoveredEntityNodeId).toBeNull();
@@ -2668,7 +2668,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)).not.toBeNull();
 		runtime.setSelectedEntityGuid(player.identity.guid);
 		expect(
-			runtime.selectedEntityPresentationState(player.identity.guid).kind,
+			runtime.dynamicEntityPresentationState(player.identity.guid).kind,
 		).toBe("realized");
 
 		await activateSpawnScene(runtime, "0x0002ffff", 2);
@@ -2676,7 +2676,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(deferred.get(player.identity.guid)).toBe("deferred");
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)).toBeNull();
 		expect(
-			runtime.selectedEntityPresentationState(player.identity.guid).kind,
+			runtime.dynamicEntityPresentationState(player.identity.guid).kind,
 		).toBe("frontend-evicted");
 
 		await activateSpawnScene(runtime, "0x0001ffff", 3);
@@ -2684,7 +2684,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(reinstalled.get(player.identity.guid)).toBe("installed");
 		expect(runtime.dynamicEntityOrigin(player.identity.guid)).not.toBeNull();
 		expect(
-			runtime.selectedEntityPresentationState(player.identity.guid).kind,
+			runtime.dynamicEntityPresentationState(player.identity.guid).kind,
 		).toBe("realized");
 		expect(visualLoads).toBe(1);
 
@@ -2785,7 +2785,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			};
 			entity.presentation.entityClass = entityClass;
 			const partX = () => {
-				const selected = runtime.selectedEntityPresentationState(
+				const selected = runtime.dynamicEntityPresentationState(
 					entity.identity.guid,
 				);
 				if (selected.kind !== "realized")
@@ -2952,7 +2952,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			expect(runtime.getAuthoredDynamicRuntimeDiagnostics().animation).toEqual(
 				animationBefore,
 			);
-			const selected = runtime.selectedEntityPresentationState(7);
+			const selected = runtime.dynamicEntityPresentationState(7);
 			if (selected.kind !== "realized")
 				throw new Error("Replacement lost its selected entity.");
 			expect(selected.frame.localBounds.max.x).toBe(1);
@@ -2999,7 +2999,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		]);
 		setTestCamera(runtime, SPAWN_TEST_CAMERA);
 		const partX = (guid: number) => {
-			const selected = runtime.selectedEntityPresentationState(guid);
+			const selected = runtime.dynamicEntityPresentationState(guid);
 			if (selected.kind !== "realized")
 				throw new Error("Animated continuity fixture lost its entity.");
 			return selected.frame.localBounds.min.x;
@@ -3040,7 +3040,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		delayed.resolve(appearanceVisual(2));
 		expect(await stale).toBe("deferred");
 		expect(load).toHaveBeenCalledTimes(2);
-		const selected = runtime.selectedEntityPresentationState(7);
+		const selected = runtime.dynamicEntityPresentationState(7);
 		if (selected.kind !== "realized")
 			throw new Error("A was lost during supersession.");
 		expect(selected.frame.localBounds.max.x).toBe(0);
@@ -3068,7 +3068,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		expect(await current).toBe("installed");
 		b.resolve(appearanceVisual(2));
 		expect(await stale).toBe("deferred");
-		const selected = runtime.selectedEntityPresentationState(7);
+		const selected = runtime.dynamicEntityPresentationState(7);
 		if (selected.kind !== "realized")
 			throw new Error("Reversed completion removed the current appearance.");
 		expect(selected.frame.localBounds.max.x).toBe(3);
@@ -3116,7 +3116,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await activateSpawnScene(runtime, "0x0001ffff", 3);
 		await vi.waitFor(() => {
 			runtime.tick();
-			const selected = runtime.selectedEntityPresentationState(7);
+			const selected = runtime.dynamicEntityPresentationState(7);
 			if (selected.kind !== "realized")
 				throw new Error(
 					"Returned residency has not realized its desired appearance.",
@@ -3142,7 +3142,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await expect(
 			runtime.reevaluateDynamicEntityEligibility(),
 		).rejects.toThrow();
-		const selected = runtime.selectedEntityPresentationState(7);
+		const selected = runtime.dynamicEntityPresentationState(7);
 		if (selected.kind !== "realized")
 			throw new Error("Failed replacement removed the previous visual.");
 		expect(selected.frame.localBounds.max.x).toBe(0);
@@ -3167,7 +3167,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			1000,
 		);
 		await vi.waitFor(() => {
-			const selected = runtime.selectedEntityPresentationState(7);
+			const selected = runtime.dynamicEntityPresentationState(7);
 			if (selected.kind !== "realized")
 				throw new Error("Tick replacement lost its visual.");
 			expect(selected.frame.localBounds.max.x).toBe(2);
@@ -3363,11 +3363,11 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		});
 		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
 		expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
-		expect(runtime.selectedEntityPresentationState(7).kind).toBe("realized");
+		expect(runtime.dynamicEntityPresentationState(7).kind).toBe("realized");
 
 		await activateSpawnScene(runtime, "0x0002ffff", 2);
 		expect(runtime.dynamicEntityOrigin(7)).toBeNull();
-		expect(runtime.selectedEntityPresentationState(7)).toEqual({
+		expect(runtime.dynamicEntityPresentationState(7)).toEqual({
 			kind: "frontend-evicted",
 		});
 
@@ -3376,7 +3376,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			runtime.tick();
 			expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
 		});
-		expect(runtime.selectedEntityPresentationState(7).kind).toBe("realized");
+		expect(runtime.dynamicEntityPresentationState(7).kind).toBe("realized");
 		await runtime.destroy();
 	});
 
@@ -3523,7 +3523,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(2);
 		runtime.setSelectedEntityGuid(child.identity.guid);
-		const selectedChild = runtime.selectedEntityPresentationState(
+		const selectedChild = runtime.dynamicEntityPresentationState(
 			child.identity.guid,
 		);
 		if (selectedChild.kind !== "realized")
@@ -3540,7 +3540,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		};
 		await runtime.upsertDynamicEntity(changedParent);
 		expect(runtime.dynamicEntityPlacementRevision).toBe(placementRevision);
-		const retainedChild = runtime.selectedEntityPresentationState(
+		const retainedChild = runtime.dynamicEntityPresentationState(
 			child.identity.guid,
 		);
 		if (retainedChild.kind !== "realized")
@@ -3551,7 +3551,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			setupDid: 0x02000002,
 		};
 		expect(await runtime.upsertDynamicEntity(changedParent)).toBe("installed");
-		const reattachedChild = runtime.selectedEntityPresentationState(
+		const reattachedChild = runtime.dynamicEntityPresentationState(
 			child.identity.guid,
 		);
 		if (reattachedChild.kind !== "realized")
@@ -3563,11 +3563,11 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
 		).toBe(2);
 		await activateSpawnScene(runtime, "0x0002ffff", 2);
-		expect(
-			runtime.selectedEntityPresentationState(child.identity.guid),
-		).toEqual({
-			kind: "frontend-evicted",
-		});
+		expect(runtime.dynamicEntityPresentationState(child.identity.guid)).toEqual(
+			{
+				kind: "frontend-evicted",
+			},
+		);
 		await runtime.destroy();
 	});
 

@@ -7,3 +7,21 @@
 		--ui-combat-text-size: 32px;
 	}
 }
+
+/* Reticle inheritance and live replacement, independent of combat text. */
+@layer overrides {
+	#combat-reticle-theme-probe {
+		--ui-combat-reticle-size: 36px;
+		--ui-combat-reticle-radius: 42px;
+		--ui-combat-reticle-pulse-travel: 9px;
+		--ui-combat-reticle-orbit-duration: 1.75s;
+		--ui-combat-reticle-pulse-duration: 0.4s;
+		--ui-combat-reticle-fill-color: #12ab34;
+		--ui-combat-reticle-outline-color: #abcdef;
+		--ui-combat-reticle-border-color: #123456;
+		--ui-combat-reticle-outline-width: 3;
+		--ui-combat-reticle-border-width: 7;
+		--ui-combat-reticle-glow-color: #abcdef;
+		--ui-combat-reticle-glow-blur: 7px;
+	}
+}

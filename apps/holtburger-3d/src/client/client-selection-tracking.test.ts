@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { sceneVec3 } from "../lib/assets/ac-frame";
 import type { LandblockOwnerId } from "../lib/game/game-types";
 import { AABB3, Mat4, Quat, Vec3 } from "../lib/game/math/types";
-import type { SelectedDynamicEntityFrame } from "../lib/game/runtime/game-presentation-runtime";
+import type { DynamicEntityPresentationFrame } from "../lib/game/runtime/game-presentation-runtime";
 import type { PrimaryCameraView } from "../lib/game/runtime/types";
 import { clientSelectedEntityDistance } from "./client-selection-tracking";
 
@@ -46,7 +46,7 @@ describe("client selection tracking", () => {
 function frame(
 	landblockId: LandblockOwnerId,
 	localToLandblock: Mat4,
-): SelectedDynamicEntityFrame {
+): DynamicEntityPresentationFrame {
 	return {
 		guid: 7,
 		localBounds: new AABB3(new Vec3(-1, -1, -1), new Vec3(1, 1, 1)),

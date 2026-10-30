@@ -1,3 +1,4 @@
+import { rotateRenderVector } from "../lib/game/math/camera-orientation";
 import { RenderSceneInterestController } from "../lib/game/runtime/render-scene-interest-controller";
 import {
 	resolvedJumpFixture,
@@ -61,8 +62,8 @@ import type {
 	PortalTransitionPresentationReceipt,
 } from "../lib/client/portal-transition-presentation";
 import type {
-	SelectedDynamicEntityFrame,
-	SelectedDynamicEntityPresentationState,
+	DynamicEntityPresentationFrame,
+	DynamicEntityPresentationState,
 } from "../lib/game/runtime/game-presentation-runtime";
 import type { PrimaryCameraView } from "../lib/game/runtime/types";
 import { projectClientTargetIndicator } from "./client-target-indicator";
@@ -673,7 +674,7 @@ describe("ClientGameplayPresentation", () => {
 		localToLandblock.m41 = 12;
 		localToLandblock.m42 = 3;
 		localToLandblock.m43 = -40;
-		const selectedFrame: SelectedDynamicEntityFrame = {
+		const entityFrame: DynamicEntityPresentationFrame = {
 			guid: 7,
 			localBounds: new AABB3(
 				new Vec3(-0.1, -0.1, -0.1),
@@ -686,14 +687,14 @@ describe("ClientGameplayPresentation", () => {
 				scope: { kind: "outdoor" },
 			},
 		};
-		runtime.selectedFrame = selectedFrame;
+		runtime.entityFrame = entityFrame;
 
 		expect(presentation.readTargetIndicatorFrame()).toEqual(
 			projectClientTargetIndicator({
-				bounds: selectedFrame.localBounds,
+				bounds: entityFrame.localBounds,
 				cssHeight: 480,
 				cssWidth: 640,
-				placement: selectedFrame.placement,
+				placement: entityFrame.placement,
 				tuning: CLIENT_TUNING.entitySelection.offscreenIndicator,
 				view: primaryView,
 			}),
@@ -701,18 +702,135 @@ describe("ClientGameplayPresentation", () => {
 		expect(presentation.selectedEntityTrackingStatus(7)).toMatchObject({
 			kind: "tracked",
 		});
-		runtime.selectedPresentationState = { kind: "frontend-evicted" };
+		runtime.entityPresentationState = { kind: "frontend-evicted" };
 		expect(presentation.selectedEntityTrackingStatus(7)).toEqual({
 			kind: "frontend-evicted",
 		});
-		runtime.selectedPresentationState = null;
-		runtime.selectedFrame = null;
+		runtime.entityPresentationState = null;
+		runtime.entityFrame = null;
 		expect(presentation.readTargetIndicatorFrame()).toBeNull();
 		expect(presentation.selectedEntityTrackingStatus(7)).toEqual({
 			kind: "temporarily-unrealized",
 		});
 		runtime.removeDynamicEntity(7, 1);
 		await presentation.destroy();
+	});
+
+	it("tracks the auto-attack identity independently and hides when engagement ends or realization disappears", async () => {
+		const engagement = {
+			desired: {
+				target: 7,
+				profile: {
+					kind: "melee" as const,
+					height: "medium" as const,
+					power: 0.5,
+				},
+			},
+			state: "active" as const,
+			refill: null,
+		};
+		// A snapshot accepted before presentation creation must supply the engagement without app seeding.
+		const transport = new FakeClientTransport({
+			...currentState(0x0101_0001),
+			combat: engagement,
+		});
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const canvas = fakeCanvas();
+		const presentation = new ClientGameplayPresentation({
+			canvas,
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+		});
+		try {
+			expect(presentation.readCombatTargetFrame()).toBeNull();
+			await presentation.start();
+			await vi.waitFor(() =>
+				expect(presentation.frame(1000).rendered).toBe(true),
+			);
+			const view = runtime.primaryViews.at(-1);
+			if (view === undefined)
+				throw new Error("Fixture has no presented camera.");
+			const origin = createLandblockWorldOrigin(
+				view.camera.placement.landblockId,
+			);
+			const forward = rotateRenderVector(
+				new Vec3(0, 0, -10),
+				view.camera.placement.rotation,
+			);
+			const localToLandblock = Mat4.identity();
+			localToLandblock.m41 =
+				view.camera.placement.position.x - origin.x + forward.x;
+			localToLandblock.m42 = view.camera.placement.position.y + forward.y;
+			localToLandblock.m43 =
+				view.camera.placement.position.z - origin.z + forward.z;
+			runtime.entityFrame = {
+				guid: 7,
+				localBounds: new AABB3(new Vec3(-1, -1, -1), new Vec3(1, 1, 1)),
+				placement: {
+					envCellId: null,
+					landblockId: view.camera.placement.landblockId,
+					localToLandblock,
+					scope: { kind: "outdoor" },
+				},
+			};
+			expect(presentation.readCombatTargetFrame()?.x).toBeCloseTo(
+				canvas.clientWidth / 2,
+			);
+			expect(presentation.readCombatTargetFrame()?.y).toBeCloseTo(
+				canvas.clientHeight / 2,
+			);
+			const initial = presentation.readCombatTargetFrame();
+			presentation.setSelectedEntityGuid(8);
+			expect(presentation.readCombatTargetFrame()).toEqual(initial);
+			presentation.setSelectedEntityGuid(null);
+			expect(presentation.readCombatTargetFrame()).toEqual(initial);
+
+			const replacementOffset = rotateRenderVector(
+				new Vec3(2, 0, 0),
+				view.camera.placement.rotation,
+			);
+			const replacementPlacement = localToLandblock.clone();
+			replacementPlacement.m41 += replacementOffset.x;
+			replacementPlacement.m42 += replacementOffset.y;
+			replacementPlacement.m43 += replacementOffset.z;
+			runtime.entityFrame = {
+				...runtime.entityFrame,
+				guid: 9,
+				placement: {
+					...runtime.entityFrame.placement,
+					localToLandblock: replacementPlacement,
+				},
+			};
+			transport.emit("client-combat-status-updated", {
+				...engagement,
+				desired: { ...engagement.desired, target: 9 },
+			});
+			expect(presentation.readCombatTargetFrame()?.x).toBeGreaterThan(
+				canvas.clientWidth / 2,
+			);
+
+			const replacement = runtime.entityFrame;
+			runtime.entityFrame = null;
+			expect(presentation.readCombatTargetFrame()).toBeNull();
+			runtime.entityFrame = replacement;
+			runtime.entityPresentationState = { kind: "frontend-evicted" };
+			expect(presentation.readCombatTargetFrame()).toBeNull();
+			runtime.entityPresentationState = null;
+			expect(presentation.readCombatTargetFrame()).not.toBeNull();
+
+			// Cancellation retires the intent before the server finishes the attack sequence.
+			transport.emit("client-combat-status-updated", {
+				desired: null,
+				state: "retiring",
+				refill: null,
+			});
+			expect(presentation.readCombatTargetFrame()).toBeNull();
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+		}
 	});
 
 	it("projects the accepted marker and retains neutral world feedback during replacement", async () => {
@@ -1544,9 +1662,8 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 	completedActivations: number[] = [];
 	realizationDisposition: DynamicEntityRealizationDisposition = "installed";
 	dynamicOriginEnvCellId: string | null = null;
-	selectedFrame: SelectedDynamicEntityFrame | null = null;
-	selectedPresentationState: SelectedDynamicEntityPresentationState | null =
-		null;
+	entityFrame: DynamicEntityPresentationFrame | null = null;
+	entityPresentationState: DynamicEntityPresentationState | null = null;
 	nameplateDecoration = new Map<
 		number,
 		Pick<NameplateContent, "indicators" | "strikeThrough">
@@ -1727,12 +1844,12 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 		this.hoveredEntityGuid = guid;
 	}
 
-	selectedEntityPresentationState(): SelectedDynamicEntityPresentationState {
+	dynamicEntityPresentationState(guid: number): DynamicEntityPresentationState {
 		return (
-			this.selectedPresentationState ??
-			(this.selectedFrame === null
+			this.entityPresentationState ??
+			(this.entityFrame === null || this.entityFrame.guid !== guid
 				? { kind: "temporarily-unrealized" }
-				: { frame: this.selectedFrame, kind: "realized" })
+				: { frame: this.entityFrame, kind: "realized" })
 		);
 	}
 

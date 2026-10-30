@@ -5,6 +5,7 @@ import type { LandblockOwnerId } from "../lib/game/game-types";
 import { AABB3, Mat4, Quat, Vec3 } from "../lib/game/math/types";
 import type { PrimaryCameraView } from "../lib/game/runtime/types";
 import type { ResolvedScenePlacement } from "../lib/game/scene";
+import { projectClientEntityCenter } from "./client-entity-projection";
 import {
 	projectClientTargetIndicator,
 	type ClientTargetIndicatorGeometryTuning,
@@ -71,6 +72,42 @@ describe("client target indicator", () => {
 	it("collapses the safe rectangle for a viewport smaller than twice the inset", () => {
 		const frame = project(placement(30, 0, -10), bounds(0.1), 40, 20);
 		expect(frame).toMatchObject({ x: 30, y: 10 });
+	});
+});
+
+describe("combat indicator center projection", () => {
+	const center = (x: number, y: number, z: number) =>
+		projectClientEntityCenter({
+			bounds: bounds(1),
+			placement: placement(x, y, z),
+			cssWidth: 500,
+			cssHeight: 400,
+			view: VIEW,
+		});
+	it("maps the bounds center into CSS pixels independently of render extent", () => {
+		expect(center(0, 0, -10)).toEqual({ x: 250, y: 200 });
+		expect(center(5, 0, -10)?.x).toBeCloseTo(350);
+		expect(center(0, 5, -10)?.y).toBeCloseTo(100);
+	});
+	it.each([
+		[0, 0, 10],
+		[0, 0, 0],
+		[30, 0, -10],
+		[0, 30, -10],
+		[0, 0, -0.01],
+		[0, 0, -3000],
+	])("hides clipped center (%s, %s, %s)", (x, y, z) => {
+		expect(center(x, y, z)).toBeNull();
+	});
+	it("uses the local bounds center rather than the entity origin", () => {
+		const frame = projectClientEntityCenter({
+			bounds: new AABB3(new Vec3(-1, 1, -1), new Vec3(1, 3, 1)),
+			placement: placement(0, 0, -10),
+			cssWidth: 500,
+			cssHeight: 400,
+			view: VIEW,
+		});
+		expect(frame?.y).toBeCloseTo(160);
 	});
 });
 

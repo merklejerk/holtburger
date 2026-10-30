@@ -589,13 +589,24 @@ export class ClientGameplayPresentation {
 		const view = this.#lastPrimaryView;
 		const { spellCastTarget, combat } = this.#session.state();
 		// A pending non-self cast takes presentation priority without changing auto-attack intent.
-		const target = spellCastTarget ?? combat.desired?.target ?? null;
+		const engagement =
+			spellCastTarget !== null
+				? { target: spellCastTarget, combatType: "magic" as const }
+				: combat.desired === null
+					? null
+					: {
+							target: combat.desired.target,
+							combatType: combat.desired.profile.kind,
+						};
 		const state =
-			target === null
+			engagement === null
 				? null
-				: this.#activeResources?.runtime.dynamicEntityPresentationState(target);
-		if (view === null || state?.kind !== "realized") return null;
-		return projectClientCombatTarget({
+				: this.#activeResources?.runtime.dynamicEntityPresentationState(
+						engagement.target,
+					);
+		if (view === null || engagement === null || state?.kind !== "realized")
+			return null;
+		const projection = projectClientCombatTarget({
 			tuning: CLIENT_TUNING.combatTargetIndicator,
 			bounds: state.frame.localBounds,
 			placement: state.frame.placement,
@@ -603,6 +614,9 @@ export class ClientGameplayPresentation {
 			cssWidth: this.#canvas.clientWidth,
 			cssHeight: this.#canvas.clientHeight,
 		});
+		return projection === null
+			? null
+			: { ...projection, combatType: engagement.combatType };
 	}
 
 	setHoveredEntityGuid(guid: number | null): void {

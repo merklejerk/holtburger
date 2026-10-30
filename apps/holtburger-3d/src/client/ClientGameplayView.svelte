@@ -1230,6 +1230,7 @@
 		{/if}
 		{#if combatMode === "melee" || combatMode === "missile"}
 			<ClientCombatBar
+				showHelpLabels={ui.showHelpLabels}
 				{inventory}
 				{input}
 				{displayPlatform}

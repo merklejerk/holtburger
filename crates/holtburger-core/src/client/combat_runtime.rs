@@ -563,6 +563,17 @@ impl ClientRuntime {
         match command {
             ClientCommand::CastSpell { spell_id, aim } => self.cast_spell(spell_id, aim).await,
             ClientCommand::BeginCombatEngagement { target, profile } => {
+                if !self.world.combat_target_status(target).is_available() {
+                    self.reject_combat_request("Select a valid target before attacking.");
+                    // Reassert retained intent so frontends can retire speculative cancellation
+                    // ownership even when this refusal leaves an idle status unchanged.
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::CombatStatusUpdated(
+                            self.combat_engagement.status(),
+                        ));
+                    return Ok(());
+                }
                 let profile = profile.normalized();
                 let previous = self.combat_engagement.status();
                 self.combat_engagement.begin(
@@ -1469,8 +1480,89 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invalid_attack_starts_report_feedback_and_preserve_retained_intent() {
+        for profile in [
+            ClientAttackProfile::Melee {
+                height: AttackHeight::High,
+                power: 0.25,
+            },
+            ClientAttackProfile::Missile {
+                height: AttackHeight::Low,
+                accuracy: 0.75,
+            },
+        ] {
+            for target in [Guid::NULL, Guid(1), Guid(3), Guid(4)] {
+                for retained in [false, true] {
+                    let mut client = client(0);
+                    client.world.add_entity(combat_target(Guid(2)));
+                    // A present world object is insufficient: physical attacks require a creature.
+                    client
+                        .world
+                        .add_entity(holtburger_world::entity::Entity::new(
+                            Guid(3),
+                            "Item".into(),
+                            WorldPosition {
+                                landblock_id: Guid(0x1234_0001),
+                                ..WorldPosition::default()
+                            },
+                        ));
+                    if retained {
+                        client
+                            .handle_command(ClientCommand::BeginCombatEngagement {
+                                target: Guid(2),
+                                profile,
+                            })
+                            .await
+                            .unwrap();
+                    }
+                    let previous = client.combat_engagement.status();
+                    let sequence = client.session.game_action_sequence;
+                    let mut events = client.subscribe_client_view_events();
+                    client
+                        .handle_command(ClientCommand::BeginCombatEngagement { target, profile })
+                        .await
+                        .unwrap();
+                    assert_eq!(client.combat_engagement.status(), previous);
+                    assert_eq!(client.session.game_action_sequence, sequence);
+                    let ClientViewEvent::ActionResult { source, reason } =
+                        events.try_recv().unwrap()
+                    else {
+                        panic!("Expected rejected attack feedback");
+                    };
+                    assert_eq!(source, ActionResultSource::Client);
+                    let ActionResultReason::General(message) = reason else {
+                        panic!("Expected local attack refusal");
+                    };
+                    assert_eq!(message, "Select a valid target before attacking.");
+                    let ClientViewEvent::CombatStatusUpdated(status) = events.try_recv().unwrap()
+                    else {
+                        panic!("Expected retained combat status after refusal");
+                    };
+                    assert_eq!(status, previous);
+                    assert!(events.try_recv().is_err());
+                }
+            }
+        }
+    }
+
+    /// Available world creature used by command tests independently of spell fixtures.
+    fn combat_target(guid: Guid) -> holtburger_world::entity::Entity {
+        let mut target = holtburger_world::entity::Entity::new(
+            guid,
+            "Target".into(),
+            WorldPosition {
+                landblock_id: Guid(0x1234_0001),
+                ..WorldPosition::default()
+            },
+        );
+        target.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        target
+    }
+
+    #[tokio::test]
     async fn manual_movement_interrupts_melee_but_preserves_missile_combat() {
         let mut client = client(0);
+        client.world.add_entity(combat_target(Guid(2)));
         let begin = || ClientCommand::BeginCombatEngagement {
             target: Guid(2),
             profile: ClientAttackProfile::Melee {

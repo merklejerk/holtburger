@@ -760,6 +760,7 @@ describe("ClientGameplayPresentation", () => {
 				canvas.clientHeight / 2,
 			);
 			const initial = presentation.readCombatTargetFrame();
+			expect(initial?.combatType).toBe("melee");
 			presentation.setSelectedEntityGuid(8);
 			expect(presentation.readCombatTargetFrame()).toEqual(initial);
 			presentation.setSelectedEntityGuid(null);
@@ -846,16 +847,16 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-combat-status-updated", {
 				desired: {
 					target: 9,
-					profile: { kind: "melee", height: "medium", power: 0.5 },
+					profile: { kind: "missile", height: "medium", accuracy: 0.5 },
 				},
 				state: "active",
 				refill: null,
 			});
-			expect(presentation.readCombatTargetFrame()).not.toBeNull();
+			expect(presentation.readCombatTargetFrame()?.combatType).toBe("magic");
 			transport.emit("client-spell-cast-target-updated", { target: null });
 			expect(presentation.readCombatTargetFrame()).toBeNull();
 			runtime.entityFrame = { ...runtime.entityFrame, guid: 9 };
-			expect(presentation.readCombatTargetFrame()).not.toBeNull();
+			expect(presentation.readCombatTargetFrame()?.combatType).toBe("missile");
 			// A replacement snapshot is authoritative, including an absent cast and auto-attack.
 			transport.emit("client-current-state", currentState(0x0101_0001));
 			expect(presentation.readCombatTargetFrame()).toBeNull();

@@ -19,10 +19,16 @@ export interface ClientTargetIndicatorFrame {
 	readonly y: number;
 }
 
-/** One combat target has either a centered reticle or an offscreen directional arrow. */
-export type ClientCombatTargetFrame =
+/** Geometry-only result shared by centered and offscreen combat target projection. */
+export type ClientCombatTargetPlacement =
 	| (ClientEntityScreenPoint & { readonly kind: "reticle" })
 	| (ClientTargetIndicatorFrame & { readonly kind: "edge" });
+
+/** Coherent target projection and attack source chosen by gameplay presentation. */
+export type ClientCombatTargetFrame = ClientCombatTargetPlacement & {
+	/** Attack source chosen alongside the target, independent of the player's current stance. */
+	readonly combatType: "melee" | "missile" | "magic";
+};
 
 /** Shared entity projection inputs plus the caller-owned screen-edge lane. */
 export interface ClientTargetIndicatorProjectionInput extends ClientEntityProjectionInput {
@@ -33,7 +39,7 @@ export interface ClientTargetIndicatorProjectionInput extends ClientEntityProjec
 /** Prefer the centered reticle; reuse selection's full-bound clipping policy for edge guidance. */
 export function projectClientCombatTarget(
 	input: ClientTargetIndicatorProjectionInput,
-): ClientCombatTargetFrame | null {
+): ClientCombatTargetPlacement | null {
 	if (input.cssWidth <= 0 || input.cssHeight <= 0) return null;
 	const center = projectClientEntityCenter(input);
 	if (center !== null) return { ...center, kind: "reticle" };

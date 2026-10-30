@@ -583,6 +583,13 @@
 	};
 	let releaseCombatKeys: (() => void) | null = null;
 	const combatBarProbe = {
+		/** Exercise the same cold UI preference passed to the production HUD. */
+		help: (showHelpLabels: boolean) => {
+			userSettings = {
+				...userSettings,
+				ui: { ...userSettings.ui, showHelpLabels },
+			};
+		},
 		/** Runtime tuning used by indexed binding assertions. */
 		breakpoints: COMBAT_BREAKPOINTS,
 		/** Supply enters through the production semantic mirror, not component-local state. */
@@ -672,6 +679,7 @@
 		updateCombatProfile(profile);
 		combatProfileSelectionRevision += 1;
 		combatBarProbe.active(profile.kind);
+		combatStatus = { ...combatStatus, desired: { target: 7, profile } };
 	}
 	function selectCombatBreakpoint(index: CombatBreakpointIndex): void {
 		if (characterSettings === null) return;
@@ -2671,6 +2679,8 @@
 				center.publish({ message: event.message, tone: "status" });
 		});
 		const notices = [
+			"Select a target before attacking.",
+			"Select a valid target before attacking.",
 			"You're too busy!",
 			"Use timed out waiting for the server.",
 			"You can't open or close this Door that way",

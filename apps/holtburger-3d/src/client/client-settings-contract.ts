@@ -175,6 +175,8 @@ export const clientUiSettingsSchema = z
 	.object({
 		/** Show the FPS HUD; older profiles keep it hidden until explicitly enabled. */
 		showFps: z.boolean().default(false),
+		/** Reveal combat control labels on hover; older profiles receive help by default. */
+		showHelpLabels: z.boolean().default(true),
 		/** Absent choices use the client default; explicit Base/null and saved IDs are retained. */
 		themeId: uiThemeIdSchema.nullable().default(CLIENT_DEFAULT_THEME_ID),
 		/** Older sections inherit neutral scaling without losing fonts or warning thresholds. */

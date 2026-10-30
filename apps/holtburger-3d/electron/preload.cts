@@ -1,4 +1,5 @@
 import electron = require("electron");
+import type { PointerPosition } from "./pointer-lock-hover.js";
 
 const { contextBridge, ipcRenderer } = electron;
 
@@ -7,6 +8,38 @@ const documentIdentity: Promise<string> = ipcRenderer.invoke("document:boot");
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 	return ipcRenderer.invoke(channel, await documentIdentity, ...args);
 }
+
+if (process.argv.includes("--holtburger-wayland-pointer-restore")) {
+	let position: PointerPosition | null = null;
+	let lockOrigin: PointerPosition | null = null;
+	const observePosition = (event: MouseEvent): void => {
+		if (globalThis.document.pointerLockElement !== null) return;
+		position = {
+			x: event.clientX,
+			y: event.clientY,
+			globalX: event.screenX,
+			globalY: event.screenY,
+		};
+	};
+	globalThis.addEventListener("mousemove", observePosition, true);
+	globalThis.addEventListener("mousedown", observePosition, true);
+	globalThis.addEventListener("blur", () => {
+		position = null;
+		lockOrigin = null;
+	});
+	globalThis.document.addEventListener("pointerlockchange", () => {
+		if (globalThis.document.pointerLockElement !== null) {
+			lockOrigin = position;
+			return;
+		}
+		const origin = lockOrigin;
+		lockOrigin = null;
+		// Correct hover immediately; an animation-frame delay makes the displaced hover flash longer.
+		if (origin !== null && globalThis.document.hasFocus())
+			void invoke("window:restore-pointer", origin).catch(console.error);
+	});
+}
+
 contextBridge.exposeInMainWorld("holtburgerLauncher", {
 	enabled: !process.argv.includes("--holtburger-launcher-disabled"),
 	snapshot: () => invoke("launcher:snapshot"),

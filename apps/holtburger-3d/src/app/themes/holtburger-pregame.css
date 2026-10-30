@@ -43,8 +43,8 @@
 			var(--ui-color-accent) 20%,
 			transparent
 		);
-		--pregame-primary-shadow:
-			inset 0 0 0 3px #080a09, inset 0 0 0 4px var(--ui-color-border);
+		/* Pointed wire frames decorate text actions without adding layout space. */
+		--pregame-button-filigree: url("../../assets/icons/pregame-button-filigree.svg");
 	}
 	.client-pregame-screen .ui-button {
 		--ui-button-background-color: var(--pregame-button-background);
@@ -58,6 +58,44 @@
 	}
 	.client-pregame-screen .ui-button:where(:active:not(:disabled)) {
 		--ui-button-background-color: var(--pregame-button-active-background);
+	}
+	/* Quiet links, roster entries, and compact icon controls retain their own chrome. */
+	.client-pregame-screen
+		.pregame-action.ui-button:where(:not(.pregame-quiet, .ui-icon-button)) {
+		position: relative;
+		border-color: transparent;
+		/* Fixed-depth points leave the existing text inset clear at every button width. */
+		clip-path: polygon(
+			16px 0,
+			calc(100% - 16px) 0,
+			100% 50%,
+			calc(100% - 16px) 100%,
+			16px 100%,
+			0 50%
+		);
+		/* Keep keyboard focus inside the clipped silhouette. */
+		outline-offset: -3px;
+	}
+	.client-pregame-screen
+		.pregame-action.ui-button:where(
+			:not(.pregame-quiet, .ui-icon-button)
+		)::before {
+		content: "";
+		position: absolute;
+		inset: -1px;
+		border: 0 solid transparent;
+		border-image: var(--pregame-button-filigree) 24 28 / 50% 28px / 0 stretch;
+		opacity: 0.6;
+		pointer-events: none;
+	}
+	.client-pregame-screen
+		.pregame-action.ui-button:where(:not(.pregame-quiet, .ui-icon-button)):is(
+			.enter-world,
+			.pregame-primary,
+			:hover:not(:disabled),
+			:focus-visible
+		)::before {
+		opacity: 1;
 	}
 	/* Compact pregame controls share circular chrome without text-action sizing. */
 	.client-pregame-screen .pregame-round-button {
@@ -83,7 +121,6 @@
 		color: var(--ui-color-highlight);
 		letter-spacing: 0.15em;
 		text-transform: uppercase;
-		box-shadow: var(--pregame-primary-shadow);
 	}
 	.client-pregame-screen .pregame-quiet {
 		--ui-button-background-color: transparent;

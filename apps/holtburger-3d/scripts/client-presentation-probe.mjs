@@ -109,7 +109,7 @@ export async function probeClientPresentation(
 			try {
 				screen.style.setProperty('--ui-color-highlight', 'rgb(17, 183, 209)');
 				screen.style.setProperty('--ui-font-heading', 'monospace');
-				screen.style.setProperty('--pregame-primary-shadow', 'none');
+				screen.style.setProperty('--pregame-button-filigree', 'none');
                 screen.style.setProperty('--pregame-name-background-color', 'rgb(24 48 72 / 80%)');
                 screen.style.setProperty('--pregame-name-input-background', 'rgb(36 72 108 / 60%)');
 				screen.style.setProperty('--pregame-backdrop-color', 'rgb(45 67 89 / 50%)');
@@ -121,7 +121,7 @@ export async function probeClientPresentation(
 					brand: getComputedStyle(screen.querySelector('.pregame-brand')).color,
 					font: getComputedStyle(screen.querySelector('.pregame-brand')).fontFamily,
 					primary: getComputedStyle(primary).color,
-					shadow: getComputedStyle(primary).boxShadow,
+					filigree: getComputedStyle(primary, '::before').borderImageSource,
 					shadeChanged: getComputedStyle(shade, '::before').backgroundImage !== before,
 					isolated: getComputedStyle(document.body).color === bodyColor,
                     nameThemed: name === null || (getComputedStyle(name, '::before').background !== nameBefore && getComputedStyle(name.querySelector('input')).backgroundColor !== inputBefore),
@@ -135,7 +135,7 @@ export async function probeClientPresentation(
 			brand: "rgb(17, 183, 209)",
 			font: "monospace",
 			primary: "rgb(17, 183, 209)",
-			shadow: "none",
+			filigree: "none",
 			shadeChanged: true,
 			isolated: true,
 			nameThemed: true,

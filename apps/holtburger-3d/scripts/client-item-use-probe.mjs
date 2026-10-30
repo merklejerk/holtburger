@@ -59,9 +59,9 @@ export async function probeItemUse(client, evaluateExpression) {
 	await read(api + ".itemUseProbe().ready()");
 
 	const action = ".action-cell[data-action-cell='1']";
-	const bind = async (source, id) => {
+	const bind = async (source, id, destination = action) => {
 		const start = await point(source);
-		const end = await point(action);
+		const end = await point(destination);
 		await client.send("Input.dispatchMouseEvent", {
 			type: "mousePressed",
 			...start,
@@ -85,7 +85,7 @@ export async function probeItemUse(client, evaluateExpression) {
 		await read(api + ".itemUseProbe().ready()");
 		assert.equal(
 			await read(
-				`document.querySelector(${JSON.stringify(action)}).dataset.actionItem`,
+				`document.querySelector(${JSON.stringify(destination)}).dataset.actionItem`,
 			),
 			String(id),
 		);
@@ -103,10 +103,41 @@ export async function probeItemUse(client, evaluateExpression) {
 			unrestricted: false,
 		});
 		await reply({ kind: "executed" });
+		const boundFood = ".action-cell[data-action-cell='2']";
+		await bind(food, 91, boundFood);
 		await bind(tool, 95);
 		await click(action);
 		await resolveTarget(false);
 		assert.equal((await state()).kind, "acquiring");
+		// Answer the production compatibility queries for all mounted cells. The same
+		// physical item in inventory and on the action bar must share one query.
+		const equippedTargetSequence = await read(`(async () => {
+			await new Promise(requestAnimationFrame);
+			const queries = ${api}.itemUseProbe().queryCommands().map(entry => entry.args.query);
+			const cells = queries.filter(query => query.target === 91);
+			if (cells.length !== 1) throw new Error('Expected one query for both food cells');
+			for (const query of queries)
+				${api}.itemUseProbe().targetReply({ sequence: query.sequence, eligible: query.target === 91 });
+			await new Promise(requestAnimationFrame);
+			const considered = ${api}.itemUseProbe().snapshot().considered?.sequence;
+			const equipped = queries.find(query => query.target === 95 && query.sequence !== considered);
+			if (!equipped) throw new Error('Missing equipped target compatibility query');
+			return equipped.sequence;
+		})()`);
+		for (const [selector, dimmed] of [
+			[food, false],
+			[boundFood, false],
+			[tool, true],
+			[action, true],
+			[".action-cell[data-action-cell='3']", true],
+		]) {
+			assert.equal(
+				await read(
+					`document.querySelector(${JSON.stringify(selector)}).dataset.combineDimmed`,
+				),
+				String(dimmed),
+			);
+		}
 		await read(`(async () => {
             const expected = 'Use ' + ${api}.itemUseProbe().snapshot().name + ' on… (Escape to cancel)';
             const deadline = performance.now() + 5000;
@@ -168,10 +199,46 @@ export async function probeItemUse(client, evaluateExpression) {
 			assert.equal((await state()).kind, "acquiring");
 		};
 		await hover(food, 91, true);
+		// The equipped target's authority verdict must control its effective opacity,
+		// including while the pointer is over an item that cannot be equipped there.
+		await read(`(async () => {
+			${api}.itemUseProbe().targetReply({ sequence: ${equippedTargetSequence}, eligible: true });
+			const cell = document.querySelector(${JSON.stringify(tool)});
+			const row = cell.closest('.equipment-row');
+			const deadline = performance.now() + 5000;
+			while (performance.now() < deadline) {
+				const opacity = Number(getComputedStyle(cell).opacity) * Number(getComputedStyle(row).opacity);
+				if (opacity === 1) return;
+				await new Promise(requestAnimationFrame);
+			}
+			throw new Error('Eligible equipped combine target remained dimmed during inventory hover');
+		})()`);
+		await hover(boundFood, 91, true);
 		await hover(tool, 95, false);
+		// Equipment hover still supplies ordinary inventory hints; combine admission
+		// takes precedence over those hints on the eligible inventory target.
+		await read(`(async () => {
+			const cell = document.querySelector(${JSON.stringify(food)});
+			const deadline = performance.now() + 5000;
+			while (performance.now() < deadline) {
+				if (Number(getComputedStyle(cell).opacity) === 1) return;
+				await new Promise(requestAnimationFrame);
+			}
+			throw new Error('Equipment hover overrode eligible inventory combine target opacity');
+		})()`);
+		await click(tool);
+		assert.deepEqual((await state()).request.intent, {
+			kind: "targeted",
+			source: 95,
+			target: 95,
+		});
+		await reply({
+			kind: "rejected",
+			reason: "Fixture incompatible equipped target",
+		});
 		await hover(".client-canvas", 91, true);
 		await read(api + ".itemUseProbe().hoverWorld(null)");
-		await click(food);
+		await click(boundFood);
 		pending = await state();
 		assert.deepEqual(pending.request.intent, {
 			kind: "targeted",
@@ -208,6 +275,10 @@ export async function probeItemUse(client, evaluateExpression) {
 			amount: 1,
 		});
 		await reply({ kind: "executed" });
+		assert.equal(
+			await read("document.querySelectorAll('[data-combine-dimmed]').length"),
+			0,
+		);
 		await read(api + ".itemUseProbe().select(95)");
 		await click(action);
 		await resolveTarget(false);
@@ -398,6 +469,11 @@ export async function probeItemUse(client, evaluateExpression) {
 			mixedActionBindings: true,
 			automaticTargetFallback: true,
 			combineEligibilityCursor: true,
+			combineCellDimming: true,
+			boundCombinationTargets: true,
+			equippedCombinationTargetOpacity: true,
+			equippedCombinationTargetClick: true,
+			combineOpacityOverridesEquipmentHover: true,
 			escape: true,
 		};
 	} finally {

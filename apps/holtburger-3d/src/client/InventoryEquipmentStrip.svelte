@@ -53,10 +53,7 @@
 <div
 	class="equipment-strip"
 	aria-busy={updating}
-	use:equipmentStripFilter={{
-		locations: updating ? undefined : hoveredEquipLocations,
-		rows: equipment.rows,
-	}}
+	use:equipmentStripFilter={equipment.rows}
 >
 	<ItemGridStrip {attentionIndexes}>
 		{#each equipment.rows as { slot, item, availability } (slot.mask)}
@@ -148,11 +145,7 @@
 		.equipment-row:global([hidden]) {
 			display: none;
 		}
-		.equipment-row:global([data-hover-dimmed="true"]) {
-			opacity: var(--ui-item-dimmed-opacity, 0.3);
-		}
 		.equipment-row {
-			transition: opacity var(--ui-item-dim-duration, 150ms) ease-out;
 			display: grid;
 			grid-template-columns:
 				calc(
@@ -161,11 +154,6 @@
 				minmax(0, 1fr);
 			align-items: center;
 			gap: calc(var(--ui-inventory-equipment-slot-gap) * var(--ui-icon-scale));
-		}
-		@media (prefers-reduced-motion: reduce) {
-			.equipment-row {
-				transition: none;
-			}
 		}
 	}
 </style>

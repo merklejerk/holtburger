@@ -184,7 +184,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 			`Drag artwork is not visible beside the pointer: ${JSON.stringify({ ghost, position })}`,
 		);
 	const equipmentRows = await read(
-		`Array.from(document.querySelectorAll('[data-equipment-slot]'), (row) => ({ label: row.getAttribute('aria-label'), hidden: row.hidden, dimmed: row.dataset.hoverDimmed }))`,
+		`Array.from(document.querySelectorAll('[data-equipment-slot]'), (row) => ({ label: row.getAttribute('aria-label'), hidden: row.hidden }))`,
 	);
 	const candidates = equipmentRows
 		.filter((row) => !row.hidden)
@@ -197,8 +197,6 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		throw new Error(
 			"Inventory armor drag did not preserve only candidate equipment rows",
 		);
-	if (equipmentRows.some((row) => row.dimmed !== undefined))
-		throw new Error("Hover dimming overrode active equipment drag filtering");
 	const hovered = await lastPreview();
 	if (hovered.intent.target.kind !== "item")
 		throw new Error("Native drag did not use positional item targeting");

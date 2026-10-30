@@ -63,6 +63,17 @@ export type ItemInteractionState =
 			readonly question: LocalConfirmationRequest;
 	  };
 type Acquisition = Extract<ItemInteractionState, { kind: "acquiring" }>;
+/** Mounted cell compatibility subscription; sequences retire stale authority replies. */
+interface TargetObservation {
+	/** Source captured from the acquisition that owns this subscription. */
+	readonly source: number;
+	/** Physical target shared by one or more mounted cells. */
+	readonly target: number;
+	/** Replaced whenever entity facts invalidate the outstanding query. */
+	sequence: number;
+	/** Null retires a previous verdict while refreshed authority is pending. */
+	readonly receive: (eligible: boolean | null) => void;
+}
 type Session = Pick<
 	ClientLifecycleSession,
 	| "entities"
@@ -96,6 +107,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 	readonly #beginTrade: (partner: number) => void;
 	readonly #unsubscribe: () => void;
 	readonly #listeners = new Set<(state: ItemInteractionState) => void>();
+	readonly #targetObservations = new Set<TargetObservation>();
 	#state: ItemInteractionState = { kind: "idle" };
 	#destroyed = false;
 	/** A deadline needs no timer; each give checks expiry when it starts. */
@@ -385,6 +397,37 @@ export class ClientItemInteractions implements LocalDialogSource {
 			});
 	}
 
+	/** Observe mounted-cell compatibility, refreshing when authoritative entity facts change. */
+	observeTarget(
+		target: number,
+		receive: (eligible: boolean | null) => void,
+	): () => void {
+		if (this.#state.kind !== "acquiring")
+			throw new Error("Target observation requires active item acquisition.");
+		const observation: TargetObservation = {
+			source: this.#state.source,
+			target,
+			sequence: allocateOperation(),
+			receive,
+		};
+		this.#targetObservations.add(observation);
+		this.#queryObservation(observation);
+		return () => this.#targetObservations.delete(observation);
+	}
+
+	#queryObservation(observation: TargetObservation): void {
+		const { sequence, source, target } = observation;
+		void this.#session
+			.queryItemUseTarget({ sequence, source, target })
+			.catch((error: unknown) => {
+				if (
+					this.#targetObservations.has(observation) &&
+					observation.sequence === sequence
+				)
+					this.#failure(String(error));
+			});
+	}
+
 	/** Hover checks never submit a use action or open a confirmation. */
 	consider(target: number | null): void {
 		const state = this.#state;
@@ -466,6 +509,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 		this.#destroyed = true;
 		this.#unsubscribe();
 		this.#listeners.clear();
+		this.#targetObservations.clear();
 	}
 
 	#item(source: number) {
@@ -560,6 +604,10 @@ export class ClientItemInteractions implements LocalDialogSource {
 	#receive(event: ClientLifecycleSessionEvent): void {
 		this.#giveConfirmation.receive(event);
 		if (event.type === "item-use-target-result") {
+			for (const observation of this.#targetObservations) {
+				if (observation.sequence === event.result.sequence)
+					observation.receive(event.result.eligible);
+			}
 			const state = this.#state;
 			if (
 				state.kind === "resolving" &&
@@ -616,14 +664,23 @@ export class ClientItemInteractions implements LocalDialogSource {
 					: this.#state.request.sourceOwned !== item.ownedByPlayer)
 			)
 				this.cancel();
-			else if (
-				this.#state.kind === "acquiring" &&
-				this.#state.considered !== null
-			)
-				this.#queryTarget(this.#state, this.#state.considered.target);
+			else if (this.#state.kind === "acquiring") {
+				for (const observation of this.#targetObservations) {
+					observation.sequence = allocateOperation();
+					observation.receive(null);
+					this.#queryObservation(observation);
+				}
+				if (this.#state.considered !== null)
+					this.#queryTarget(this.#state, this.#state.considered.target);
+			}
 		}
 	}
 	#set(state: ItemInteractionState): void {
+		const sameAcquisition =
+			state.kind === "acquiring" &&
+			this.#state.kind === "acquiring" &&
+			state.generation === this.#state.generation;
+		if (!sameAcquisition) this.#targetObservations.clear();
 		this.#state = state;
 		for (const listener of this.#listeners) listener(state);
 	}

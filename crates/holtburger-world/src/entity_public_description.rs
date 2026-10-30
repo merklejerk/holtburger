@@ -2,6 +2,7 @@
 
 use holtburger_common::properties::{
     ItemType, ObjectDescriptionFlag, PropertyBool, PropertyInt, PropertyString, PropertyUpdate,
+    Usable,
 };
 use holtburger_protocol::messages::object::messages::description::PublicWeenieDescription;
 
@@ -12,6 +13,8 @@ pub(crate) struct EntityPublicDescription {
     pub name: Option<String>,
     /// Public classification used for catalog grouping.
     pub item_type: ItemType,
+    /// Public use admission for nearby grouping; appraisal never overrides it.
+    pub usable: Usable,
     /// Public visibility admission; ordinary updates can supersede the spawn flag.
     pub ui_hidden: bool,
     /// Current publicly disclosed quantity, independently absent from its maximum.
@@ -32,6 +35,10 @@ impl EntityPublicDescription {
         Self {
             name: description.name.clone(),
             item_type: ItemType::from_bits_retain(description.item_type),
+            usable: description
+                .usable
+                .map(Usable::from_raw)
+                .unwrap_or(Usable::UNDEF),
             ui_hidden: description
                 .obj_desc_flags
                 .contains(ObjectDescriptionFlag::UI_HIDDEN),
@@ -50,6 +57,9 @@ impl EntityPublicDescription {
             PropertyUpdate::String(PropertyString::Name, value) => self.name = Some(value.clone()),
             PropertyUpdate::Int(PropertyInt::ItemType, value) => {
                 self.item_type = ItemType::from_bits_retain(*value as u32);
+            }
+            PropertyUpdate::Int(PropertyInt::ItemUseable, value) => {
+                self.usable = Usable::from_raw(*value as u32);
             }
             PropertyUpdate::Int(property, value) => {
                 let target = match property {

@@ -12,8 +12,18 @@ import {
 import {
 	NEARBY_ENTITY_CATEGORIES,
 	type ClientEntityFacts,
-	type NearbyEntityCategory,
 } from "./client-entity-mirror";
+
+/** App-local order splits the world's broad item group into Props and Pickups. */
+const NEARBY_CATEGORIES = [
+	...NEARBY_ENTITY_CATEGORIES.map((category) =>
+		category === "item" ? ("prop" as const) : category,
+	),
+	"pickup",
+] as const;
+
+/** Display categories; pickup admission can also overlap other recognized groups. */
+export type NearbyCategory = (typeof NEARBY_CATEGORIES)[number];
 
 /** Category captions are app-local presentation over world-owned semantics. */
 export const NEARBY_CATEGORY_DETAILS = {
@@ -22,15 +32,16 @@ export const NEARBY_CATEGORY_DETAILS = {
 	player: { label: "Players" },
 	corpse: { label: "Corpses" },
 	container: { label: "Containers" },
-	item: { label: "Items" },
+	prop: { label: "Props" },
+	pickup: { label: "Pickups" },
 	portal: { label: "Portals" },
 	lifestone: { label: "Lifestones" },
 	door: { label: "Doors" },
-	switch: { label: "Switches" },
-} as const satisfies Record<NearbyEntityCategory, { readonly label: string }>;
+	useable: { label: "Useable" },
+} as const satisfies Record<NearbyCategory, { readonly label: string }>;
 
-/** Shared category order also provides stable pill and sort order. */
-export const NEARBY_FILTER_OPTIONS = NEARBY_ENTITY_CATEGORIES.map(
+/** Category pills plus pickup admission, which is excluded from Props. */
+export const NEARBY_FILTER_OPTIONS = NEARBY_CATEGORIES.map(
 	(category) => [category, NEARBY_CATEGORY_DETAILS[category].label] as const,
 );
 
@@ -48,8 +59,12 @@ export interface NearbyRow {
 	readonly guid: number;
 	/** World-projected public-only summary; merged inspection fields never enter rows. */
 	readonly facts: NonNullable<ClientEntityFacts["nearby"]>;
+	/** Resolved once for row labels, icons, filtering, and category sorting. */
+	readonly category: NearbyCategory;
 	/** Existing confirmed-open state supplies the corpse subtype label. */
 	readonly corpse: ClientEntityFacts["corpse"];
+	/** World-owned admission for a pickup attempt, independent of examination. */
+	readonly canPickUp: ClientEntityFacts["canPickUp"];
 	/** Current accepted position, distinct from a queued detection's frozen location. */
 	readonly location: NearbyLocation;
 	/** Player-relative meters; absent until a player pose is available. */
@@ -63,11 +78,20 @@ export interface NearbyQuery {
 	/** Raw name query; the spell catalog's tokenizer owns normalization. */
 	readonly text: string;
 	/** Union of selected category pills; empty admits every category. */
-	readonly categories: readonly NearbyEntityCategory[];
+	readonly categories: readonly NearbyCategory[];
 	/** Intersect the category/name result with enabled alert membership. */
 	readonly tracked: boolean;
 	/** Every ordering uses GUID as its final stable tie-breaker. */
 	readonly sort: "distance" | "name" | "category";
+}
+
+/** Keep displayed counts and filtering on the same world-produced admission fact. */
+export function matchesNearbyFilter(
+	row: NearbyRow,
+	filter: NearbyCategory,
+): boolean {
+	if (filter === "pickup") return row.canPickUp;
+	return row.category === filter;
 }
 
 export function filterNearbyRows(
@@ -75,13 +99,15 @@ export function filterNearbyRows(
 	query: NearbyQuery,
 ): NearbyRow[] {
 	const terms = textSearchWords(query.text);
-	const order = NEARBY_FILTER_OPTIONS.map(([category]) => category);
+	const order = NEARBY_CATEGORIES;
 	return rows
 		.filter(
 			(row) =>
 				(!query.tracked || row.matchingRules.length > 0) &&
 				(query.categories.length === 0 ||
-					query.categories.includes(row.facts.category)) &&
+					query.categories.some((filter) =>
+						matchesNearbyFilter(row, filter),
+					)) &&
 				matchesSearchTerms(textSearchWords(row.facts.name), terms),
 		)
 		.sort((a, b) => {
@@ -103,8 +129,7 @@ export function filterNearbyRows(
 					});
 					break;
 				case "category":
-					comparison =
-						order.indexOf(a.facts.category) - order.indexOf(b.facts.category);
+					comparison = order.indexOf(a.category) - order.indexOf(b.category);
 					break;
 			}
 			return comparison || a.guid - b.guid;

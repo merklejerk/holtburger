@@ -6,7 +6,7 @@ use anyhow::Context;
 use std::sync::Arc;
 
 use crate::dynamic_entity_view::{DynamicEntityRuntimeProjection, project_dynamic_entity_runtime};
-use holtburger_content::{MotionSequenceCatalog, WeenieTypeIndex};
+use holtburger_content::MotionSequenceCatalog;
 use holtburger_world::entity::EntityMutationBoundary;
 
 use holtburger_common::Guid;
@@ -107,10 +107,6 @@ pub fn project_client_dynamic_entity(
             crate::semantic_dynamic_entity_map_blip_category(
                 entity.flags,
                 entity.item_type(),
-                world
-                    .weenie_types
-                    .as_ref()
-                    .and_then(|types| types.get(wcid)),
                 entity.usable_flags(),
             ),
             entity.radar_enum().map(|value| value as i32),
@@ -175,15 +171,13 @@ pub(super) struct DynamicEntityTickBaseline {
     metadata: DynamicEntityMetadataBoundary,
 }
 
-/// World-owned mutation evidence and immutable catalog identities sampled together.
+/// World-owned mutation evidence and the immutable motion catalog sampled together.
 #[derive(Clone)]
 struct DynamicEntityMetadataBoundary {
     /// Entity changes must remain observable until the after boundary.
     entities: EntityMutationBoundary,
-    /// Held immutable handles detect both replacement and copy-on-write catalog changes.
+    /// Held immutable handle detects replacement and copy-on-write motion-catalog changes.
     motion_sequences: Arc<MotionSequenceCatalog>,
-    /// Radar classification can change when the parsed type catalog is installed or replaced.
-    weenie_types: Option<Arc<WeenieTypeIndex>>,
 }
 
 impl DynamicEntityMetadataBoundary {
@@ -191,17 +185,11 @@ impl DynamicEntityMetadataBoundary {
         Self {
             entities: world.entities.mutation_boundary(),
             motion_sequences: Arc::clone(&world.motion_sequences),
-            weenie_types: world.weenie_types.as_ref().map(Arc::clone),
         }
     }
 
-    fn catalogs_unchanged(&self, world: &WorldState) -> bool {
+    fn motion_catalog_unchanged(&self, world: &WorldState) -> bool {
         Arc::ptr_eq(&self.motion_sequences, &world.motion_sequences)
-            && match (&self.weenie_types, &world.weenie_types) {
-                (None, None) => true,
-                (Some(before), Some(after)) => Arc::ptr_eq(before, after),
-                _ => false,
-            }
     }
 
     /// Refresh independently advancing fields, or rebuild all facts when reuse lacks proof.
@@ -209,11 +197,11 @@ impl DynamicEntityMetadataBoundary {
         &self,
         world: &WorldState,
         previous: &crate::DynamicEntityView,
-        catalogs_unchanged: bool,
+        motion_catalog_unchanged: bool,
         traversed: bool,
     ) -> Result<Option<crate::DynamicEntityView>, ClientDynamicEntityViewError> {
         let guid = previous.identity.guid;
-        if !catalogs_unchanged || !world.entities.unchanged_since(guid, &self.entities) {
+        if !motion_catalog_unchanged || !world.entities.unchanged_since(guid, &self.entities) {
             return project_client_dynamic_entity(world, guid);
         }
         let Some(runtime) = project_client_entity_runtime(world, guid)? else {
@@ -319,7 +307,7 @@ impl ClientRuntime {
         duration_ms: f64,
         body_motions: &std::collections::HashMap<Guid, ClientBodyMotion>,
     ) -> anyhow::Result<Option<DynamicEntityTickBatch>> {
-        let catalogs_unchanged = before.metadata.catalogs_unchanged(&self.world);
+        let motion_catalog_unchanged = before.metadata.motion_catalog_unchanged(&self.world);
         let before_by_guid = before
             .views
             .into_iter()
@@ -342,10 +330,12 @@ impl ClientRuntime {
             let motion = body_motions.get(&guid);
             let traversed = matches!(motion, Some(ClientBodyMotion::Physical(path))
                 if path.legs().iter().any(|leg| leg.end() != path.initial()));
-            let projected =
-                before
-                    .metadata
-                    .project_after(&self.world, previous, catalogs_unchanged, traversed);
+            let projected = before.metadata.project_after(
+                &self.world,
+                previous,
+                motion_catalog_unchanged,
+                traversed,
+            );
             let entity = match projected {
                 Ok(Some(entity)) => entity,
                 Ok(None) => continue,
@@ -709,7 +699,6 @@ mod tests {
             crate::semantic_dynamic_entity_map_blip_category(
                 ObjectDescriptionFlag::LIFE_STONE,
                 None,
-                None,
                 holtburger_common::properties::Usable::UNDEF
             ),
             crate::DynamicEntityMapBlipCategory::Lifestone
@@ -718,7 +707,6 @@ mod tests {
             crate::semantic_dynamic_entity_map_blip_category(
                 ObjectDescriptionFlag::empty(),
                 Some(ItemType::LIFE_STONE),
-                None,
                 holtburger_common::properties::Usable::UNDEF
             ),
             crate::DynamicEntityMapBlipCategory::Lifestone

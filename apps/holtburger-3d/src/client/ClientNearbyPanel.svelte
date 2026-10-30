@@ -16,6 +16,7 @@
 	} from "./client-entity-alerts";
 	import {
 		filterNearbyRows,
+		matchesNearbyFilter,
 		NEARBY_FILTER_OPTIONS,
 		NEARBY_CATEGORY_DETAILS,
 		type NearbyQuery,
@@ -231,8 +232,8 @@
 											? query.categories.filter((value) => value !== category)
 											: [...query.categories, category],
 									})}
-								>{label} ({view.rows.filter(
-									(row) => row.facts.category === category,
+								>{label} ({view.rows.filter((row) =>
+									matchesNearbyFilter(row, category),
 								).length})</button
 							>
 						{/each}
@@ -290,13 +291,11 @@
 								>
 								<span
 									class="category-icon"
-									data-entity-category={row.facts.category}
+									data-entity-category={row.category}
 									role="img"
-									aria-label={NEARBY_CATEGORY_DETAILS[row.facts.category].label}
-									title={NEARBY_CATEGORY_DETAILS[row.facts.category].label}
-									><ClientEntityCategoryIcon
-										category={row.facts.category}
-									/></span
+									aria-label={NEARBY_CATEGORY_DETAILS[row.category].label}
+									title={NEARBY_CATEGORY_DETAILS[row.category].label}
+									><ClientEntityCategoryIcon category={row.category} /></span
 								>
 								<button
 									class="ui-catalog-trigger entity-name"
@@ -321,14 +320,14 @@
 								<div class="ui-catalog-details entity-details">
 									<span
 										class="ui-pill"
-										data-entity-category={row.facts.category}
-										title={NEARBY_CATEGORY_DETAILS[row.facts.category].label}
+										data-entity-category={row.category}
+										title={NEARBY_CATEGORY_DETAILS[row.category].label}
 									>
 										{row.facts.vendor
 											? "Vendor"
 											: row.corpse !== null
 												? `Corpse · ${row.corpse}`
-												: NEARBY_CATEGORY_DETAILS[row.facts.category].label}
+												: NEARBY_CATEGORY_DETAILS[row.category].label}
 									</span>
 									{#if row.location.waypoint !== null}{@const waypoint =
 											row.location.waypoint}<button

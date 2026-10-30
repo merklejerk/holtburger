@@ -173,8 +173,14 @@ impl ExplorerHostRuntime {
             ExplorerPossessionControlProfile::standard()
                 .context("failed to construct standard Explorer possession control profile")?,
         ));
-        let catalog = Arc::new(ExplorerWeenieCatalog::new(Arc::clone(
-            &content.weenie_catalog,
+        let catalog = Arc::new(ExplorerWeenieCatalog::new(Arc::new(
+            holtburger_content::WeenieCatalogContent::discover(
+                content
+                    .repository
+                    .source_description()
+                    .map(std::path::Path::new),
+                None,
+            ),
         )));
         let explorer_entity_driver = Arc::new(ExplorerEntityDriver::new(
             catalog,
@@ -236,7 +242,6 @@ impl ExplorerHostRuntime {
         HostStatus {
             app_name: "holtburger-3d",
             status: "landblock-source-batch-host-ready",
-            entity_metadata: self.content.weenie_catalog.capability(),
         }
     }
 

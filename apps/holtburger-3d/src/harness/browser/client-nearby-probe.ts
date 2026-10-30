@@ -144,6 +144,97 @@ export async function probeClientNearby(dependencies: {
 	require(examineRequests().length === 0, "left click only selects its entity");
 	input('[aria-label="Search entity names"]', "");
 	await tick();
+	const pickup = nearbyFacts(7, "Loose Gem");
+	require(pickup.nearby !== null, "pickup fixture has public facts");
+	const publishPickup = (canPickUp: boolean) =>
+		emit("client-entity-facts-changed", {
+			projectileSupply: null,
+			salvage: null,
+			worldContainer: null,
+			upserts: [
+				{
+					...pickup,
+					canPickUp,
+					nearby: { ...pickup.nearby, category: "item" },
+				},
+			],
+			removed: [],
+		});
+	publishPickup(true);
+	await settle();
+	await click(".entity-filters summary");
+	const pickupFilter = '.ui-filter-pill[data-entity-category="pickup"]';
+	const propsFilter = '.ui-filter-pill[data-entity-category="prop"]';
+	require(document.querySelector(propsFilter)?.textContent?.trim() ===
+		"Props (0)", "props exclude pickup-eligible items");
+	await click(propsFilter);
+	require(document.querySelectorAll("[data-entity-guid]").length ===
+		0, "props filter excludes pickups");
+	await click(propsFilter);
+	require(document.querySelector(pickupFilter)?.textContent?.trim() ===
+		"Pickups (1)", "pickup count uses world eligibility");
+	await click(pickupFilter);
+	require(document.querySelectorAll("[data-entity-guid]").length === 1 &&
+		document.querySelector('[data-entity-guid="7"]') !==
+			null, "pickup filter shows eligible entities without examination");
+	require(document
+		.querySelector('[data-entity-guid="7"] .category-icon')
+		?.getAttribute("aria-label") ===
+		"Pickups", "pickup row label agrees with its filter");
+	publishPickup(false);
+	await settle();
+	require(document.querySelectorAll("[data-entity-guid]").length === 0 &&
+		document.querySelector(pickupFilter)?.textContent?.trim() ===
+			"Pickups (0)", "pickup rows and count follow eligibility changes");
+	require(document.querySelector(propsFilter)?.textContent?.trim() ===
+		"Props (1)", "ineligible items move into props");
+	require(examineRequests().length ===
+		0, "pickup filtering never examines entities");
+	await click(pickupFilter);
+	await click(propsFilter);
+	require(document.querySelectorAll("[data-entity-guid]").length === 1 &&
+		document.querySelector('[data-entity-guid="7"]') !==
+			null, "props filter shows the item after pickup eligibility is withdrawn");
+	require(document
+		.querySelector('[data-entity-guid="7"] .category-icon')
+		?.getAttribute("aria-label") ===
+		"Props", "row label follows the transition from pickup to prop");
+	await click(propsFilter);
+	await click(".entity-filters summary");
+	emit("client-entity-facts-changed", {
+		projectileSupply: null,
+		salvage: null,
+		worldContainer: null,
+		upserts: [
+			{
+				...pickup,
+				canPickUp: false,
+				nearby: { ...pickup.nearby, name: "Lever", category: "useable" },
+			},
+		],
+		removed: [],
+	});
+	await settle();
+	await click(".entity-filters summary");
+	const useableFilter = '.ui-filter-pill[data-entity-category="useable"]';
+	require(document.querySelector(useableFilter)?.textContent?.trim() ===
+		"Useable (1)", "useable category has a live count");
+	await click(useableFilter);
+	require(document.querySelectorAll("[data-entity-guid]").length === 1 &&
+		document.querySelector('[data-entity-guid="7"] .category-icon svg') !==
+			null, "useable filter and category icon accept public-only lever facts");
+	require(examineRequests().length ===
+		0, "useable filtering never examines entities");
+	await click(useableFilter);
+	await click(".entity-filters summary");
+	emit("client-entity-facts-changed", {
+		projectileSupply: null,
+		salvage: null,
+		worldContainer: null,
+		upserts: [facts[0]],
+		removed: [],
+	});
+	await settle();
 	const categoryIcon = document.querySelector(
 		'[data-entity-guid="8"] .category-icon svg',
 	);

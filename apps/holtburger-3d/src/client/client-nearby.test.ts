@@ -62,6 +62,71 @@ describe("ClientNearby", () => {
 		if (ready) accept([rule("one")]);
 		return { session, owner, chat, accept, save, scene };
 	}
+	it("filters pickups across categories and follows eligibility changes without examination", () => {
+		const { session, owner } = setup();
+		const item = nearbyFacts(7, "Loose Gem");
+		const pack = nearbyFacts(8, "Loose Pack");
+		if (item.nearby === null || pack.nearby === null)
+			throw new Error("fixture requires public facts");
+		const gem = {
+			...item,
+			canPickUp: true,
+			nearby: { ...item.nearby, category: "item" as const },
+		};
+		const bag = {
+			...pack,
+			canPickUp: true,
+			nearby: { ...pack.nearby, category: "container" as const },
+		};
+		session.baseline(
+			[gem, bag, { ...gem, guid: 9, canPickUp: false }],
+			[nearbyPose(7, 5), nearbyPose(8, 10), nearbyPose(9, 15)],
+		);
+		const query = {
+			text: "",
+			categories: ["pickup"] as const,
+			tracked: false,
+			sort: "distance" as const,
+		};
+		const pickups = () =>
+			filterNearbyRows(owner.read().rows, query).map((row) => row.guid);
+		const props = () =>
+			filterNearbyRows(owner.read().rows, {
+				...query,
+				categories: ["prop"],
+			}).map((row) => row.guid);
+		expect(pickups()).toEqual([7, 8]);
+		expect(props()).toEqual([9]);
+		expect(owner.read().rows.map((row) => [row.guid, row.category])).toEqual([
+			[7, "pickup"],
+			[8, "container"],
+			[9, "prop"],
+		]);
+		expect(
+			filterNearbyRows(owner.read().rows, {
+				...query,
+				categories: [],
+				sort: "category",
+			}).map((row) => row.guid),
+		).toEqual([8, 9, 7]);
+		expect(
+			filterNearbyRows(owner.read().rows, {
+				...query,
+				categories: ["pickup", "prop"],
+			}).map((row) => row.guid),
+		).toEqual([7, 8, 9]);
+		expect(
+			filterNearbyRows(owner.read().rows, { ...query, text: "gem" }).map(
+				(row) => row.guid,
+			),
+		).toEqual([7]);
+		session.update([{ ...gem, canPickUp: false }]);
+		expect(pickups()).toEqual([8]);
+		expect(props()).toEqual([7, 9]);
+		expect(owner.read().rows.find((row) => row.guid === 7)?.category).toBe(
+			"prop",
+		);
+	});
 	it("matches authored names while formatting unnamed alert text", () => {
 		const { session, owner, chat, accept } = setup();
 		accept([rule("generated", "*Unnamed*")]);

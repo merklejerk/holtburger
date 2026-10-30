@@ -280,7 +280,6 @@ describe("sortContentsItems", () => {
 				mapCategory: "other" as const,
 				objectFlags: 0,
 				wcid: null,
-				weenieType: null,
 				pyrealBalance: null,
 				aetheriaActivation: null,
 				burden: null,
@@ -314,12 +313,11 @@ describe("sortContentsItems", () => {
 });
 
 describe("inventory type precedence", () => {
-	it("orders item type, weenie type and WCID before names, with missing facts last", () => {
+	it("orders public item type and WCID before names, with missing templates last", () => {
 		const classified = (
 			guid: number,
 			name: string,
 			itemType: number,
-			weenieType: string | null,
 			wcid: number | null,
 		): ClientEntityFacts => {
 			const entity = child(guid, 1, { kind: "item", index: guid });
@@ -327,33 +325,26 @@ describe("inventory type precedence", () => {
 				throw new Error("Known fixture required.");
 			return {
 				...entity,
-				description: {
-					...entity.description,
-					name,
-					itemType,
-					weenieType,
-					wcid,
-				},
+				description: { ...entity.description, name, itemType, wcid },
 			};
 		};
 		const items = [
-			classified(1, "First category", 1, "Scroll", 900),
-			classified(2, "Zebra", 2, "Food", 10),
-			classified(3, "Apple", 2, "Food", 20),
-			classified(4, "A later type", 2, "Scroll", 1),
-			classified(5, "Unknown type", 2, null, 1),
-			classified(6, "Unknown template", 2, "Food", null),
-			classified(7, "Apple", 2, "Food", 10),
-			classified(8, "Apple", 2, "Food", 10),
+			classified(1, "First category", 1, 900),
+			classified(2, "Zebra", 2, 10),
+			classified(3, "Apple", 2, 20),
+			classified(4, "Low template", 2, 1),
+			classified(5, "Unknown template", 2, null),
+			classified(6, "Apple", 2, 10),
+			classified(7, "Apple", 2, 10),
 		];
 		expect(
 			sortContentsItems([...items].reverse(), "item-type").map(
 				(item) => item.guid,
 			),
-		).toEqual([1, 7, 8, 2, 3, 6, 4, 5]);
+		).toEqual([1, 4, 6, 7, 2, 3, 5]);
 		expect(
 			sortContentsItems(items, "alphabetical").map((item) => item.guid),
-		).toEqual([4, 3, 7, 8, 1, 6, 5, 2]);
+		).toEqual([3, 6, 7, 1, 4, 5, 2]);
 		expect(sortContentsItems(items, "native")).toBe(items);
 	});
 });

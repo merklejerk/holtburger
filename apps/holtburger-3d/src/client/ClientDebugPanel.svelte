@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { formatItemType, formatObjectFlags } from "./client-entity-labels";
 	import type { ClientSelectedEntity } from "./client-selected-entity";
-	import type { WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 	import { onMount } from "svelte";
 	import type {
 		ClientDiagnosticResidency,
@@ -10,8 +9,6 @@
 	import ToggleField from "../app/ToggleField.svelte";
 
 	interface Props {
-		/** Startup catalog availability for switch classification diagnostics. */
-		readonly entityMetadata: WeenieCatalogCapability | null;
 		readonly readDiagnostics: () => ClientGameplayPresentationDiagnostics | null;
 		/** Selection is resolved in the client layer, independently of scene residency. */
 		readonly readSelectedEntity: () => ClientSelectedEntity | null;
@@ -26,7 +23,6 @@
 	}
 
 	const {
-		entityMetadata,
 		readDiagnostics,
 		readSelectedEntity,
 		entityCollisionDisabled,
@@ -71,16 +67,6 @@
 {/snippet}
 
 <div class="debug-panel-body ui-body">
-	<section aria-label="Entity metadata">
-		<strong>Entity metadata</strong>
-		{#if entityMetadata === null}<p class="ui-muted">Loading catalog status…</p>
-		{:else if entityMetadata.status === "available"}<p class="ui-muted">
-				{entityMetadata.recordCount.toLocaleString()} templates available
-			</p>
-		{:else}<p class="ui-muted">
-				Switch classification unavailable: {entityMetadata.reason}
-			</p>{/if}
-	</section>
 	<section class="selected-details" aria-label="Selected entity details">
 		<strong>Selected entity</strong>
 		{#if selected === null}
@@ -105,15 +91,6 @@
 						{@render diagnosticRow(
 							"Object flags",
 							formatObjectFlags(facts.description.objectFlags),
-						)}
-						{@render diagnosticRow(
-							"Weenie type (catalog)",
-							facts.description.weenieType === null
-								? "unavailable"
-								: facts.description.weenieType.replace(
-										/([a-z0-9])([A-Z])/g,
-										"$1 $2",
-									),
 						)}
 					{:else}
 						{@render diagnosticRow("Description", "Loading…")}

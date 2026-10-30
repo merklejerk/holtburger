@@ -100,5 +100,5 @@ pub use texture_pixels::{ResolvedSurfaceTexturePixels, TexturePixelFormat};
 
 pub mod weenie_catalog;
 pub use weenie_catalog::{
-    WeenieCatalogCapability, WeenieCatalogContent, WeenieCatalogUnavailableKind, WeenieTypeIndex,
+    WeenieCatalogCapability, WeenieCatalogContent, WeenieCatalogUnavailableKind,
 };

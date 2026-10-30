@@ -8,14 +8,14 @@
 	import PortalIcon from "../assets/icons/entity-category-portal.svg?component";
 	import LifestoneIcon from "../assets/icons/entity-category-lifestone.svg?component";
 	import DoorIcon from "../assets/icons/entity-category-door.svg?component";
-	import SwitchIcon from "../assets/icons/entity-category-switch.svg?component";
-	import type { NearbyEntityCategory } from "./client-entity-mirror";
+	import UseableIcon from "../assets/icons/hud-interact.svg?component";
+	import type { NearbyCategory } from "./client-nearby-policy";
 
 	const {
 		category,
 	}: {
-		/** Public entity category selects dedicated artwork, independently of HUD action icons. */
-		readonly category: NearbyEntityCategory;
+		/** Resolved row category selects artwork, independently of the selected HUD action. */
+		readonly category: NearbyCategory;
 	} = $props();
 	const icons = {
 		monster: MonsterIcon,
@@ -23,12 +23,13 @@
 		player: PlayerIcon,
 		corpse: CorpseIcon,
 		container: ContainerIcon,
-		item: ItemIcon,
+		prop: ItemIcon,
+		pickup: ItemIcon,
 		portal: PortalIcon,
 		lifestone: LifestoneIcon,
 		door: DoorIcon,
-		switch: SwitchIcon,
-	} satisfies Record<NearbyEntityCategory, typeof MonsterIcon>;
+		useable: UseableIcon,
+	} satisfies Record<NearbyCategory, typeof MonsterIcon>;
 	const Icon = $derived(icons[category]);
 </script>
 

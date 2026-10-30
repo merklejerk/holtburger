@@ -43,7 +43,6 @@ export function entityFacts(
 			mapCategory: "other",
 			objectFlags: 0,
 			wcid: null,
-			weenieType: null,
 			pyrealBalance: null,
 			aetheriaActivation: null,
 			burden: null,

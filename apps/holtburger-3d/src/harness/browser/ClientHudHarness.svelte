@@ -1564,7 +1564,6 @@
 						mapCategory: "other",
 						objectFlags: 0,
 						wcid: guid === 7 ? 42 : null,
-						weenieType: null,
 						pyrealBalance: null,
 						aetheriaActivation: null,
 						burden: null,
@@ -6076,11 +6075,6 @@
 					}}
 					onCastSpell={(id) => void castSpell(id)}
 					{itemInteractions}
-					entityMetadata={{
-						status: "available",
-						path: "fixture.hwc",
-						recordCount: 1,
-					}}
 					entityCollisionDisabled={false}
 					onEntityCollisionDisabledChange={() => {}}
 					cameraController={cameraEnabled ? cameraController : null}

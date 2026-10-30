@@ -379,31 +379,6 @@ mod tests {
     }
 
     #[test]
-    fn shared_catalog_parses_native_switch_index_and_rejects_invalid_types() {
-        use holtburger_common::properties::WeenieType;
-        let directory = tempdir().unwrap();
-        let path = directory.path().join(CATALOG_FILE_NAME);
-        let mut switch = template(286);
-        switch.weenie_type = WeenieType::Switch as i32;
-        write_catalog_atomic(&path, &[switch.clone()]).unwrap();
-        let content = WeenieCatalogContent::discover(None, Some(path.clone()));
-        let types = content.types().expect("parsed metadata");
-        assert_eq!(types.get(286), Some(WeenieType::Switch));
-        assert_eq!(types.get(999), None);
-        switch.weenie_type = i32::MAX;
-        write_catalog_atomic(&path, &[switch]).unwrap();
-        let invalid = WeenieCatalogContent::discover(None, Some(path));
-        assert!(matches!(
-            invalid.capability(),
-            WeenieCatalogCapability::Unavailable {
-                kind: WeenieCatalogUnavailableKind::Invalid,
-                ..
-            }
-        ));
-        assert!(invalid.types().is_none());
-    }
-
-    #[test]
     fn directory_and_hba_selections_choose_only_the_canonical_sibling_name() {
         let directory = tempdir().unwrap();
         let path = directory.path().join(CATALOG_FILE_NAME);

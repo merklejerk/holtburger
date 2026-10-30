@@ -1,7 +1,7 @@
 import { z } from "zod";
 
-/** Shared optional content capability reported by either host mode. */
-export const weenieCatalogCapabilitySchema = z.discriminatedUnion("status", [
+/** Optional server-snapshot capability reported by the Explorer host. */
+const weenieCatalogCapabilitySchema = z.discriminatedUnion("status", [
 	z.object({
 		status: z.literal("available"),
 		path: z.string(),

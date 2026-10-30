@@ -207,7 +207,14 @@ export class ClientNearby {
 				rows.push({
 					guid,
 					facts: entity.nearby,
+					category:
+						entity.nearby.category === "item"
+							? entity.canPickUp
+								? "pickup"
+								: "prop"
+							: entity.nearby.category,
 					corpse: entity.corpse,
+					canPickUp: entity.canPickUp,
 					location: this.#location(pose),
 					distance:
 						player === null

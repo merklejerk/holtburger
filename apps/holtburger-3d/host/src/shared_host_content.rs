@@ -3,7 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use holtburger_content::{ContentDecodeCache, ContentRepository, WeenieCatalogContent};
+use holtburger_content::{ContentDecodeCache, ContentRepository};
 use holtburger_core::{ContentAssetRuntime, ContentAssetService};
 use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, SpellTable, XpTable};
 use holtburger_world::WorldBootstrap;
@@ -32,8 +32,6 @@ pub struct SharedHostContent {
     pub motion_catalog: Arc<holtburger_content::MotionSequenceCatalog>,
     /// Setup dimensions prepared with the motion catalog, reused by client bootstrap.
     setup_dimensions: Arc<holtburger_content::SetupDimensionCatalog>,
-    /// Optional static entity catalog shared by both host modes.
-    pub weenie_catalog: Arc<WeenieCatalogContent>,
     /// Lazy map-image service, independent of client authority and scene residency.
     pub world_map: Arc<crate::world_map::WorldMapService>,
     /// Lazily parsed client bootstrap, cached at the content owner rather than in either mode.
@@ -49,17 +47,6 @@ pub struct SharedHostContent {
 impl SharedHostContent {
     /// Builds a shared content owner from an injected repository for tests and diagnostics.
     pub fn from_repository(repository: Arc<ContentRepository>) -> Result<Self> {
-        Self::from_repository_with_catalog(repository, None)
-    }
-
-    pub(crate) fn from_repository_with_catalog(
-        repository: Arc<ContentRepository>,
-        override_path: Option<std::path::PathBuf>,
-    ) -> Result<Self> {
-        let weenie_catalog = Arc::new(WeenieCatalogContent::discover(
-            repository.source_description().map(std::path::Path::new),
-            override_path,
-        ));
         let service =
             ContentAssetService::new(Arc::clone(&repository), Arc::new(ContentDecodeCache::new()));
         let motion_reference = repository
@@ -75,7 +62,6 @@ impl SharedHostContent {
             world_map,
             runtime: ContentAssetRuntime::new(service.clone()),
             repository,
-            weenie_catalog,
             service: Arc::new(service),
             motion_catalog: Arc::new(motion_reference.motion_sequences),
             setup_dimensions: Arc::new(motion_reference.setup_dimensions),
@@ -152,7 +138,10 @@ impl SharedHostContent {
             .soul_emotes()
             .context("failed to load soul emote catalog for client bootstrap")?;
         let bootstrap = WorldBootstrap {
-            weenie_types: self.weenie_catalog.types(),
+            housing_storage_wcid: self
+                .repository
+                .read_housing_storage_wcid()
+                .context("failed to resolve housing-storage identity for client bootstrap")?,
             skill_table: Arc::new(skill_table),
             secondary_attribute_table: Arc::new(secondary_attribute_table),
             spell_table: Arc::new(spell_table),

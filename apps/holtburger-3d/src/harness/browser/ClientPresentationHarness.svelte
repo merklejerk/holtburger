@@ -326,15 +326,6 @@
 						authority.exit("explicit-disconnect", "Fixture disconnected");
 						return;
 					}
-					if (command === "host_status")
-						return {
-							entityMetadata: {
-								status: "unavailable",
-								path: null,
-								kind: "missing",
-								reason: "Presentation fixture has no server catalog",
-							},
-						};
 					if (command === "load_soul_emotes")
 						return soulEmoteFixture().references;
 					if (command === "prepare_ui_icons") {

@@ -79,10 +79,6 @@
 		type ClientSelectedEntity,
 	} from "./client-selected-entity";
 	import { z } from "zod";
-	import {
-		weenieCatalogCapabilitySchema,
-		type WeenieCatalogCapability,
-	} from "../lib/host/weenie-catalog-capability";
 	import ClientMessageDialog from "./ClientMessageDialog.svelte";
 	import ClientToastOverlay from "./ClientToastOverlay.svelte";
 	import { ClientContractNotifications } from "./client-contract-notifications";
@@ -2002,8 +1998,6 @@
 		}),
 	);
 
-	/** One startup result consumed only by the diagnostics panel. */
-	let entityMetadata = $state<WeenieCatalogCapability | null>(null);
 	onMount(() => {
 		let disposed = false;
 		const unsubscribeVisualCacheFailure =
@@ -2025,17 +2019,6 @@
 						"command",
 						`Soul-emote catalog could not be loaded: ${diagnostic(error)}`,
 					);
-			});
-		void transport
-			.invoke("host_status")
-			.then((value) => {
-				const status = z
-					.object({ entityMetadata: weenieCatalogCapabilitySchema })
-					.parse(value);
-				if (!disposed) entityMetadata = status.entityMetadata;
-			})
-			.catch((error: unknown) => {
-				if (!disposed) appLifecycle.fail("command", diagnostic(error));
 			});
 		const owner = new ClientLifecycleSession(
 			hostClientLifecycleTransport(transport),
@@ -2463,7 +2446,6 @@
 			emotesEnabled={gameplayInputEnabled}
 			onToggleCombat={() => void toggleCombatMode()}
 			onCastSpell={(spellId) => void castSpell(spellId)}
-			{entityMetadata}
 			cameraController={lifecycle.kind === "in-world" ? cameraController : null}
 			{debugEnabled}
 			{nearby}

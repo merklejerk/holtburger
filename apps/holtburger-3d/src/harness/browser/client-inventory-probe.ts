@@ -35,7 +35,6 @@ function item(
 			mapCategory: "other",
 			objectFlags: 0,
 			wcid: null,
-			weenieType: null,
 			pyrealBalance: null,
 			aetheriaActivation: null,
 			burden: null,
@@ -163,7 +162,6 @@ export async function probeClientInventory(options: {
 				mapCategory: "other",
 				objectFlags: 0,
 				wcid: null,
-				weenieType: null,
 				pyrealBalance: 12345,
 				aetheriaActivation: null,
 				burden: null,
@@ -193,7 +191,6 @@ export async function probeClientInventory(options: {
 				mapCategory: "other",
 				objectFlags: 0,
 				wcid: null,
-				weenieType: null,
 				pyrealBalance: null,
 				aetheriaActivation: null,
 				burden: null,
@@ -318,7 +315,6 @@ export async function probeClientInventory(options: {
 			mapCategory: "other",
 			objectFlags: 0,
 			wcid: null,
-			weenieType: null,
 			pyrealBalance: null,
 			aetheriaActivation: null,
 			burden: null,
@@ -343,7 +339,6 @@ export async function probeClientInventory(options: {
 			mapCategory: "other",
 			objectFlags: 0x8000,
 			wcid: 123,
-			weenieType: "Food",
 			pyrealBalance: null,
 			aetheriaActivation: null,
 			burden: null,
@@ -880,7 +875,6 @@ export async function probeClientInventory(options: {
 		!inventoryDetails.textContent.includes("Container") ||
 		!inventoryDetails.textContent.includes("123 (0x0000007b)") ||
 		!inventoryDetails.textContent.includes("Object flags") ||
-		!inventoryDetails.textContent.includes("Weenie type (catalog)") ||
 		!inventoryDetails.textContent.includes("Food") ||
 		inventoryJson === undefined ||
 		!inventoryJson.includes('"ownedByPlayer": true') ||
@@ -904,7 +898,6 @@ export async function probeClientInventory(options: {
 			mapCategory: "other",
 			objectFlags: 0,
 			wcid: null,
-			weenieType: null,
 			pyrealBalance: null,
 			aetheriaActivation: null,
 			burden: null,
@@ -1093,7 +1086,6 @@ export async function probeClientInventory(options: {
 			mapCategory: "other",
 			objectFlags: 0,
 			wcid: null,
-			weenieType: null,
 			pyrealBalance: null,
 			aetheriaActivation: null,
 			burden: null,

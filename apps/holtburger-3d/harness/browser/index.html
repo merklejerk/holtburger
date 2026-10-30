@@ -2,6 +2,10 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
+		<!-- Establish cascade priority before bundled styles can register layers. -->
+		<style>
+			@layer base, components, theme, overrides;
+		</style>
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<title>Holtburger 3D Browser Harness</title>

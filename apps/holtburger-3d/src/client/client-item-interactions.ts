@@ -1,3 +1,4 @@
+import { allocateItemUseOperation } from "./client-item-use-sequence";
 import { ClientConfirmationSuppression } from "./client-confirmation-suppression";
 import type {
 	LocalConfirmationRequest,
@@ -84,14 +85,6 @@ type Session = Pick<
 	| "equipItem"
 	| "submitInventory"
 >;
-
-// Identities survive controller replacement so late host results cannot match a new owner.
-let nextOperation = 0;
-function allocateOperation(): number {
-	if (nextOperation === 0xffff_ffff)
-		throw new Error("Item interaction identity space exhausted.");
-	return ++nextOperation;
-}
 
 /** Frontend item interactions. Rust evaluates consequences; this owner decides whether to ask. */
 export class ClientItemInteractions implements LocalDialogSource {
@@ -239,7 +232,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 			source,
 			recipient,
 			question: {
-				requestId: `give-${allocateOperation()}`,
+				requestId: `give-${allocateItemUseOperation()}`,
 				text: `Give ${item.description.name} to ${target.description.name}?${item.description.stackCount === null ? "" : " This gives the entire stack."}`,
 				acceptLabel: "Give",
 				cancelLabel: "Cancel",
@@ -300,7 +293,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 				source,
 				name: item.description.name,
 				sourceOwned: item.ownedByPlayer,
-				generation: allocateOperation(),
+				generation: allocateItemUseOperation(),
 				considered: null,
 			});
 		} else if (
@@ -384,7 +377,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 			source,
 			sourceOwned: item.ownedByPlayer,
 			target,
-			sequence: allocateOperation(),
+			sequence: allocateItemUseOperation(),
 		};
 		this.#set(state);
 		// Validating the player also checks the source's creature target mask in world.
@@ -407,7 +400,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 		const observation: TargetObservation = {
 			source: this.#state.source,
 			target,
-			sequence: allocateOperation(),
+			sequence: allocateItemUseOperation(),
 			receive,
 		};
 		this.#targetObservations.add(observation);
@@ -441,7 +434,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 	}
 
 	#queryTarget(state: Acquisition, target: number): void {
-		const sequence = allocateOperation();
+		const sequence = allocateItemUseOperation();
 		this.#set({
 			...state,
 			considered: { target, sequence, eligibility: "pending" },
@@ -468,7 +461,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 		if (target !== null)
 			this.#submit(
 				{ kind: "targeted", source: state.source, target },
-				{ ...state, generation: allocateOperation(), considered: null },
+				{ ...state, generation: allocateItemUseOperation(), considered: null },
 			);
 		return true;
 	}
@@ -488,7 +481,10 @@ export class ClientItemInteractions implements LocalDialogSource {
 			this.cancel();
 			return;
 		}
-		this.#send({ ...state.request, sequence: allocateOperation() }, null);
+		this.#send(
+			{ ...state.request, sequence: allocateItemUseOperation() },
+			null,
+		);
 	}
 
 	/** Keyboard ownership changes retire targeting, including retries, without losing dispatched results. */
@@ -541,7 +537,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 		}
 		this.#send(
 			{
-				sequence: allocateOperation(),
+				sequence: allocateItemUseOperation(),
 				player: read.level.playerGuid,
 				sourceOwned: source.ownedByPlayer,
 				intent,
@@ -586,7 +582,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 					expected: { kind: "destroy-item", target, amount },
 				},
 				question: {
-					requestId: "item-use-" + allocateOperation(),
+					requestId: "item-use-" + allocateItemUseOperation(),
 					text:
 						"Using this mana stone will destroy " +
 						amount +
@@ -666,7 +662,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 				this.cancel();
 			else if (this.#state.kind === "acquiring") {
 				for (const observation of this.#targetObservations) {
-					observation.sequence = allocateOperation();
+					observation.sequence = allocateItemUseOperation();
 					observation.receive(null);
 					this.#queryObservation(observation);
 				}

@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { ClientCombineCells } from "./client-combine-cells";
-	import type { ClientChatSuppressionSettings } from "./client-settings-contract";
+	import type {
+		ClientChatSuppressionSettings,
+		ClientLockInteractionSettings,
+	} from "./client-settings-contract";
 	import type {
 		ClientGameplayOption,
 		ClientGameplayPreferences,
@@ -108,6 +111,8 @@
 	import type { ClientInventoryState } from "./client-inventory-state";
 	import ClientDebugPanel from "./ClientDebugPanel.svelte";
 	import ClientLogopolisWindow from "./ClientLogopolisWindow.svelte";
+	import ClientLocksWindow from "./ClientLocksWindow.svelte";
+	import type { ClientLocksState } from "./client-locks-state";
 	import ClientHudWindow from "./ClientHudWindow.svelte";
 	import ClientWorldPanel from "./ClientWorldPanel.svelte";
 	import type { WorldMapSource } from "../lib/game/world-map/types";
@@ -172,6 +177,12 @@
 	interface Props {
 		/** Local chat admission preferences, independent of server character options. */
 		readonly chatSuppression: ClientChatSuppressionSettings;
+		/** Local persisted policy for key automation and chooser presentation. */
+		readonly lockInteractions: ClientLockInteractionSettings;
+		/** Persist local lock policy through the settings owner. */
+		readonly onLockInteractionsChange: (
+			settings: ClientLockInteractionSettings,
+		) => void;
 		readonly onChatSuppressionChange: (
 			settings: ClientChatSuppressionSettings,
 		) => void;
@@ -339,6 +350,7 @@
 		readonly logopolisLaunchRevision: number;
 		/** Character-owned salvage draft and local confirmation policy. */
 		readonly salvage: ClientSalvageState | null;
+		readonly locks: ClientLocksState | null;
 		/** Session-owned P2P gestures and confirmed offer presentation. */
 		readonly trade: ClientTradeState | null;
 		/** Presentation owner for confirmed external storage, independent of system-panel selection. */
@@ -359,7 +371,7 @@
 		readonly onRetryBook: () => void;
 		readonly objectPreviewService: ClientObjectPreviewService;
 		readonly onExamineEntity: () => void;
-		/** Select and examine an entity represented by an item-backed HUD cell. */
+		/** Inspect the explicit identity without changing gameplay selection. */
 		readonly onExamineItem: (guid: number) => void;
 		readonly onCloseInspection: () => void;
 		readonly readCombatTargetFrame: () => ClientCombatTargetFrame | null;
@@ -436,6 +448,8 @@
 	}
 
 	let {
+		lockInteractions,
+		onLockInteractionsChange,
 		chatSuppression,
 		onChatSuppressionChange,
 		canReturnToMenu,
@@ -529,6 +543,7 @@
 		vendor,
 		houseCrystal,
 		logopolisLaunchRevision,
+		locks,
 		salvage,
 		trade,
 		itemInteractions,
@@ -1509,6 +1524,19 @@
 				/>
 			{/key}
 		{/if}
+		{#if locks !== null && inventory !== null}
+			{#key locks}
+				<ClientLocksWindow
+					model={locks}
+					{inventory}
+					placement={hudLayout.locks}
+					{viewport}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("locks", placement)}
+					{onExamineItem}
+				/>
+			{/key}
+		{/if}
 		{#if salvage !== null && inventory !== null}
 			{#key salvage}
 				<ClientSalvageWindow
@@ -1738,7 +1766,7 @@
 							visible={nearbyOpen}
 							selectedGuid={selectedEntityGuid}
 							onSelectEntity={onSelectKnownEntity}
-							{onExamineEntity}
+							onExamineEntity={onExamineItem}
 							{onSetWaypoint}
 						/>
 					</ClientHudWindow>
@@ -1786,6 +1814,8 @@
 					{:else if panel === "settings"}
 						{#key characterGuid}
 							<ClientSettingsPanel
+								{lockInteractions}
+								{onLockInteractionsChange}
 								{chatSuppression}
 								{onChatSuppressionChange}
 								{gameplayPreferences}

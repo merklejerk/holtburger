@@ -28,6 +28,7 @@
 						"tinkering": null,
 						"spellcraft": null,
 						"mana": null,
+						"lockTool": null,
 						"lockpicking": null,
 						"status": {
 							"bonded": null,

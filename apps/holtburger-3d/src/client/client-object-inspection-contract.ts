@@ -1,6 +1,9 @@
 import { itemCooldownDefinitionSchema } from "./client-item-cooldowns-contract";
 import { z } from "zod";
-import { clientIconAppearanceSchema } from "./client-entity-mirror";
+import {
+	clientIconAppearanceSchema,
+	lockToolFactsSchema,
+} from "./client-entity-mirror";
 
 const u32 = z.number().int().nonnegative().max(0xffff_ffff);
 const i32 = z.number().int().min(-0x8000_0000).max(0x7fff_ffff);
@@ -268,6 +271,7 @@ const itemInspectionSchema = z
 			.strict()
 			.nullable(),
 		status: itemStatusSchema,
+		lockTool: lockToolFactsSchema.nullable(),
 		lockpicking: z
 			.object({
 				difficulty: i32.nullable(),

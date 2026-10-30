@@ -269,9 +269,9 @@ fn classify_pre_world_action_result(reason: &ActionResultReason) -> Option<Boots
         ActionResultReason::Character(error) if is_retryable_pre_world_character_error(*error) => {
             Some(BootstrapEventOutcome::Retry { message })
         }
-        ActionResultReason::Character(_) | ActionResultReason::General(_) => {
-            Some(BootstrapEventOutcome::Fatal { message })
-        }
+        ActionResultReason::Character(_)
+        | ActionResultReason::General(_)
+        | ActionResultReason::Locked { .. } => Some(BootstrapEventOutcome::Fatal { message }),
         ActionResultReason::InventoryServerSaveFailed { .. } => {
             Some(BootstrapEventOutcome::Fatal { message })
         }

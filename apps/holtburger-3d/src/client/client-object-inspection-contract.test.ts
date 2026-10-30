@@ -3,6 +3,21 @@ import fixture from "./fixtures/object-inspection-wire.json";
 import { decodeObjectInspectionResult } from "./client-object-inspection-contract";
 
 describe("object inspection host contract", () => {
+	it("preserves template lockpick bonuses and unknown values without guessing zero", () => {
+		for (const bonus of [null, -10, 0, 30]) {
+			const item = structuredClone(fixture.item);
+			Object.assign(item.outcome.inspection.details.details, {
+				lockTool: { kind: "lockpick", bonus },
+			});
+			expect(decodeObjectInspectionResult(item)).toEqual(item);
+		}
+		const item = structuredClone(fixture.item);
+		Object.assign(item.outcome.inspection.details.details, {
+			lockTool: { kind: "lockpick", bonus: 1.5 },
+		});
+		expect(() => decodeObjectInspectionResult(item)).toThrow();
+	});
+
 	it("preserves independently disclosed lock difficulty and integer percentage points", () => {
 		for (const lockpicking of [
 			null,

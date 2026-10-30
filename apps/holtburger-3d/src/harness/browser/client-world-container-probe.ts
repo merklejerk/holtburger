@@ -151,6 +151,7 @@ export async function probeWorldContainer(options: {
 			knownSpells: null,
 			enchantments: null,
 			appearanceOptions: { showHelmet: true, showCloak: true },
+			gameplayPreferences: null,
 			party: null,
 			partyPreferences: null,
 			friends: null,
@@ -559,7 +560,7 @@ export async function probeWorldContainer(options: {
 		require(pickups().length ===
 			count + 1, "Accepted transfer was not submitted once");
 		require(document.querySelector(source) !==
-			null, "Transfer optimistically removed its source");
+			null, `Transfer source missing after ${JSON.stringify(request)}: ${source}; visible=${[...document.querySelectorAll("[data-item-guid]")].map((cell) => cell.getAttribute("data-item-guid")).join(",")}`);
 	};
 	// Sample actual non-item hit regions rather than sending events to an obscured element.
 	const background =

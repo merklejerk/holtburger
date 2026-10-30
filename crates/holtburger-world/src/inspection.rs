@@ -1,6 +1,6 @@
 use crate::damage::compute_damage_range;
 use crate::entity::Entity;
-use crate::entity_facts::EntityIconAppearance;
+use crate::entity_facts::{EntityIconAppearance, LockToolFacts, lock_tool_facts};
 use crate::magic::calculate_mana_time_left;
 use crate::state::allegiance::titles::rank_title;
 use crate::vendor::CoreVendorItem;
@@ -248,6 +248,8 @@ pub struct ItemInspection {
     pub status: ItemStatus,
     /// Latest server appraisal of a currently locked object.
     pub lockpicking: Option<LockpickingInfo>,
+    /// Public tool identity and authored template bonus, shared with inventory facts.
+    pub lock_tool: Option<LockToolFacts>,
     /// Stack count and maximum when the item is stackable.
     pub stack: Option<CountInfo>,
     /// Remaining and maximum structure/uses.
@@ -1324,6 +1326,7 @@ impl ItemInspection {
                 .supplement
                 .and_then(|supplement| supplement.lockpicking)
                 .filter(|_| object.get_bool_prop_opt(PropertyBool::Locked) == Some(true)),
+            lock_tool: lock_tool_facts(object.public_flags, object.item_type(), object.wcid),
             stack: CountInfo::stack_from_object(object),
             uses: CountInfo::uses_from_object(object),
             armor: object

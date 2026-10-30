@@ -44,6 +44,8 @@ import type {
 } from "../../client/client-spell-inspection-contract";
 import type {
 	ClientItemUseResult,
+	ClientItemUseFinished,
+	ClientLockedTarget,
 	ClientItemUseTargetResult,
 } from "../../client/client-item-use-contract";
 import type { ClientInventoryPreviewResult } from "../../client/client-inventory-contract";
@@ -274,6 +276,8 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-salvage-preview",
 	"client-salvage-result",
 	"client-item-use-result",
+	"client-item-use-finished",
+	"client-locked-target",
 	"client-death-locations",
 	"client-item-use-target-result",
 	"client-spell-inspection-context",
@@ -387,6 +391,8 @@ export interface HostEventPayloadMap {
 	"client-salvage-preview": SalvagePreviewResult;
 	"client-salvage-result": SalvageSubmitResult;
 	"client-item-use-result": ClientItemUseResult;
+	"client-item-use-finished": ClientItemUseFinished;
+	"client-locked-target": ClientLockedTarget;
 	"client-death-locations": DeathLocationResult;
 	"client-item-use-target-result": ClientItemUseTargetResult;
 	"client-spell-inspection-context": SpellInspectionContext;

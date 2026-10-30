@@ -248,10 +248,10 @@ export async function probeClientNearby(dependencies: {
 	categoryIcon.dispatchEvent(contextMenu);
 	await tick();
 	require(contextMenu.defaultPrevented, "entity row suppresses the native context menu");
-	require(dependencies.selected() === 8 &&
+	require(dependencies.selected() === 7 &&
 		examineRequests().length === 1 &&
 		examineRequests()[0].args?.guid ===
-			8, "right click selects and examines the clicked entity rather than the previous selection");
+			8, "right click examines the clicked entity while preserving the previous selection");
 	// The sampled row can outlive authoritative facts until the next display pull.
 	const staleRow = document.querySelector('[data-entity-guid="9"]');
 	require(staleRow !== null, "third entity is displayed before removal");
@@ -270,13 +270,13 @@ export async function probeClientNearby(dependencies: {
 		}),
 	);
 	await tick();
-	require(dependencies.selected() === 8 &&
+	require(dependencies.selected() === 7 &&
 		examineRequests().length ===
 			1, "unavailable row neither changes selection nor examines the previous target");
 	require(document
 		.querySelector('.nearby-panel [role="alert"]')
 		?.textContent?.includes("unavailable") ===
-		true, "unavailable row reports the existing selection error");
+		true, "unavailable row reports the examination error");
 	emit("client-entity-facts-changed", {
 		projectileSupply: null,
 		salvage: null,
@@ -707,7 +707,7 @@ export async function probeClientNearby(dependencies: {
 			"pointer-hit-testing",
 			"search",
 			"selection",
-			"right-click-select-and-examine",
+			"right-click-examine-preserves-selection",
 			"stale-row-examination-rejected",
 			"disclosure",
 			"exact-rule",

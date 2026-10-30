@@ -3,13 +3,17 @@
 use holtburger_common::{
     Guid,
     properties::{
-        ItemType, ObjectDescriptionFlag, PropertyString, WorldObjectExt,
+        ItemType, ObjectDescriptionFlag, PropertyBool, PropertyString, WorldObjectExt,
         WorldObjectPropertyAccessors,
     },
+    stats::SkillType,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{context::WorldContextExt, entity::Entity};
+use crate::{
+    context::{WorldContext, WorldContextExt},
+    entity::Entity,
+};
 
 /// Authored use shape, independent of the current target and character busy state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,6 +252,46 @@ pub fn evaluate_item_use(
         }
     }
     Ok(ItemUseEvaluation::Ordinary)
+}
+
+impl crate::WorldState {
+    /// Estimate from retained target appraisal and current skill. ACE Lock.cs uses template
+    /// LockpickMod; unknown templates deliberately assume +0. Instance overrides and
+    /// changes since the appraisal cannot be observed.
+    pub fn estimate_lockpick_success_percent(&self, source: Guid, target: Guid) -> Option<f64> {
+        let pick = self.get_visible_entity(source)?;
+        if !pick.flags.contains(ObjectDescriptionFlag::LOCKPICK) {
+            return None;
+        }
+        let target = self.get_visible_entity(target)?;
+        if target.get_bool_prop_opt(PropertyBool::Locked) != Some(true) {
+            return None;
+        }
+        let difficulty = target
+            .inspection_supplement
+            .as_ref()?
+            .lockpicking?
+            .difficulty?;
+        let skill = self.get_player_skill_current(SkillType::Lockpick)?;
+        let bonus = pick
+            .wcid
+            .and_then(holtburger_content::lockpick_bonus)
+            .unwrap_or(0);
+        Some(lockpick_success_percent(skill, bonus, difficulty))
+    }
+}
+
+/// ACE Lock.cs rejects these locks before making a skill roll.
+const UNPICKABLE_LOCK_DIFFICULTY: i32 = 9999;
+
+/// ACE SkillCheck.cs promotes its float32 factor to double. Effective skill has a zero floor.
+fn lockpick_success_percent(skill: u32, bonus: i32, difficulty: i32) -> f64 {
+    if difficulty >= UNPICKABLE_LOCK_DIFFICULTY {
+        return 0.0;
+    }
+    let effective_skill = (f64::from(skill) + f64::from(bonus)).max(0.0);
+    let delta = effective_skill - f64::from(difficulty.max(0));
+    (1.0 - 1.0 / (1.0 + (f64::from(0.03_f32) * delta).exp())) * 100.0
 }
 
 #[cfg(test)]
@@ -507,5 +551,122 @@ mod tests {
             )
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod lockpick_chance_tests {
+    use super::{UNPICKABLE_LOCK_DIFFICULTY, lockpick_success_percent};
+
+    #[test]
+    fn estimates_require_appraised_target_and_skill_but_unknown_pick_bonus_is_zero() {
+        use crate::{
+            WorldState,
+            entity::Entity,
+            inspection::{InspectionSupplement, LockpickingInfo},
+            stats::{Skill, SkillType, TrainingLevel},
+        };
+        use holtburger_common::{
+            Guid,
+            position::WorldPosition,
+            properties::{ObjectDescriptionFlag, PropertyBool, WorldObjectPropertyAccessorsMut},
+        };
+        let mut world = WorldState::synthetic();
+        let mut pick = Entity::new(Guid(2), "Pick".into(), WorldPosition::default());
+        pick.flags.insert(ObjectDescriptionFlag::LOCKPICK);
+        pick.wcid = Some(999);
+        world.entities.insert(pick);
+        let mut target = Entity::new(Guid(3), "Lock".into(), WorldPosition::default());
+        target.set_bool_prop(PropertyBool::Locked, true);
+        world.entities.insert(target);
+        assert_eq!(
+            world.estimate_lockpick_success_percent(Guid(2), Guid(3)),
+            None
+        );
+        world
+            .entities
+            .get_mut(Guid(3))
+            .expect("target")
+            .inspection_supplement = Some(InspectionSupplement {
+            lockpicking: Some(LockpickingInfo {
+                difficulty: Some(200),
+                success_percent: Some(1),
+            }),
+            ..Default::default()
+        });
+        assert_eq!(
+            world.estimate_lockpick_success_percent(Guid(2), Guid(3)),
+            None
+        );
+        world.player.skills.insert(
+            SkillType::Lockpick,
+            Skill {
+                skill_type: SkillType::Lockpick,
+                ranks: 0,
+                init: 200,
+                spent_xp: 0,
+                next_rank_xp: None,
+                base: 200,
+                current: 200,
+                training: TrainingLevel::Trained,
+                trained_cost: 0,
+                specialized_cost: 0,
+                breakdown: Default::default(),
+            },
+        );
+        assert_eq!(
+            world.estimate_lockpick_success_percent(Guid(2), Guid(3)),
+            Some(50.0)
+        );
+        world.entities.get_mut(Guid(2)).expect("pick").wcid = Some(516);
+        assert!(
+            world
+                .estimate_lockpick_success_percent(Guid(2), Guid(3))
+                .expect("known bonus")
+                > 64.0
+        );
+        world.entities.get_mut(Guid(2)).expect("pick").wcid = Some(999);
+        assert_eq!(
+            world.estimate_lockpick_success_percent(Guid(2), Guid(3)),
+            Some(50.0)
+        );
+        world
+            .player
+            .skills
+            .get_mut(&SkillType::Lockpick)
+            .expect("skill")
+            .current = 220;
+        assert!(
+            world
+                .estimate_lockpick_success_percent(Guid(2), Guid(3))
+                .expect("current skill")
+                > 64.0
+        );
+        world
+            .entities
+            .get_mut(Guid(3))
+            .expect("target")
+            .set_bool_prop(PropertyBool::Locked, false);
+        assert_eq!(
+            world.estimate_lockpick_success_percent(Guid(2), Guid(3)),
+            None
+        );
+        assert_eq!(
+            world.estimate_lockpick_success_percent(Guid(99), Guid(3)),
+            None
+        );
+    }
+
+    #[test]
+    fn ace_chances_include_bonus_skill_floor_and_unpickable_locks() {
+        assert_eq!(lockpick_success_percent(200, 0, 200), 50.0);
+        assert_eq!(lockpick_success_percent(200, 20, 220), 50.0);
+        assert_eq!(lockpick_success_percent(5, -10, 0), 50.0);
+        assert_eq!(
+            lockpick_success_percent(200, 0, UNPICKABLE_LOCK_DIFFICULTY),
+            0.0
+        );
+        assert!((lockpick_success_percent(200, 20, 200) - 64.56563).abs() < 0.00001);
+        assert!((lockpick_success_percent(200, -10, 200) - 42.55575).abs() < 0.00001);
     }
 }

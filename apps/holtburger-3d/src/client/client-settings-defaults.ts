@@ -12,7 +12,10 @@ import {
 } from "./client-hud-layout";
 import { initialActionBar } from "./client-action-bar-state";
 import { initialSpellBarBindings } from "./client-spell-bar-state";
-import { clientChatSuppressionSettingsSchema } from "./client-settings-contract";
+import {
+	clientChatSuppressionSettingsSchema,
+	clientLockInteractionSettingsSchema,
+} from "./client-settings-contract";
 import type {
 	ClientAudioSettings,
 	ClientCharacterSettings,
@@ -51,11 +54,13 @@ export function createDefaultClientUserSettings(
 		recentEmotes: [],
 		chatFilters: [...CLIENT_CHAT_FILTER_TAGS],
 		chatSuppression: clientChatSuppressionSettingsSchema.parse({}),
+		lockInteractions: clientLockInteractionSettingsSchema.parse({}),
 		graphics: { ...CLIENT_GRAPHICS_DEFAULTS },
 		audio: { ...CLIENT_AUDIO_DEFAULTS },
 		ui: {
 			showFps: false,
 			showHelpLabels: true,
+			useUnlockHelper: true,
 			textScale: CLIENT_TEXT_SCALE.initial,
 			iconScale: CLIENT_ICON_SCALE.initial,
 			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,

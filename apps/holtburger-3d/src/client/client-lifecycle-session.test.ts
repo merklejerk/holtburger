@@ -2304,6 +2304,53 @@ describe("ClientLifecycleSession", () => {
 		expect(transport.calls).toHaveLength(1);
 	});
 
+	it("carries begin/stop identities through commands and unchanged idle status", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const profile = { kind: "melee", height: "medium", power: 0.5 } as const;
+		await session.beginCombatEngagement(7, profile, 31);
+		await session.updateCombatProfile(profile);
+		await session.stopCombatEngagement(32);
+		expect(transport.invocations.slice(-3)).toEqual([
+			{
+				command: "begin_client_combat_engagement",
+				args: { target: 7, profile, intentSequence: 31 },
+			},
+			{ command: "update_client_combat_profile", args: { profile } },
+			{
+				command: "stop_client_combat_engagement",
+				args: { intentSequence: 32 },
+			},
+		]);
+		const receipts: number[] = [];
+		session.subscribe((event) => {
+			if (event.type === "combat")
+				receipts.push(event.status.processedIntentSequence);
+		});
+		for (const processedIntentSequence of [31, 32]) {
+			transport.emit("client-combat-status-updated", {
+				desired: null,
+				state: "idle",
+				refill: null,
+				processedIntentSequence,
+			});
+		}
+		expect(receipts).toEqual([31, 32]);
+		expect(session.state().combat.processedIntentSequence).toBe(32);
+		await session.stop();
+		transport.emit("client-combat-status-updated", {
+			desired: null,
+			state: "idle",
+			refill: null,
+			processedIntentSequence: 31,
+		});
+		expect(session.state().combat.processedIntentSequence).toBe(32);
+		expect(receipts).toEqual([31, 32]);
+		const replacementSession = new ClientLifecycleSession(transport);
+		expect(replacementSession.state().combat.processedIntentSequence).toBe(0);
+	});
+
 	it("dispatches recall identities and recovers choices from replacement state", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -2448,7 +2495,12 @@ function currentState(playerGuid: number): ClientCurrentState {
 		allegiancePreferences: null,
 		friendsPreferences: null,
 		combatMode: "peace",
-		combat: { desired: null, state: "idle", refill: null },
+		combat: {
+			desired: null,
+			state: "idle",
+			processedIntentSequence: 0,
+			refill: null,
+		},
 		spellCastTarget: null,
 		vitals: [],
 		characterMotion: null,

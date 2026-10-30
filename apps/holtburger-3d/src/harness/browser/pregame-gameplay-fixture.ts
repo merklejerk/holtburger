@@ -10,17 +10,22 @@ import {
 	type ClientLifecycleTransport,
 } from "../../client/client-lifecycle-session";
 import type {
+	ClientAttackProfile,
 	ClientCurrentState,
 	ClientExitRequested,
 	ClientCameraTick,
 } from "../../client/client-host-contract";
+import { clientAttackProfileSchema } from "../../client/client-host-contract";
 import type { ObjectPreviewVisual } from "../../lib/game/runtime/object-preview-source";
 import {
 	cellId,
 	type DynamicEntityView,
 } from "../../lib/game/runtime/dynamic-entity-feed";
 import { emptyHousing } from "../../client/client-housing-contract";
-import { playerEntitySnapshot } from "../../client/client-entity-mirror.test-support";
+import {
+	entityFacts,
+	playerEntitySnapshot,
+} from "../../client/client-entity-mirror.test-support";
 import { CLIENT_PREGAME_SCENE_TUNING } from "../../client/client-pregame-tuning";
 import { createLandblockWorldOrigin } from "../../lib/game/landblocks";
 
@@ -95,6 +100,104 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 	let logoutRequests = 0;
 	const emit = (event: ClientEventName, payload: unknown) =>
 		handlers.get(event)?.(payload);
+	/** Ordered command receipts; responses advance only when the browser probe explicitly releases them. */
+	const combatCommands: Array<
+		| {
+				kind: "begin";
+				target: number;
+				profile: ClientAttackProfile;
+				intentSequence: number;
+		  }
+		| { kind: "stop"; intentSequence: number }
+	> = [];
+	let deliveredCombatCommands = 0;
+	const combatTargetGuid = guid + 1;
+	const publishCombat = (combat: ClientCurrentState["combat"]) => {
+		state = { ...state, combat };
+		emit("client-combat-status-updated", combat);
+	};
+	const combatRepro = {
+		prepare: () => {
+			if (state.lifecycle.kind !== "in-world")
+				throw new Error("Combat repro requires gameplay");
+			combatCommands.length = 0;
+			deliveredCombatCommands = 0;
+			const target = entityFacts(combatTargetGuid, { targeting: "creature" });
+			if (target.description.kind !== "known")
+				throw new Error("Combat fixture target must be known");
+			state = {
+				...state,
+				combatMode: "melee",
+				combat: {
+					desired: null,
+					state: "idle",
+					processedIntentSequence: 0,
+					refill: null,
+				},
+				entities: {
+					...playerEntitySnapshot(guid),
+					entities: [
+						entityFacts(guid),
+						{
+							...target,
+							description: { ...target.description, name: "Combat target B" },
+						},
+					],
+				},
+				dynamic: {
+					...state.dynamic,
+					entities: [
+						player,
+						{
+							...player,
+							identity: { ...player.identity, guid: combatTargetGuid },
+						},
+					],
+				},
+			};
+			emit("client-current-state", state);
+		},
+		deliverNext: () => {
+			const start = combatCommands[deliveredCombatCommands];
+			if (start === undefined)
+				throw new Error("No combat response waiting for release");
+			deliveredCombatCommands++;
+			if (start.kind === "stop") {
+				publishCombat({
+					desired: null,
+					state: "idle",
+					processedIntentSequence: start.intentSequence,
+					refill: null,
+				});
+			} else if (start.target === guid) {
+				// Match core's self-target refusal: warning, then the retained idle status.
+				emit("client-action-feedback", {
+					message: "Select a valid target before attacking.",
+					tone: "warning",
+				});
+				publishCombat({
+					...state.combat,
+					processedIntentSequence: start.intentSequence,
+				});
+			} else if (start.target === combatTargetGuid) {
+				publishCombat({
+					desired: { target: start.target, profile: start.profile },
+					state: "active",
+					processedIntentSequence: start.intentSequence,
+					refill: null,
+				});
+			} else throw new Error(`Unexpected combat target ${start.target}`);
+		},
+		read: () => ({
+			starts: combatCommands.filter((command) => command.kind === "begin"),
+			delivered: deliveredCombatCommands,
+			stops: combatCommands.filter((command) => command.kind === "stop").length,
+			processedIntentSequence: state.combat.processedIntentSequence,
+			activeTarget: state.combat.desired?.target ?? null,
+			playerGuid: guid,
+			targetGuid: combatTargetGuid,
+		}),
+	};
 	/** Retirement and selection share a complete playerless authority baseline. */
 	const playerlessState = (
 		lifecycle: ClientCurrentState["lifecycle"],
@@ -156,7 +259,29 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 		command: HostCommandName,
 		args?: HostCommandArguments,
 	) => {
-		if (command === "request_client_current_state")
+		if (command === "begin_client_combat_engagement") {
+			combatCommands.push({
+				kind: "begin",
+				intentSequence: z
+					.number()
+					.int()
+					.positive()
+					.safe()
+					.parse(args?.intentSequence),
+				target: z.number().int().parse(args?.target),
+				profile: clientAttackProfileSchema.parse(args?.profile),
+			});
+		} else if (command === "stop_client_combat_engagement") {
+			combatCommands.push({
+				kind: "stop",
+				intentSequence: z
+					.number()
+					.int()
+					.positive()
+					.safe()
+					.parse(args?.intentSequence),
+			});
+		} else if (command === "request_client_current_state")
 			emit("client-current-state", state);
 		else if (command === "select_client_character") await enter();
 		else if (
@@ -266,6 +391,7 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 	const transport: ClientLifecycleTransport = { listen, invoke };
 	const session = new ClientLifecycleSession(transport);
 	return {
+		combatRepro,
 		session,
 		transport,
 		listen,
@@ -333,7 +459,12 @@ function currentState(player: DynamicEntityView): ClientCurrentState {
 		allegiancePreferences: null,
 		friendsPreferences: null,
 		combatMode: "peace",
-		combat: { desired: null, state: "idle", refill: null },
+		combat: {
+			desired: null,
+			state: "idle",
+			processedIntentSequence: 0,
+			refill: null,
+		},
 		spellCastTarget: null,
 		vitals: [],
 		characterMotion: null,

@@ -727,6 +727,7 @@ describe("ClientGameplayPresentation", () => {
 				},
 			},
 			state: "active" as const,
+			processedIntentSequence: 0,
 			refill: null,
 		};
 		// A snapshot accepted before presentation creation must supply the engagement without app seeding.
@@ -799,6 +800,7 @@ describe("ClientGameplayPresentation", () => {
 			transport.emit("client-combat-status-updated", {
 				desired: null,
 				state: "retiring",
+				processedIntentSequence: 0,
 				refill: null,
 			});
 			expect(presentation.readCombatTargetFrame()).toBeNull();
@@ -850,6 +852,7 @@ describe("ClientGameplayPresentation", () => {
 					profile: { kind: "missile", height: "medium", accuracy: 0.5 },
 				},
 				state: "active",
+				processedIntentSequence: 0,
 				refill: null,
 			});
 			expect(presentation.readCombatTargetFrame()?.combatType).toBe("magic");
@@ -2148,7 +2151,12 @@ function currentState(playerGuid: number): ClientCurrentState {
 		allegiancePreferences: null,
 		friendsPreferences: null,
 		combatMode: "peace",
-		combat: { desired: null, state: "idle", refill: null },
+		combat: {
+			desired: null,
+			state: "idle",
+			processedIntentSequence: 0,
+			refill: null,
+		},
 		spellCastTarget: null,
 		vitals: [],
 		characterMotion: null,

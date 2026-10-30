@@ -195,6 +195,8 @@ pub struct ClientCombatRefillWire {
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCombatStatusWire {
+    /// Latest processed begin/stop identity, independent of retained attack intent.
+    pub processed_intent_sequence: u64,
     pub desired: Option<ClientCombatEngagementWire>,
     pub state: ClientCombatControlStateWire,
     pub refill: Option<ClientCombatRefillWire>,
@@ -219,6 +221,7 @@ impl From<holtburger_core::ClientCombatStatus> for ClientCombatStatusWire {
         };
         let now = std::time::Instant::now();
         Self {
+            processed_intent_sequence: value.processed_intent_sequence,
             desired: value.desired.map(|desired| ClientCombatEngagementWire {
                 target: desired.target,
                 profile: desired.profile.into(),
@@ -3068,6 +3071,24 @@ mod tests {
                 matches!(event, ClientHostEvent::ChatMessage(ClientChatMessageWire::System { message }) if !message.is_empty())
             );
         }
+    }
+
+    #[test]
+    fn combat_status_projects_acknowledgement_independently_of_retained_intent() {
+        let status = holtburger_core::ClientCombatStatus {
+            processed_intent_sequence: 17,
+            ..Default::default()
+        };
+        let wire = ClientCombatStatusWire::from(status);
+        assert_eq!(
+            serde_json::to_value(wire).unwrap(),
+            serde_json::json!({
+                "processedIntentSequence": 17,
+                "desired": null,
+                "state": "idle",
+                "refill": null
+            })
+        );
     }
 
     #[test]

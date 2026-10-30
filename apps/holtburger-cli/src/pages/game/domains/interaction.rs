@@ -24,7 +24,9 @@ fn set_active_interaction(
     sync_target_health_query(previous_interaction, next_interaction, result);
 
     if should_cancel_attack(state, previous_interaction, next_interaction) {
-        result.commands.push(ClientCommand::StopCombatEngagement);
+        result.commands.push(ClientCommand::StopCombatEngagement {
+            intent_sequence: state.data.next_combat_intent_sequence(),
+        });
     }
 }
 

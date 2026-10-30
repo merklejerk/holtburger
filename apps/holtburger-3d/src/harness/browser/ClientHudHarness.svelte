@@ -393,6 +393,7 @@
 	let combatStatus = $state<ClientCombatStatus>({
 		desired: null,
 		state: "idle",
+		processedIntentSequence: 0,
 		refill: null,
 	});
 	const spellBarEnabled = $derived(
@@ -615,7 +616,12 @@
 			hudMode = "runtime";
 			spellCombatMode = mode;
 			selectedGuid = 7;
-			combatStatus = { desired: null, state: "idle", refill: null };
+			combatStatus = {
+				desired: null,
+				state: "idle",
+				processedIntentSequence: 0,
+				refill: null,
+			};
 			releaseCombatKeys?.();
 			releaseCombatKeys = keyboard.bindGame({
 				keydown: (event) => {
@@ -644,6 +650,7 @@
 							: { kind: "missile", height: "medium", accuracy: 0.5 },
 				},
 				state: "active",
+				processedIntentSequence: 0,
 				refill: { elapsedMs: 350, durationMs: 1000 },
 			};
 		},
@@ -652,7 +659,12 @@
 			releaseCombatKeys?.();
 			releaseCombatKeys = null;
 			spellCombatMode = "peace";
-			combatStatus = { desired: null, state: "idle", refill: null };
+			combatStatus = {
+				desired: null,
+				state: "idle",
+				processedIntentSequence: 0,
+				refill: null,
+			};
 		},
 	};
 	let combatProfileSelectionRevision = $state(0);
@@ -1516,7 +1528,12 @@
 			allegiancePreferences: null,
 			friendsPreferences: null,
 			combatMode: "peace",
-			combat: { desired: null, state: "idle", refill: null },
+			combat: {
+				desired: null,
+				state: "idle",
+				processedIntentSequence: 0,
+				refill: null,
+			},
 			spellCastTarget: null,
 			vitals: [],
 			characterSheet: null,
@@ -6042,7 +6059,12 @@
 					}}
 					onCombatProfileSelect={selectCombatProfile}
 					onStopCombat={() => {
-						combatStatus = { desired: null, state: "idle", refill: null };
+						combatStatus = {
+							desired: null,
+							state: "idle",
+							processedIntentSequence: 0,
+							refill: null,
+						};
 					}}
 					combatEnabled={true}
 					onToggleCombat={() => {

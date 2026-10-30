@@ -656,7 +656,7 @@ fn teleport_start_clears_targeting_and_core_status_retires_attack() {
         result
             .commands
             .iter()
-            .any(|command| { matches!(command, ClientCommand::StopCombatEngagement) })
+            .any(|command| { matches!(command, ClientCommand::StopCombatEngagement { .. }) })
     );
     assert_eq!(state.view.active_interaction, None);
     assert_eq!(state.data.combat_status.desired, None);

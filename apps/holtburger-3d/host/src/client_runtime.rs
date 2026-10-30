@@ -422,13 +422,18 @@ pub enum ClientHostCommand {
         aim: holtburger_core::client::types::SpellCastAim,
     },
     BeginClientCombatEngagement {
+        #[serde(rename = "intentSequence")]
+        intent_sequence: u64,
         target: holtburger_common::Guid,
         profile: ClientAttackProfileRequest,
     },
     UpdateClientCombatProfile {
         profile: ClientAttackProfileRequest,
     },
-    StopClientCombatEngagement,
+    StopClientCombatEngagement {
+        #[serde(rename = "intentSequence")]
+        intent_sequence: u64,
+    },
     RequestClientCurrentState,
     /// Refresh the active character/account effective home.
     RefreshClientHousing,
@@ -1076,10 +1081,18 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
-        BeginClientCombatEngagement { target, profile } => {
+        BeginClientCombatEngagement {
+            target,
+            profile,
+            intent_sequence,
+        } => {
             let profile = profile.into_core().map_err(application_error)?;
             runtime
-                .send_command(ClientCommand::BeginCombatEngagement { target, profile })
+                .send_command(ClientCommand::BeginCombatEngagement {
+                    target,
+                    profile,
+                    intent_sequence,
+                })
                 .await
                 .map(|()| HostResponse::Unit)
                 .map_err(application_error)
@@ -1092,8 +1105,8 @@ pub async fn dispatch_client(
                 .map(|()| HostResponse::Unit)
                 .map_err(application_error)
         }
-        StopClientCombatEngagement => runtime
-            .send_command(ClientCommand::StopCombatEngagement)
+        StopClientCombatEngagement { intent_sequence } => runtime
+            .send_command(ClientCommand::StopCombatEngagement { intent_sequence })
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

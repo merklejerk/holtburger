@@ -153,6 +153,7 @@
 		});
 		const bridge = globalThis as typeof globalThis & {
 			__HOLTBURGER_CLIENT_PRESENTATION__?: {
+				combat: ReturnType<typeof pregameGameplayFixture>["combatRepro"];
 				theme: () => ReturnType<typeof fixtureTheme.owner.read>;
 				read(): {
 					worldCanvases: number;
@@ -365,6 +366,7 @@
 				},
 			};
 			bridge.__HOLTBURGER_CLIENT_PRESENTATION__ = {
+				combat: authority.combatRepro,
 				theme: () => fixtureTheme.owner.read(),
 				read: () => ({
 					worldCanvases: worlds.size,

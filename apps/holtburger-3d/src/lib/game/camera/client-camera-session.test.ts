@@ -456,6 +456,7 @@ function currentState(): ClientCurrentState {
 		friendsPreferences: null,
 		combatMode: "peace",
 		combat: { desired: null, state: "idle", refill: null },
+		spellCastTarget: null,
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

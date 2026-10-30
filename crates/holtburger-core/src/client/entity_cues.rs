@@ -518,7 +518,7 @@ mod tests {
             pending.deadline
         ));
         let targeted = PendingBusyOperation {
-            operation: PendingOperation::UseWithTarget,
+            operation: PendingOperation::UseWithTarget { spell_target: None },
             ..pending
         };
         assert!(!matches(

@@ -2674,7 +2674,9 @@ mod tests {
     async fn use_done_finishes_busy_operation_with_weenie_hint() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget);
+        client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget {
+            spell_target: None,
+        });
 
         let encoded_error = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
             target: holtburger_common::Guid::NULL,
@@ -2720,7 +2722,9 @@ mod tests {
     async fn use_done_with_explicit_error_finishes_busy_operation_directly() {
         let mut client = build_test_client();
         let mut events = client.subscribe_client_view_events();
-        client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget);
+        client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget {
+            spell_target: None,
+        });
 
         let encoded = encode_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
             target: holtburger_common::Guid::NULL,

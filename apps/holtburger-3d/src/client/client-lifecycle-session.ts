@@ -182,6 +182,7 @@ import {
 	decodeClientCombatMode,
 	type ClientCombatMode,
 	decodeClientCombatStatus,
+	spellCastTargetSchema,
 	type ClientCombatStatus,
 	clientAttackProfileSchema,
 	type ClientAttackProfile,
@@ -393,6 +394,7 @@ type ClientEventName = Extract<
 	| "client-party-updated"
 	| "client-combat-mode-updated"
 	| "client-combat-status-updated"
+	| "client-spell-cast-target-updated"
 	| "client-entity-health-updated"
 	| "client-chat-message"
 	| "client-combat-outcome"
@@ -458,6 +460,8 @@ export interface ClientLifecycleSessionState {
 	/** Latest server stance, consumed by the combat shortcut. */
 	readonly combatMode: ClientCombatMode;
 	readonly combat: ClientCombatStatus;
+	/** Core-resolved non-self recipient, retained only while the cast operation is pending. */
+	readonly spellCastTarget: number | null;
 	readonly vitals: readonly ClientVital[];
 	readonly characterMotion: ClientCharacterMotionCapabilities | null;
 	/** Current server question, retained independently of presentation mounts. */
@@ -1601,6 +1605,12 @@ export class ClientLifecycleSession {
 				}),
 			);
 			unlisteners.push(
+				await listen("client-spell-cast-target-updated", (payload) => {
+					const { target } = spellCastTargetSchema.parse(payload);
+					this.#state = { ...this.#state, spellCastTarget: target };
+				}),
+			);
+			unlisteners.push(
 				await listen("client-combat-status-updated", (payload) => {
 					const status = decodeClientCombatStatus(payload);
 					this.#state = { ...this.#state, combat: status };
@@ -2017,6 +2027,7 @@ export class ClientLifecycleSession {
 			gameplayPreferences: state.gameplayPreferences,
 			combatMode: state.combatMode,
 			combat: state.combat,
+			spellCastTarget: state.spellCastTarget,
 			vitals: state.vitals,
 			characterMotion: state.characterMotion,
 			activeConfirmation: state.activeConfirmation,
@@ -2291,6 +2302,7 @@ function emptyState(): ClientLifecycleSessionState {
 		gameplayPreferences: null,
 		combatMode: "unknown",
 		combat: { desired: null, state: "idle", refill: null },
+		spellCastTarget: null,
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

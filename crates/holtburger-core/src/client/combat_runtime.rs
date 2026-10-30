@@ -1049,10 +1049,15 @@ mod tests {
                 .await
                 .unwrap()
         );
+        assert_eq!(
+            client.application_snapshot().spell_cast_target,
+            Some(Guid(2))
+        );
         client
             .finish_busy_operation_from_use_done(WeenieError::None)
             .await
             .unwrap();
+        assert_eq!(client.application_snapshot().spell_cast_target, None);
         for (text, kind) in [
             (
                 "You burn Drudge for 37 points with Test Spell.",
@@ -1107,7 +1112,9 @@ mod tests {
                 WorldPosition::default(),
             ));
             if mode == "busy" {
-                client.arm_busy_operation(super::super::PendingOperation::UseWithTarget);
+                client.arm_busy_operation(super::super::PendingOperation::UseWithTarget {
+                    spell_target: None,
+                });
             }
             if mode == "failed" {
                 client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
@@ -1780,19 +1787,26 @@ mod tests {
             client
                 .handle_command(ClientCommand::CastSpell {
                     spell_id: 42,
-                    aim: SpellCastAim::Untargeted
+                    aim: SpellCastAim::Normal {
+                        selection: Some(Guid(2))
+                    }
                 })
                 .await
                 .is_err()
         );
         assert!(client.active_busy_operation.is_none());
         let mut states = Vec::new();
+        let mut targets = Vec::new();
         while let Ok(event) = events.try_recv() {
-            if let ClientViewEvent::BusyStateUpdated { busy } = event {
-                states.push(busy);
+            match event {
+                ClientViewEvent::BusyStateUpdated { busy } => states.push(busy),
+                ClientViewEvent::SpellCastTargetUpdated { target } => targets.push(target),
+                _ => {}
             }
         }
         assert_eq!(states, [Some(BusyOperationKind::SpellCast), None]);
+        assert_eq!(targets, [Some(Guid(2)), None]);
+        assert_eq!(client.application_snapshot().spell_cast_target, None);
     }
 
     #[tokio::test]

@@ -179,6 +179,10 @@ pub enum HostEvent {
         mode: crate::client_projection::ClientCombatMode,
     },
     ClientCombatStatusUpdated(crate::client_projection::ClientCombatStatusWire),
+    /// Non-self recipient of the pending spell operation, or null after retirement.
+    ClientSpellCastTargetUpdated {
+        target: Option<holtburger_common::Guid>,
+    },
     ClientPlayerSpellsUpdated {
         #[serde(rename = "spellIds")]
         spell_ids: Vec<u32>,
@@ -622,6 +626,9 @@ impl ClientEventSink for StdioEventSink {
             },
             crate::client_projection::ClientHostEvent::CombatModeUpdated { mode } => {
                 HostEvent::ClientCombatModeUpdated { mode }
+            }
+            crate::client_projection::ClientHostEvent::SpellCastTargetUpdated { target } => {
+                HostEvent::ClientSpellCastTargetUpdated { target }
             }
             crate::client_projection::ClientHostEvent::CombatStatusUpdated(status) => {
                 HostEvent::ClientCombatStatusUpdated(status)

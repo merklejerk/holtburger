@@ -165,6 +165,7 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         character_options: None,
         combat_mode: CombatMode::NonCombat,
         combat: Default::default(),
+        spell_cast_target: None,
         lifecycle: ClientLifecycleState::InWorld,
         entity_collision_disabled: false,
         can_teleport_from_map: false,

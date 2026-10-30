@@ -126,7 +126,10 @@ pub(super) enum PendingOperation {
     Use {
         source: Guid,
     },
-    UseWithTarget,
+    UseWithTarget {
+        /// Non-self filtering is applied at publication; only known spell-bearing item uses set this.
+        spell_target: Option<Guid>,
+    },
     /// Resolved wire target; untargeted casts cannot correlate automatic turns.
     SpellCast {
         target: Option<Guid>,
@@ -142,7 +145,7 @@ impl PendingOperation {
     fn kind(&self) -> BusyOperationKind {
         match self {
             Self::Use { .. } => BusyOperationKind::Use,
-            Self::UseWithTarget => BusyOperationKind::UseWithTarget,
+            Self::UseWithTarget { .. } => BusyOperationKind::UseWithTarget,
             Self::SpellCast { .. } => BusyOperationKind::SpellCast,
             Self::Vendor(execution) => execution.kind(),
             Self::Housing(execution) => execution.kind(),
@@ -459,6 +462,7 @@ impl ClientRuntime {
                 self.world.player_combat_mode()
             },
             combat: self.combat_engagement.status(),
+            spell_cast_target: self.active_spell_cast_target(),
             vitals: self.world.player.vitals.clone(),
             character_sheet: self.character_sheet(),
             trade: self.trade_snapshot(),
@@ -767,7 +771,29 @@ impl ClientRuntime {
             .map(|pending| pending.operation.kind())
     }
 
+    /// Spell operation owns the resolved recipient; consumers never reconstruct it from selection.
+    fn active_spell_cast_target(&self) -> Option<Guid> {
+        match self
+            .active_busy_operation
+            .as_ref()
+            .map(|pending| &pending.operation)
+        {
+            Some(
+                PendingOperation::SpellCast { target }
+                | PendingOperation::UseWithTarget {
+                    spell_target: target,
+                },
+            ) => target.filter(|target| *target != Guid::NULL && *target != self.world.player.guid),
+            _ => None,
+        }
+    }
+
     fn emit_busy_state_updated(&self) {
+        let _ = self
+            .client_view_event_tx
+            .send(ClientViewEvent::SpellCastTargetUpdated {
+                target: self.active_spell_cast_target(),
+            });
         let _ = self
             .client_view_event_tx
             .send(ClientViewEvent::BusyStateUpdated {
@@ -4710,7 +4736,11 @@ mod tests {
         let mut client = builder::build_test_client(ClientState::Connected);
         let mut events = client.subscribe_client_view_events();
 
-        assert!(client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget));
+        assert!(
+            client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget {
+                spell_target: None
+            })
+        );
         client.poll_busy_timeout(Instant::now() + BUSY_OPERATION_TIMEOUT + Duration::from_secs(1));
 
         assert!(client.active_busy_operation.is_none());
@@ -4736,7 +4766,11 @@ mod tests {
     fn arm_busy_operation_rejects_overlap_and_preserves_original_pending_state() {
         let mut client = builder::build_test_client(ClientState::Connected);
 
-        assert!(client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget));
+        assert!(
+            client.arm_busy_operation(crate::client::PendingOperation::UseWithTarget {
+                spell_target: None
+            })
+        );
         assert!(
             !client.arm_busy_operation(crate::client::PendingOperation::SpellCast { target: None })
         );
@@ -4744,7 +4778,7 @@ mod tests {
         assert!(matches!(
             client.active_busy_operation,
             Some(PendingBusyOperation {
-                operation: PendingOperation::UseWithTarget,
+                operation: PendingOperation::UseWithTarget { spell_target: None },
                 ..
             })
         ));

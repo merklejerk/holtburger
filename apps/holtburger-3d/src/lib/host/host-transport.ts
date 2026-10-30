@@ -312,6 +312,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-allegiance-updated",
 	"client-combat-mode-updated",
 	"client-combat-status-updated",
+	"client-spell-cast-target-updated",
 	"client-entity-health-updated",
 	"client-chat-message",
 	"client-combat-outcome",
@@ -434,6 +435,8 @@ export interface HostEventPayloadMap {
 	};
 	"client-combat-mode-updated": { mode: ClientCombatMode };
 	"client-combat-status-updated": ClientCombatStatus;
+	/** Non-self spell recipient, already resolved by the shared operation owner. */
+	"client-spell-cast-target-updated": { target: number | null };
 	"client-player-vitals-updated": {
 		vitals: ClientVital[];
 	};

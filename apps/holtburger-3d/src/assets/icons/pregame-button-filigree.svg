@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="48" viewBox="0 0 80 48" fill="none" stroke="#c9aa70" stroke-width="1">
+  <!-- Half-height, 28px-wide end slices preserve the spacing between the two wires. -->
+  <path d="M3.5 20L16 .5H64L76.5 20M76.5 28L64 47.5H16L3.5 28" />
+  <defs>
+    <!-- The inner chevron is continuous; a diamond joins the outer wires at each pointed tip. -->
+    <path id="endcap" d="M26 .5L12 24L26 47.5M3.5 20L6.5 24L3.5 28L.5 24Z" />
+  </defs>
+  <use href="#endcap" />
+  <use href="#endcap" transform="translate(80 0) scale(-1 1)" />
+</svg>

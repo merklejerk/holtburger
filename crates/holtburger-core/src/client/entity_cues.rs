@@ -123,7 +123,7 @@ impl ClientRuntime {
         };
         if sound_id != OPEN_FAIL_DUE_TO_LOCK_SOUND
             || pending.deadline <= Instant::now()
-            || !matches!(pending.operation, PendingOperation::Use { source } if source == guid)
+            || pending.operation.direct_use_source() != Some(guid)
         {
             return;
         }
@@ -139,7 +139,14 @@ impl ClientRuntime {
         // attempt or a custom housing-storage WCID can therefore produce a false locked hint.
         self.emit_action_result(
             ActionResultSource::Client,
-            ActionResultReason::General(format!("The {} is locked", entity.name())),
+            match pending.operation {
+                PendingOperation::GuardedUse { sequence, .. } => ActionResultReason::Locked {
+                    target: guid,
+                    name: entity.name().to_owned(),
+                    sequence,
+                },
+                _ => ActionResultReason::General(format!("The {} is locked", entity.name())),
+            },
         );
     }
 
@@ -558,7 +565,14 @@ mod tests {
         entity.wcid = Some(42);
         client.world.add_entity(entity);
         client.active_busy_operation = Some(PendingBusyOperation {
-            operation: PendingOperation::Use { source: guid },
+            operation: PendingOperation::GuardedUse {
+                sequence: 41,
+                intent: holtburger_world::item_use::ItemUseIntent::Direct {
+                    source: guid,
+                    unrestricted: false,
+                },
+                spell_target: None,
+            },
             deadline: Instant::now() + BUSY_OPERATION_TIMEOUT,
             pending_error: None,
         });
@@ -574,8 +588,8 @@ mod tests {
         assert!(
             matches!(events.try_recv().unwrap(), ClientViewEvent::ActionResult {
             source: ActionResultSource::Client,
-            reason: ActionResultReason::General(message),
-        } if message == "The Door is locked")
+            reason: ActionResultReason::Locked { target, name, sequence: 41 },
+        } if target == guid && name == "Door")
         );
         while let Ok(event) = events.try_recv() {
             assert!(
@@ -583,6 +597,22 @@ mod tests {
                 "sound waits for scene admission"
             );
         }
+        assert!(
+            client.active_busy_operation.is_some(),
+            "sound does not release admission"
+        );
+        client
+            .finish_busy_operation_from_use_done(holtburger_protocol::errors::WeenieError::None)
+            .await
+            .unwrap();
+        assert!(client.active_busy_operation.is_none());
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            ClientViewEvent::ItemUseFinished(super::super::item_use::ItemUseFinished {
+                sequence: 41,
+                ..
+            })
+        ));
     }
 
     #[test]

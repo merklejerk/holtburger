@@ -131,7 +131,6 @@
 						ondblclick={() => onExamineItem(guid)}
 						oncontextmenu={(event) => {
 							event.preventDefault();
-							onSelectItem(guid);
 							onExamineItem(guid);
 						}}
 					>

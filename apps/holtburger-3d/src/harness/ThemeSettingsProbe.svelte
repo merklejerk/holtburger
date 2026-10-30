@@ -81,6 +81,11 @@
 {#if ready}
 	{#if gameplay}
 		<ClientSettingsPanel
+			lockInteractions={settings.lockInteractions}
+			onLockInteractionsChange={(lockInteractions) => {
+				settings = { ...settings, lockInteractions };
+				persistence.publish({ sections: { lockInteractions } });
+			}}
 			chatSuppression={settings.chatSuppression}
 			onChatSuppressionChange={(chatSuppression) => {
 				settings = { ...settings, chatSuppression };

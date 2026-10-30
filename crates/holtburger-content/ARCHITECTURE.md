@@ -291,3 +291,7 @@ parses authored progress text once into literal text or one integer substitution
 Unsupported formatting fails bootstrap with the contract ID and format text.
 World uses this immutable lookup to interpret server trackers; no per-row host
 content fetch or app-owned duplicate catalog is needed.
+
+Standard lockpick WCID bonuses live in `lockpick.rs`. Inventory, inspection, and chance
+estimates consume this small reference table without loading a server-template snapshot.
+Unknown WCIDs remain absent; world and frontend policy explicitly assume zero where needed.

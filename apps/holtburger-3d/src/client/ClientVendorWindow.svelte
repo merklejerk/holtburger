@@ -310,7 +310,6 @@
 												onclick={() => (selected = cell.sources[0])}
 												oncontextmenu={(event) => {
 													event.preventDefault();
-													selected = cell.sources[0];
 													onExamineItem(cell.sources[0]);
 												}}
 											>

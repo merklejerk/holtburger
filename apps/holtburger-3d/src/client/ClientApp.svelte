@@ -1443,11 +1443,6 @@
 
 	function handleGameKeydown(event: KeyboardEvent): void {
 		if (event.defaultPrevented) return;
-		if (event.key === "Escape") {
-			gameplayView?.openSystemMenu();
-			event.preventDefault();
-			return;
-		}
 		if (gameplayView?.handleSystemPanelKeydown(event)) return;
 		if (preciseJumpActive && !event.isComposing) {
 			if (
@@ -1525,6 +1520,11 @@
 		if (clientInput.shortcut("interact", event) && !event.isComposing) {
 			event.preventDefault();
 			if (!event.repeat) itemInteractions?.interactSelected(unrestrictedUse);
+			return;
+		}
+		if (event.key === "Escape") {
+			gameplayView?.openSystemMenu();
+			event.preventDefault();
 			return;
 		}
 		if (inputArbiter !== null && characterInput.apply(event, true))
@@ -2128,6 +2128,7 @@
 				),
 		});
 		const input = new ClientSelectionInput({
+			keyboard,
 			input: clientInput,
 			selection,
 			cycle,

@@ -1,3 +1,7 @@
+import type {
+	EscapeContextHandle,
+	KeyboardInputPolicy,
+} from "../lib/input/keyboard-input-policy";
 import type { AppInput } from "../lib/input/app-input";
 import type {
 	ClientCycleSelectionController,
@@ -26,12 +30,15 @@ export class ClientSelectionInput {
 	readonly #selection: ClientEntitySelection;
 	readonly #cycle: ClientCycleSelectionController;
 	readonly #holdDelayMs: number;
+	/** Release acquisition listeners and the selection cancellation context together. */
 	readonly #unsubscribe: () => void;
 	#press: PendingSelectionPress | null = null;
 	#destroyed = false;
 
 	constructor(options: {
 		readonly input: AppInput;
+		/** App-local Escape ordering shared with windows and other interactions. */
+		readonly keyboard: KeyboardInputPolicy;
 		readonly selection: ClientEntitySelection;
 		readonly cycle: ClientCycleSelectionController;
 		/** Duration before a held cycle binding acquires its nearest target. */
@@ -41,9 +48,27 @@ export class ClientSelectionInput {
 		this.#selection = options.selection;
 		this.#cycle = options.cycle;
 		this.#holdDelayMs = options.holdDelayMs;
-		this.#unsubscribe = options.selection.subscribeExternalIntent(() =>
+		const unsubscribeIntent = options.selection.subscribeExternalIntent(() =>
 			this.cancel(),
 		);
+		let context: EscapeContextHandle | null = null;
+		const updateContext = (guid: number | null): void => {
+			context?.release();
+			context =
+				guid === null
+					? null
+					: options.keyboard.bindEscapeContext(() => {
+							this.cancel();
+							this.#selection.select(null);
+						});
+		};
+		updateContext(options.selection.selectedGuid());
+		const unsubscribeSelection = options.selection.subscribe(updateContext);
+		this.#unsubscribe = () => {
+			unsubscribeIntent();
+			unsubscribeSelection();
+			context?.release();
+		};
 	}
 
 	keydown(event: KeyboardEvent, nowMs: number): boolean {
@@ -63,6 +88,13 @@ export class ClientSelectionInput {
 			] as const
 		).find((action) => this.#input.shortcut(action, event));
 		if (action === undefined) return false;
+		// An empty selection must leave the fallback Escape action reachable.
+		if (
+			action === "cancel" &&
+			this.#selection.selectedGuid() === null &&
+			this.#press === null
+		)
+			return false;
 		event.preventDefault();
 		if (event.repeat) return true;
 		this.cancel();

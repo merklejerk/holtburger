@@ -76,8 +76,8 @@ export class ClientSelectionInput {
 		const action = (
 			[
 				"selectSelf",
-				"nextCreature",
-				"previousCreature",
+				"nextInteractable",
+				"previousInteractable",
 				"nextHostile",
 				"previousHostile",
 				"nextNonCreature",
@@ -105,11 +105,11 @@ export class ClientSelectionInput {
 			case "cancel":
 				this.#selection.select(null);
 				break;
-			case "nextCreature":
-				this.#beginPress(event, "creature", 1, nowMs);
+			case "nextInteractable":
+				this.#beginPress(event, "interactable", 1, nowMs);
 				break;
-			case "previousCreature":
-				this.#beginPress(event, "creature", -1, nowMs);
+			case "previousInteractable":
+				this.#beginPress(event, "interactable", -1, nowMs);
 				break;
 			case "nextHostile":
 				this.#beginPress(event, "hostile", 1, nowMs);

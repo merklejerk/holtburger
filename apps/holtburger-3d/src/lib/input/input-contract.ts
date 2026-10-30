@@ -91,8 +91,8 @@ export type ClientPanelShortcut =
 export const CLIENT_SHORTCUT_ACTIONS = [
 	...CLIENT_PANEL_SHORTCUT_ACTIONS,
 	"selectSelf",
-	"nextCreature",
-	"previousCreature",
+	"nextInteractable",
+	"previousInteractable",
 	"nextHostile",
 	"previousHostile",
 	"nextNonCreature",
@@ -173,9 +173,12 @@ export interface ClientMouseConfiguration {
 	readonly invertSteeringVertical: boolean;
 }
 
-/** Persisted client input policy, including keyboard bindings and fixed mouse gestures. */
+/** Persisted client input policy, including bindings, mouse gestures, and target acquisition. */
 export type ClientInputConfiguration = ClientKeyboardConfiguration &
-	ClientMouseConfiguration;
+	ClientMouseConfiguration & {
+		/** Restrict the default target cycler to the approximate camera view. */
+		readonly targetOnlyInView: boolean;
+	};
 
 /** Zero-based positions of the ten numbered bars and cells. */
 export type InputDigitIndex = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;

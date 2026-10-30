@@ -2146,6 +2146,7 @@
 					owner.mirror,
 					gameplayPresentation?.targetingView() ?? null,
 					CLIENT_TUNING.entitySelection.cycle,
+					userSettings.input.targetOnlyInView,
 				),
 		});
 		const input = new ClientSelectionInput({

@@ -78,8 +78,8 @@ const CLIENT_LABELS: Readonly<Record<ClientShortcut, string>> = {
 	toggleSettings: "Toggle settings",
 
 	selectSelf: "Select self",
-	nextCreature: "Next creature",
-	previousCreature: "Previous creature",
+	nextInteractable: "Select next target",
+	previousInteractable: "Select previous target",
 	nextHostile: "Next hostile",
 	previousHostile: "Previous hostile",
 	nextNonCreature: "Next world object",

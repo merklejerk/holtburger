@@ -95,6 +95,8 @@ export type ClientAttackProfile = z.infer<typeof clientAttackProfileSchema>;
 
 const combatStatusSchema = z
 	.object({
+		/** Highest processed begin/stop sequence; superseded requests cannot change intent. Zero is initial. */
+		processedIntentSequence: z.number().int().nonnegative().safe(),
 		desired: z
 			.object({
 				target: z.number().int().nonnegative().max(0xffff_ffff),

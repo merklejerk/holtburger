@@ -1259,9 +1259,11 @@ export class ClientLifecycleSession {
 	async beginCombatEngagement(
 		target: number,
 		profile: ClientAttackProfile,
+		intentSequence: number,
 	): Promise<void> {
 		if (this.#state.lifecycle?.kind !== "in-world") return;
 		await this.#transport.invoke("begin_client_combat_engagement", {
+			intentSequence,
 			target,
 			profile: clientAttackProfileSchema.parse(profile),
 		});
@@ -1273,8 +1275,10 @@ export class ClientLifecycleSession {
 		});
 	}
 
-	async stopCombatEngagement(): Promise<void> {
-		await this.#transport.invoke("stop_client_combat_engagement");
+	async stopCombatEngagement(intentSequence: number): Promise<void> {
+		await this.#transport.invoke("stop_client_combat_engagement", {
+			intentSequence,
+		});
 	}
 
 	/** Retained fellowship facts stay imperative, independent of panel lifetime. */
@@ -2301,7 +2305,12 @@ function emptyState(): ClientLifecycleSessionState {
 		appearanceOptions: null,
 		gameplayPreferences: null,
 		combatMode: "unknown",
-		combat: { desired: null, state: "idle", refill: null },
+		combat: {
+			desired: null,
+			state: "idle",
+			processedIntentSequence: 0,
+			refill: null,
+		},
 		spellCastTarget: null,
 		vitals: [],
 		characterMotion: null,

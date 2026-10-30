@@ -301,6 +301,8 @@ pub struct GameData {
     pub combat_mode: CombatMode,
     /// Core-owned desired engagement and ACE repeat lifecycle.
     pub combat_status: holtburger_core::ClientCombatStatus,
+    /// Last locally issued begin/stop identity, retained independently of delayed status updates.
+    pub combat_intent_sequence: u64,
     /// Local CLI combat controls for melee power or missile accuracy and attack height.
     pub combat_controls: CombatControlState,
     /// Every entity currently in player's pack.
@@ -347,6 +349,7 @@ impl Default for GameData {
             world_name: "Dereth".to_string(), // Default
             combat_mode: CombatMode::NonCombat,
             combat_status: Default::default(),
+            combat_intent_sequence: 0,
             combat_controls: CombatControlState::default(),
             inventory: HashSet::new(),
             equipment: HashMap::new(),
@@ -360,6 +363,16 @@ impl Default for GameData {
 }
 
 impl GameData {
+    /// Allocate after both issued and recovered identities so queued commands never share a receipt.
+    pub fn next_combat_intent_sequence(&mut self) -> u64 {
+        self.combat_intent_sequence = self
+            .combat_intent_sequence
+            .max(self.combat_status.processed_intent_sequence)
+            .checked_add(1)
+            .expect("combat intent sequence exhausted");
+        self.combat_intent_sequence
+    }
+
     pub fn new(guid: Guid, name: String, world_name: String) -> Self {
         Self::new_with_account(guid, name, String::new(), world_name)
     }

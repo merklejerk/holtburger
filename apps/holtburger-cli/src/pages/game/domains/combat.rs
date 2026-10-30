@@ -183,6 +183,7 @@ fn start_explicit_attack(state: &mut GameState, target_guid: Guid) -> UpdateResu
     let profile = shared_attack_profile(state, desired_mode)
         .expect("explicit melee or missile mode must produce an attack profile");
     result.commands.push(ClientCommand::BeginCombatEngagement {
+        intent_sequence: state.data.next_combat_intent_sequence(),
         target: target_guid,
         profile,
     });

@@ -4,6 +4,7 @@ import { probeCombatBar } from "./client-combat-bar-probe.mjs";
 import { probeSalvage } from "./client-salvage-probe.mjs";
 import { probeUserThemeLifecycle } from "./user-theme-lifecycle-probe.mjs";
 import { probeClientPresentation } from "./client-presentation-probe.mjs";
+import { probeClientCombatEscape } from "./client-combat-escape-probe.mjs";
 import { probeClientMouseMovement } from "./client-mouse-movement-probe.mjs";
 import { probeSpellBar } from "./client-spell-bar-probe.mjs";
 import { probeClientWaypoint } from "./client-waypoint-probe.mjs";
@@ -136,7 +137,9 @@ try {
 		report = {
 			suite: options.userThemeLifecycle
 				? "user-theme-lifecycle"
-				: "client-presentation",
+				: options.clientCombatEscape
+					? "client-combat-escape"
+					: "client-presentation",
 			passed: true,
 			evidence: result.clientPresentation,
 			browserErrors,
@@ -653,6 +656,7 @@ function parseArgs(args) {
 		pregamePreview: false,
 		pregameLocation: 0,
 		clientPresentation: false,
+		clientCombatEscape: false,
 		userThemeLifecycle: false,
 		worldMap: false,
 		clientWorldMap: false,
@@ -838,6 +842,10 @@ function parseArgs(args) {
 				break;
 			case "--client-presentation":
 				parsed.clientPresentation = true;
+				break;
+			case "--client-combat-escape":
+				parsed.clientPresentation = true;
+				parsed.clientCombatEscape = true;
 				break;
 			case "--pregame-location":
 				parsed.pregameLocation = Number(args[++index]);
@@ -1989,6 +1997,7 @@ Options:
   --nameplate-report-only
                         Print only renderer identity, errors, profiling, and nameplate evidence.
   --client-presentation Verify actual client selection/creator/gameplay/return on one world context.
+  --client-combat-escape Verify combat retry and cancellation ordering through the actual client.
   --pregame-location <index> Choose a configured pregame scene for diagnostics (default: 0).
   --pregame-preview    Exercise static asset ownership and direct preview draw before world startup.
   --object-preview-report-only
@@ -5457,7 +5466,9 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			const clientPresentation = await (
 				options.userThemeLifecycle
 					? probeUserThemeLifecycle
-					: probeClientPresentation
+					: options.clientCombatEscape
+						? probeClientCombatEscape
+						: probeClientPresentation
 			)(client, evaluateExpression, consoleMessages);
 			return {
 				clientPresentation,

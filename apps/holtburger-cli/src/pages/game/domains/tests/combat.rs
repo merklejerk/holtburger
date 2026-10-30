@@ -29,6 +29,7 @@ fn explicit_attack_delegates_one_engagement_to_core() {
                 height: AttackHeight::Medium,
                 power,
             },
+            ..
         } if *target == target_guid && (*power - 0.5).abs() < f32::EPSILON
     )));
     assert_eq!(
@@ -36,6 +37,30 @@ fn explicit_attack_delegates_one_engagement_to_core() {
         Some(Interaction::Targeting { target_guid })
     );
     assert!(state.handle_tick(0.016).commands.is_empty());
+}
+
+#[test]
+fn queued_combat_actions_allocate_after_recovered_and_unacknowledged_intents() {
+    let target_guid = Guid(0x6000_0001);
+    let mut state = GameState::new(Guid(0x5000_0001), "Player".into(), "World".into());
+    attackable_target(&mut state, target_guid);
+    state.data.combat_mode = CombatMode::Melee;
+    state.data.combat_status.processed_intent_sequence = 40;
+    for expected in [41, 42] {
+        let result = state
+            .handle_action(AppAction::Attack { guid: target_guid })
+            .unwrap();
+        assert!(result.commands.iter().any(|command| matches!(command,
+            ClientCommand::BeginCombatEngagement { intent_sequence, .. } if *intent_sequence == expected
+        )));
+    }
+    let result = state.handle_action(AppAction::CancelInteraction).unwrap();
+    assert!(result.commands.iter().any(|command| matches!(
+        command,
+        ClientCommand::StopCombatEngagement {
+            intent_sequence: 43
+        }
+    )));
 }
 
 #[test]
@@ -76,7 +101,7 @@ fn leaving_targeting_stops_the_shared_engagement() {
         result
             .commands
             .iter()
-            .any(|command| matches!(command, ClientCommand::StopCombatEngagement))
+            .any(|command| matches!(command, ClientCommand::StopCombatEngagement { .. }))
     );
     assert_eq!(state.view.active_interaction, None);
 }

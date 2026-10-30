@@ -378,6 +378,7 @@
 	let combatStatus = $state<ClientCombatStatus>({
 		desired: null,
 		state: "idle",
+		processedIntentSequence: 0,
 		refill: null,
 	});
 	/** Accepted profile selections, including repeated selections of the current value. */
@@ -463,19 +464,23 @@
 		}
 		// Selection is sampled only for this explicit begin; core retains the engaged target.
 		retireCombatEscapeContext();
+		const sequence = nextCombatIntentSequence();
 		const context = keyboard.bindEscapeContext(stopCombat);
-		combatEscapeContext = context;
+		combatEscapeContext = { sequence, context };
 		void currentSession
-			.beginCombatEngagement(target, profile)
+			.beginCombatEngagement(target, profile, sequence)
 			.catch((error: unknown) => {
 				// A failed older begin must not retire a newer engagement's cancellation.
-				if (combatEscapeContext === context) retireCombatEscapeContext();
+				if (combatEscapeContext?.context === context)
+					retireCombatEscapeContext();
 				reportCommandFailure(error);
 			});
 	}
 	function stopCombat(): void {
 		retireCombatEscapeContext();
-		void session?.stopCombatEngagement().catch(reportCommandFailure);
+		void session
+			?.stopCombatEngagement(nextCombatIntentSequence())
+			.catch(reportCommandFailure);
 	}
 	const spellBarEnabled = $derived(
 		characterSettings.kind === "ready" &&
@@ -901,16 +906,38 @@
 	let inputController: CharacterInputController | null = null;
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	/** Explicit attack intent owns cancellation; passive status updates can only retire it. */
-	let combatEscapeContext: EscapeContextHandle | null = null;
+	let combatEscapeContext: {
+		/** Begin request whose eventual idle status may retire this registration. */
+		readonly sequence: number;
+		/** Input-policy lease; rejection of another request cannot release it. */
+		readonly context: EscapeContextHandle;
+	} | null = null;
+	/** Monotonic across character transitions; old acknowledgements must never reuse an identity. */
+	let combatIntentSequence = 0;
+	function nextCombatIntentSequence(): number {
+		const next = combatIntentSequence + 1;
+		if (!Number.isSafeInteger(next))
+			throw new Error("Combat intent sequence exhausted");
+		combatIntentSequence = next;
+		return next;
+	}
 	/** Precise-jump entry owns registration; completion, cancellation and teardown retire it. */
 	let preciseEscapeContext: EscapeContextHandle | null = null;
 	function retireCombatEscapeContext(): void {
-		combatEscapeContext?.release();
+		combatEscapeContext?.context.release();
 		combatEscapeContext = null;
 	}
 	function acceptCombatStatus(status: ClientCombatStatus): void {
 		combatStatus = status;
-		if (status.desired === null) retireCombatEscapeContext();
+		combatIntentSequence = Math.max(
+			combatIntentSequence,
+			status.processedIntentSequence,
+		);
+		if (
+			status.desired === null &&
+			status.processedIntentSequence === combatEscapeContext?.sequence
+		)
+			retireCombatEscapeContext();
 	}
 	let facingInput: ClientFacingInputDispatch | null = null;
 	const mouseMovement: ClientMouseMovementInput = {

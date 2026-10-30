@@ -172,7 +172,9 @@ pub(super) fn apply_navigation_interrupt(
             state.data.combat_mode,
             CombatMode::Melee | CombatMode::Missile
         ) {
-            result.commands.push(ClientCommand::StopCombatEngagement);
+            result.commands.push(ClientCommand::StopCombatEngagement {
+                intent_sequence: state.data.next_combat_intent_sequence(),
+            });
         }
         result.actions.push(AppAction::Notification {
             notification: AppNotification::ActiveInteractionChanged { interaction: None },

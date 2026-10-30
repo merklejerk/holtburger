@@ -562,20 +562,21 @@ impl ClientRuntime {
         }
         match command {
             ClientCommand::CastSpell { spell_id, aim } => self.cast_spell(spell_id, aim).await,
-            ClientCommand::BeginCombatEngagement { target, profile } => {
+            ClientCommand::BeginCombatEngagement {
+                target,
+                profile,
+                intent_sequence,
+            } => {
+                let previous = self.combat_engagement.status();
+                if !self.combat_engagement.admit_intent(intent_sequence) {
+                    return Ok(());
+                }
                 if !self.world.combat_target_status(target).is_available() {
                     self.reject_combat_request("Select a valid target before attacking.");
-                    // Reassert retained intent so frontends can retire speculative cancellation
-                    // ownership even when this refusal leaves an idle status unchanged.
-                    let _ = self
-                        .client_view_event_tx
-                        .send(ClientViewEvent::CombatStatusUpdated(
-                            self.combat_engagement.status(),
-                        ));
+                    self.emit_combat_status_if_changed(previous);
                     return Ok(());
                 }
                 let profile = profile.normalized();
-                let previous = self.combat_engagement.status();
                 self.combat_engagement.begin(
                     target,
                     profile,
@@ -598,8 +599,11 @@ impl ClientRuntime {
                 self.emit_combat_status_if_changed(previous);
                 Ok(())
             }
-            ClientCommand::StopCombatEngagement => {
+            ClientCommand::StopCombatEngagement { intent_sequence } => {
                 let previous = self.combat_engagement.status();
+                if !self.combat_engagement.admit_intent(intent_sequence) {
+                    return Ok(());
+                }
                 self.combat_engagement.stop();
                 self.emit_combat_status_if_changed(previous);
                 self.advance_combat_engagement(Instant::now()).await
@@ -1449,6 +1453,7 @@ mod tests {
             }
             client
                 .handle_command(ClientCommand::BeginCombatEngagement {
+                    intent_sequence: 1,
                     target: Guid(2),
                     profile: ClientAttackProfile::Melee {
                         height: AttackHeight::Medium,
@@ -1509,17 +1514,25 @@ mod tests {
                     if retained {
                         client
                             .handle_command(ClientCommand::BeginCombatEngagement {
+                                intent_sequence: 1,
                                 target: Guid(2),
                                 profile,
                             })
                             .await
                             .unwrap();
                     }
-                    let previous = client.combat_engagement.status();
+                    let previous = ClientCombatStatus {
+                        processed_intent_sequence: 2,
+                        ..client.combat_engagement.status()
+                    };
                     let sequence = client.session.game_action_sequence;
                     let mut events = client.subscribe_client_view_events();
                     client
-                        .handle_command(ClientCommand::BeginCombatEngagement { target, profile })
+                        .handle_command(ClientCommand::BeginCombatEngagement {
+                            target,
+                            profile,
+                            intent_sequence: 2,
+                        })
                         .await
                         .unwrap();
                     assert_eq!(client.combat_engagement.status(), previous);
@@ -1560,10 +1573,131 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn begin_stop_receipts_advance_while_profile_and_runtime_updates_retain_identity() {
+        let mut client = client(0);
+        client.world.add_entity(combat_target(Guid(2)));
+        let profile = ClientAttackProfile::Melee {
+            height: AttackHeight::High,
+            power: 0.25,
+        };
+        client
+            .handle_command(ClientCommand::BeginCombatEngagement {
+                intent_sequence: 11,
+                target: Guid(2),
+                profile,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            client.combat_engagement.status().processed_intent_sequence,
+            11
+        );
+        let replacement = ClientAttackProfile::Melee {
+            height: AttackHeight::Low,
+            power: 0.75,
+        };
+        client
+            .handle_command(ClientCommand::UpdateCombatProfile(replacement))
+            .await
+            .unwrap();
+        assert_eq!(
+            client.combat_engagement.status().processed_intent_sequence,
+            11
+        );
+        assert_eq!(
+            client.combat_engagement.status().desired.unwrap().profile,
+            replacement
+        );
+        client.observe_combat_feedback(&CombatFeedback::AttackCommenced, Instant::now());
+        assert_eq!(
+            client.combat_engagement.status().processed_intent_sequence,
+            11
+        );
+        for intent_sequence in [12, 13] {
+            let mut events = client.subscribe_client_view_events();
+            client
+                .handle_command(ClientCommand::StopCombatEngagement { intent_sequence })
+                .await
+                .unwrap();
+            let ClientViewEvent::CombatStatusUpdated(status) = events.try_recv().unwrap() else {
+                panic!("Expected stop acknowledgement even without a retained target");
+            };
+            assert_eq!(status.processed_intent_sequence, intent_sequence);
+            assert!(status.desired.is_none());
+        }
+        client.combat_engagement.reset();
+        assert_eq!(
+            client.combat_engagement.status().processed_intent_sequence,
+            13
+        );
+    }
+
+    #[tokio::test]
+    async fn superseded_begin_and_stop_cannot_overwrite_newer_intent() {
+        let mut client = client(0);
+        client.world.add_entity(combat_target(Guid(2)));
+        let begin = |intent_sequence, power| ClientCommand::BeginCombatEngagement {
+            target: Guid(2),
+            intent_sequence,
+            profile: ClientAttackProfile::Melee {
+                height: AttackHeight::Medium,
+                power,
+            },
+        };
+        client.handle_command(begin(3, 0.75)).await.unwrap();
+        let accepted = client.combat_engagement.status();
+        let sequence = client.session.game_action_sequence;
+        let mut events = client.subscribe_client_view_events();
+        for command in [
+            begin(1, 0.25),
+            ClientCommand::StopCombatEngagement { intent_sequence: 2 },
+            begin(3, 0.5),
+        ] {
+            client.handle_command(command).await.unwrap();
+            assert_eq!(client.combat_engagement.status(), accepted);
+            assert_eq!(client.session.game_action_sequence, sequence);
+            assert!(events.try_recv().is_err());
+        }
+        client
+            .handle_command(ClientCommand::StopCombatEngagement { intent_sequence: 5 })
+            .await
+            .unwrap();
+        let stopped = client.combat_engagement.status();
+        client.handle_command(begin(4, 1.0)).await.unwrap();
+        assert_eq!(client.combat_engagement.status(), stopped);
+        // Retirement preserves the watermark so a late request cannot restart an ended character action.
+        client.combat_engagement.reset();
+        client.handle_command(begin(4, 1.0)).await.unwrap();
+        assert_eq!(
+            client.combat_engagement.status().processed_intent_sequence,
+            5
+        );
+        assert!(client.combat_engagement.status().desired.is_none());
+        client
+            .handle_command(ClientCommand::BeginCombatEngagement {
+                target: Guid(3),
+                intent_sequence: 7,
+                profile: ClientAttackProfile::Melee {
+                    height: AttackHeight::Medium,
+                    power: 0.5,
+                },
+            })
+            .await
+            .unwrap();
+        client.handle_command(begin(6, 1.0)).await.unwrap();
+        assert_eq!(
+            client.combat_engagement.status().processed_intent_sequence,
+            7
+        );
+        assert!(client.combat_engagement.status().desired.is_none());
+    }
+
+    #[tokio::test]
     async fn manual_movement_interrupts_melee_but_preserves_missile_combat() {
         let mut client = client(0);
         client.world.add_entity(combat_target(Guid(2)));
         let begin = || ClientCommand::BeginCombatEngagement {
+            intent_sequence: 1,
             target: Guid(2),
             profile: ClientAttackProfile::Melee {
                 height: AttackHeight::Medium,
@@ -1587,11 +1721,15 @@ mod tests {
             .unwrap();
         assert_eq!(
             client.combat_engagement.status(),
-            ClientCombatStatus::default()
+            ClientCombatStatus {
+                processed_intent_sequence: 1,
+                ..ClientCombatStatus::default()
+            }
         );
 
         client
             .handle_command(ClientCommand::BeginCombatEngagement {
+                intent_sequence: 2,
                 target: Guid(2),
                 profile: ClientAttackProfile::Missile {
                     height: AttackHeight::Medium,

@@ -664,7 +664,7 @@ mod tests {
             result
                 .commands
                 .iter()
-                .any(|command| matches!(command, ClientCommand::StopCombatEngagement))
+                .any(|command| matches!(command, ClientCommand::StopCombatEngagement { .. }))
         );
         assert_eq!(state.view.active_interaction, None);
     }

@@ -42,6 +42,8 @@ enum CombatPhase {
 /// Owns request cardinality separately from presentation feedback and physical readiness.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct CombatEngagementRuntime {
+    /// Command acknowledgement, independent of the retained engagement's target and profile.
+    processed_intent_sequence: u64,
     desired: Option<ClientCombatEngagement>,
     sent: Option<ClientCombatEngagement>,
     phase: CombatPhase,
@@ -54,6 +56,7 @@ pub(super) struct CombatEngagementRuntime {
 impl Default for CombatEngagementRuntime {
     fn default() -> Self {
         Self {
+            processed_intent_sequence: 0,
             desired: None,
             sent: None,
             phase: CombatPhase::Idle,
@@ -77,6 +80,7 @@ impl CombatEngagementRuntime {
 
     pub(super) fn status(self) -> ClientCombatStatus {
         ClientCombatStatus {
+            processed_intent_sequence: self.processed_intent_sequence,
             desired: self.desired,
             state: match self.phase {
                 CombatPhase::Idle => ClientCombatControlState::Idle,
@@ -87,6 +91,16 @@ impl CombatEngagementRuntime {
             },
             refill: self.refill,
         }
+    }
+
+    /// Admit only newer begin/stop requests, including refusals. Host tasks may enqueue out of order.
+    #[must_use]
+    pub(super) fn admit_intent(&mut self, sequence: u64) -> bool {
+        if sequence <= self.processed_intent_sequence {
+            return false;
+        }
+        self.processed_intent_sequence = sequence;
+        true
     }
 
     pub(super) fn begin(
@@ -174,7 +188,12 @@ impl CombatEngagementRuntime {
     }
 
     pub(super) fn reset(&mut self) {
-        *self = Self::default();
+        // Retiring an engagement is not a new command. Preserve the receipt so an idle
+        // update can still retire the lease that owned the latest processed begin.
+        *self = Self {
+            processed_intent_sequence: self.processed_intent_sequence,
+            ..Self::default()
+        };
     }
 
     pub(super) fn next_effect(&mut self, now: Instant, ready: bool) -> Option<CombatControlEffect> {

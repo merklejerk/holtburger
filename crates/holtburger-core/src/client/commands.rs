@@ -356,7 +356,7 @@ impl ClientRuntime {
             | ClientCommand::CastSpell { .. }
             | ClientCommand::BeginCombatEngagement { .. }
             | ClientCommand::UpdateCombatProfile(_)
-            | ClientCommand::StopCombatEngagement
+            | ClientCommand::StopCombatEngagement { .. }
             | ClientCommand::TargetedMeleeAttack { .. }
             | ClientCommand::TargetedMissileAttack { .. } => self.handle_combat_command(cmd).await,
 

@@ -713,6 +713,8 @@ pub struct ClientCombatRefillEstimate {
 /// Atomic projection of desired combat and the control state that owns wire requests.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ClientCombatStatus {
+    /// Highest processed begin/stop sequence; superseded requests cannot change intent. Zero is initial.
+    pub processed_intent_sequence: u64,
     pub desired: Option<ClientCombatEngagement>,
     pub state: ClientCombatControlState,
     pub refill: Option<ClientCombatRefillEstimate>,
@@ -721,6 +723,7 @@ pub struct ClientCombatStatus {
 impl Default for ClientCombatStatus {
     fn default() -> Self {
         Self {
+            processed_intent_sequence: 0,
             desired: None,
             state: ClientCombatControlState::Idle,
             refill: None,
@@ -1580,13 +1583,18 @@ pub enum ClientCommand {
     },
     /// Starts or explicitly retargets the shared server-repeat engagement.
     BeginCombatEngagement {
+        /// Caller-owned begin/stop identity echoed even when this request is refused.
+        intent_sequence: u64,
         target: Guid,
         profile: ClientAttackProfile,
     },
     /// Coalesces controls for the desired engagement without changing its target.
     UpdateCombatProfile(ClientAttackProfile),
     /// Clears desired engagement and retires any server attack sequence.
-    StopCombatEngagement,
+    StopCombatEngagement {
+        /// Caller-owned begin/stop identity; profile-only updates retain the current identity.
+        intent_sequence: u64,
+    },
     TargetedMeleeAttack {
         target: Guid,
         attack_height: AttackHeight,

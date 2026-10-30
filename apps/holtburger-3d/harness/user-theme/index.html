@@ -6,6 +6,10 @@
 			http-equiv="Content-Security-Policy"
 			content="__UI_THEME_PROBE_CSP__"
 		/>
+		<!-- Establish cascade priority before bundled styles can register layers. -->
+		<style>
+			@layer base, components, theme, overrides;
+		</style>
 		<title>User theme probe</title>
 	</head>
 	<body>

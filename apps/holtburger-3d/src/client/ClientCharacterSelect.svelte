@@ -3,6 +3,7 @@
 	import ClientPregameSettingsDrawer from "./ClientPregameSettingsDrawer.svelte";
 	import SettingsIcon from "../assets/icons/hud-settings.svg?component";
 	import UiDialog from "../app/UiDialog.svelte";
+	import { navigateVerticalButtons } from "../app/vertical-button-navigation";
 	import DeleteIcon from "../assets/icons/character-delete.svg?component";
 	import RestoreIcon from "../assets/icons/character-restore.svg?component";
 	import {
@@ -163,35 +164,10 @@
 	/** Arrow navigation selects a row; Enter/Space retain native button activation. */
 	function navigateCharacters(event: KeyboardEvent): void {
 		if (!(event.target instanceof HTMLButtonElement) || blocked) return;
-		const focused = event.target;
-		const options = Array.from(
-			focused.form?.querySelectorAll<HTMLButtonElement>(
-				'button[name="character"]:not(:disabled)',
-			) ?? [],
+		const options = event.target.form?.querySelectorAll<HTMLButtonElement>(
+			'button[name="character"]',
 		);
-		const index = options.indexOf(focused);
-		if (index === -1) return;
-		let destination: number;
-		switch (event.key) {
-			case "ArrowUp":
-				destination = (index + options.length - 1) % options.length;
-				break;
-			case "ArrowDown":
-				destination = (index + 1) % options.length;
-				break;
-			case "Home":
-				destination = 0;
-				break;
-			case "End":
-				destination = options.length - 1;
-				break;
-			default:
-				return;
-		}
-		event.preventDefault();
-		const next = options[destination];
-		next.focus();
-		next.click();
+		if (options !== undefined) navigateVerticalButtons(event, options)?.click();
 	}
 
 	function handleSubmit(event: SubmitEvent): void {

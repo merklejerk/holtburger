@@ -21,6 +21,63 @@ function fixture() {
 }
 
 describe("game keyboard routing", () => {
+	it("allows initial Tab and Shift+Tab on a native page, then restores gameplay suppression on teardown", () => {
+		const { keyboard, game } = fixture();
+		const page = keyboard.nativePage({
+			isConnected: true,
+			closest: () => null,
+		} as unknown as HTMLElement);
+		expect(keyboard.gameActive).toBe(false);
+		for (const shiftKey of [false, true]) {
+			const tab = Object.assign(keyEvent("Tab"), { shiftKey });
+			keyboard.keydown(tab);
+			expect(tab.defaultPrevented).toBe(false);
+			keyboard.keyup(tab);
+		}
+		keyboard.keydown(keyEvent("KeyW"));
+		expect(game.keydown).not.toHaveBeenCalled();
+		page.destroy();
+		keyboard.keyup(keyEvent("KeyW"));
+		expect(game.keyup).not.toHaveBeenCalled();
+		expect(keyboard.gameActive).toBe(true);
+		const gameTab = keyEvent("Tab");
+		keyboard.keydown(gameTab);
+		expect(gameTab.defaultPrevented).toBe(true);
+		expect(game.keydown).toHaveBeenCalledOnce();
+	});
+	it("cancels held game keys when a native page appears without sending their releases to it or back to gameplay", () => {
+		const { keyboard, game } = fixture();
+		keyboard.keydown(keyEvent("KeyW"));
+		const page = keyboard.nativePage({
+			isConnected: true,
+			closest: () => null,
+		} as unknown as HTMLElement);
+		expect(game.cancel).toHaveBeenCalledOnce();
+		keyboard.keydown(keyEvent("KeyW", true));
+		keyboard.keyup(keyEvent("KeyW"));
+		expect(game.keydown).toHaveBeenCalledOnce();
+		expect(game.keyup).not.toHaveBeenCalled();
+		page.destroy();
+	});
+	it("keeps native navigation effective until all overlapping page lifetimes retire", () => {
+		const { keyboard } = fixture();
+		const first = keyboard.nativePage({
+			isConnected: true,
+			closest: () => null,
+		} as unknown as HTMLElement);
+		const second = keyboard.nativePage({
+			isConnected: true,
+			closest: () => null,
+		} as unknown as HTMLElement);
+		first.destroy();
+		const nativeTab = keyEvent("Tab");
+		keyboard.keydown(nativeTab);
+		expect(nativeTab.defaultPrevented).toBe(false);
+		second.destroy();
+		const gameTab = keyEvent("Tab");
+		keyboard.keydown(gameTab);
+		expect(gameTab.defaultPrevented).toBe(true);
+	});
 	it("does not prepare activation state for a detached scope", () => {
 		const { keyboard } = fixture();
 		const activation = vi.fn(() => true);

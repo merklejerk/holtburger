@@ -1,5 +1,5 @@
 <script module lang="ts">
-	/** The startup intro is shared across all pregame mounts in this app launch. */
+	/** The startup intro is shared across all pregame mounts in this document. */
 	let wordmarkIntroConsumed = false;
 </script>
 
@@ -71,7 +71,7 @@
 	class:with-backdrop={backdrop}
 	class:hero-brand={branding === "hero"}
 	aria-label="Holtburger client"
-	use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
+	use:keyboard.nativePage
 >
 	<header class="pregame-brand">
 		{#if showPortalLogo}

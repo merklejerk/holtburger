@@ -125,6 +125,9 @@ async function launch(mode, args) {
 			? []
 			: [`--user-data-dir=${join(config, profileName)}`]),
 		"--remote-debugging-port=0",
+		...(launchTarget.kind !== "development" && mode === "client"
+			? ["--inspect=0"]
+			: []),
 		"--use-angle=swiftshader",
 		"--enable-unsafe-swiftshader",
 	];
@@ -181,6 +184,7 @@ async function launch(mode, args) {
 			output += chunk.toString();
 		});
 	let client;
+	let inspector;
 	try {
 		const browser = await waitFor(() => {
 			if (status !== null)
@@ -193,10 +197,20 @@ async function launch(mode, args) {
 				(response) => response.json(),
 			);
 			return targets.find(
-				(target) => target.type === "page" && target.url.includes(`/${mode}/`),
+				(target) =>
+					target.type === "page" &&
+					(target.url.includes(`/${mode}/`) ||
+						(mode === "client" && target.url.includes("/launcher/"))),
 			)?.webSocketDebuggerUrl;
 		}, "application page");
 		client = await createCdpClient(page);
+		if (launchTarget.kind !== "development" && mode === "client") {
+			const endpoint = await waitFor(
+				() => output.match(/Debugger listening on (ws:\/\/[^\s]+)/)?.[1],
+				"native diagnostic endpoint",
+			);
+			inspector = await createCdpClient(endpoint);
+		}
 		await waitFor(
 			() =>
 				evaluate(
@@ -207,13 +221,21 @@ async function launch(mode, args) {
 		);
 		return {
 			client,
+			inspector,
 			snapshot: () => evaluate(client, "window.holtburgerContent.snapshot()"),
 			async close(expectedCode) {
+				// Node waits for an attached debugger even after orderly application shutdown.
+				inspector?.close();
 				try {
 					// Quit can close the debugger before its reply arrives. Process exit is
 					// independent; only a transport closure may accompany a valid exit.
 					const [request, exit] = await Promise.allSettled([
-						evaluate(client, "void window.holtburgerContent.quit()"),
+						evaluate(
+							client,
+							mode === "client"
+								? "void window.holtburgerClient.quit()"
+								: "void window.holtburgerContent.quit()",
+						),
 						waitFor(() => status, "orderly app exit"),
 					]);
 					if (exit.status === "rejected") throw exit.reason;
@@ -241,6 +263,7 @@ async function launch(mode, args) {
 			},
 		};
 	} catch (error) {
+		inspector?.close();
 		client?.close();
 		if (status === null) child.kill();
 		throw new Error(`${mode} startup probe failed: ${output}`, {
@@ -304,24 +327,44 @@ try {
 		);
 		let app = await launch(mode, []);
 		try {
-			const state = await waitFor(async () => {
-				const current = await app.snapshot();
-				if (current.phase.kind === "fatal")
-					throw new Error(current.phase.message);
-				return current.phase.kind === "restart_required" ? current : null;
-			}, `${mode} necessary-resource failure`);
-			await requireFixtureLocation(state.phase.location, fixture);
-			const footer = await evaluate(
-				app.client,
-				"document.querySelector('.startup-overlay .pregame-footer .loading-assets')?.textContent",
-			);
-			const expectedFooter = `Assets: ${state.phase.location}`;
-			if (footer !== expectedFooter)
-				throw new Error(
-					`Loading footer expected ${JSON.stringify(expectedFooter)}, received ${JSON.stringify(footer)}`,
+			if (mode === "client") {
+				await waitFor(async () => {
+					try {
+						return await evaluate(
+							app.client,
+							"location.pathname.includes('/launcher/') && window.holtburgerLauncher.snapshot().then((value) => value.canPlay && Boolean(value.failure))",
+						);
+					} catch (error) {
+						if (
+							error instanceof Error &&
+							/Execution context was destroyed|Document request admission is closed/.test(
+								error.message,
+							)
+						)
+							return false;
+						throw error;
+					}
+				}, "failed client attempt returns to launcher");
+			} else {
+				const state = await waitFor(async () => {
+					const current = await app.snapshot();
+					if (current.phase.kind === "fatal")
+						throw new Error(current.phase.message);
+					return current.phase.kind === "restart_required" ? current : null;
+				}, `${mode} necessary-resource failure`);
+				await requireFixtureLocation(state.phase.location, fixture);
+				const footer = await evaluate(
+					app.client,
+					"document.querySelector('.startup-overlay .pregame-footer .loading-assets')?.textContent",
 				);
+				const expectedFooter = `Assets: ${state.phase.location}`;
+				if (footer !== expectedFooter)
+					throw new Error(
+						`Loading footer expected ${JSON.stringify(expectedFooter)}, received ${JSON.stringify(footer)}`,
+					);
+			}
 		} finally {
-			await app.close(mode === "client" ? 1 : 0);
+			await app.close(0);
 		}
 		const failed = JSON.parse(await readFile(preference, "utf8"));
 		if (
@@ -440,6 +483,7 @@ try {
 			if (launchTarget.kind !== "development" && mode === "client")
 				await probePackagedThemeAssets({
 					client: app.client,
+					inspect: (expression) => evaluate(app.inspector, expression),
 					read: (expression) => evaluate(app.client, expression),
 					waitFor,
 					profileDirectory: join(config, profileName),

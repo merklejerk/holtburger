@@ -2,6 +2,7 @@
 	"$schema": "https://unpkg.com/knip@6/schema.json",
 	"entry": [
 		"src/client/main.ts",
+		"src/launcher/main.ts",
 		"src/explorer/main.ts",
 		"src/harness/browser/main.ts",
 		"src/harness/browser/client-precise-jump-probe.ts",
@@ -19,6 +20,7 @@
 		"scripts/entry-paths.mjs"
 	],
 	"ignore": ["scripts/entry-paths.d.mts"],
+	"ignoreBinaries": ["python"],
 	"ignoreDependencies": ["@electron-forge/maker-zip", "@types/rbush", "rbush"],
 	"ignoreIssues": {
 		"src/lib/game/commit/artifacts.ts": ["types"],

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { CLIENT_CLOSE_PREPARATION_TIMEOUT_MS } from "../../electron/client-window-close";
+import { CLIENT_CLOSE_PREPARATION_TIMEOUT_MS } from "../../electron/client-retirement";
 import { UiThemeSelection } from "./ui-theme-selection";
 import {
 	UI_THEME_LOAD_TIMEOUT_MS,

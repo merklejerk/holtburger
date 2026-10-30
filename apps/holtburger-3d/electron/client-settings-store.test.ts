@@ -27,7 +27,7 @@ import {
 } from "../src/client/client-settings-values";
 
 const initialWindow = {
-	normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
+	normalBounds: { width: 1440, height: 900 },
 	maximized: false,
 } as const;
 

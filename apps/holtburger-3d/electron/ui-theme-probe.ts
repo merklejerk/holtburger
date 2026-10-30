@@ -55,26 +55,40 @@ app.whenReady().then(async () => {
 			}
 		})(join(directory, "themes"), console.error);
 		const store = new ClientSettingsStore(join(directory, "settings.json"), {
-			normalBounds: { x: 0, y: 0, width: 1200, height: 900 },
+			normalBounds: { width: 1200, height: 900 },
 			maximized: false,
 		});
 		await store.load();
+		const diagnosticIdentity = "user-theme-diagnostic";
+		ipcMain.handle("document:boot", () => diagnosticIdentity);
 		let failCatalog = false;
 		ipcMain.handle("themes:list", () => {
 			if (failCatalog) throw new Error("Diagnostic user catalog failure");
 			return catalog.list();
 		});
-		ipcMain.handle("themes:resolve", (_event, id: string) =>
-			catalog.resolve(id),
+		ipcMain.handle(
+			"themes:resolve",
+			(_event, identity: unknown, id: string) => {
+				assert.equal(identity, diagnosticIdentity);
+				return catalog.resolve(id);
+			},
 		);
 		ipcMain.handle("themes:open-directory", () => {
 			throw new Error("Diagnostic folder opening failure");
 		});
-		ipcMain.handle("settings:load-user", (_event, defaults: unknown) =>
-			store.loadUser(defaults, "persisted"),
+		ipcMain.handle(
+			"settings:load-user",
+			(_event, identity: unknown, defaults: unknown) => {
+				assert.equal(identity, diagnosticIdentity);
+				return store.loadUser(defaults, "persisted");
+			},
 		);
-		ipcMain.handle("settings:save-user-patch", (_event, patch: unknown) =>
-			store.saveUserPatch(clientUserSettingsPatchSchema.parse(patch)),
+		ipcMain.handle(
+			"settings:save-user-patch",
+			(_event, identity: unknown, patch: unknown) => {
+				assert.equal(identity, diagnosticIdentity);
+				return store.saveUserPatch(clientUserSettingsPatchSchema.parse(patch));
+			},
 		);
 		window = new BrowserWindow({
 			show: false,

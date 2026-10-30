@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { launcherTransport } from "../launcher/launcher-transport";
 	import type {
 		ClientGameplayOption,
 		ClientGameplayPreferences,
@@ -522,7 +523,7 @@
 	let dialogPresentation = $state<ClientDialogPresentation | null>(null);
 	let dialogs: ClientDialogs | null = null;
 	let chatMessages = $state<readonly ClientChatLine[]>([]);
-	/** Sent input survives world-view remounts until this app closes. */
+	/** Sent input survives world-view remounts until this client document retires. */
 	let sentChatHistory = $state<readonly string[]>([]);
 	const chatComposer = new ClientChatComposer({
 		recentEmotes: startupUserSettings.recentEmotes,
@@ -832,7 +833,7 @@
 		});
 		return () => {
 			unregister();
-			// Normal native close has already awaited this operation; unmount joins the same owner.
+			// Native retirement has already awaited this operation; unmount joins the same owner.
 			void appLifecycle
 				.prepareClose(prepareResources)
 				.catch((error) => console.error(error));
@@ -1273,8 +1274,17 @@
 	async function returnToMainMenu(): Promise<void> {
 		await appLifecycle.returnToSelection();
 	}
+	async function returnToLauncher(): Promise<void> {
+		// Reuse the lifecycle owner's page diagnostic rather than reconstructing a second error summary.
+		const details =
+			page.kind === "loading" && page.content.kind !== "pending"
+				? page.content.details
+				: null;
+		await launcherTransport().back(details);
+	}
 	async function disconnect(): Promise<void> {
 		await appLifecycle.disconnect();
+		await returnToLauncher();
 	}
 
 	async function castSpell(spellId: number): Promise<void> {
@@ -2655,7 +2665,15 @@
 				{/if}
 			{/snippet}
 			{#snippet actions()}
-				{#if page.content.kind === "ended"}
+				{#if page.content.kind === "ended" || page.content.kind === "failed"}
+					{#if window.holtburgerLauncher?.enabled !== false}
+						<button
+							class="pregame-primary pregame-action ui-button"
+							type="button"
+							onclick={() => void returnToLauncher().catch(console.error)}
+							>Back to launcher</button
+						>
+					{/if}
 					<button
 						class="pregame-primary pregame-action ui-button"
 						type="button"
@@ -2664,7 +2682,8 @@
 						><span class="pregame-icon" aria-hidden="true"><PowerIcon /></span
 						><span>Quit application</span></button
 					>
-				{:else if page.content.kind === "failed" && page.content.retry !== null}
+				{/if}
+				{#if page.content.kind === "failed" && page.content.retry !== null}
 					<button
 						class="pregame-action ui-button"
 						type="button"

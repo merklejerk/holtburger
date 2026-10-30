@@ -57,7 +57,8 @@
 <style>
 	@layer components {
 		.ui-dialog {
-			width: fit-content;
+			/* Browsers with expanding content can opt into a stable width; viewport limits still apply. */
+			width: var(--ui-dialog-width, fit-content);
 			min-width: min(18rem, calc(100vw - 2rem));
 			max-width: min(34rem, calc(100vw - 2rem));
 			max-height: calc(100vh - 2rem);

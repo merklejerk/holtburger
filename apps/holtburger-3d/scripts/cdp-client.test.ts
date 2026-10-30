@@ -73,7 +73,8 @@ it("settles replies and removes event subscriptions", async () => {
 	emit({ id, result: { enabled: true } });
 	await expect(request).resolves.toEqual({ enabled: true });
 	const denied = client.send("Runtime.enable");
-	const commandError = expect(denied).rejects.not.toBeInstanceOf(CdpConnectionError);
+	const commandError =
+		expect(denied).rejects.not.toBeInstanceOf(CdpConnectionError);
 	const { id: deniedId } = JSON.parse(socket.send.mock.calls[1][0]);
 	emit({ id: deniedId, error: { message: "Diagnostic command rejection" } });
 	await commandError;

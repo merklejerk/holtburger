@@ -29,7 +29,7 @@
 	.client-pregame-screen :is(.enter-world, .pregame-primary) {
 		min-height: 56px;
 	}
-	.client-pregame-screen .pregame-quiet {
+	.client-pregame-screen .pregame-quiet:where(:not(.ui-icon-button)) {
 		min-height: 36px;
 		padding: 8px 0;
 	}

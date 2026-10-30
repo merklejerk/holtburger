@@ -372,20 +372,7 @@ export type ClientCharacterSettings = z.infer<
 	typeof clientCharacterSettingsSchema
 >;
 
-/** Native window state is available before renderer settings bootstrap. */
-export const clientWindowSettingsSchema = z
-	.object({
-		normalBounds: z
-			.object({
-				x: z.number().int().safe(),
-				y: z.number().int().safe(),
-				width: z.number().int().positive().safe(),
-				height: z.number().int().positive().safe(),
-			})
-			.strict()
-			.readonly(),
-		maximized: z.boolean(),
-	})
-	.strict()
-	.readonly();
-export type ClientWindowSettings = z.infer<typeof clientWindowSettingsSchema>;
+export {
+	clientWindowSettingsSchema,
+	type ClientWindowSettings,
+} from "../app/window-settings-contract.js";

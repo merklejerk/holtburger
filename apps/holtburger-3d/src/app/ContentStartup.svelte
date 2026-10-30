@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { launcherTransport } from "../launcher/launcher-transport";
 	import PowerIcon from "../assets/icons/hud-power.svg?component";
 	import { getAllContexts, onMount } from "svelte";
 	import AssetSetup from "./AssetSetup.svelte";
@@ -166,6 +167,10 @@
 				onChoose={() => run(transport.choose)}
 				onRetry={() => run(transport.retry)}
 				onQuit={() => run(transport.quit)}
+				onBack={mode === "client" &&
+				window.holtburgerLauncher?.enabled !== false
+					? () => run(() => launcherTransport().back(failure))
+					: null}
 			/>
 		{:else if page !== null}
 			<ClientLoadingPage
@@ -176,6 +181,16 @@
 					: null}
 			>
 				{#snippet footer()}
+					{#if mode === "client" && window.holtburgerLauncher?.enabled !== false}
+						<button
+							class="pregame-action pregame-quiet ui-button"
+							type="button"
+							onclick={() => run(() => launcherTransport().back(failure))}
+							>{page?.kind === "pending"
+								? "Cancel"
+								: "Back to launcher"}</button
+						>
+					{/if}
 					<button
 						class="pregame-action pregame-quiet ui-button"
 						type="button"

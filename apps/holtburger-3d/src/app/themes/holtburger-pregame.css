@@ -45,6 +45,7 @@
 		);
 		/* Pointed wire frames decorate text actions without adding layout space. */
 		--pregame-button-filigree: url("../../assets/icons/pregame-button-filigree.svg");
+		--pregame-play-filigree: url("../../assets/icons/pregame-play-filigree.svg");
 	}
 	.client-pregame-screen .ui-button {
 		--ui-button-background-color: var(--pregame-button-background);
@@ -150,6 +151,101 @@
 		color: var(--ui-color-muted);
 	}
 
+	/* Play is the launcher's metalwork centerpiece; shared pregame action geometry stays intact. */
+	.client-pregame-screen .launcher-play {
+		--pregame-button-filigree: var(--pregame-play-filigree);
+		--ui-button-background-color: linear-gradient(
+			180deg,
+			#8a6326 0%,
+			#593b12 44%,
+			#322006 52%,
+			#73501c 100%
+		);
+		overflow: hidden;
+		border-color: transparent;
+		color: #ffedb6;
+		font-weight: 600;
+		letter-spacing: 0.22em;
+		text-shadow:
+			0 1px 2px #100a02,
+			0 0 12px rgb(255 218 125 / 25%);
+		box-shadow:
+			inset 0 1px 0 rgb(255 235 178 / 35%),
+			inset 0 -1px 0 #362104,
+			inset 0 0 18px rgb(238 181 66 / 15%);
+		transition:
+			filter 120ms,
+			color 100ms;
+	}
+	.client-pregame-screen .launcher-play:hover:enabled {
+		color: #fff7df;
+		filter: brightness(1.15);
+	}
+	.client-pregame-screen .launcher-play:active:enabled {
+		filter: brightness(0.95);
+	}
+	.client-pregame-screen .launcher-play::after {
+		content: "";
+		position: absolute;
+		inset: -1px;
+		pointer-events: none;
+		/* A bright copy of the frame shines through a moving mask; its interior remains transparent. */
+		border: 0 solid transparent;
+		border-image: var(--pregame-button-filigree) 24 28 / 50% 28px / 0 stretch;
+		filter: brightness(3) saturate(0.5)
+			drop-shadow(0 0 1px rgb(255 235 178 / 90%));
+		mask-image: linear-gradient(
+			135deg,
+			transparent calc(50% - 42px),
+			rgb(255 255 255 / 20%) calc(50% - 22px),
+			rgb(255 255 255 / 95%) calc(50% - 7px),
+			#fff 50%,
+			rgb(255 255 255 / 65%) calc(50% + 7px),
+			transparent calc(50% + 34px)
+		);
+		mask-size: 300% 300%;
+		mask-repeat: no-repeat;
+		mask-position: 80% 80%;
+		opacity: 0;
+	}
+	/* Only readiness changes retrigger the sweep; hovering and edits that keep Play enabled do not. */
+	.client-pregame-screen .launcher-play:enabled::after {
+		animation: launcher-play-shine 900ms linear;
+	}
+	@keyframes launcher-play-shine {
+		0% {
+			opacity: 0;
+			mask-position: 80% 80%;
+		}
+		10%,
+		85% {
+			opacity: 1;
+		}
+		100% {
+			opacity: 0;
+			mask-position: 20% 20%;
+		}
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.client-pregame-screen .launcher-play:enabled::after {
+			animation: none;
+		}
+	}
+
+	/* Launcher columns and server selection share the pregame palette. */
+	.client-pregame-screen .launcher-profile {
+		border-color: var(--ui-color-border);
+	}
+	.client-pregame-screen
+		.launcher-server-row:is(:hover, :focus-within, [data-selected="true"]) {
+		background: var(--pregame-button-hover-background);
+	}
+	.client-pregame-screen .launcher-server-row[data-selected="true"] {
+		border-inline-start-color: var(--ui-color-accent);
+	}
+	.client-pregame-screen .launcher-server-choice[aria-pressed="true"] {
+		color: var(--ui-color-highlight);
+	}
 	/* ClientPregameScreen. */
 	.client-pregame-screen {
 		background:
@@ -288,17 +384,23 @@
 		accent-color: var(--ui-color-muted);
 	}
 
-	.client-pregame-screen .creation-skill-row {
+	.client-pregame-screen .pregame-expandable-row {
 		border-bottom: 1px solid
 			color-mix(in srgb, var(--ui-color-border) 30%, transparent);
 	}
 	.client-pregame-screen .creation-skill-level {
 		color: var(--ui-color-accent);
 	}
-	.client-pregame-screen .creation-description {
+	.client-pregame-screen
+		:is(.creation-description, .pregame-expandable-content) {
 		color: var(--ui-color-muted);
 	}
-	.client-pregame-screen .creation-skill-row summary:focus-visible {
+	.client-pregame-screen .pregame-expandable-row:hover,
+	.client-pregame-screen .pregame-expandable-row:has(:focus-visible) {
+		background: color-mix(in srgb, var(--ui-color-highlight) 12%, transparent);
+		border-radius: var(--ui-radius-surface);
+	}
+	.client-pregame-screen .pregame-expandable-row summary:focus-visible {
 		outline: 2px solid var(--ui-color-focus);
 		outline-offset: -2px;
 	}

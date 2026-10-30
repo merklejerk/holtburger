@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-	ClientWindowClose,
+	ClientRetirement,
 	CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
-} from "../../electron/client-window-close";
+} from "../../electron/client-retirement";
 import { ClientSettingsPersistence } from "./client-settings-persistence";
 import { ClientAppLifecycle } from "./client-app-lifecycle";
 
@@ -19,11 +19,9 @@ function setup() {
 	const dependencies = {
 		prepareRenderer: vi.fn(),
 		shutdownNative: vi.fn(async () => {}),
-		reportFailure: vi.fn(),
-		exit: vi.fn(),
 		deadlineMs: CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
 	};
-	return { ...dependencies, owner: new ClientWindowClose(dependencies) };
+	return { ...dependencies, owner: new ClientRetirement(dependencies) };
 }
 
 describe("client renderer/native close composition", () => {
@@ -69,11 +67,10 @@ describe("client renderer/native close composition", () => {
 		saveA.resolve();
 		await vi.waitFor(() => expect(sent).toEqual(["A", "B"]));
 		expect(app.shutdownNative).not.toHaveBeenCalled();
-		expect(app.exit).not.toHaveBeenCalled();
 		saveB.resolve();
-		await Promise.all([closing, firstSave]);
+		expect((await Promise.all([closing, firstSave]))[0]).toEqual({
+			kind: "prepared",
+		});
 		expect(app.shutdownNative).toHaveBeenCalledOnce();
-		expect(app.exit).toHaveBeenCalledOnce();
-		expect(app.reportFailure).not.toHaveBeenCalled();
 	});
 });

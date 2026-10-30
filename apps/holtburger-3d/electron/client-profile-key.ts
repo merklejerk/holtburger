@@ -2,7 +2,7 @@ import type { ClientLaunchConfiguration } from "./client-launch.js";
 
 const MAXIMUM_GUID = 0xffff_ffff;
 
-/** Normalize a launch endpoint only for local profile namespacing, never server selection. */
+/** Normalize an endpoint for local namespacing and duplicate detection without resolving DNS aliases. */
 export function clientServerScope(
 	startup: Pick<ClientLaunchConfiguration, "host" | "port">,
 ): string {

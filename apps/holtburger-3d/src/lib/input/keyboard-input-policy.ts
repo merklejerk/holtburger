@@ -110,6 +110,8 @@ function isNativeCopyOfDocumentSelection(
 export class KeyboardInputPolicy {
 	/** Mounted UI endpoints; registration alone grants no keyboard ownership. */
 	readonly #scopes = new Map<HTMLElement, KeyboardScope>();
+	/** Mounted native pages own the default interaction even before any control has focus. */
+	readonly #nativePages = new Set<HTMLElement>();
 	/** Native modal order, with the innermost interaction last. */
 	readonly #modals: ModalOwnership[] = [];
 	/** Physical presses retain their game release destination across pass-through scopes. */
@@ -146,6 +148,7 @@ export class KeyboardInputPolicy {
 	/** Whether keyboard commands can currently enter the world context. */
 	get gameActive(): boolean {
 		return (
+			!this.#nativePageActive &&
 			this.#allowsGame(this.#owner) &&
 			this.#modals.length === 0 &&
 			this.viewport.allowed
@@ -273,6 +276,31 @@ export class KeyboardInputPolicy {
 		};
 	};
 
+	/** Svelte action: a foreground form page uses browser defaults for its entire mounted lifetime. */
+	readonly nativePage = (element: HTMLElement): { destroy: () => void } => {
+		const registration = this.scope(element, {
+			nativeControls: true,
+			keydown: () => {},
+		});
+		this.#nativePages.add(element);
+		this.cancel();
+		if (this.#owner !== null && !element.contains(this.#owner))
+			this.returnToGame();
+		return {
+			destroy: () => {
+				this.#nativePages.delete(element);
+				registration.destroy();
+			},
+		};
+	};
+
+	get #nativePageActive(): boolean {
+		return [...this.#nativePages].some(
+			(element) =>
+				element.isConnected && element.closest("[hidden], [inert]") === null,
+		);
+	}
+
 	/** Activate a registered surface, constrained to the top modal when one is open. */
 	activate(element: HTMLElement): void {
 		if (!this.#scopes.has(element))
@@ -392,6 +420,7 @@ export class KeyboardInputPolicy {
 		// Subsequent native Tab/arrow navigation is deliberate keyboard interaction.
 		this.#pointerControl = null;
 		this.#validateOwner();
+		const nativePage = this.#nativePageActive;
 		if (this.#owner !== null)
 			this.#scopeFor(this.#owner)?.modifiersChanged?.(event);
 		const key = event.code || event.key;
@@ -451,6 +480,7 @@ export class KeyboardInputPolicy {
 			(owner === null || !this.#nativeControlsFor(owner)) &&
 			this.#modals.length === 0 &&
 			this.viewport.allowed &&
+			!nativePage &&
 			fresh
 		) {
 			for (const [element, scope] of this.#scopes) {
@@ -478,6 +508,7 @@ export class KeyboardInputPolicy {
 			this.#owner === null &&
 			this.#modals.length === 0 &&
 			this.viewport.allowed &&
+			!nativePage &&
 			fresh &&
 			event.key === "Escape" &&
 			this.#cancelEscapeContext()
@@ -490,10 +521,12 @@ export class KeyboardInputPolicy {
 		if (!event.defaultPrevented && this.gameActive) {
 			this.#presses.set(key, "game");
 			this.#game?.keydown(event);
-		} else if (owner === null) this.#presses.set(key, "cancelled");
+		} else if (owner === null)
+			this.#presses.set(key, nativePage ? "native" : "cancelled");
 		// Native UI scopes retain Tab traversal; gameplay keeps its configured Tab commands.
 		if (
 			event.key === "Tab" &&
+			!nativePage &&
 			(this.#owner === null || !this.#nativeControlsFor(this.#owner))
 		)
 			event.preventDefault();
@@ -718,6 +751,10 @@ export class KeyboardInputPolicy {
 	readonly #pointerDown = (event: PointerEvent): void => {
 		// A drag may end without a click. A new press always retires its trailing-click guard.
 		this.#focusReturnGesture = null;
+		if (this.#nativePageActive) {
+			this.#pointerControl = null;
+			return;
+		}
 		const target = event.target;
 		if (!(target instanceof Element)) return;
 		// Labels focus their associated input, and icon children focus their enclosing button.

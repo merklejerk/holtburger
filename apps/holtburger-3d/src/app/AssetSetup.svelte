@@ -15,14 +15,24 @@
 		readonly onRetry: () => void;
 		/** Quit remains available before any game runtime exists. */
 		readonly onQuit: () => void;
+		/** Client startup may return to its launcher; Explorer has no launcher surface. */
+		readonly onBack: (() => void) | null;
 	}
-	const { state, temporary, onChoose, onRetry, onQuit }: Props = $props();
+	const { state, temporary, onChoose, onRetry, onQuit, onBack }: Props =
+		$props();
 	const id = $props.id();
 	const titleId = `${id}-asset-title`;
 </script>
 
 <ClientPregameScreen branding="hero" showPortalLogo={true} backdrop={false}>
 	{#snippet footer()}
+		{#if onBack !== null}
+			<button
+				class="pregame-action pregame-quiet ui-button"
+				type="button"
+				onclick={onBack}>Back to launcher</button
+			>
+		{/if}
 		<button
 			class="pregame-action pregame-quiet ui-button"
 			type="button"

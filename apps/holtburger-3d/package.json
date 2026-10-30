@@ -28,6 +28,7 @@
 		"smoke:sidecar": "node scripts/sidecar-smoke.mjs",
 		"probe:client": "npm run build:electron:main && npm run build:host && node scripts/live-client-probe.mjs",
 		"probe:indexed-textures": "node scripts/indexed-texture-probe.mjs",
+		"probe:launcher": "node scripts/launcher-lifecycle-probe.mjs",
 		"probe:content": "npm run build:electron:main && cargo build -p holtburger-3d-host --bin holtburger-3d-host && node scripts/content-startup-probe.mjs",
 		"probe:user-themes": "npm run build:electron:main && npm run build && npm run probe:user-themes:built",
 		"probe:user-themes:built": "node scripts/user-theme-probe.mjs",

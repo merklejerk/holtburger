@@ -274,6 +274,21 @@ describe("Electron launch arguments", () => {
 			partitionClientLaunchArguments(["--ignore-world-map-cache=true"]),
 		).toThrow("does not accept a value");
 	});
+	it("forwards no-launcher to main without a renderer query or a flag value", () => {
+		expect(
+			partitionClientLaunchArguments([
+				"--no-launcher",
+				"--account=ash",
+				"--debug",
+			]),
+		).toEqual({
+			launchArguments: ["--no-launcher", "--account=ash"],
+			rendererArguments: ["--debug"],
+		});
+		expect(() =>
+			partitionClientLaunchArguments(["--no-launcher=true"]),
+		).toThrow("does not accept a value");
+	});
 
 	it("turns the bare client debug flag into an explicit renderer value", () => {
 		expect(buildEntryPath("client/index.html", ["--debug"])).toBe(

@@ -130,10 +130,10 @@ export class GamePresentationOwner {
 		let audioContext: AudioContext | undefined;
 		let portalTransitionAssets: PortalTransitionAssets | undefined;
 		try {
-			throwIfPresentationConstructionAborted(signal);
+			signal?.throwIfAborted();
 			activeRegionSource = ActiveRegionHostSource.build(hostTransport);
 			const activeRegion = await activeRegionSource.load();
-			throwIfPresentationConstructionAborted(signal);
+			signal?.throwIfAborted();
 			const sourceBatch: LandblockSourceBatchSource =
 				LandblockSourceHostBatch.build(activeRegion, hostTransport);
 			profileHostSource = LandblockProfileHostSource.build(hostTransport);
@@ -141,13 +141,13 @@ export class GamePresentationOwner {
 			const texturePixelSource = presentationResources.texturePixelSource;
 			staticDetailOwner = new ActiveRegionStaticDetailOwner(texturePixelSource);
 			const staticDetailBinding = await staticDetailOwner.install(activeRegion);
-			throwIfPresentationConstructionAborted(signal);
+			signal?.throwIfAborted();
 			device = await WebGL2Device.build(canvas, portalWarpDriveTuning);
-			throwIfPresentationConstructionAborted(signal);
+			signal?.throwIfAborted();
 			const textureFilteringCapabilities =
 				device.getTextureFilteringCapabilities();
 			commitPipeline = await StandardCommitPipeline.build({ sourceBatch });
-			throwIfPresentationConstructionAborted(signal);
+			signal?.throwIfAborted();
 			soundTableSource = SoundTableHostSource.build(hostTransport);
 			audioContext = audioContextFactory();
 			audioDevice = new WebAudioDevice(
@@ -162,7 +162,7 @@ export class GamePresentationOwner {
 				setupVisual: presentationResources.setupVisualSource,
 				soundTable: soundTableSource,
 			});
-			throwIfPresentationConstructionAborted(signal);
+			signal?.throwIfAborted();
 			runtime = await GamePresentationRuntime.build(
 				device,
 				commitPipeline,
@@ -175,24 +175,24 @@ export class GamePresentationOwner {
 				undefined,
 				tickProfiler,
 			);
-			throwIfPresentationConstructionAborted(signal);
+			signal?.throwIfAborted();
 			if (portalTransitionAssets === undefined) {
 				throw new Error("Portal transition assets were not prepared.");
 			}
 			await runtime.installPortalTransitionAssets(portalTransitionAssets);
-			throwIfPresentationConstructionAborted(signal);
+			signal?.throwIfAborted();
 			runtime.installActiveRegionStaticDetails(staticDetailBinding);
 			const ambient = ambientRegionFacts(activeRegion);
 			if (ambient !== null) {
-				throwIfPresentationConstructionAborted(signal);
+				signal?.throwIfAborted();
 				await runtime.installAmbientRegion(ambient);
 			}
 			skySource = new SkyHostSource(hostTransport);
-			throwIfPresentationConstructionAborted(signal);
+			signal?.throwIfAborted();
 			const sky = await skySource.loadSkySource();
-			throwIfPresentationConstructionAborted(signal);
+			signal?.throwIfAborted();
 			await runtime.installSky(sky);
-			throwIfPresentationConstructionAborted(signal);
+			signal?.throwIfAborted();
 			return new GamePresentationOwner({
 				activeRegion,
 				activeRegionSource,
@@ -239,15 +239,6 @@ export class GamePresentationOwner {
 	destroy(): Promise<void> {
 		return (this.#retirement ??= this.#teardown.close());
 	}
-}
-
-function throwIfPresentationConstructionAborted(
-	signal: AbortSignal | undefined,
-): void {
-	if (!signal?.aborted) return;
-	const error = new Error("Presentation construction was cancelled.");
-	error.name = "AbortError";
-	throw error;
 }
 
 interface PresentationParts {

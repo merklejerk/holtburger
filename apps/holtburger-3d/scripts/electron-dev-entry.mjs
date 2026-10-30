@@ -14,6 +14,7 @@ import {
 	requireEntry,
 } from "./entry-paths.mjs";
 import { resolveVitePort } from "./dev-port.mjs";
+import { parseClientLaunchArguments } from "../dist-electron/electron/client-launch.js";
 
 const [entryName, ...allArgs] = process.argv.slice(2);
 let rawArgs;
@@ -47,7 +48,12 @@ try {
 	);
 	electronSwitches = electronLaunch.electronSwitches;
 	const rendererArgs = electronLaunch.args;
-	entryPath = buildEntryPath(entry.path, rendererArgs);
+	const initialPath =
+		entryName === "client" &&
+		parseClientLaunchArguments(partitioned.launchArguments).startup === null
+			? "launcher/index.html"
+			: entry.path;
+	entryPath = buildEntryPath(initialPath, rendererArgs);
 	electronAppArgs = [
 		...(content.noContentSearch ? ["--no-content-search"] : []),
 		...(content.clearContent ? ["--clear-content"] : []),

@@ -46,6 +46,25 @@ describe("current client settings values", () => {
 		).toBe(false);
 	});
 
+	it("enables help for older UI profiles and preserves explicit choices", () => {
+		const { showHelpLabels, ...older } = createDefaultClientUserSettings(
+			viewport,
+			0,
+		).ui;
+		expect(showHelpLabels).toBe(true);
+		expect(clientUiSettingsSchema.parse(older).showHelpLabels).toBe(true);
+		for (const enabled of [true, false]) {
+			expect(
+				clientUiSettingsSchema.parse({ ...older, showHelpLabels: enabled })
+					.showHelpLabels,
+			).toBe(enabled);
+		}
+		expect(
+			clientUiSettingsSchema.safeParse({ ...older, showHelpLabels: "true" })
+				.success,
+		).toBe(false);
+	});
+
 	it("adds panel defaults to old profiles and preserves remapped and unbound panels", () => {
 		const olderClient = Object.fromEntries(
 			Object.entries(CLIENT_KEYBOARD_DEFAULTS.client).filter(
@@ -101,6 +120,7 @@ describe("current client settings values", () => {
 		expect(clientUiSettingsSchema.parse({ fonts })).toEqual({
 			themeId: CLIENT_DEFAULT_THEME_ID,
 			showFps: false,
+			showHelpLabels: true,
 			fonts,
 			textScale: CLIENT_TEXT_SCALE.initial,
 			iconScale: CLIENT_ICON_SCALE.initial,
@@ -115,6 +135,7 @@ describe("current client settings values", () => {
 		expect(clientUiSettingsSchema.parse(older)).toEqual({
 			themeId: CLIENT_DEFAULT_THEME_ID,
 			showFps: false,
+			showHelpLabels: true,
 			...older,
 			textScale: CLIENT_TEXT_SCALE.initial,
 			iconScale: CLIENT_ICON_SCALE.initial,
@@ -127,6 +148,7 @@ describe("current client settings values", () => {
 			expect(clientUiSettingsSchema.parse({ ...older, textScale })).toEqual({
 				themeId: CLIENT_DEFAULT_THEME_ID,
 				showFps: false,
+				showHelpLabels: true,
 				...older,
 				textScale,
 				iconScale: CLIENT_ICON_SCALE.initial,

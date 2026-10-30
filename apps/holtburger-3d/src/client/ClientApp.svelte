@@ -409,9 +409,11 @@
 	function selectCombatProfile(profile: ClientAttackProfile): void {
 		if (!persistCombatProfile(profile)) return;
 		combatProfileSelectionRevision += 1;
-		if (selectedEntityGuid !== null) beginCombatEngagement(profile);
-		else if (combatStatus.desired !== null)
+		if (selectedEntityGuid === null && combatStatus.desired !== null) {
 			void session?.updateCombatProfile(profile).catch(reportCommandFailure);
+			return;
+		}
+		beginCombatEngagement(profile);
 	}
 	function selectCombatBreakpoint(index: CombatBreakpointIndex): void {
 		const value = COMBAT_BREAKPOINTS[index];
@@ -448,16 +450,23 @@
 		if (
 			currentSession === null ||
 			lifecycle.kind !== "in-world" ||
-			selectedEntityGuid === null ||
 			characterSettings.kind !== "ready"
 		)
 			return;
+		const target = selectedEntityGuid;
+		if (target === null) {
+			toastCenter.publish({
+				message: "Select a target before attacking.",
+				tone: "warning",
+			});
+			return;
+		}
 		// Selection is sampled only for this explicit begin; core retains the engaged target.
 		retireCombatEscapeContext();
 		const context = keyboard.bindEscapeContext(stopCombat);
 		combatEscapeContext = context;
 		void currentSession
-			.beginCombatEngagement(selectedEntityGuid, profile)
+			.beginCombatEngagement(target, profile)
 			.catch((error: unknown) => {
 				// A failed older begin must not retire a newer engagement's cancellation.
 				if (combatEscapeContext === context) retireCombatEscapeContext();

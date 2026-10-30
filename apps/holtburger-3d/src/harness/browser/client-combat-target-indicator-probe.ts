@@ -47,7 +47,7 @@ export async function probeClientCombatTargetIndicator() {
 		};
 		if (!marker.hidden || !combatEdge.hidden)
 			throw new Error("Absent engagement displayed a combat reticle.");
-		frame = { kind: "reticle", x: 125, y: 210 };
+		frame = { combatType: "melee", kind: "reticle", x: 125, y: 210 };
 		await nextFrame();
 		if (marker.hidden || arrow.hidden)
 			throw new Error(
@@ -59,7 +59,13 @@ export async function probeClientCombatTargetIndicator() {
 			target.querySelectorAll(".combat-reticle-diamond").length !== 4
 		)
 			throw new Error("Combat reticle geometry or pointer policy failed.");
-		frame = { kind: "edge", x: 128, y: 210, rotationRadians: Math.PI / 2 };
+		frame = {
+			combatType: "melee",
+			kind: "edge",
+			x: 128,
+			y: 210,
+			rotationRadians: Math.PI / 2,
+		};
 		await nextFrame();
 		if (!marker.hidden || combatEdge.hidden || arrow.hidden)
 			throw new Error(
@@ -101,7 +107,7 @@ export async function probeClientCombatTargetIndicator() {
 			throw new Error(
 				"Combat and selection arrow palettes are indistinguishable.",
 			);
-		frame = { kind: "reticle", x: 125, y: 210 };
+		frame = { combatType: "melee", kind: "reticle", x: 125, y: 210 };
 		await nextFrame();
 		if (marker.hidden || !combatEdge.hidden)
 			throw new Error("Returning onscreen retained the combat edge arrow.");
@@ -134,7 +140,20 @@ export async function probeClientCombatTargetIndicator() {
 			getComputedStyle(body).stroke !== "rgb(171, 205, 239)" ||
 			getComputedStyle(border).stroke !== "rgb(18, 52, 86)"
 		)
-			throw new Error("Theme reticle colors did not inherit.");
+			throw new Error(
+				`Theme reticle colors did not inherit: ${JSON.stringify({
+					fill: getComputedStyle(body).fill,
+					stroke: getComputedStyle(body).stroke,
+					border: getComputedStyle(border).stroke,
+					mode: marker.dataset.combatType,
+					palette: getComputedStyle(marker).getPropertyValue(
+						"--combat-type-color",
+					),
+					resolved: getComputedStyle(marker).getPropertyValue(
+						"--combat-reticle-fill",
+					),
+				})}`,
+			);
 		if (
 			getComputedStyle(body).strokeWidth !== "3px" ||
 			getComputedStyle(border).strokeWidth !== "7px"
@@ -152,6 +171,28 @@ export async function probeClientCombatTargetIndicator() {
 			throw new Error(
 				"Combat edge arrow did not inherit the themed reticle palette.",
 			);
+		for (const [combatType, fill] of [
+			["melee", "rgb(18, 171, 52)"],
+			["missile", "rgb(171, 52, 18)"],
+			["magic", "rgb(52, 18, 171)"],
+		] as const) {
+			frame = { kind: "reticle", combatType, x: 125, y: 210 };
+			await nextFrame();
+			if (
+				getComputedStyle(body).fill !== fill ||
+				getComputedStyle(combatPaint).fill !== fill
+			)
+				throw new Error(
+					`Themed ${combatType} palette did not reach both combat markers.`,
+				);
+		}
+		// Common paint remains an explicit override for themes that want one palette for all attacks.
+		target.style.setProperty("--ui-combat-reticle-fill-color", "#112233");
+		if (getComputedStyle(body).fill !== "rgb(17, 34, 51)")
+			throw new Error("Common combat reticle fill override failed.");
+		target.style.removeProperty("--ui-combat-reticle-fill-color");
+		frame = { kind: "reticle", combatType: "melee", x: 125, y: 210 };
+		await nextFrame();
 		target.style.setProperty("--ui-combat-target-arrow-fill-color", "#112233");
 		if (getComputedStyle(combatPaint).fill !== "rgb(17, 34, 51)")
 			throw new Error("Dedicated combat arrow palette override failed.");
@@ -168,7 +209,7 @@ export async function probeClientCombatTargetIndicator() {
 		)
 			throw new Error("Reticle theme removal did not restore base appearance.");
 
-		frame = { kind: "reticle", x: 230, y: 175 };
+		frame = { combatType: "melee", kind: "reticle", x: 230, y: 175 };
 		await nextFrame();
 		expectPosition("translate3d(230px, 175px, 0px)");
 		frame = null;
@@ -195,6 +236,7 @@ export async function probeClientCombatTargetIndicator() {
 		followsProjection: true,
 		selectionIndependent: true,
 		themeInheritance: true,
+		combatTypeColors: true,
 		liveThemeReplacement: true,
 		teardown: true,
 	};

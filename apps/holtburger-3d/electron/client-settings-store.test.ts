@@ -148,6 +148,7 @@ describe("ClientSettingsStore", () => {
 			).toEqual({
 				themeId: CLIENT_DEFAULT_THEME_ID,
 				showFps: false,
+				showHelpLabels: true,
 				fonts,
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.initial,
@@ -156,6 +157,7 @@ describe("ClientSettingsStore", () => {
 			const ui = {
 				themeId: "Midnight 雪",
 				showFps: true,
+				showHelpLabels: false,
 				fonts,
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.maximum,

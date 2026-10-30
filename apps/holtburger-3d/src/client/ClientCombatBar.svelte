@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { presentClientBinding } from "./client-binding-catalog";
-	import { onDestroy, untrack } from "svelte";
+	import { onDestroy, onMount, untrack } from "svelte";
+	import CombatHelpLeaders from "../assets/icons/combat-help-leaders.svg?component";
+	import CombatPlay from "../assets/icons/combat-play.svg?component";
+	import CombatPause from "../assets/icons/combat-pause.svg?component";
 	import {
 		COMBAT_BREAKPOINT_INDICES,
 		COMBAT_HEIGHT_INDICES,
@@ -108,6 +111,10 @@
 			GAUGE_TUNING.backdropBleedBottom,
 	} as const;
 	const arcPath = `M ${arcCenterX - GAUGE_TUNING.arcRadiusX} ${GAUGE_TUNING.arcBaselineY} A ${GAUGE_TUNING.arcRadiusX} ${GAUGE_TUNING.arcRadiusY} 0 0 1 ${arcCenterX + GAUGE_TUNING.arcRadiusX} ${GAUGE_TUNING.arcBaselineY}`;
+	/** Offset the label outside both the slider and its outward shortcut hints. */
+	const helpArcRadiusX = GAUGE_TUNING.arcRadiusX + 28;
+	const helpArcRadiusY = GAUGE_TUNING.arcRadiusY + 40;
+	const helpArcPath = `M ${arcCenterX - helpArcRadiusX} ${GAUGE_TUNING.arcBaselineY} A ${helpArcRadiusX} ${helpArcRadiusY} 0 0 1 ${arcCenterX + helpArcRadiusX} ${GAUGE_TUNING.arcBaselineY}`;
 
 	function pointOnArc(value: number): GaugePoint {
 		return {
@@ -175,6 +182,8 @@
 		/** Accepted interactions, including selections that leave the profile unchanged. */
 		readonly selectionRevision: number;
 		readonly enabled: boolean;
+		/** User preference for hover-only explanatory labels; shortcuts remain independent. */
+		readonly showHelpLabels: boolean;
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 		/** Commit an attack profile and engage the current selection when present. */
 		readonly onProfileSelect: (profile: ClientAttackProfile) => void;
@@ -193,6 +202,7 @@
 		profile,
 		selectionRevision,
 		enabled,
+		showHelpLabels,
 		onPlacementChange,
 		onProfileSelect,
 		onStopCombat,
@@ -232,8 +242,13 @@
 	const value = $derived(
 		profile.kind === "melee" ? profile.power : profile.accuracy,
 	);
+	// Intent stays engaged through charging and readiness waits until cancellation is accepted.
+	const engaged = $derived(status.desired !== null);
+	const engagementLabel = $derived(engaged ? "Cancel attack" : "Start attack");
 	let combatBar: HTMLDivElement | null = null;
 	let profileEmphasized = $state(false);
+	/** Initial visibility has its own lifetime and never enables hover help. */
+	let appearing = $state(true);
 	let observedProfile = $state<string | null>(null);
 	let emphasisTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -252,6 +267,13 @@
 			throw new Error(`${property} must be a non-negative duration`);
 		return amount * multiplier;
 	}
+
+	onMount(() => {
+		const timer = setTimeout(() => {
+			appearing = false;
+		}, cssDurationMs("--ui-combat-appearance-hold-duration"));
+		return () => clearTimeout(timer);
+	});
 
 	$effect(() => {
 		const signature = `${profile.kind}:${profile.height}:${value}:${selectionRevision}`;
@@ -404,6 +426,8 @@
 		class="combat-bar"
 		style:--combat-metal={`url(#${gaugeId}-metal)`}
 		class:profile-emphasized={profileEmphasized}
+		class:appearing
+		class:help-enabled={showHelpLabels}
 		data-combat-mode={profile.kind}
 	>
 		<div
@@ -423,6 +447,7 @@
 			style:height={`${GAUGE_TUNING.viewBoxHeight}px`}
 		>
 			<defs>
+				<path id={`${gaugeId}-help-arc`} d={helpArcPath} />
 				<linearGradient
 					id={`${gaugeId}-metal`}
 					x1="0"
@@ -436,6 +461,15 @@
 					<stop class="gauge-metal-dark" offset="1" />
 				</linearGradient>
 			</defs>
+			<text class="combat-help power-label" aria-hidden="true">
+				<textPath
+					href={`#${gaugeId}-help-arc`}
+					startOffset="50%"
+					text-anchor="middle"
+				>
+					{profile.kind === "melee" ? "Power" : "Accuracy"}
+				</textPath>
+			</text>
 			<g class="gauge-decoration" aria-hidden="true">
 				<path
 					class="gauge-bezel-outline"
@@ -573,14 +607,13 @@
 		>
 			<button
 				type="button"
-				class="stop-attack"
-				disabled={!enabled || status.desired === null}
-				aria-label="Stop attacking"
-				title="Stop attacking (Esc)"
-				onclick={onStopCombat}
-				><svg viewBox="0 0 28 28" aria-hidden="true">
-					<rect class="stop-face" x="3" y="3" width="22" height="22" />
-				</svg></button
+				class="engagement-toggle"
+				class:engaged
+				disabled={!enabled}
+				aria-label={engagementLabel}
+				title={engaged ? `${engagementLabel} (Esc)` : engagementLabel}
+				onclick={() => (engaged ? onStopCombat() : onProfileSelect(profile))}
+				>{#if engaged}<CombatPause />{:else}<CombatPlay />{/if}</button
 			>
 			{#if remaining !== null && profile.kind === "missile"}
 				<div
@@ -597,6 +630,11 @@
 				</div>
 			{/if}
 		</div>
+		<div class="combat-help side-labels" aria-hidden="true">
+			<CombatHelpLeaders />
+			<span class="height-label">Height</span>
+			<span class="engagement-label">{engagementLabel}</span>
+		</div>
 	</div>
 </ClientHudPanel>
 
@@ -611,7 +649,7 @@
 			align-items: center;
 			gap: 4px;
 		}
-		.stop-attack {
+		.engagement-toggle {
 			display: grid;
 			place-items: center;
 			width: 32px;
@@ -620,26 +658,26 @@
 			pointer-events: auto;
 			border: 0;
 			background: transparent;
-			color: var(--ui-combat-stop-color);
+			color: var(--ui-combat-start-color);
 			cursor: pointer;
 		}
-		.stop-attack svg {
+		.engagement-toggle.engaged {
+			color: var(--ui-combat-stop-color);
+		}
+		.engagement-toggle :global(svg) {
 			width: 28px;
 			height: 28px;
 			pointer-events: none;
 		}
-		.stop-face {
-			fill: currentColor;
-		}
-		.stop-attack:hover:not(:disabled) svg,
-		.stop-attack:focus-visible svg {
+		.engagement-toggle:hover:not(:disabled) :global(svg),
+		.engagement-toggle:focus-visible :global(svg) {
 			transform: scale(1.15);
 		}
-		.stop-attack:focus-visible {
+		.engagement-toggle:focus-visible {
 			outline: 2px solid var(--ui-color-focus);
 			outline-offset: 2px;
 		}
-		.stop-attack:disabled {
+		.engagement-toggle:disabled {
 			opacity: 0.35;
 			cursor: default;
 		}
@@ -672,11 +710,74 @@
 			color: var(--ui-combat-foreground-color);
 			opacity: var(--combat-rest-opacity);
 			transition: opacity var(--ui-combat-opacity-transition-duration) ease-out;
+			transform-origin: center;
+			animation: combat-pop-in var(--ui-combat-appearance-duration)
+				var(--ui-combat-appearance-easing);
 		}
 		.combat-bar:hover,
 		.combat-bar:focus-within,
-		.combat-bar.profile-emphasized {
+		.combat-bar.profile-emphasized,
+		.combat-bar.appearing {
 			--combat-rest-opacity: 1;
+		}
+		@keyframes combat-pop-in {
+			from {
+				transform: scale(var(--ui-combat-appearance-start-scale));
+			}
+			to {
+				transform: scale(1);
+			}
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.combat-bar {
+				animation: none;
+			}
+		}
+		.combat-help {
+			color: var(--ui-combat-help-color, var(--ui-combat-foreground-color));
+			opacity: 0;
+			pointer-events: none;
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+			font-weight: 600;
+			text-shadow: var(
+				--ui-combat-help-text-shadow,
+				var(--ui-combat-breakpoint-shadow)
+			);
+			transition: opacity var(--ui-combat-opacity-transition-duration) ease-out;
+		}
+		.combat-bar.help-enabled:hover .combat-help {
+			opacity: 1;
+		}
+		.power-label {
+			fill: currentColor;
+			letter-spacing: var(--ui-combat-help-arc-letter-spacing);
+		}
+		.side-labels {
+			position: absolute;
+			inset: 0;
+			z-index: 3;
+		}
+		.side-labels :global(svg) {
+			stroke: var(--ui-combat-help-leader-color, currentColor);
+			stroke-width: var(--ui-combat-help-leader-width);
+			stroke-dasharray: var(--ui-combat-help-leader-dasharray);
+			position: absolute;
+			inset: 0;
+			width: 100%;
+			height: 100%;
+			overflow: visible;
+		}
+		.side-labels span {
+			position: absolute;
+			white-space: nowrap;
+		}
+		.height-label {
+			left: 0;
+			top: 150px;
+		}
+		.engagement-label {
+			right: 0;
+			top: 160px;
 		}
 		.gauge-background {
 			position: absolute;

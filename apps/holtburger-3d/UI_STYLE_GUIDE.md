@@ -268,6 +268,22 @@ physical press, selection, an open panel, or disabled controls.
 | `--ui-option-background`, `--ui-option-border-color`                                                                                                        | Full background and border color for `ui-option` list rows. Rows implemented as `ui-button` use button properties.                    |
 | `--ui-input-background`, `--ui-input-border-color`                                                                                                          | Full background and border color for inputs. Use `::placeholder`, `:disabled`, and `[aria-invalid="true"]` for text and state colors. |
 
+Combat HUD hover help uses `--ui-combat-help-color` and
+`--ui-combat-help-text-shadow` independently of the control paint. When omitted,
+they inherit the HUD foreground and shortcut shadow at the consuming element;
+leader color inherits the help color unless explicitly overridden. The curved
+Power/Accuracy label uses `--ui-combat-help-arc-letter-spacing` (a CSS length).
+Leader lines use `--ui-combat-help-leader-color`, `--ui-combat-help-leader-width`,
+and `--ui-combat-help-leader-dasharray`; widths and dash lengths use the SVG's
+320-by-200 viewBox units, with `none` for a solid line. Label positions, leader
+paths, and hit targets remain component-owned.
+
+The centered HUD pop-in uses `--ui-combat-appearance-start-scale` (a nonnegative,
+unitless scale) and `--ui-combat-appearance-easing` (a CSS easing function).
+`--ui-combat-appearance-duration` controls its duration, and
+`--ui-combat-appearance-hold-duration` controls the initial opaque hold, both in
+CSS time units. Help paint updates live. Reduced motion disables the pop-in.
+
 The combat-target reticle uses `--ui-combat-reticle-*` tokens. `size`, `radius`,
 `pulse-travel`, and `glow-blur` are CSS lengths; `orbit-duration` and
 `pulse-duration` are positive CSS times. `fill-color`, `outline-color`,
@@ -283,6 +299,13 @@ Failure messages and target death alone do not retire the operation; timeout
 withdraws local ownership without asserting that the server cancelled the cast.
 Self and untargeted casts provide no spell marker. Clearing the cast reveals any
 still-active auto-attack target. Reduced-motion preferences disable both animations.
+
+The active attack source selects the reticle fill: red for melee, yellow for
+missile, and blue for magic. Themes control these independently through
+`--ui-combat-reticle-melee-color`, `--ui-combat-reticle-missile-color`, and
+`--ui-combat-reticle-magic-color`. The optional `--ui-combat-reticle-fill-color`
+overrides all attack types with a common fill. The source follows the displayed
+target, including a pending spell taking priority over retained auto-attack intent.
 
 Offscreen combat targets use the same edge-arrow projection and artwork as
 selection, with a separate inward lane controlled by

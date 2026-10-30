@@ -15,6 +15,10 @@
 		let handle = 0;
 		const update = (): void => {
 			const frame = readFrame();
+			if (frame !== null && marker.dataset.combatType !== frame.combatType) {
+				marker.dataset.combatType = frame.combatType;
+				edgeMarker.dataset.combatType = frame.combatType;
+			}
 			marker.hidden = frame?.kind !== "reticle";
 			edgeMarker.hidden = frame?.kind !== "edge";
 			if (frame?.kind === "reticle")
@@ -29,7 +33,12 @@
 	});
 </script>
 
-<div bind:this={marker} class="combat-reticle" hidden aria-hidden="true">
+<div
+	bind:this={marker}
+	class="combat-target combat-reticle"
+	hidden
+	aria-hidden="true"
+>
 	<div class="combat-reticle-orbit">
 		{#each [0, 90, 180, 270] as angle}
 			<div
@@ -50,7 +59,7 @@
 
 <div
 	bind:this={edgeMarker}
-	class="combat-target-arrow"
+	class="combat-target combat-target-arrow"
 	hidden
 	aria-hidden="true"
 >
@@ -59,8 +68,7 @@
 
 <style>
 	@layer components {
-		.combat-reticle,
-		.combat-target-arrow {
+		.combat-target {
 			position: absolute;
 			top: 0;
 			left: 0;
@@ -77,7 +85,7 @@
 			/* Optional arrow paint overrides otherwise resolve the reticle palette at the consumer. */
 			--target-fill: var(
 				--ui-combat-target-arrow-fill-color,
-				var(--ui-combat-reticle-fill-color)
+				var(--combat-reticle-fill)
 			);
 			--target-outline: var(
 				--ui-combat-target-arrow-outline-color,
@@ -89,6 +97,22 @@
 				var(--ui-combat-reticle-glow-color)
 			);
 			--target-glow-blur: var(--ui-combat-target-arrow-glow-blur);
+		}
+		.combat-target {
+			/* An optional common fill overrides all modes; otherwise use the attack's palette. */
+			--combat-reticle-fill: var(
+				--ui-combat-reticle-fill-color,
+				var(--combat-type-color)
+			);
+		}
+		.combat-target:global([data-combat-type="melee"]) {
+			--combat-type-color: var(--ui-combat-reticle-melee-color);
+		}
+		.combat-target:global([data-combat-type="missile"]) {
+			--combat-type-color: var(--ui-combat-reticle-missile-color);
+		}
+		.combat-target:global([data-combat-type="magic"]) {
+			--combat-type-color: var(--ui-combat-reticle-magic-color);
 		}
 
 		.combat-reticle-orbit,
@@ -125,7 +149,7 @@
 			stroke-width: var(--ui-combat-reticle-border-width);
 		}
 		.diamond-body {
-			fill: var(--ui-combat-reticle-fill-color);
+			fill: var(--combat-reticle-fill);
 			stroke: var(--ui-combat-reticle-outline-color);
 			stroke-width: var(--ui-combat-reticle-outline-width);
 		}

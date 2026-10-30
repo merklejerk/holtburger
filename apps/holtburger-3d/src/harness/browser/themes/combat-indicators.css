@@ -16,7 +16,9 @@
 		--ui-combat-reticle-pulse-travel: 9px;
 		--ui-combat-reticle-orbit-duration: 1.75s;
 		--ui-combat-reticle-pulse-duration: 0.4s;
-		--ui-combat-reticle-fill-color: #12ab34;
+		--ui-combat-reticle-melee-color: #12ab34;
+		--ui-combat-reticle-missile-color: #ab3412;
+		--ui-combat-reticle-magic-color: #3412ab;
 		--ui-combat-reticle-outline-color: #abcdef;
 		--ui-combat-reticle-border-color: #123456;
 		--ui-combat-reticle-outline-width: 3;

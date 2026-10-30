@@ -556,14 +556,17 @@
 			filter: var(--ui-combat-handle-focus-filter);
 		}
 
-		/* Red enamel inset in the same copper fitting as the gauge. */
-		.ui-theme .combat-bar .stop-face {
+		/* Both engagement actions share the gauge's copper fitting. */
+		.ui-theme .combat-bar .engagement-face {
 			stroke: var(--combat-metal);
 			stroke-width: 2;
 			filter: drop-shadow(0 1px 1px #160c09cc);
 		}
-		.ui-theme .combat-bar .stop-attack:active:not(:disabled) .stop-face {
-			fill: #8c3024;
+		.ui-theme
+			.combat-bar
+			.engagement-toggle:active:not(:disabled)
+			.engagement-face {
+			fill: color-mix(in srgb, currentColor 72%, black);
 		}
 
 		/* A slim companion instrument to the combat gauge, using the existing jump geometry. */

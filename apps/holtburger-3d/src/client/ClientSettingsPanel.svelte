@@ -427,6 +427,17 @@
 						<label class="ui-checkbox"
 							><input
 								type="checkbox"
+								checked={ui.showHelpLabels}
+								onchange={(event) =>
+									onUiChange({
+										...ui,
+										showHelpLabels: event.currentTarget.checked,
+									})}
+							/> Show help labels</label
+						>
+						<label class="ui-checkbox"
+							><input
+								type="checkbox"
 								checked={graphics.alwaysShowEntityNameplates}
 								onchange={(event) =>
 									onGraphicsChange({

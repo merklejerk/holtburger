@@ -104,11 +104,11 @@ export const INPUT_DEFAULTS = {
 		],
 		/** Forward traversal restricted to world-classified hostile creatures. */
 		nextHostile: [
-			{ key: "v", shift: false, ctrl: true, alt: false, meta: false },
+			{ key: "e", shift: false, ctrl: true, alt: false, meta: false },
 		],
 		/** Reverse traversal restricted to world-classified hostile creatures. */
 		previousHostile: [
-			{ key: "v", shift: true, ctrl: true, alt: false, meta: false },
+			{ key: "e", shift: true, ctrl: true, alt: false, meta: false },
 		],
 		/** Use the currently selected entity. */
 		interact: [{ key: "r", ctrl: false, alt: false, meta: false }],

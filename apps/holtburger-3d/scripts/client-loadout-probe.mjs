@@ -211,8 +211,8 @@ export async function probeLoadouts(client, evaluateExpression) {
 		const initialWidth = await read(
 			`document.querySelector(${JSON.stringify(panel)}).getBoundingClientRect().width`,
 		);
-		const initialHandle = await point(`${panel} .hud-window-resize-right`);
-		await drag(`${panel} .hud-window-resize-right`, {
+		const initialHandle = await point(`${panel} .resize-border-right`);
+		await drag(`${panel} .resize-border-right`, {
 			x: initialHandle.x - initialWidth,
 			y: initialHandle.y,
 		});
@@ -225,11 +225,11 @@ export async function probeLoadouts(client, evaluateExpression) {
 			(_, index) => minimumWidth + index,
 		);
 		for (const width of widths) {
-			const handle = await point(`${panel} .hud-window-resize-right`);
+			const handle = await point(`${panel} .resize-border-right`);
 			const current = await read(
 				`document.querySelector(${JSON.stringify(panel)}).getBoundingClientRect().width`,
 			);
-			await drag(`${panel} .hud-window-resize-right`, {
+			await drag(`${panel} .resize-border-right`, {
 				x: handle.x + width - current,
 				y: handle.y,
 			});
@@ -243,11 +243,11 @@ export async function probeLoadouts(client, evaluateExpression) {
 			);
 			await assertNoHorizontalOverflow();
 		}
-		const handle = await point(`${panel} .hud-window-resize-right`);
+		const handle = await point(`${panel} .resize-border-right`);
 		const current = await read(
 			`document.querySelector(${JSON.stringify(panel)}).getBoundingClientRect().width`,
 		);
-		await drag(`${panel} .hud-window-resize-right`, {
+		await drag(`${panel} .resize-border-right`, {
 			x: handle.x + initialWidth - current,
 			y: handle.y,
 		});

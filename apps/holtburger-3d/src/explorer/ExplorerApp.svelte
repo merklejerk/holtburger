@@ -2090,6 +2090,7 @@
 				viewState={minimap}
 				editable={true}
 				minSize={140}
+				resizeBounds={null}
 				resizable={true}
 				onStateChange={(next) => {
 					minimap = next;

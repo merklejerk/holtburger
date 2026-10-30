@@ -47,7 +47,7 @@ export async function probeClientBook(client, evaluateExpression, delay) {
 		`(() => {
 		const panel = document.querySelector('[aria-label="Field Journal"]');
 		const bounds = panel.getBoundingClientRect();
-		const grip = panel.querySelector('.hud-window-resize-bottom-right').getBoundingClientRect();
+		const grip = panel.querySelector('.resize-border-bottom-right').getBoundingClientRect();
 		return {
 			panel: { left: bounds.left, top: bounds.top, width: bounds.width, height: bounds.height },
 			grip: { left: grip.left, top: grip.top, width: grip.width, height: grip.height },

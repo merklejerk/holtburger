@@ -115,14 +115,17 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	const appInput = new AppInput(INPUT_DEFAULTS);
 	const character = appInput.characterContext(() => {});
 	const input = new ClientSelectionInput({
+		keyboard,
 		input: appInput,
 		selection,
 		cycle,
 		holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,
 	});
+	let systemMenuRequests = 0;
 	const unbind = keyboard.bindGame({
 		keydown: (event) => {
-			input.keydown(event, nowMs);
+			if (!input.keydown(event, nowMs) && event.key === "Escape")
+				systemMenuRequests++;
 		},
 		keyup: (event) => input.keyup(event, nowMs),
 		cancel: () => {
@@ -398,6 +401,32 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		character.replaceBindings(CLIENT_KEYBOARD_DEFAULTS.character);
 		appInput.replaceConfiguration(INPUT_DEFAULTS);
 
+		// The fallback must wait for both selection and a window whose close awaits authority.
+		selection.select(2);
+		let closeRequests = 0;
+		const window = keyboard.bindEscapeContext(() => closeRequests++, {
+			untilRelease: true,
+		});
+		const beforeMenu = systemMenuRequests;
+		try {
+			press("Escape");
+			press("Escape");
+			expectSelected(2, "server-delayed window retains Escape");
+			if (closeRequests !== 2 || systemMenuRequests !== beforeMenu)
+				throw new Error(
+					"Pending window close let Escape reach the system menu.",
+				);
+		} finally {
+			window.release();
+		}
+		press("Escape");
+		expectSelected(null, "selection precedes system menu");
+		if (systemMenuRequests !== beforeMenu)
+			throw new Error("Selection cancellation also opened the system menu.");
+		press("Escape");
+		if (systemMenuRequests !== beforeMenu + 1)
+			throw new Error("Empty Escape stack did not reach the system menu.");
+
 		// Explicit population measurement, not a general renderer performance claim.
 		const population = 1000;
 		replace(
@@ -418,6 +447,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			passed: true,
 			holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,
 			holdAndFocusChecks: true,
+			escapeFallbackOrdering: true,
 			remapCancellation: true,
 			remappedSelfWithoutPresentation: true,
 			scans,

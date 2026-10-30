@@ -1,3 +1,5 @@
+import { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
+import { ViewportInputGate } from "../lib/input/viewport-input-gate";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientEntityMirror } from "./client-entity-mirror";
 import { entityFacts } from "./client-entity-mirror.test-support";
@@ -77,7 +79,9 @@ function fixture() {
 		sample,
 		policy: { radiusMeters: 50, idleResetMs: 10, viewMarginMeters: 2 },
 	});
+	const keyboard = new KeyboardInputPolicy(new ViewportInputGate());
 	const input = new ClientSelectionInput({
+		keyboard,
 		input: new AppInput(INPUT_DEFAULTS),
 		selection,
 		cycle,
@@ -87,6 +91,7 @@ function fixture() {
 		selection,
 		cycle,
 		input,
+		keyboard,
 		sample,
 		candidates,
 		emit: (event: ClientLifecycleSessionEvent) => {
@@ -268,6 +273,73 @@ describe("selection press lifecycle", () => {
 		expect(f.selection.selectedGuid()).toBe(4);
 		f.cycle.cycle("creature", 1, 1);
 		expect(f.selection.selectedGuid()).toBe(5);
+		f.input.destroy();
+	});
+});
+
+describe("selection Escape ordering", () => {
+	it("unwinds selection and windows by interaction recency before the system-menu fallback", () => {
+		const f = fixture();
+		const fallback = vi.fn();
+		f.keyboard.bindGame({
+			keydown: fallback,
+			keyup: () => {},
+			cancel: () => {},
+		});
+		const escape = () =>
+			f.keyboard.keydown(key({ key: "Escape", code: "Escape" }));
+		f.selection.select(2);
+		const close = vi.fn();
+		f.keyboard.bindEscapeContext(close);
+		escape();
+		expect(close).toHaveBeenCalledOnce();
+		expect(f.selection.selectedGuid()).toBe(2);
+		expect(fallback).not.toHaveBeenCalled();
+		escape();
+		expect(f.selection.selectedGuid()).toBeNull();
+		expect(fallback).not.toHaveBeenCalled();
+		escape();
+		expect(fallback).toHaveBeenCalledOnce();
+		const secondClose = vi.fn();
+		f.keyboard.bindEscapeContext(secondClose);
+		f.selection.select(3);
+		escape();
+		expect(f.selection.selectedGuid()).toBeNull();
+		expect(secondClose).not.toHaveBeenCalled();
+		escape();
+		expect(secondClose).toHaveBeenCalledOnce();
+		f.input.destroy();
+	});
+
+	it("releases selection cancellation on explicit clear and input teardown", () => {
+		const f = fixture();
+		const fallback = vi.fn();
+		f.keyboard.bindGame({
+			keydown: fallback,
+			keyup: () => {},
+			cancel: () => {},
+		});
+		f.selection.select(2);
+		f.selection.select(null);
+		f.keyboard.keydown(key({ key: "Escape", code: "Escape" }));
+		expect(fallback).toHaveBeenCalledOnce();
+		f.selection.select(3);
+		f.input.destroy();
+		f.keyboard.keydown(key({ key: "Escape", code: "Escape" }));
+		expect(fallback).toHaveBeenCalledTimes(2);
+	});
+
+	it("lets empty cancellation fall through but consumes a pending acquisition", () => {
+		const f = fixture();
+		const escape = key({ key: "Escape", code: "Escape" });
+		expect(f.input.keydown(escape, 0)).toBe(false);
+		expect(escape.defaultPrevented).toBe(false);
+		f.input.keydown(key(), 0);
+		expect(f.input.keydown(key({ key: "Escape", code: "Escape" }), 0)).toBe(
+			true,
+		);
+		vi.advanceTimersByTime(HOLD_MS);
+		expect(f.sample).not.toHaveBeenCalled();
 		f.input.destroy();
 	});
 });

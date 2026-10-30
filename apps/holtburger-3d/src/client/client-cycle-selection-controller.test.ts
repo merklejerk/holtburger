@@ -1,3 +1,5 @@
+import { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
+import { ViewportInputGate } from "../lib/input/viewport-input-gate";
 import { OUTDOOR_LANDBLOCK_WORLD_SIZE } from "../lib/game/landblocks";
 import { describe, expect, it, vi } from "vitest";
 import { AppInput } from "../lib/input/app-input";
@@ -202,6 +204,7 @@ describe("stable cycle acquisition", () => {
 	it("routes exact modifiers, self, Escape, repeat and already consumed events", () => {
 		const f = fixture();
 		const input = new ClientSelectionInput({
+			keyboard: new KeyboardInputPolicy(new ViewportInputGate()),
 			input: new AppInput(INPUT_DEFAULTS),
 			selection: f.selection,
 			cycle: f.cycle,

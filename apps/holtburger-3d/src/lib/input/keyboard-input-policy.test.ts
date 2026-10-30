@@ -177,12 +177,13 @@ describe("game keyboard routing", () => {
 		const inspectionOrder = vi.fn();
 		const closeInventory = vi.fn();
 		const stopAttack = vi.fn();
-		const inventory = keyboard.bindEscapeContext(
-			closeInventory,
-			inventoryOrder,
-		);
+		const inventory = keyboard.bindEscapeContext(closeInventory, {
+			onOrder: inventoryOrder,
+		});
 		const attack = keyboard.bindEscapeContext(stopAttack);
-		const inspection = keyboard.bindEscapeContext(vi.fn(), inspectionOrder);
+		const inspection = keyboard.bindEscapeContext(vi.fn(), {
+			onOrder: inspectionOrder,
+		});
 		expect(inventoryOrder).toHaveBeenLastCalledWith(0);
 		expect(inspectionOrder).toHaveBeenLastCalledWith(1);
 		inventory.promote();
@@ -339,4 +340,18 @@ describe("game keyboard routing", () => {
 			expect(game.keyup).not.toHaveBeenCalled();
 		},
 	);
+});
+
+it("keeps a server-delayed window ahead of gameplay until its owner releases it", () => {
+	const { keyboard, game } = fixture();
+	const close = vi.fn();
+	const window = keyboard.bindEscapeContext(close, { untilRelease: true });
+	keyboard.keydown(keyEvent("Escape"));
+	keyboard.keydown(keyEvent("Escape", true));
+	keyboard.keydown(keyEvent("Escape"));
+	expect(close).toHaveBeenCalledTimes(2);
+	expect(game.keydown).not.toHaveBeenCalled();
+	window.release();
+	keyboard.keydown(keyEvent("Escape"));
+	expect(game.keydown).toHaveBeenCalledOnce();
 });

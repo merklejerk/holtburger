@@ -48,12 +48,20 @@ export interface EscapeContextHandle {
 	readonly release: () => void;
 }
 
-/** One registered contextual cancellation, retained across an optimistic dismissal. */
-interface EscapeContextEntry {
-	/** Existing feature operation invoked after this entry leaves the stack. */
-	readonly cancel: () => void;
+/** Context routing options owned by the feature's cancellation lifetime. */
+export interface EscapeContextOptions {
 	/** Floating surfaces receive their depth among other floating surfaces. */
-	readonly onOrder: ((depth: number) => void) | undefined;
+	readonly onOrder?: (depth: number) => void;
+	/** Keep routing to a visible surface until its owner releases it, including server-delayed closes. */
+	readonly untilRelease?: boolean;
+}
+
+/** One registered contextual cancellation. */
+interface EscapeContextEntry {
+	/** Existing feature operation invoked for one Escape press. */
+	readonly cancel: () => void;
+	/** Feature lifetime and optional visual-order projection. */
+	readonly options: EscapeContextOptions | undefined;
 }
 
 /** A modal retains the prior interaction independently of DOM focus restoration. */
@@ -234,9 +242,9 @@ export class KeyboardInputPolicy {
 	/** Register cancellation; optional visual-depth publication keeps floating surfaces in the same order. */
 	bindEscapeContext(
 		cancel: () => void,
-		onOrder?: (depth: number) => void,
+		options?: EscapeContextOptions,
 	): EscapeContextHandle {
-		const entry: EscapeContextEntry = { cancel, onOrder };
+		const entry: EscapeContextEntry = { cancel, options };
 		let released = false;
 		const promote = () => {
 			if (released) return;
@@ -533,11 +541,14 @@ export class KeyboardInputPolicy {
 		if (event.defaultPrevented) event.stopImmediatePropagation();
 	};
 
-	/** Retire before invoking feature code so one press cannot cancel two contexts. */
+	/** Route one press to one context; visible surfaces retain ownership until actually closed. */
 	#cancelEscapeContext(): boolean {
-		const entry = this.#escapeContexts.pop();
+		const entry = this.#escapeContexts.at(-1);
 		if (entry === undefined) return false;
-		this.#publishEscapeOrder();
+		if (!entry.options?.untilRelease) {
+			this.#escapeContexts.pop();
+			this.#publishEscapeOrder();
+		}
 		entry.cancel();
 		return true;
 	}
@@ -546,7 +557,7 @@ export class KeyboardInputPolicy {
 	#publishEscapeOrder(): void {
 		let depth = 0;
 		for (const entry of this.#escapeContexts) {
-			if (entry.onOrder !== undefined) entry.onOrder(depth++);
+			if (entry.options?.onOrder !== undefined) entry.options.onOrder(depth++);
 		}
 	}
 

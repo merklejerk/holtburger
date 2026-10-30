@@ -75,10 +75,10 @@
 			return;
 		}
 		// Read the current prop when Escape fires; keyed window content can replace its close target.
-		escapeContext = keyboard.bindEscapeContext(
-			() => onClose(),
-			(value) => (depth = value),
-		);
+		escapeContext = keyboard.bindEscapeContext(() => onClose(), {
+			onOrder: (value) => (depth = value),
+			untilRelease: true,
+		});
 		return () => {
 			escapeContext?.release();
 			escapeContext = null;

@@ -296,13 +296,16 @@ export async function probeObjectInspection(
 			read(`(() => {
 			const section = document.querySelector('[data-inspection-progression]');
 			const bar = section?.querySelector('progress');
-			return section === null ? null : {text: section.textContent, value: bar.value, max: bar.max, label: bar.getAttribute('aria-label'), description: bar.getAttribute('aria-valuetext')};
+			return section === null ? null : {text: section.textContent, value: bar.value, max: bar.max, label: bar.getAttribute('aria-label'), description: bar.getAttribute('aria-valuetext'), exactQuantities: [...section.querySelectorAll('span[title]')].map((span) => span.title)};
 		})()`);
 		let progression = await progressionBar();
 		assert.equal(progression.value, 12.5);
 		assert.equal(progression.max, 100);
 		assert.equal(progression.label, "Item level experience");
-		assert.match(progression.text, /350,000,000 \/ 700,000,000/);
+		assert.deepEqual(progression.exactQuantities, [
+			"350,000,000",
+			"700,000,000",
+		]);
 		await screenshot("inspection-item");
 
 		// Exercise refresh through the production request owner, retaining the same window.
@@ -577,7 +580,7 @@ export async function probeObjectInspection(
 		});
 		await settle(350);
 
-		// Item cells and item-backed action cells share the same select-and-examine policy.
+		// Item and action cells inspect explicit identities without changing selection.
 		await read(
 			"document.querySelector('button[aria-label^=\"Close Ancient Atlan Sword\"]').click()",
 		);
@@ -590,13 +593,14 @@ export async function probeObjectInspection(
 			inventoryItem,
 			"Inventory did not mount an authoritative item for right-click inspection",
 		);
+		await select(8);
 		const beforeInventoryCell = await snapshot();
 		await rightClick(inventoryItem);
 		const inventoryCell = await waitFor(
 			(value) => value.commandCount === beforeInventoryCell.commandCount + 1,
 			"Inventory cell right-click did not request inspection",
 		);
-		assert.equal(inventoryCell.selectedGuid, 300);
+		assert.equal(inventoryCell.selectedGuid, beforeInventoryCell.selectedGuid);
 		assert.deepEqual(inventoryCell.commands.at(-1)?.args, { guid: 300 });
 		await respond("missing", 300);
 
@@ -616,7 +620,7 @@ export async function probeObjectInspection(
 			(value) => value.commandCount === beforeActionCell.commandCount + 1,
 			"Action cell right-click did not request inspection",
 		);
-		assert.equal(actionCell.selectedGuid, 300);
+		assert.equal(actionCell.selectedGuid, beforeActionCell.selectedGuid);
 		assert.deepEqual(actionCell.commands.at(-1)?.args, { guid: 300 });
 		await respond("missing", 300);
 
@@ -731,14 +735,15 @@ export async function probeObjectInspection(
 		await read(probe + ".restore()");
 		await settle(100);
 
-		// Right-click selects the viewport hit and examines that exact entity.
+		// Right-click examines the viewport hit while preserving gameplay selection.
+		await select(8);
 		const beforeRightClick = await snapshot();
 		await rightClick(".client-canvas");
 		const rightClicked = await waitFor(
 			(value) => value.commandCount === beforeRightClick.commandCount + 1,
 			"Right-click did not request inspection",
 		);
-		assert.equal(rightClicked.selectedGuid, 7);
+		assert.equal(rightClicked.selectedGuid, beforeRightClick.selectedGuid);
 		assert.deepEqual(rightClicked.commands.at(-1)?.args, { guid: 7 });
 
 		const crosstalk = await read(probe + ".crosstalk()");

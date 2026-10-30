@@ -8,6 +8,7 @@ pub mod decode_cache;
 pub mod generated_scenery;
 pub mod interior;
 pub mod landblock;
+mod lockpick;
 pub mod material_capabilities;
 pub mod material_graph;
 pub mod motion_sequence;
@@ -53,6 +54,7 @@ pub use landblock::{
     LandblockEnvCellRef, LandblockObject, LandblockObjectSourceFamily, LandblockPlacement,
     LandblockRestriction, LandblockSceneClass, LandblockTerrain, normalize_landblock_id,
 };
+pub use lockpick::lockpick_bonus;
 pub use material_capabilities::{
     MaterialArchiveCapabilityReport, MaterialRecordAvailability, MaterialRecordCounts,
     MaterialReferenceCoverage, MaterialReferenceParseFailure, RepositoryResourceIndexEntry,

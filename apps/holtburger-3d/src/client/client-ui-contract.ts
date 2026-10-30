@@ -73,6 +73,8 @@ export interface ClientUiDefaults {
 	readonly worldContainer: Omit<ClientUiPanel, "resizable">;
 	/** Vendor catalog, currencies, and combined trade draft. */
 	readonly vendor: Omit<ClientUiPanel, "resizable">;
+	/** Target-bound lock tools and sequential key attempts. */
+	readonly locks: Omit<ClientUiPanel, "resizable">;
 	/** Local salvage queue, estimated output, and explicit destruction action. */
 	readonly salvage: Omit<ClientUiPanel, "resizable">;
 	/** Crystal ownership, requirements, and physical payment draft. */

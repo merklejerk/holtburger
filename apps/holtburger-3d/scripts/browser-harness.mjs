@@ -360,6 +360,8 @@ try {
 			...result.clientPreciseJump,
 			consoleMessages: result.consoleMessages,
 		};
+	} else if (options.clientLocks) {
+		report = { suite: "client-locks", ...result.clientLocks, browserErrors };
 	} else if (options.clientInventory) {
 		report = {
 			suite: "client-inventory",
@@ -670,6 +672,7 @@ function parseArgs(args) {
 		clientNearby: false,
 		clientSpells: false,
 		clientInventory: false,
+		clientLocks: false,
 		clientLoadouts: false,
 		clientPreciseJump: false,
 		clientSettingsTabs: false,
@@ -892,6 +895,10 @@ function parseArgs(args) {
 			case "--client-precise-jump":
 				parsed.clientHud = true;
 				parsed.clientPreciseJump = true;
+				break;
+			case "--client-locks":
+				parsed.clientHud = true;
+				parsed.clientLocks = true;
 				break;
 			case "--client-inventory":
 				parsed.clientHud = true;
@@ -2227,6 +2234,7 @@ Options:
   --client-combat-bar   Verify attack controls, projectile supply, and HUD cancellation.
   --client-hud          Exercise runtime/layout HUD visibility, centered drag anchoring, and
                          constrained viewport restoration using the deterministic client fixture.
+  --client-locks        Verify locked-target HUD, manual and batched keys, Escape, and teardown.
   --client-inventory    Verify inventory gestures, item use, give confirmations, and suppression.
   --item-cooldowns      Verify shared countdowns, themed CSS fills, expiry, and untouched icon artwork.
   --client-loadouts     Exercise loadout capture, exclusions, shortcut placement, and warning feedback.
@@ -4841,6 +4849,17 @@ async function runClientHudHarness({ viteUrl }) {
 			clientNearby.checks.push("chat-entity-native-keyboard");
 			return {
 				clientNearby,
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
+		if (options.clientLocks) {
+			return {
+				clientLocks: await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeLocks",
+					[],
+				),
 				consoleMessages,
 				state: { error: null, ready: true },
 			};

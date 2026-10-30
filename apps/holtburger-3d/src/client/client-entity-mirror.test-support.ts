@@ -32,6 +32,8 @@ export function entityFacts(
 		canReceiveGive: false,
 		canTrade: false,
 		canOfferTrade: false,
+		lockTool: null,
+		isLocked: null,
 		salvage: { kind: "ineligible", reason: "Fixture item cannot be salvaged." },
 		description: {
 			kind: "known",

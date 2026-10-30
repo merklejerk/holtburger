@@ -36,8 +36,8 @@
 		readonly visible: boolean;
 		readonly selectedGuid: number | null;
 		readonly onSelectEntity: (guid: number) => boolean;
-		/** Examine the current selection only after this panel successfully selects its row. */
-		readonly onExamineEntity: () => void;
+		/** Inspect the clicked identity independently of the current selection. */
+		readonly onExamineEntity: (guid: number) => void;
 		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
 	} = $props();
 	// Cold initial markup; only this visible consumer's bounded timer publishes later rows.
@@ -130,7 +130,7 @@
 		editor = null;
 		error = null;
 	}
-	/** Both pointer actions share selection admission and unavailable-target feedback. */
+	/** Left-click selection retains its existing admission feedback. */
 	function selectEntity(guid: number): boolean {
 		const selected = onSelectEntity(guid);
 		error = selected
@@ -276,7 +276,12 @@
 							class:selected={selectedGuid === row.guid}
 							oncontextmenu={(event) => {
 								event.preventDefault();
-								if (selectEntity(row.guid)) onExamineEntity();
+								if (
+									owner.read().rows.some((current) => current.guid === row.guid)
+								) {
+									error = null;
+									onExamineEntity(row.guid);
+								} else error = "This entity is unavailable.";
 							}}
 						>
 							<div class="entity-row">

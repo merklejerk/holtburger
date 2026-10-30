@@ -76,9 +76,38 @@ export const itemUseTargetQuerySchema = z
 	.strict();
 /** Public-fact eligibility, independent of busy state or confirmation policy. */
 export const itemUseTargetResultSchema = z
-	.object({ sequence: identity, eligible: z.boolean() })
+	.object({
+		sequence: identity,
+		eligible: z.boolean(),
+		lockpickSuccessPercent: z.number().finite().min(0).max(100).nullable(),
+	})
 	.strict();
 export type ClientItemUseTargetQuery = z.infer<typeof itemUseTargetQuerySchema>;
 export type ClientItemUseTargetResult = z.infer<
 	typeof itemUseTargetResultSchema
 >;
+
+/** Terminal guarded-use receipt. Error names preserve the protocol enum's serde spelling. */
+export const itemUseFinishedSchema = z
+	.object({
+		sequence: identity,
+		outcome: z.discriminatedUnion("kind", [
+			z
+				.object({
+					kind: z.literal("completed"),
+					error: z.string(),
+					message: z.string(),
+				})
+				.strict(),
+			z.object({ kind: z.literal("timed-out") }).strict(),
+			z.object({ kind: z.literal("aborted") }).strict(),
+		]),
+	})
+	.strict();
+export type ClientItemUseFinished = z.infer<typeof itemUseFinishedSchema>;
+
+/** Best-effort server lock rejection matched to a pending direct use. */
+export const lockedTargetSchema = z
+	.object({ target: identity, name: z.string(), sequence: identity })
+	.strict();
+export type ClientLockedTarget = z.infer<typeof lockedTargetSchema>;

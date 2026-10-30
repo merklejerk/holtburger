@@ -13,7 +13,7 @@ use holtburger_protocol::messages::{
 use holtburger_world::context::WorldContextExt;
 
 use super::{
-    ClientRuntime, ClientState, PendingOperation,
+    ClientRuntime, ClientState,
     types::{ActionResultReason, ActionResultSource, ClientViewEvent},
 };
 
@@ -189,7 +189,7 @@ impl ClientRuntime {
             && self
                 .active_busy_operation
                 .as_ref()
-                .is_some_and(|pending| matches!(pending.operation, PendingOperation::Use { .. }))
+                .is_some_and(|pending| pending.operation.direct_use_source().is_some())
         {
             self.clear_busy_operation();
         }
@@ -205,7 +205,7 @@ impl ClientRuntime {
             match &event.event {
                 GameEvent::ViewContents(data) => {
                     let matches_use = self.active_busy_operation.as_ref().is_some_and(|pending| {
-                        matches!(pending.operation, PendingOperation::Use { source } if source == data.container)
+                        pending.operation.direct_use_source() == Some(data.container)
                             && pending.pending_error.is_none()
                     });
                     // RETAIL DIVERGENCE: acclient.c:413266 gates ground containers on OPENABLE.
@@ -456,6 +456,21 @@ mod tests {
         client.begin_world_entry_transition().await.unwrap();
         assert_eq!(client.world.world_container().root(), None);
         assert!(client.closing_containers.is_empty());
+    }
+
+    #[tokio::test]
+    async fn guarded_direct_use_accepts_its_container_roster() {
+        let mut client = fixture();
+        client.arm_busy_operation(super::super::PendingOperation::GuardedUse {
+            sequence: 7,
+            spell_target: None,
+            intent: ItemUseIntent::Direct {
+                source: ROOT,
+                unrestricted: false,
+            },
+        });
+        receive(&mut client, roster(ROOT, &[])).await;
+        assert_eq!(client.world.world_container().root(), Some(ROOT));
     }
 
     #[tokio::test]

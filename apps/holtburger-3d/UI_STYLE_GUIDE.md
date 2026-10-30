@@ -319,6 +319,11 @@ override the reticle palette; without them, reticle color changes apply live.
 Edge guidance starts when the complete target bounds leave the view, matching
 selection's policy. Neither combat marker tests wall occlusion.
 
+Unlock controls follow the current selection. Changing selection cancels a running
+key sequence; inspecting an explicit object does not change selection.
+The horizontal action buttons use `--ui-locks-action-icon-size`; the preferred item cell
+retains the shared `--ui-item-cell-min-size` and `--ui-icon-scale` sizing.
+
 The Enchantments window shares the spell panel's padding, row, filter, and color
 tokens. Its affected-stat headings use `--ui-enchantments-heading-margin`,
 `--ui-enchantments-heading-font-size`, `--ui-enchantments-heading-letter-spacing`,

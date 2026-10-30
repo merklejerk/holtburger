@@ -106,6 +106,7 @@ it("defers Client construction and composes saved HUD placements after content r
 					hudLayout: expect.objectContaining({
 						inventory,
 						journal: defaults.hudLayout.journal,
+						locks: defaults.hudLayout.locks,
 						partyHud: defaults.hudLayout.partyHud,
 					}),
 				}),

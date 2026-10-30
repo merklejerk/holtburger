@@ -135,6 +135,13 @@ pub enum HostEvent {
     ClientSalvagePreview(holtburger_core::client::salvage::SalvagePreviewResult),
     ClientSalvageResult(holtburger_core::client::salvage::SalvageSubmitResult),
     ClientItemUseResult(holtburger_core::client::item_use::ItemUseResult),
+    ClientItemUseFinished(holtburger_core::client::item_use::ItemUseFinished),
+    ClientLockedTarget {
+        /// Original guarded direct-use receipt identity.
+        sequence: u32,
+        target: holtburger_common::Guid,
+        name: String,
+    },
     ClientItemUseTargetResult(holtburger_core::client::item_use::ItemUseTargetResult),
     ClientInventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
     ClientHousingUpdated(Box<holtburger_core::client::housing::HousingSnapshot>),
@@ -575,6 +582,18 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::ItemUseResult(result) => {
                 HostEvent::ClientItemUseResult(result)
             }
+            crate::client_projection::ClientHostEvent::ItemUseFinished(result) => {
+                HostEvent::ClientItemUseFinished(result)
+            }
+            crate::client_projection::ClientHostEvent::LockedTarget {
+                target,
+                name,
+                sequence,
+            } => HostEvent::ClientLockedTarget {
+                target,
+                name,
+                sequence,
+            },
             crate::client_projection::ClientHostEvent::TradeSnapshot(snapshot) => {
                 HostEvent::ClientTradeSnapshot(snapshot)
             }
@@ -933,6 +952,57 @@ pub async fn run_stdio(launch: crate::host_mode::HostLaunch) -> anyhow::Result<(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn lock_feedback_and_use_receipts_reach_the_host_wire_with_identity() {
+        use holtburger_core::client::item_use::{ItemUseCompletion, ItemUseFinished};
+        use holtburger_core::{ActionResultReason, ActionResultSource, ClientViewEvent};
+        use holtburger_protocol::errors::WeenieError;
+        let (sender, receiver) = mpsc::sync_channel(2);
+        let sink = StdioEventSink::new(sender);
+        for event in [
+            ClientViewEvent::ActionResult {
+                source: ActionResultSource::Client,
+                reason: ActionResultReason::Locked {
+                    target: holtburger_common::Guid(9),
+                    name: "Chest".into(),
+                    sequence: 41,
+                },
+            },
+            ClientViewEvent::ItemUseFinished(ItemUseFinished {
+                sequence: 42,
+                outcome: ItemUseCompletion::Completed {
+                    error: WeenieError::KeyDoesntFitThisLock,
+                    message: "The key does not fit.".into(),
+                },
+            }),
+        ] {
+            sink.publish_client_event(
+                crate::client_projection::project_client_event(event).unwrap(),
+            )
+            .unwrap();
+        }
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("expected lock event")
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "event": "client-locked-target", "payload": { "target": 9, "name": "Chest", "sequence": 41 }
+            })
+        );
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("expected use receipt")
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "event": "client-item-use-finished", "payload": { "sequence": 42, "outcome": {
+                    "kind": "completed", "error": "KeyDoesntFitThisLock", "message": "The key does not fit."
+                }}
+            })
+        );
+    }
+
     use super::*;
     use crate::host_mode::ClientLaunchConfiguration;
     use holtburger_common::properties::EquipMask;

@@ -28,11 +28,14 @@ pub struct ItemUseTargetQuery {
 
 /// Current public-fact eligibility; this does not reserve or execute an operation.
 #[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ItemUseTargetResult {
     /// Original query identity, used to discard stale hover responses.
     pub sequence: u32,
     /// True when the same semantic evaluator used at execution accepts this pairing.
     pub eligible: bool,
+    /// Estimated percentage for a lockpick pairing; absent without target appraisal/skill.
+    pub lockpick_success_percent: Option<f64>,
 }
 
 /// Correlated use request bound to the character that originated the interaction.
@@ -73,6 +76,33 @@ pub enum ItemUseOutcome {
     Executed,
 }
 
+/// Terminal server-processing result for one guarded request; local IDs are not wire IDs.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemUseFinished {
+    /// Original guarded request sequence.
+    pub sequence: u32,
+    /// Completion, timeout, or local retirement of an already admitted request.
+    pub outcome: ItemUseCompletion,
+}
+
+/// A timeout or abort cannot retract a submitted action or establish its server outcome.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum ItemUseCompletion {
+    /// Resolved UseDone error, including a preceding attributed wire error.
+    Completed {
+        /// Typed protocol refusal used by callers deciding whether to continue.
+        error: holtburger_protocol::errors::WeenieError,
+        /// Shared user-facing feedback, including attributed wire parameters.
+        message: String,
+    },
+    /// The server outcome remains unknown.
+    TimedOut,
+    /// Local ownership was retired without a completion.
+    Aborted,
+}
+
 impl ClientRuntime {
     pub(super) fn query_item_use_target(&self, query: ItemUseTargetQuery) {
         let eligible = matches!(self.state, ClientState::InWorld)
@@ -89,6 +119,12 @@ impl ClientRuntime {
             .send(ClientViewEvent::ItemUseTargetResult(ItemUseTargetResult {
                 sequence: query.sequence,
                 eligible,
+                lockpick_success_percent: eligible
+                    .then(|| {
+                        self.world
+                            .estimate_lockpick_success_percent(query.source, query.target)
+                    })
+                    .flatten(),
             }));
     }
 
@@ -143,7 +179,10 @@ impl ClientRuntime {
         if evaluation.consequence() != request.expected {
             return Ok(ItemUseOutcome::ConsequenceChanged { evaluation });
         }
-        if !self.dispatch_item_use(&request.intent).await? {
+        if !self
+            .dispatch_tracked_item_use(&request.intent, Some(request.sequence))
+            .await?
+        {
             return Ok(reject("Your character is busy."));
         }
         Ok(ItemUseOutcome::Executed)
@@ -151,6 +190,15 @@ impl ClientRuntime {
 
     /// Common wire dispatch and busy admission for guarded and existing callers.
     pub(super) async fn dispatch_item_use(&mut self, intent: &ItemUseIntent) -> Result<bool> {
+        self.dispatch_tracked_item_use(intent, None).await
+    }
+
+    /// Derive busy ownership from the same intent sent on the wire. A sequence adds receipts.
+    async fn dispatch_tracked_item_use(
+        &mut self,
+        intent: &ItemUseIntent,
+        sequence: Option<u32>,
+    ) -> Result<bool> {
         if self.active_busy_operation.is_some() {
             return Ok(false);
         }
@@ -167,20 +215,32 @@ impl ClientRuntime {
                 .map(|spell| (*target, spell.0)),
             ItemUseIntent::Direct { .. } => None,
         };
-        let (operation, action) = match intent {
-            ItemUseIntent::Direct { source, .. } => (
-                super::PendingOperation::Use { source: *source },
-                GameAction::Use(Box::new(UseActionData { guid: *source })),
-            ),
-            ItemUseIntent::Targeted { source, target } => (
-                super::PendingOperation::UseWithTarget {
-                    spell_target: targeted_spell.map(|(target, _)| target),
-                },
+        let spell_target = targeted_spell.map(|(target, _)| target);
+        let operation = match sequence {
+            Some(sequence) => super::PendingOperation::GuardedUse {
+                sequence,
+                intent: intent.clone(),
+                spell_target,
+            },
+            None => match intent {
+                ItemUseIntent::Direct { source, .. } => {
+                    super::PendingOperation::Use { source: *source }
+                }
+                ItemUseIntent::Targeted { .. } => {
+                    super::PendingOperation::UseWithTarget { spell_target }
+                }
+            },
+        };
+        let action = match intent {
+            ItemUseIntent::Direct { source, .. } => {
+                GameAction::Use(Box::new(UseActionData { guid: *source }))
+            }
+            ItemUseIntent::Targeted { source, target } => {
                 GameAction::UseWithTarget(Box::new(UseWithTargetActionData {
                     item_guid: *source,
                     target_guid: *target,
-                })),
-            ),
+                }))
+            }
         };
         if !self.arm_busy_operation(operation) {
             return Ok(false);
@@ -267,6 +327,88 @@ mod tests {
         )
     }
 
+    #[tokio::test]
+    async fn failed_guarded_send_emits_abort_and_dispatch_refusal_for_the_same_request() {
+        let (mut client, mut request) = fixture();
+        request.expected = ItemUseConsequence::DestroyItem {
+            target: Guid(3),
+            amount: 1,
+        };
+        // The existing Session binds IPv4, so this IPv6 destination forces a real send failure.
+        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
+            .await
+            .unwrap();
+        let mut events = client.subscribe_client_view_events();
+        assert!(client.submit_item_use(request.clone()).await.is_err());
+        assert!(client.active_busy_operation.is_none());
+        let mut terminals = Vec::new();
+        let mut refusals = Vec::new();
+        while let Ok(event) = events.try_recv() {
+            match event {
+                ClientViewEvent::ItemUseFinished(result) => terminals.push(result),
+                ClientViewEvent::ItemUseResult(result) => refusals.push(result),
+                _ => {}
+            }
+        }
+        assert_eq!(terminals.len(), 1);
+        assert_eq!(terminals[0].sequence, request.sequence);
+        assert_eq!(terminals[0].outcome, ItemUseCompletion::Aborted);
+        assert_eq!(refusals.len(), 1);
+        assert_eq!(refusals[0].sequence, request.sequence);
+        assert!(matches!(
+            refusals[0].outcome,
+            ItemUseOutcome::Rejected { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn guarded_spell_item_retains_cast_target_and_terminal_receipt() {
+        use holtburger_common::properties::{PropertyDataId, WorldObjectPropertyAccessorsMut};
+        let (mut client, request) = fixture();
+        client
+            .world
+            .entities
+            .get_mut(Guid(2))
+            .expect("source")
+            .set_did_prop(PropertyDataId::Spell, Guid(42));
+        client
+            .world
+            .entities
+            .get_mut(Guid(2))
+            .expect("source")
+            .set_int_prop(PropertyInt::ItemType, ItemType::CASTER.bits() as i32);
+        let mut events = client.client_view_event_tx.subscribe();
+        client.submit_item_use(request.clone()).await.unwrap();
+        assert!(
+            std::iter::from_fn(|| events.try_recv().ok()).any(|event| matches!(
+                event,
+                ClientViewEvent::ItemUseResult(ItemUseResult {
+                    outcome: ItemUseOutcome::Executed,
+                    ..
+                })
+            ))
+        );
+        assert_eq!(
+            client.application_snapshot().spell_cast_target,
+            Some(Guid(3))
+        );
+        client
+            .finish_busy_operation_from_use_done(holtburger_protocol::errors::WeenieError::None)
+            .await
+            .unwrap();
+        assert_eq!(client.application_snapshot().spell_cast_target, None);
+        let receipts: Vec<_> = std::iter::from_fn(|| events.try_recv().ok())
+            .filter_map(|event| {
+                if let ClientViewEvent::ItemUseFinished(result) = event {
+                    Some(result.sequence)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert_eq!(receipts, vec![request.sequence]);
+    }
+
     #[test]
     fn target_queries_report_compatibility_without_busy_or_execution() {
         let (client, _) = fixture();
@@ -282,6 +424,7 @@ mod tests {
             };
             assert_eq!(result.sequence, sequence);
             assert_eq!(result.eligible, expected);
+            assert_eq!(result.lockpick_success_percent, None);
         }
         assert_eq!(client.session.game_action_sequence, 0);
         assert!(client.active_busy_operation.is_none());

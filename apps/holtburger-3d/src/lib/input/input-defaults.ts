@@ -102,6 +102,14 @@ export const INPUT_DEFAULTS = {
 		previousUnopenedCorpse: [
 			{ key: "v", shift: true, ctrl: false, alt: false, meta: false },
 		],
+		/** Forward traversal restricted to world-classified hostile creatures. */
+		nextHostile: [
+			{ key: "v", shift: false, ctrl: true, alt: false, meta: false },
+		],
+		/** Reverse traversal restricted to world-classified hostile creatures. */
+		previousHostile: [
+			{ key: "v", shift: true, ctrl: true, alt: false, meta: false },
+		],
 		/** Use the currently selected entity. */
 		interact: [{ key: "r", ctrl: false, alt: false, meta: false }],
 		/** Request authoritative examination facts for the selected entity. */

@@ -93,6 +93,8 @@ export const CLIENT_SHORTCUT_ACTIONS = [
 	"selectSelf",
 	"nextCreature",
 	"previousCreature",
+	"nextHostile",
+	"previousHostile",
 	"nextNonCreature",
 	"previousNonCreature",
 	"nextUnopenedCorpse",

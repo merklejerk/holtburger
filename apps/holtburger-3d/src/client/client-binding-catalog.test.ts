@@ -3,7 +3,10 @@ import {
 	replaceClientBinding,
 } from "../lib/input/client-keyboard-bindings";
 import { describe, expect, it } from "vitest";
-import { CLIENT_KEYBOARD_DEFAULTS } from "./client-input-settings";
+import {
+	CLIENT_KEYBOARD_DEFAULTS,
+	clientKeyboardSettingsSchema,
+} from "./client-input-settings";
 import { ACTION_SLOT_INDICES } from "./client-action-bar-contract";
 import { ACTION_BAR_COMMANDS } from "../lib/input/input-contract";
 import {
@@ -31,6 +34,31 @@ const ctrlDigitTwo = {
 };
 
 describe("client binding catalog", () => {
+	it("fills new hostile shortcuts in saved settings and preserves explicit remaps", () => {
+		const savedClient = { ...CLIENT_KEYBOARD_DEFAULTS.client };
+		Reflect.deleteProperty(savedClient, "nextHostile");
+		Reflect.deleteProperty(savedClient, "previousHostile");
+		const restored = clientKeyboardSettingsSchema.parse({
+			...CLIENT_KEYBOARD_DEFAULTS,
+			client: savedClient,
+		});
+		expect(restored.client.nextHostile).toEqual(
+			CLIENT_KEYBOARD_DEFAULTS.client.nextHostile,
+		);
+		expect(restored.client.previousHostile).toEqual(
+			CLIENT_KEYBOARD_DEFAULTS.client.previousHostile,
+		);
+		const remapped = replaceClientBinding(
+			restored,
+			{ kind: "client", action: "nextHostile" },
+			[{ key: "F8" }],
+		);
+		expect(
+			clientKeyboardSettingsSchema.parse(remapped).client.nextHostile,
+		).toEqual([{ key: "F8" }]);
+		expect(row("client.nextHostile").group).toBe("Targeting & interaction");
+	});
+
 	it("checks panel toggles against every overlapping keyboard context", () => {
 		const panel = row("client.toggleInventory");
 		for (const id of [

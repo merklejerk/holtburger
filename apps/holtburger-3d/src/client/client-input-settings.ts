@@ -58,6 +58,8 @@ const keyboardSettingsBaseSchema = z
 					toggleJournal: INPUT_DEFAULTS.client.toggleJournal,
 					toggleSettings: INPUT_DEFAULTS.client.toggleSettings,
 
+					nextHostile: INPUT_DEFAULTS.client.nextHostile,
+					previousHostile: INPUT_DEFAULTS.client.previousHostile,
 					splitStack: INPUT_DEFAULTS.client.splitStack,
 					toggleChatHistory: INPUT_DEFAULTS.client.toggleChatHistory,
 					holdChatHistory: INPUT_DEFAULTS.client.holdChatHistory,

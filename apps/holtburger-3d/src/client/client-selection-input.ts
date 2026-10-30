@@ -5,8 +5,7 @@ import type {
 import type { AppInput } from "../lib/input/app-input";
 import type {
 	ClientCycleSelectionController,
-	CycleCategory,
-	CycleSubset,
+	CycleFilter,
 } from "./client-cycle-selection-controller";
 import type { ClientEntitySelection } from "./client-entity-selection";
 
@@ -14,9 +13,8 @@ import type { ClientEntitySelection } from "./client-entity-selection";
 interface PendingSelectionPress {
 	/** Physical key identity captured before modifiers can change. */
 	readonly key: string;
-	/** Category and direction captured for the short-press action. */
-	readonly category: CycleCategory;
-	readonly subset: CycleSubset;
+	/** Eligibility and direction captured for the short-press action. */
+	readonly filter: CycleFilter;
 	readonly direction: 1 | -1;
 	/** Timer is cancelled when release or interruption consumes this press. */
 	readonly timer: ReturnType<typeof setTimeout>;
@@ -80,6 +78,8 @@ export class ClientSelectionInput {
 				"selectSelf",
 				"nextCreature",
 				"previousCreature",
+				"nextHostile",
+				"previousHostile",
 				"nextNonCreature",
 				"previousNonCreature",
 				"nextUnopenedCorpse",
@@ -111,6 +111,12 @@ export class ClientSelectionInput {
 			case "previousCreature":
 				this.#beginPress(event, "creature", -1, nowMs);
 				break;
+			case "nextHostile":
+				this.#beginPress(event, "hostile", 1, nowMs);
+				break;
+			case "previousHostile":
+				this.#beginPress(event, "hostile", -1, nowMs);
+				break;
 			case "nextNonCreature":
 				this.#beginPress(event, "non-creature", 1, nowMs);
 				break;
@@ -118,10 +124,10 @@ export class ClientSelectionInput {
 				this.#beginPress(event, "non-creature", -1, nowMs);
 				break;
 			case "nextUnopenedCorpse":
-				this.#beginPress(event, "non-creature", 1, nowMs, "unopened-corpse");
+				this.#beginPress(event, "unopened-corpse", 1, nowMs);
 				break;
 			case "previousUnopenedCorpse":
-				this.#beginPress(event, "non-creature", -1, nowMs, "unopened-corpse");
+				this.#beginPress(event, "unopened-corpse", -1, nowMs);
 				break;
 		}
 		return true;
@@ -135,14 +141,8 @@ export class ClientSelectionInput {
 			if (event.isComposing) return;
 			// Event-loop delays must not turn a completed hold into a short press.
 			if (nowMs - pending.startedAtMs >= this.#holdDelayMs)
-				this.#cycle.selectNearest(pending.category, pending.subset);
-			else
-				this.#cycle.cycle(
-					pending.category,
-					pending.direction,
-					nowMs,
-					pending.subset,
-				);
+				this.#cycle.selectNearest(pending.filter);
+			else this.#cycle.cycle(pending.filter, pending.direction);
 		} else if (["Shift", "Control", "Alt", "Meta"].includes(event.key))
 			this.cancel();
 	}
@@ -162,23 +162,21 @@ export class ClientSelectionInput {
 
 	#beginPress(
 		event: KeyboardEvent,
-		category: CycleCategory,
+		filter: CycleFilter,
 		direction: 1 | -1,
 		nowMs: number,
-		subset: CycleSubset = "all",
 	): void {
 		// Express intent now, without changing selection or advancing the cycle before release.
 		this.#selection.beginAcquisition("cycle");
 		const pending: PendingSelectionPress = {
 			key: event.code || event.key,
-			category,
-			subset,
+			filter,
 			direction,
 			startedAtMs: nowMs,
 			timer: setTimeout(() => {
 				if (this.#press !== pending) return;
 				this.#press = null;
-				this.#cycle.selectNearest(category, subset);
+				this.#cycle.selectNearest(filter);
 			}, this.#holdDelayMs),
 		};
 		this.#press = pending;

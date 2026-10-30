@@ -194,8 +194,8 @@ export const CLIENT_UI_DEFAULTS = {
 		resizable: false,
 	},
 	toast: {
-		anchor: "bottom-center",
-		offset: { x: 0, y: 64 },
+		anchor: "center",
+		offset: { x: 0, y: 256 },
 		size: { width: 420, height: 64 },
 		minSize: { width: 200, height: 64 },
 		resizable: false,

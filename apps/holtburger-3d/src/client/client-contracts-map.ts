@@ -66,8 +66,8 @@ export function contractMapMarkers(
 				},
 				location: row.contact.location,
 			});
-		// Quest areas are authored points. In-progress visibility is h3d policy, not an ACE rule.
-		if (row.status.kind === "inProgress")
+		// Quest areas are authored points. Available/in-progress visibility is h3d policy, not an ACE rule.
+		if (row.status.kind === "available" || row.status.kind === "inProgress")
 			locations.push({
 				entry: { id: row.id, name: row.name, role: "area" },
 				location: row.area,
@@ -102,7 +102,7 @@ export function contractMapMarkers(
 	}));
 }
 
-/** Compose current status with retained placement; countdown expiry never rebuilds geometry. */
+/** Compose current status with projected destination roles and placement. */
 export function contractMapTooltips(
 	markers: readonly ContractMapMarker[],
 	facts: ContractsSnapshot | null,

@@ -322,11 +322,13 @@ export async function probeContractMap(options: {
 							kind: "waitingToRepeat",
 							remainingSeconds: CLIENT_TUNING.journal.displayIntervalMs / 2000,
 						},
+						area: second.area,
 					}
 				: row,
 		);
 		replace(repeat);
 		await settle();
+		require(markers().length === 1, "Waiting contract revealed its quest area");
 		const retained = markers()[0];
 		if (retained === undefined) throw new Error("Missing repeat marker");
 		hover(retained);
@@ -335,10 +337,31 @@ export async function probeContractMap(options: {
 			"Waiting to repeat",
 		), "Waiting tooltip status missing");
 		await waitTimer();
-		require(markers()[0] === retained &&
+		require(markers().length === 2 &&
 			tooltip().textContent?.includes(
 				"Available",
-			), "Expiry rebuilt geometry or left stale tooltip status");
+			), "Expiry failed to reveal the quest area or left stale tooltip status");
+		const availableContact = markers().find(
+			(node) => node.dataset.contractMarker === retained.dataset.contractMarker,
+		);
+		if (availableContact === undefined)
+			throw new Error("Expiry lost the contract contact");
+		const availableArea = markers().find(
+			(node) => node.dataset.contractMarker !== retained.dataset.contractMarker,
+		);
+		if (availableArea === undefined)
+			throw new Error("Expiry lost the contract quest area");
+		hover(availableArea);
+		await settle();
+		require(tooltip().textContent?.includes("Quest area") &&
+			tooltip().textContent?.includes(
+				"Available",
+			), "Available quest area tooltip missing");
+		await waitTimer();
+		require(markers().includes(availableContact) &&
+			markers().includes(
+				availableArea,
+			), "Unchanged destinations rebuilt marker nodes");
 		const crowded: ContractRow[] = Array.from({ length: 40 }, (_, index) => ({
 			...first,
 			id: index + 10,
@@ -402,7 +425,8 @@ export async function probeContractMap(options: {
 			snapshotRecovery: true,
 			portalRetention: true,
 			completionRetainsContact: true,
-			expiryWithoutGeometryRebuild: true,
+			expiryRevealsQuestArea: true,
+			unchangedDestinationsRetainNodes: true,
 			crowdedTooltipScroll: true,
 			characterReset: true,
 		};

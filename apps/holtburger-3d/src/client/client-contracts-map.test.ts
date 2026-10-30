@@ -44,25 +44,27 @@ describe("contract map projection", () => {
 		owner.reset();
 		expect(contractMapMarkers(owner.readFacts())).toEqual([]);
 	});
-	it("shows selected outdoor contacts in every status and quest area only during progress", () => {
+	it("shows selected outdoor contacts in every status and quest areas when available or in progress", () => {
 		const row = contact();
-		for (const status of [
-			{ kind: "available" },
-			{ kind: "completed" },
-			{ kind: "waitingToRepeat", remainingSeconds: 10 },
+		if (row.contact === null) throw new Error("Expected fixture contact");
+		for (const [status, roles] of [
+			[{ kind: "available" }, ["area", "start"]],
+			[{ kind: "inProgress", progress: null }, ["area", "start"]],
+			[{ kind: "completed" }, ["start"]],
+			[{ kind: "waitingToRepeat", remainingSeconds: 10 }, ["start"]],
 		] as const) {
 			const markers = contractMapMarkers({
 				rows: [
 					{
 						...row,
 						status,
-						area: row.contact?.location ?? { kind: "missing" },
+						area: row.contact.location,
 					},
 				],
 			});
 			expect(
 				markers.flatMap((marker) => marker.entries.map((entry) => entry.role)),
-			).toEqual(["start"]);
+			).toEqual(roles);
 		}
 		const area = contractsUpdatedSchema.parse(fixture).contracts?.rows[1];
 		if (area?.kind !== "resolved") throw new Error("Expected fixture area");

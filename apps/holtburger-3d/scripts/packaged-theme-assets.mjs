@@ -48,6 +48,7 @@ async function probeCustomTheme(read, profileDirectory, api) {
 /** Reuse the renderer asset harness through the installed app's real preload and theme protocol. */
 export async function probePackagedThemeAssets({
 	client,
+	inspect,
 	read,
 	waitFor,
 	profileDirectory,
@@ -57,6 +58,20 @@ export async function probePackagedThemeAssets({
 	const harness = new URL("../harness/user-theme/index.html", original).href;
 	const api = "window.__UI_THEME_ASSET_PROBE__";
 	const settings = "window.__UI_THEME_SETTINGS_PROBE__";
+	// Harness navigation is diagnostic setup, never a production document-admission policy.
+	// Patch only this isolated process, and retire the exception after restoring the product page.
+	await inspect(`(() => {
+		const require = process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json');
+		const { app } = require('electron');
+		const { DocumentAdmission } = require(app.getAppPath() + '/dist-electron/electron/document-admission.js');
+		const boot = DocumentAdmission.prototype.boot;
+		DocumentAdmission.prototype.boot = function(url) {
+			if (url === ${JSON.stringify(harness)} || url === ${JSON.stringify(original)})
+				this.navigate('client', new URL(url).pathname.split('/dist/')[1]);
+			return boot.call(this, url);
+		};
+		globalThis.__restoreThemeProbeAdmission = () => { DocumentAdmission.prototype.boot = boot; };
+	})()`);
 	try {
 		await client.send("Page.navigate", { url: harness });
 		await waitFor(() => read(`Boolean(${api})`), "packaged theme harness");
@@ -105,10 +120,16 @@ export async function probePackagedThemeAssets({
 			}),
 		);
 	} finally {
-		await client.send("Page.navigate", { url: original });
-		await waitFor(
-			() => read("Boolean(document.querySelector('.client-pregame-screen'))"),
-			"restored application page",
-		);
+		try {
+			await client.send("Page.navigate", { url: original });
+			await waitFor(
+				() => read("Boolean(document.querySelector('.client-pregame-screen'))"),
+				"restored application page",
+			);
+		} finally {
+			await inspect(
+				"globalThis.__restoreThemeProbeAdmission(); delete globalThis.__restoreThemeProbeAdmission",
+			);
+		}
 	}
 }

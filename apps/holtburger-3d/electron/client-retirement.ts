@@ -21,19 +21,15 @@ interface Dependencies {
 	readonly prepareRenderer: () => void;
 	/** Flush accepted persistence and stop the host after the renderer IPC acceptance cutoff. */
 	readonly shutdownNative: () => Promise<void>;
-	/** Native diagnostic/exit-status owner; failure does not skip the remaining releases. */
-	readonly reportFailure: (error: unknown) => void;
-	/** Final native exit bypasses intercepted close events. */
-	readonly exit: () => void;
 	/** One budget covers early handler registration and renderer preparation. */
 	readonly deadlineMs: number;
 }
 
-/** Main-process window close policy; Electron events delegate to this one operation. */
-export class ClientWindowClose {
+/** One terminal document retirement; returning to the picker and application Quit share this operation. */
+export class ClientRetirement {
 	readonly #dependencies: Dependencies;
 	#phase: ClosePhase = { kind: "open" };
-	#completion: Promise<void> | null = null;
+	#completion: Promise<ClientClosePreparation> | null = null;
 	/** Renderer loss can precede the close event that it triggers. */
 	#rendererFailure: string | null = null;
 
@@ -49,7 +45,7 @@ export class ClientWindowClose {
 		return this.#phase.kind === "preparing";
 	}
 
-	request(): Promise<void> {
+	request(): Promise<ClientClosePreparation> {
 		return (this.#completion ??= Promise.resolve().then(() => this.#close()));
 	}
 
@@ -107,17 +103,13 @@ export class ClientWindowClose {
 		});
 	}
 
-	async #close(): Promise<void> {
+	async #close(): Promise<ClientClosePreparation> {
 		const preparation = await this.#prepare();
-		if (preparation.kind === "failed")
-			this.#dependencies.reportFailure(new Error(preparation.diagnostic));
 		try {
 			await this.#dependencies.shutdownNative();
-		} catch (error) {
-			this.#dependencies.reportFailure(error);
+			return preparation;
 		} finally {
 			this.#phase = { kind: "closed" };
-			this.#dependencies.exit();
 		}
 	}
 }

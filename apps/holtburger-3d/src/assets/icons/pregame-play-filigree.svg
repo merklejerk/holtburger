@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="48" viewBox="0 0 80 48" fill="none" stroke="url(#gold)" stroke-width="1">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff2bf" />
+      <stop offset=".28" stop-color="#b47d2e" />
+      <stop offset=".5" stop-color="#fff9df" />
+      <stop offset=".68" stop-color="#c18a34" />
+      <stop offset="1" stop-color="#edcd81" />
+    </linearGradient>
+    <!-- Fixed end slices keep the nested chevrons and diamond tracery sharp as the button grows. -->
+    <g id="endcap">
+      <path d="M26 .5L12 24L26 47.5M27 6L19 24L27 42" />
+      <path d="M3.5 19L8 24L3.5 29L.5 24ZM14.5 20L18 24L14.5 28L11 24Z" />
+      <path d="M20 7L22 10L20 13L18 10ZM20 35L22 38L20 41L18 38Z" />
+      <path d="M24 4H27M24 44H27M4 24H7" stroke-width=".6" />
+    </g>
+  </defs>
+  <path d="M3.5 19L16 .5H64L76.5 19M76.5 29L64 47.5H16L3.5 29" />
+  <path d="M25 4H55M25 44H55" opacity=".65" stroke-width=".6" />
+  <use href="#endcap" />
+  <use href="#endcap" transform="translate(80 0) scale(-1 1)" />
+</svg>

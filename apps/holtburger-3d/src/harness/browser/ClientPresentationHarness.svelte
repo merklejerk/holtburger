@@ -80,6 +80,9 @@
 		let closed = false;
 		const previousBridge = window.holtburgerHost;
 		const previousStartup = window.holtburgerClient;
+		const previousLauncher = window.holtburgerLauncher;
+		// Record native handoffs while retaining this client-only document for retirement assertions.
+		const launcherReturns: Array<string | null> = [];
 		const nativeGetContext = HTMLCanvasElement.prototype.getContext;
 		const worlds = new Set<HTMLCanvasElement>();
 		let worldContextRequests = 0;
@@ -261,6 +264,27 @@
 					authority.selection(emptyRoster);
 				},
 			};
+			const unavailableLauncherOperation = async (): Promise<never> => {
+				throw new Error(
+					"Launcher catalog operations are outside the client presentation fixture.",
+				);
+			};
+			window.holtburgerLauncher = {
+				enabled: true,
+				snapshot: unavailableLauncherOperation,
+				directory: unavailableLauncherOperation,
+				importServer: unavailableLauncherOperation,
+				saveServer: unavailableLauncherOperation,
+				deleteServer: unavailableLauncherOperation,
+				saveProfile: unavailableLauncherOperation,
+				deleteProfile: unavailableLauncherOperation,
+				credentials: unavailableLauncherOperation,
+				recover: unavailableLauncherOperation,
+				play: unavailableLauncherOperation,
+				back: async (diagnostic) => {
+					launcherReturns.push(diagnostic);
+				},
+			};
 			retireClose = registerElectronStartupClose(
 				new StartupGameLifecycle("client"),
 			);
@@ -348,6 +372,7 @@
 					portalReveals: authority.acknowledgements(),
 					logoutRequests: authority.logoutRequests(),
 					disconnectRequests,
+					launcherReturns: [...launcherReturns],
 					worldDraws,
 					rosterDelivered,
 					sceneResponses,
@@ -454,6 +479,7 @@
 			HTMLCanvasElement.prototype.getContext = nativeGetContext;
 			window.holtburgerHost = previousBridge;
 			window.holtburgerClient = previousStartup;
+			window.holtburgerLauncher = previousLauncher;
 			delete bridge.__HOLTBURGER_CLIENT_PRESENTATION__;
 		};
 	});

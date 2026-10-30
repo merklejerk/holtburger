@@ -315,8 +315,7 @@ export class ClientPresentationRoot<
 		try {
 			await this.#ownerCompletion;
 		} catch (error) {
-			if (!(error instanceof DOMException && error.name === "AbortError"))
-				failures.push(error);
+			if (!isAbortError(error)) failures.push(error);
 		}
 		try {
 			await this.#owner?.destroy();

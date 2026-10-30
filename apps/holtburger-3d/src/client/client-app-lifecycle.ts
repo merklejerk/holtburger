@@ -366,7 +366,7 @@ export class ClientAppLifecycle {
 			await this.#disconnecting;
 		});
 	}
-	/** Renderer preparation stays withdrawn until Electron exits; every independent flush still runs. */
+	/** Renderer preparation stays withdrawn until this document retires; every independent flush still runs. */
 	prepareClose(prepareResources: () => Promise<void>): Promise<void> {
 		if (this.#closing !== null) return this.#closing;
 		this.#closing = this.#operate("quit", async () => {

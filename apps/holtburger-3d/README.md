@@ -175,11 +175,15 @@ Each mounted frontend owns its action context. `provideAppInputPolicy()` provide
 router and one `ViewportInputGate`; descendants access them with `useAppInputPolicy()`.
 `ClientApp` and `ExplorerApp` mount keyboard routing at their app lifetimes. Gameplay action
 contexts and viewport gestures are admitted only in their appropriate authority phase; the
-pre-game scene accepts character rotation through its foreground surface, without gameplay movement or picking. Pre-game foreground declares native keyboard controls so roster arrows and Tab retain browser behavior.
+pre-game scene accepts character rotation through its foreground surface, without gameplay movement or picking.
+The shared `ClientPregameScreen` uses `keyboard.nativePage` for its mounted lifetime. Launcher,
+setup, loading, and character pages retain browser Tab/Shift+Tab traversal and pointer focus even
+before a control has focus. This context blocks gameplay commands and retires with the page.
 
 Keyboard ownership defaults to the game. Ordinary HUD buttons, toggles, inventory controls, and
 panel gestures do not acquire it. Text/number editors, editable content, and native selects acquire
-it through focus. Tab and Shift+Tab never traverse the interface, including within dialogs;
+it through focus. During gameplay, Tab and Shift+Tab do not traverse ordinary HUD controls or dialogs;
+an explicitly active scope with `nativeControls` retains browser traversal.
 `tabindex="-1"` still permits intentional programmatic focus. Clicking a `data-game-viewport`
 surface or leaving an editor returns keyboard ownership to the game. Mouse gestures remain local.
 
@@ -534,10 +538,53 @@ The screenshot fixture reads the active theme dimensions too.
 
 ## Development
 
-Packaged applications default to client mode and require CLI account/connection arguments.
-Use an explicit `explorer` argument for offline exploration. Both clients use `-p` for port
-and `-P` for password. See the [alpha quickstart](../../docs/ALPHA_QUICKSTART.md) for native
+Packaged applications open the integrated server/profile launcher by default. Play starts the Rust
+sidecar and asset setup, then connects; highlighting a profile does not start the game. Disconnect
+returns to the launcher in the same window. Character logout keeps the connection and returns to
+character selection. Complete CLI account/connection arguments bypass the launcher initially;
+`--account` remains required for a direct connection. Use an explicit `explorer` argument for offline
+exploration. Both clients use `-p` for port and `-P` for password. See the [alpha quickstart](../../docs/ALPHA_QUICKSTART.md) for native
 paths, retail-content selection, and bundle layout.
+
+Add `--no-launcher` with `--account` for a direct session that exits on disconnect, cancellation,
+or connection/startup failure. This flag takes no value. Without it, direct CLI sessions return to
+the launcher when they end. Both paths finish session cleanup and flush settings before exit/return.
+
+The main launcher places server selection and profile configuration in separate, aligned columns.
+The selected server has a pregame diamond marker and accent edge. Each server has Edit/Delete icon
+actions revealed on hover or keyboard focus (always available on touch devices). Editing or deleting
+an unselected server preserves the active selection and any entered credential draft.
+
+Profiles are optional credential presets. Account/password and Play are always shown; choose a server
+and enter credentials to launch without creating a named profile. Selecting a profile fills the editable fields.
+**Save to new profile** opens a naming dialog and creates a preset; **Overwrite profile** saves
+current credentials to the selected preset under its existing name. Both save actions encrypt account/password together.
+Play uses the current form values without creating or overwriting profiles. Selecting **No profile**
+loads that server's own saved credentials. Play with **No profile** encrypts and saves the current
+account/password for that server, including failed login attempts. Named profile credentials remain
+unchanged. An empty password is supported; an account is required.
+Each server remembers the profile selected on its last Play, including **No profile**, and restores
+that preset and its credentials when selected again. Launcher file version 4 preserves this history
+and profile-free credentials; older files migrate without changing existing saved credentials.
+The launcher restores the last server used and lists servers in order of most recent Play. New
+servers appear below existing entries; editing server details preserves their position in the list.
+
+Use **Import from TreeStats** beside **Add server** to browse the public directory, search its entries,
+and add servers immediately using each row's **Add** icon button. Matching saved endpoints have a disabled
+button with an **Added** tooltip. Type and software appear as muted text beside each server name. Additive pill
+filters for both categories sit behind a collapsed Filters disclosure with an active selection count.
+A compact sort button beside Filters cycles between Name (alphabetical) and Population (highest reported
+count first, unreported counts last, ties by name). Sorting applies together with the active filters.
+Add uses the existing icon-button treatment; Refresh and Done live in the bottom action row.
+Expanded details separate labelled host/port/player-report fields from a titled Description section. Entries expand using the shared pregame character-creator row. Imports copy only
+the server name and endpoint; enter credentials or optionally save a profile afterward. Directory metadata and reported player
+counts are for browsing and do not establish server availability or H3D compatibility. The directory
+loads on demand, is cached in memory, and has an explicit Refresh action. Imported servers remain local
+copies; directory changes never update saved endpoints or credentials automatically.
+
+The optional `npm run probe:launcher -- --package out/holtburger-3d-linux-x64/holtburger-3d --tree-stats`
+probe exercises the actual public-directory flow using isolated local data. It requires network access;
+ordinary launcher probes and unit tests use no public API.
 
 Install Node.js 22.12 or newer, a current stable Rust toolchain, and the frontend dependencies:
 
@@ -697,8 +744,8 @@ Two independent desktop flags control asset setup:
 
 - `--no-content-search` disables default automatic discovery for this launch, including retries.
   A saved location and explicit `--content` remain usable; choosing a folder is still available.
-- `--clear-content` clears the saved location and its attention marker before startup, then follows
-  normal selection policy. Default discovery can find and save another location.
+- `--clear-content` clears the saved location and its attention marker once before the first game
+  attempt (at Explorer startup, or after Play in the client), then follows normal selection policy. Default discovery can find and save another location.
 - Use both to open Provide assets directly:
   `npm run dev:explorer -- --no-content-search --clear-content`.
 
@@ -753,18 +800,37 @@ The launcher and host recognize these other environment variables:
   diagnostics. Packaged applications always use their bundled host. Normal development should let
   the launcher select the freshly built binary.
 
-Electron owns one product window and at most one content-host attempt. Recoverable content setup
-reaps a failed attempt before starting another. Normal application exit requests orderly host
-shutdown and waits for process completion; acknowledgement alone is not completion. Executable,
-protocol, and unexpected host failures remain application errors. Renderer reload is unsupported
-because it would retain host-owned sessions while replacing their renderer owner; restart the
-whole application after renderer or WebGL context failure.
+Electron owns one product window and at most one game attempt. Each Play uses a fresh client
+document and Rust sidecar. Return to the launcher waits for renderer preparation, accepted settings
+and capture writes, and native host termination before reopening Play. Quit joins the same retirement
+and also flushes application-lived launcher settings. Unexpected host/connection failures retain their
+diagnostics and return through this attempt boundary. Uncoordinated renderer reload remains
+unsupported; renderer process failure is application-fatal.
+
+`launcher-settings.json` stores the server/profile catalog, last selection, launcher window size and maximized state,
+and encrypted account/password payloads for saved profiles independently of `client-settings.json` and game
+window size/maximized state. Neither surface saves or restores window position; old coordinates are
+discarded when settings are read. Game resets and `--settings-file` do not affect launcher settings. The embedded universal seed
+provides obfuscation against casual plaintext scraping, not a private key: copying this file preserves
+its saved credentials. No key file or OS credential service is required. Adding or editing a
+server rejects an endpoint already used by another saved server. Server edits preserve its profiles
+and saved credentials. Unreadable launcher files require explicit
+recovery, which preserves the original in a sibling backup. Older catalogs load without changing
+servers or encrypted envelopes and upgrade to version 4 on the next save. Incomplete older profiles
+remain editable. Saved credentials are
+loaded through a picker-only native command to fill the masked password field; catalog snapshots
+exclude passwords and encrypted envelopes.
+
+`npm run probe:launcher` verifies one-window startup, asset recovery/cancellation, repeat attempts,
+encrypted persistence, invalid-game-settings recovery, and Quit with an isolated temporary profile.
+Add `-- --assets /path/to/content` for diagnostic game construction and a real connection timeout.
+The probe records native process/memory snapshots; it makes no visual acceptance judgments.
 
 `npm run probe:content` verifies native startup/recovery in an isolated temporary profile without
 screenshots. The synthetic archive intentionally lacks necessary scene/bootstrap assets: the
 probe verifies their failure marker, next-launch setup, override isolation, and bounded shutdown in
-both modes. Client retirement preserves the failed-construction outcome as a nonzero exit; a
-setup-only close must exit successfully.
+both modes. Recoverable client attempt failures return to the launcher; failed application retirement
+retains a failure exit status. A setup-only close must exit successfully.
 
 ## Verification and diagnostics
 

@@ -2,6 +2,27 @@ import electron = require("electron");
 
 const { contextBridge, ipcRenderer } = electron;
 
+// Each preload instance belongs to one document, even when BrowserWindow is reused.
+const documentIdentity: Promise<string> = ipcRenderer.invoke("document:boot");
+async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+	return ipcRenderer.invoke(channel, await documentIdentity, ...args);
+}
+contextBridge.exposeInMainWorld("holtburgerLauncher", {
+	enabled: !process.argv.includes("--holtburger-launcher-disabled"),
+	snapshot: () => invoke("launcher:snapshot"),
+	directory: (refresh: boolean) => invoke("launcher:directory", refresh),
+	importServer: (key: string) => invoke("launcher:import-server", key),
+	saveServer: (value: unknown) => invoke("launcher:save-server", value),
+	deleteServer: (id: string) => invoke("launcher:delete-server", id),
+	saveProfile: (value: unknown) => invoke("launcher:save-profile", value),
+	deleteProfile: (id: string) => invoke("launcher:delete-profile", id),
+	credentials: (selection: unknown) =>
+		invoke("launcher:credentials", selection),
+	recover: () => invoke("launcher:recover"),
+	play: (value: unknown) => invoke("launcher:play", value),
+	back: (diagnostic: string | null) => invoke("launcher:back", diagnostic),
+});
+
 type HostListener = (payload: unknown) => void;
 
 interface RegisteredHostListener {
@@ -36,7 +57,7 @@ contextBridge.exposeInMainWorld("holtburgerHost", {
 		command: string,
 		args?: Readonly<Record<string, unknown>>,
 	): Promise<unknown> {
-		return ipcRenderer.invoke("host:invoke", { command, args });
+		return invoke("host:invoke", { command, args });
 	},
 	listen(event: string, handler: HostListener): Promise<number> {
 		const token = nextListenerToken++;
@@ -51,16 +72,16 @@ contextBridge.exposeInMainWorld("holtburgerHost", {
 
 contextBridge.exposeInMainWorld("holtburgerContent", {
 	snapshot(): Promise<unknown> {
-		return ipcRenderer.invoke("content:snapshot");
+		return invoke("content:snapshot");
 	},
 	choose(): Promise<void> {
-		return ipcRenderer.invoke("content:choose");
+		return invoke("content:choose");
 	},
 	retry(): Promise<void> {
-		return ipcRenderer.invoke("content:retry");
+		return invoke("content:retry");
 	},
 	quit(): Promise<void> {
-		return ipcRenderer.invoke("content:quit");
+		return invoke("content:quit");
 	},
 	listen(handler: (snapshot: unknown) => void): () => void {
 		const listener = (_event: unknown, snapshot: unknown) => handler(snapshot);
@@ -71,13 +92,13 @@ contextBridge.exposeInMainWorld("holtburgerContent", {
 
 contextBridge.exposeInMainWorld("holtburgerThemes", {
 	list(): Promise<unknown> {
-		return ipcRenderer.invoke("themes:list");
+		return invoke("themes:list");
 	},
 	resolve(id: string): Promise<unknown> {
-		return ipcRenderer.invoke("themes:resolve", id);
+		return invoke("themes:resolve", id);
 	},
 	openDirectory(): Promise<void> {
-		return ipcRenderer.invoke("themes:open-directory");
+		return invoke("themes:open-directory");
 	},
 });
 
@@ -104,9 +125,9 @@ if (process.argv.includes("--holtburger-mode=client")) {
 		void Promise.resolve()
 			.then(handler)
 			.then(
-				(result) => ipcRenderer.invoke("client:prepared-close", result),
+				(result) => invoke("client:prepared-close", result),
 				(error) =>
-					ipcRenderer.invoke("client:prepared-close", {
+					invoke("client:prepared-close", {
 						kind: "failed",
 						diagnostic: error instanceof Error ? error.message : String(error),
 					}),
@@ -119,7 +140,7 @@ if (process.argv.includes("--holtburger-mode=client")) {
 
 	contextBridge.exposeInMainWorld("holtburgerClient", {
 		quit(): Promise<void> {
-			return ipcRenderer.invoke("client:request-close");
+			return invoke("client:request-close");
 		},
 		onPrepareClose(handler: PreparationHandler): () => void {
 			if (preparation.kind === "running" || preparation.handler !== null)
@@ -134,15 +155,15 @@ if (process.argv.includes("--holtburger-mode=client")) {
 			};
 		},
 		start(): Promise<void> {
-			return ipcRenderer.invoke("client:start");
+			return invoke("client:start");
 		},
 	});
 	contextBridge.exposeInMainWorld("holtburgerVisualCache", {
 		read(guid: number): Promise<unknown> {
-			return ipcRenderer.invoke("visual-cache:read", guid);
+			return invoke("visual-cache:read", guid);
 		},
 		stage(capture: unknown): Promise<void> {
-			return ipcRenderer.invoke("visual-cache:stage", capture);
+			return invoke("visual-cache:stage", capture);
 		},
 		listenFailures(handler: (message: unknown) => void): () => void {
 			const listener = (_event: unknown, message: unknown) => handler(message);
@@ -152,23 +173,19 @@ if (process.argv.includes("--holtburger-mode=client")) {
 	});
 	contextBridge.exposeInMainWorld("holtburgerSettings", {
 		loadUser(defaults: unknown): Promise<unknown> {
-			return ipcRenderer.invoke("settings:load-user", defaults);
+			return invoke("settings:load-user", defaults);
 		},
 		saveUserPatch(patch: unknown): Promise<void> {
-			return ipcRenderer.invoke("settings:save-user-patch", patch);
+			return invoke("settings:save-user-patch", patch);
 		},
 		resetUser(settings: unknown): Promise<unknown> {
-			return ipcRenderer.invoke("settings:reset-user", settings);
+			return invoke("settings:reset-user", settings);
 		},
 		loadCharacter(characterGuid: number, defaults: unknown): Promise<unknown> {
-			return ipcRenderer.invoke(
-				"settings:load-character",
-				characterGuid,
-				defaults,
-			);
+			return invoke("settings:load-character", characterGuid, defaults);
 		},
 		saveCharacterPatch(characterGuid: number, patch: unknown): Promise<void> {
-			return ipcRenderer.invoke("settings:save-character-patch", {
+			return invoke("settings:save-character-patch", {
 				characterGuid,
 				patch,
 			});

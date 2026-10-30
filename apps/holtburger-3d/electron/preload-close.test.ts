@@ -12,8 +12,8 @@ function setup() {
 	const events = new Map<string, () => void>();
 	let bridge: ClientBridge | null = null;
 	const invoke = vi
-		.fn<(channel: string, payload?: unknown) => Promise<unknown>>()
-		.mockResolvedValue(undefined);
+		.fn<(channel: string, ...payload: unknown[]) => Promise<unknown>>()
+		.mockResolvedValue("document-test");
 	const errors = vi.fn();
 	const electron = {
 		ipcRenderer: {
@@ -66,21 +66,25 @@ describe("client preload close handoff", () => {
 	it("routes product Quit to native preparation while leaving the renderer alive", async () => {
 		const app = setup();
 		await app.bridge().quit();
-		expect(app.invoke).toHaveBeenCalledExactlyOnceWith("client:request-close");
+		expect(app.invoke).toHaveBeenCalledWith(
+			"client:request-close",
+			"document-test",
+		);
 	});
 
 	it("buffers an early native request until renderer registration and acknowledges only once", async () => {
 		const app = setup();
 		app.request();
 		app.request();
-		expect(app.invoke).not.toHaveBeenCalled();
+		expect(app.invoke).toHaveBeenCalledExactlyOnceWith("document:boot");
 		const prepare = vi.fn(async (): Promise<ClientClosePreparation> => ({
 			kind: "prepared",
 		}));
 		app.bridge().onPrepareClose(prepare);
 		await vi.waitFor(() =>
-			expect(app.invoke).toHaveBeenCalledExactlyOnceWith(
+			expect(app.invoke).toHaveBeenCalledWith(
 				"client:prepared-close",
+				"document-test",
 				{ kind: "prepared" },
 			),
 		);
@@ -110,8 +114,9 @@ describe("client preload close handoff", () => {
 		});
 		app.request();
 		await vi.waitFor(() =>
-			expect(app.invoke).toHaveBeenCalledExactlyOnceWith(
+			expect(app.invoke).toHaveBeenCalledWith(
 				"client:prepared-close",
+				"document-test",
 				expect.objectContaining({ kind: "failed" }),
 			),
 		);

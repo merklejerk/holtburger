@@ -34,6 +34,29 @@ describe("Electron application arguments", () => {
 });
 
 describe("parseClientLaunchArguments", () => {
+	it("requires an account for launcher-free sessions and consumes the flag as native policy", () => {
+		expect(
+			parseClientLaunchArguments(["--no-launcher", "--account=ash"]),
+		).toMatchObject({
+			noLauncher: true,
+			startup: { account: "ash" },
+			rendererArguments: [],
+		});
+		expect(parseClientLaunchArguments([]).noLauncher).toBe(false);
+		expect(() => parseClientLaunchArguments(["--no-launcher"])).toThrow(
+			"--no-launcher requires --account",
+		);
+		expect(() =>
+			parseClientLaunchArguments(["--account=ash", "--no-launcher=false"]),
+		).toThrow("does not accept a value");
+		expect(() =>
+			parseClientLaunchArguments([
+				"--account=ash",
+				"--no-launcher",
+				"--no-launcher",
+			]),
+		).toThrow("more than once");
+	});
 	it("keeps cache bypass in the launch contract and rejects values or duplicates", () => {
 		expect(
 			parseClientLaunchArguments(["--account=ash", "--ignore-world-map-cache"]),
@@ -89,6 +112,7 @@ describe("parseClientLaunchArguments", () => {
 				account: "ash",
 				password: "secret",
 			},
+			noLauncher: false,
 			ignorePersistedConfig: false,
 			ignoreWorldMapCache: false,
 			settingsFile: null,
@@ -113,6 +137,7 @@ describe("parseClientLaunchArguments", () => {
 				account: "ash",
 				password: "",
 			},
+			noLauncher: false,
 			ignorePersistedConfig: false,
 			ignoreWorldMapCache: false,
 			settingsFile: null,
@@ -132,7 +157,16 @@ describe("parseClientLaunchArguments", () => {
 	});
 
 	it("rejects missing accounts and malformed embedded ports", () => {
-		expect(() => parseClientLaunchArguments([])).toThrow(/requires --account/);
+		expect(parseClientLaunchArguments([]).startup).toBeNull();
+		expect(
+			parseClientLaunchArguments([
+				"--ignore-config",
+				"--settings-file=game.json",
+			]).startup,
+		).toBeNull();
+		expect(() => parseClientLaunchArguments(["--host=localhost"])).toThrow(
+			/requires --account/,
+		);
 		expect(() =>
 			parseClientLaunchArguments([
 				"--account=ash",
@@ -193,6 +227,7 @@ describe("parseClientLaunchArguments", () => {
 			},
 			ignorePersistedConfig: true,
 			ignoreWorldMapCache: false,
+			noLauncher: false,
 			settingsFile: null,
 			rendererArguments: [],
 		});

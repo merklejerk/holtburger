@@ -59,6 +59,7 @@ export default defineConfig(({ command, isPreview }) => {
 			rolldownOptions: {
 				input: {
 					client: resolve(rootDir, "client/index.html"),
+					launcher: resolve(rootDir, "launcher/index.html"),
 					explorer: resolve(rootDir, "explorer/index.html"),
 					browserHarness: resolve(rootDir, "harness/browser/index.html"),
 					userThemeProbe: resolve(rootDir, "harness/user-theme/index.html"),

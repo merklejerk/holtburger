@@ -87,6 +87,11 @@ export class ContentStartup<T extends StartupHost> {
 		};
 	}
 
+	/** Native setup failures use the same recoverable attempt surface as content failures. */
+	fail(message: string): void {
+		if (!this.#closing) this.#publish({ kind: "fatal", message });
+	}
+
 	start(): Promise<void> {
 		return this.#run(async () => {
 			if (this.#dependencies.clearContent) {

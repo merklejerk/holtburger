@@ -77,6 +77,7 @@ export async function verifyElectronPackage(packageRoot) {
 	for (const requiredEntry of [
 		"/package.json",
 		"/dist/client/index.html",
+		"/dist/launcher/index.html",
 		"/dist/explorer/index.html",
 		"/dist/favicon.svg",
 		"/dist/build-info.json",

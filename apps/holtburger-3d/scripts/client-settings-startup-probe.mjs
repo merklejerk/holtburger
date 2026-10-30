@@ -66,7 +66,14 @@ const child = spawn(
 	],
 	{
 		cwd: directory,
-		env: { ...process.env },
+		env: {
+			...process.env,
+			XDG_CONFIG_HOME: join(directory, "config"),
+			APPDATA: join(directory, "config"),
+			LOCALAPPDATA: join(directory, "local"),
+			XDG_DATA_HOME: join(directory, "data"),
+			XDG_CACHE_HOME: join(directory, "cache"),
+		},
 		stdio: ["ignore", "pipe", "pipe"],
 	},
 );
@@ -124,7 +131,7 @@ try {
 				before.sections.ui.fonts.body !== "mono")
 				throw new Error("Startup repair did not preserve valid sibling preferences");
 			const expectedUi = ${JSON.stringify(savedUi)};
-			if (before.sections.ui.themeId !== null) throw new Error("Older UI preferences did not restore Base");
+			if (before.sections.ui.themeId !== defaults.ui.themeId) throw new Error("Older UI preferences did not restore the configured default theme");
 			if (before.sections.ui?.textScale !== expectedUi.textScale)
 				throw new Error("Saved text scale did not cross the preload bridge");
 			const scope = document.querySelector('.client-appearance-scope');

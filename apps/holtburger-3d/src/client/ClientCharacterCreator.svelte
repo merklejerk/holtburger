@@ -25,6 +25,7 @@
 	import { characterManagementPending } from "./client-character-selection";
 	import { creationNameSchema } from "./client-character-creation-name";
 	import ClientPregameScreen from "./ClientPregameScreen.svelte";
+	import ClientPregameExpandableRow from "./ClientPregameExpandableRow.svelte";
 	import ClientPregameCharacter from "./ClientPregameCharacter.svelte";
 	import type { PregameCharacterPresentation } from "./client-pregame-character";
 	import type { CharacterManagementState } from "./client-host-contract";
@@ -888,37 +889,28 @@
 												{@const formula = creationSkillFormulaText(
 													row.skill.formula,
 												)}
-												<div class="creation-skill-row">
-													<details>
-														<summary
-															><span class="creation-skill-name"
-																>{row.skill.name}</span
+												<ClientPregameExpandableRow
+													className="creation-skill-row"
+												>
+													{#snippet summary()}<span class="creation-skill-name"
+															>{row.skill.name}</span
+														>
+														{#if startingStats !== null}
+															{@const startingLevel = startingSkillLevel(
+																row.skill.id,
+															)}
+															<span
+																class="creation-skill-level ui-mono"
+																data-starting-skill={row.skill.id}
+																aria-label={`${row.skill.name} starting level: ${startingLevel}`}
+																title={startingLevel}
+																>{startingLevel === "Unavailable"
+																	? "—"
+																	: startingLevel}</span
 															>
-															{#if startingStats !== null}
-																{@const startingLevel = startingSkillLevel(
-																	row.skill.id,
-																)}
-																<span
-																	class="creation-skill-level ui-mono"
-																	data-starting-skill={row.skill.id}
-																	aria-label={`${row.skill.name} starting level: ${startingLevel}`}
-																	title={startingLevel}
-																	>{startingLevel === "Unavailable"
-																		? "—"
-																		: startingLevel}</span
-																>
-															{/if}
-														</summary>
-														<div class="creation-description">
-															{#if row.skill.description.length > 0}<p>
-																	{row.skill.description}
-																</p>{/if}
-															{#if formula !== null}<p class="ui-mono">
-																	Formula: {formula}
-																</p>{/if}
-														</div>
-													</details>
-													<div class="creation-skill-actions">
+														{/if}
+													{/snippet}
+													{#snippet actions()}
 														{#each ["downgrade", "upgrade"] as direction}
 															{@const action =
 																direction === "upgrade"
@@ -956,8 +948,15 @@
 																>
 															</button>
 														{/each}
-													</div>
-												</div>
+													{/snippet}
+
+													{#if row.skill.description.length > 0}<p>
+															{row.skill.description}
+														</p>{/if}
+													{#if formula !== null}<p class="ui-mono">
+															Formula: {formula}
+														</p>{/if}
+												</ClientPregameExpandableRow>
 											{/each}
 										</section>
 									{/each}
@@ -1381,29 +1380,6 @@
 			display: grid;
 			gap: 20px;
 		}
-		.creation-skill-row {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) auto;
-			column-gap: 12px;
-		}
-		.creation-skill-row:hover,
-		.creation-skill-row:has(:focus-visible) {
-			background: color-mix(
-				in srgb,
-				var(--ui-color-highlight) 12%,
-				transparent
-			);
-			border-radius: var(--ui-radius-surface);
-		}
-		.creation-skill-row details {
-			min-width: 0;
-		}
-		.creation-skill-row summary {
-			min-height: 36px;
-			padding-block: 8px;
-			overflow-wrap: anywhere;
-			cursor: pointer;
-		}
 		.creation-description {
 			display: grid;
 			gap: 8px;
@@ -1413,14 +1389,7 @@
 			white-space: pre-wrap;
 			overflow-wrap: anywhere;
 		}
-		.creation-skill-actions {
-			display: flex;
-			align-self: start;
-			gap: calc(8px * var(--ui-icon-scale));
-			margin-block: 4px;
-		}
-
-		.creation-skill-row .creation-skill-level {
+		.creation-skill-level {
 			margin-inline-start: 8px;
 		}
 		.creation-vitals {

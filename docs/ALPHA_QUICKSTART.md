@@ -10,7 +10,7 @@ and separate Linux x86-64 Flatpaks. Each archive contains its own `QUICKSTART.md
 The 3D Flatpak retains `io.github.merklejerk.holtburger-alpha`; the CLI Flatpak uses
 `io.github.merklejerk.holtburger-cli-alpha`. There is no combined alpha package.
 
-Both clients use `-p` for port and `-P` for password. Client is h3d's default launch mode;
-Explorer is explicit. Connection/account arguments are supplied on the command line.
+Both clients use `-p` for port and `-P` for password. H3D opens a server/profile launcher by
+default; Explorer is explicit. Connection/account arguments can bypass the launcher for direct launch.
 Packages are unsigned and experimental. Check the release notes for actual target acceptance
 and compare downloads with `SHA256SUMS` and `release-manifest.json`.

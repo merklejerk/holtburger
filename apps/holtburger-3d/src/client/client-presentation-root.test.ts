@@ -407,23 +407,27 @@ describe("ClientPresentationRoot", () => {
 		expect(gameplay.destroy).toHaveBeenCalledOnce();
 	});
 
-	it("aborts pending resource construction and does not admit a driver afterward", async () => {
-		const { dependencies, owner } = fixture();
-		dependencies.build.mockImplementation(
-			(signal) =>
-				new Promise((_resolve, reject) => {
-					signal.addEventListener(
-						"abort",
-						() => reject(new DOMException("cancelled", "AbortError")),
-						{ once: true },
-					);
-				}),
-		);
-		const root = new ClientPresentationRoot(dependencies);
-		const starting = root.setMode("gameplay");
-		await root.destroy();
-		await starting;
-		expect(dependencies.createGameplay).not.toHaveBeenCalled();
-		expect(owner.destroy).not.toHaveBeenCalled();
-	});
+	it.each([
+		new DOMException("cancelled", "AbortError"),
+		Object.assign(new Error("cancelled"), { name: "AbortError" }),
+	])(
+		"aborts pending resource construction without treating expected cancellation as failure: %s",
+		async (cancellation) => {
+			const { dependencies, owner } = fixture();
+			dependencies.build.mockImplementation(
+				(signal) =>
+					new Promise((_resolve, reject) => {
+						signal.addEventListener("abort", () => reject(cancellation), {
+							once: true,
+						});
+					}),
+			);
+			const root = new ClientPresentationRoot(dependencies);
+			const starting = root.setMode("gameplay");
+			await root.destroy();
+			await starting;
+			expect(dependencies.createGameplay).not.toHaveBeenCalled();
+			expect(owner.destroy).not.toHaveBeenCalled();
+		},
+	);
 });

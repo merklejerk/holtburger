@@ -1,3 +1,8 @@
+import { clientExitCauseSchema as exitCauseSchema } from "./client-exit-contract.js";
+export {
+	decodeClientExitRequested,
+	type ClientExitRequested,
+} from "./client-exit-contract.js";
 import { gameplayPreferencesSchema } from "./client-gameplay-options-contract";
 import { playerVisualCaptureSchema } from "./client-object-preview-contract";
 import { contractsSnapshotSchema } from "./client-contracts-contract";
@@ -363,14 +368,6 @@ const characterSchema = z
 	})
 	.strict();
 
-const exitCauseSchema = z.enum([
-	"explicit-disconnect",
-	"server-disconnect",
-	"startup-failure",
-	"runtime-failure",
-	"host-shutdown",
-]);
-
 const worldActivationCauseSchema = z.enum(["initial-entry", "teleport"]);
 
 const lifecycleSchema = z.discriminatedUnion("kind", [
@@ -609,13 +606,6 @@ const dynamicScriptCueSchema = z
 		generation: z.number().int().nonnegative(),
 		cue: z.number().int().nonnegative(),
 		intensity: finiteNumber,
-	})
-	.strict();
-
-const exitRequestedSchema = z
-	.object({
-		cause: exitCauseSchema,
-		diagnostic: z.string(),
 	})
 	.strict();
 
@@ -1058,7 +1048,6 @@ export type ClientPresentationDiscontinuity = z.infer<
 export type ClientLocalPlayerEstablished = z.infer<
 	typeof localPlayerEstablishedSchema
 >;
-export type ClientExitRequested = z.infer<typeof exitRequestedSchema>;
 export type ClientVital = z.infer<typeof vitalSchema>;
 export type ClientChatChannel = z.infer<typeof chatChannelSchema>;
 export type ClientChatCategory = z.infer<typeof chatCategorySchema>;
@@ -1218,11 +1207,6 @@ export function decodeClientPresentationDiscontinuity(
 	value: unknown,
 ): ClientPresentationDiscontinuity {
 	return presentationDiscontinuitySchema.parse(value);
-}
-
-/** Strictly validates the redacted terminal diagnostic. */
-export function decodeClientExitRequested(value: unknown): ClientExitRequested {
-	return exitRequestedSchema.parse(value);
 }
 
 /** Strictly validates manual drive or relative facing before it crosses the host boundary. */

@@ -23,9 +23,21 @@ h3d requires your own full HBA or retail DAT directory. A retail directory norma
 .\h3d\holtburger-3d.exe --host SERVER --port 9000 --account ACCOUNT --password PASSWORD --content 'C:\path\to\retail'
 ```
 
-Client is the default mode; `client` is also accepted explicitly. There is no login screen.
-Both clients use `-p` for port and `-P` for password. Omit `--content` to use a saved
-installation or the asset folder picker. An explicit override is temporary.
+Opening the executable without connection arguments shows the server/profile launcher. Add a
+server, enter account/password, then press Play. Profiles are optional: Save to new profile opens a naming
+dialog and Overwrite profile updates the selected preset. Play with No profile saves encrypted credentials
+for that server. The Rust sidecar starts at Play; asset setup,
+character selection, and gameplay all use that same window. Disconnect returns to the launcher.
+
+The examples above bypass the launcher for a direct connection. `client` is also accepted explicitly.
+Add `--no-launcher` to exit when the session ends rather than returning to the launcher; it requires
+`--account` and also applies to cancellation and connection/startup failures.
+Both clients use `-p` for port and `-P` for password. Omit `--content` to use a saved installation or
+the asset folder picker after Play. An explicit override is temporary.
+
+Credentials explicitly saved to profiles are encrypted inside `launcher-settings.json` using a universal
+app-owned seed. This discourages plaintext scraping; it does not protect against inspection of the
+application. Launcher profiles/window geometry are separate from game settings and game resets.
 
 To open Explorer without connecting to a server, use the same executable:
 

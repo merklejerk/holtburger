@@ -822,12 +822,12 @@ export async function probeClientPresentation(
                     themedBackdrop: getComputedStyle(label, '::before').backgroundImage !== before,
                     overflowRows: [...screen.querySelectorAll('.creation-skill-row')].flatMap(row => {
                         const summary = row.querySelector('summary').getBoundingClientRect();
-                        const actions = row.querySelector('.creation-skill-actions').getBoundingClientRect();
+                        const actions = row.querySelector('.pregame-expandable-actions').getBoundingClientRect();
                         const bounds = row.getBoundingClientRect();
                         // Feathered backdrops intentionally overhang; measure the interactive bounds.
                         return summary.right <= actions.left + 1 && actions.right <= bounds.right + 1 ? [] : [{name: row.querySelector('summary').textContent, summaryRight: summary.right, actionsLeft: actions.left, actionsRight: actions.right, rowRight: bounds.right, scrollWidth: row.scrollWidth, clientWidth: row.clientWidth}];
                     }),
-                    labelsFit: [...screen.querySelectorAll('.creation-skill-actions button')].every(button => {
+                    labelsFit: [...screen.querySelectorAll('.pregame-expandable-actions button')].every(button => {
                         const bounds = button.getBoundingClientRect();
                         const label = button.querySelector('.ui-stat-action-label').getBoundingClientRect();
                         return label.left >= bounds.left && label.right <= bounds.right;
@@ -907,11 +907,11 @@ export async function probeClientPresentation(
 		let spentCredits = 0;
 		while (
 			await read(
-				`document.querySelector('.creation-skill-actions button[data-direction="up"]:not(:disabled)') !== null`,
+				`document.querySelector('.pregame-expandable-actions button[data-direction="up"]:not(:disabled)') !== null`,
 			)
 		) {
 			const charge = await read(`(() => {
-                const button = document.querySelector('.creation-skill-actions button[data-direction="up"]:not(:disabled)');
+                const button = document.querySelector('.pregame-expandable-actions button[data-direction="up"]:not(:disabled)');
                 const cost = Number(button.textContent.trim());
                 button.click();
                 return cost;
@@ -940,9 +940,9 @@ export async function probeClientPresentation(
 		assert.equal(await readCredits(), originalCredits);
 		assert.equal(
 			await read(`(() => {
-            const details = [...document.querySelectorAll('.creation-skill-row details')].find(details => details.querySelector('.creation-description .ui-mono') !== null);
+            const details = [...document.querySelectorAll('.creation-skill-row details')].find(details => details.querySelector('.pregame-expandable-content .ui-mono') !== null);
             details.open = true;
-            return details.querySelector('.creation-description p').textContent.trim().length > 0 && details.querySelector('.creation-description .ui-mono').textContent.trim().startsWith('Formula: ');
+            return details.querySelector('.pregame-expandable-content p').textContent.trim().length > 0 && details.querySelector('.pregame-expandable-content .ui-mono').textContent.trim().startsWith('Formula: ');
         })()`),
 			true,
 		);
@@ -1155,12 +1155,13 @@ export async function probeClientPresentation(
 		await read(`${api}.releaseRetirement()`);
 		await wait("document.querySelector('h1')?.textContent === 'Disconnected'");
 		assert.equal((await read(`${api}.read()`)).disconnectRequests, 1);
+		assert.deepEqual((await read(`${api}.read()`)).launcherReturns, [null]);
 		await checkBuildInformation();
-		assert.equal(
+		assert.deepEqual(
 			await read(
-				"document.querySelector('.loading-content button.pregame-primary')?.textContent.trim()",
+				"[...document.querySelectorAll('.loading-content button.pregame-primary')].map(button => button.textContent.trim())",
 			),
-			"Quit application",
+			["Back to launcher", "Quit application"],
 		);
 		assert.equal(
 			await read("document.querySelector('.pregame-footer button') === null"),
@@ -1259,11 +1260,11 @@ export async function probeClientPresentation(
 			"document.querySelector('h1')?.textContent === 'Session ended with errors'",
 		);
 		await checkBuildInformation();
-		assert.equal(
+		assert.deepEqual(
 			await read(
-				"document.querySelector('.loading-content button.pregame-primary')?.textContent.trim()",
+				"[...document.querySelectorAll('.loading-content button.pregame-primary')].map(button => button.textContent.trim())",
 			),
-			"Quit application",
+			["Back to launcher", "Quit application"],
 		);
 		assert.equal(
 			await read("document.querySelector('.pregame-footer button') === null"),

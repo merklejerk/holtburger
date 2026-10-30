@@ -19,7 +19,7 @@ await import(
 
 // Client close policy and its acknowledgement codec must also survive Node ESM emission.
 await import(
-	new URL("../dist-electron/electron/client-window-close.js", import.meta.url)
+	new URL("../dist-electron/electron/client-retirement.js", import.meta.url)
 		.href
 );
 
@@ -37,4 +37,18 @@ await import(
 // Theme discovery consumes app-local codecs from Node ESM as well as the renderer.
 await import(
 	new URL("../dist-electron/electron/ui-theme-catalog.js", import.meta.url).href
+);
+
+// Launcher persistence and terminal events must remain consumable by Electron's Node runtime.
+await import(
+	new URL("../dist-electron/electron/server-directory.js", import.meta.url).href
+);
+await import(
+	new URL("../dist-electron/electron/launcher-store.js", import.meta.url).href
+);
+await import(
+	new URL(
+		"../dist-electron/src/client/client-exit-contract.js",
+		import.meta.url,
+	).href
 );

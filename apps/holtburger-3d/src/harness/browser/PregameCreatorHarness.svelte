@@ -413,7 +413,7 @@
 		const name = summary?.querySelector(".creation-skill-name");
 		const arrows = summary
 			?.closest(".creation-skill-row")
-			?.querySelector(".creation-skill-actions");
+			?.querySelector(".pregame-expandable-actions");
 		if (
 			level === null ||
 			summary === null ||
@@ -714,7 +714,7 @@
 		await verifyStartingStats(appearanceEdit);
 		const training = [
 			...root.querySelectorAll<HTMLButtonElement>(
-				".creation-skill-actions button",
+				".pregame-expandable-actions button",
 			),
 		].find(
 			(button) =>

@@ -14,7 +14,7 @@ import { clientEnvironmentOverridesSchema } from "../src/client/client-environme
 import { clientSettingsCollectionSchema } from "../src/client/client-settings-sections";
 
 const initialWindow = {
-	normalBounds: { x: 100, y: 100, width: 1440, height: 900 },
+	normalBounds: { width: 1440, height: 900 },
 	maximized: false,
 };
 const user = createDefaultClientUserSettings(initialWindow.normalBounds, 8);
@@ -77,7 +77,7 @@ describe("persisted settings repair", () => {
 		});
 		expect(store.readWindow()).toEqual({
 			settings: {
-				normalBounds: { ...initialWindow.normalBounds, x: 250 },
+				normalBounds: initialWindow.normalBounds,
 				maximized: true,
 			},
 			unavailable: null,

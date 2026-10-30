@@ -12,7 +12,9 @@ export interface ClientLaunchConfiguration {
 }
 
 export interface ParsedClientLaunchArguments {
-	readonly startup: ClientLaunchConfiguration;
+	readonly startup: ClientLaunchConfiguration | null;
+	/** Direct sessions exit on disconnect/cancellation instead of returning to the picker. */
+	readonly noLauncher: boolean;
 	/** Treat persisted renderer-owned settings as absent without disabling later saves. */
 	readonly ignorePersistedConfig: boolean;
 	/** Regenerate the map on first request, then reuse it for this host lifetime. */
@@ -63,6 +65,7 @@ export function parseClientLaunchArguments(
 	let password = "";
 	let meleeMaxChaseDistance: number | undefined;
 	let ignorePersistedConfig = false;
+	let noLauncher = false;
 	let ignoreWorldMapCache = false;
 	let settingsFile: string | null = null;
 	const rendererArguments: string[] = [];
@@ -81,6 +84,12 @@ export function parseClientLaunchArguments(
 				`client launch argument --${name} was specified more than once`,
 			);
 		seen.add(name);
+		if (name === "no-launcher") {
+			if (parsed.value !== undefined)
+				throw new Error("--no-launcher does not accept a value");
+			noLauncher = true;
+			continue;
+		}
 		if (name === "ignore-config") {
 			if (parsed.value !== undefined)
 				throw new Error(
@@ -135,21 +144,38 @@ export function parseClientLaunchArguments(
 		}
 	}
 
-	if (account === undefined) throw new Error("client mode requires --account");
+	const connectionSupplied = [
+		"server",
+		"host",
+		"port",
+		"account",
+		"password",
+		"melee-max-chase-distance",
+	].some((name) => seen.has(name));
+	if (noLauncher && account === undefined)
+		throw new Error("--no-launcher requires --account");
+	if (connectionSupplied && account === undefined)
+		throw new Error("client mode requires --account");
 	if (server !== undefined) {
 		const resolved = parseServer(server, port);
 		host = resolved.host;
 		port = resolved.port;
 	}
 	return {
-		startup: {
-			host,
-			port,
-			account,
-			password,
-			...(meleeMaxChaseDistance === undefined ? {} : { meleeMaxChaseDistance }),
-		},
+		startup:
+			account === undefined
+				? null
+				: {
+						host,
+						port,
+						account,
+						password,
+						...(meleeMaxChaseDistance === undefined
+							? {}
+							: { meleeMaxChaseDistance }),
+					},
 		ignorePersistedConfig,
+		noLauncher,
 		ignoreWorldMapCache,
 		settingsFile,
 		rendererArguments,

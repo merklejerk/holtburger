@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { ClientCombineCells } from "./client-combine-cells";
 	import type { ClientChatSuppressionSettings } from "./client-settings-contract";
 	import type {
 		ClientGameplayOption,
@@ -635,10 +636,10 @@
 	function considerPointer(event: PointerEvent): void {
 		const element = event.target instanceof Element ? event.target : null;
 		const cell = element?.closest<HTMLElement>(
-			".item-grid-cell[data-item-guid]",
+			".item-grid-cell[data-item-guid], .action-cell[data-action-item]",
 		);
 		combineSurface = cell
-			? Number(cell.dataset.itemGuid)
+			? Number(cell.dataset.itemGuid ?? cell.dataset.actionItem)
 			: element?.closest(".client-canvas")
 				? "world"
 				: null;
@@ -775,6 +776,11 @@
 	onDestroy(() => onPartyHudDemand(false));
 
 	let worldElement = $state<HTMLElement | null>(null);
+	$effect(() => {
+		if (worldElement === null || itemInteractions === null) return;
+		const cells = new ClientCombineCells(worldElement, itemInteractions);
+		return () => cells.destroy();
+	});
 	let viewport = $state<ClientHudViewport>(initialViewport);
 	// The launch capability is immutable; snapshotting it avoids resetting edited HUD layout.
 	const shortcuts = untrack(() => createClientShortcuts(debugEnabled));
@@ -1871,7 +1877,8 @@
 		.combining[data-combine-eligibility="ineligible"] {
 			--combine-cursor: url("./combine-cursor-ineligible.svg") 12 12, crosshair;
 		}
-		.client-world.combining :global(.item-grid-cell) {
+		.client-world.combining :global(.item-grid-cell),
+		.client-world.combining :global(.action-cell) {
 			cursor: var(--combine-cursor);
 		}
 	}

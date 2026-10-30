@@ -1782,18 +1782,6 @@ export async function probeClientInventory(options: {
 
 	if (equipment.querySelector(".equipment-row[hidden]") !== null)
 		throw new Error("Equipment hover collapsed a slot");
-	const hoverDimmedRows = equipment.querySelectorAll(
-		'.equipment-row[data-hover-dimmed="true"]',
-	);
-	if (
-		hoverDimmedRows.length !== EQUIPMENT_SLOTS.length - 1 ||
-		equipment.querySelector(
-			`[data-equipment-slot="${lastEquipmentSlot.mask}"][data-hover-dimmed]`,
-		) !== null
-	)
-		throw new Error(
-			"Inventory item hover did not dim only incompatible equipment slots",
-		);
 	const attentionDown = equipment.querySelector<HTMLButtonElement>(
 		'[aria-label="Scroll items down"][data-attention="true"]',
 	);
@@ -1829,17 +1817,11 @@ export async function probeClientInventory(options: {
 		);
 	cell(remoteCompatible.guid).dispatchEvent(new PointerEvent("pointerleave"));
 	await tick();
-	if (equipment.querySelector(".equipment-row[data-hover-dimmed]") !== null)
-		throw new Error("Equipment slot hover compatibility did not clear");
 	cell(94).dispatchEvent(new PointerEvent("pointerenter"));
 	await tick();
-	if (
-		equipment.querySelectorAll('.equipment-row[data-hover-dimmed="true"]')
-			.length !== EQUIPMENT_SLOTS.length ||
-		equipment.querySelector('[data-attention="true"]') !== null
-	)
+	if (equipment.querySelector('[data-attention="true"]') !== null)
 		throw new Error(
-			"Known non-equippable item did not dim every equipment slot without scroll attention",
+			"Known non-equippable item requested equipment scroll attention",
 		);
 	cell(94).dispatchEvent(new PointerEvent("pointerleave"));
 	equipmentViewport.scrollTop = 0;

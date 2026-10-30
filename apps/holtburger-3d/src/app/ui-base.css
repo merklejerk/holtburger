@@ -1295,7 +1295,9 @@
 		box-shadow: var(--ui-item-selection-shadow, none);
 		background: var(--ui-item-selection-background, transparent);
 	}
-	.ui-theme .ui-item-cell[data-dimmed="true"],
+	/* Combining owns cell opacity while its authoritative target cue is mounted. */
+	.ui-theme .ui-item-cell[data-dimmed="true"]:not([data-combine-dimmed]),
+	.ui-theme .ui-item-cell[data-combine-dimmed="true"],
 	.ui-theme .ui-item-cell[data-inventory-dimmed="true"] {
 		opacity: var(--ui-item-dimmed-opacity, 0.3);
 	}

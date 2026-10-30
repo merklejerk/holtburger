@@ -70,7 +70,7 @@ export type ClientItemUseRequest = z.infer<typeof itemUseRequestSchema>;
 /** Correlated core result delivered through the lifecycle session. */
 export type ClientItemUseResult = z.infer<typeof itemUseResultSchema>;
 
-/** Read-only query for one hovered combine pairing. */
+/** Read-only compatibility query for one combine pairing. */
 export const itemUseTargetQuerySchema = z
 	.object({ sequence: identity, source: identity, target: identity })
 	.strict();

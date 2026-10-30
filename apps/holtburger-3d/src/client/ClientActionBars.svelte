@@ -181,6 +181,13 @@
 		}
 	}
 	function activate(id: number, slot: ActionSlotIndex, alternate: boolean) {
+		const targeting = interactions.snapshot();
+		if (targeting.kind === "acquiring") {
+			const content = requireActionBar(bars, id).slots[slot];
+			if (content !== null && content.kind !== "loadout")
+				interactions.target(content.item, targeting.generation);
+			return;
+		}
 		reconcile();
 		const content = requireActionBar(bars, id).slots[slot];
 		if (content === null) return;

@@ -163,6 +163,94 @@ async function fixture() {
 }
 
 describe("shared frontend item interaction flow", () => {
+	it("retires cell observations when acquisition is cancelled or its source disappears", async () => {
+		const f = await fixture();
+		f.interactions.use(2, false);
+		const receive = vi.fn();
+		f.interactions.observeTarget(3, receive);
+		const cancelled = f.query.mock.calls.at(-1)?.[0];
+		if (cancelled === undefined) throw new Error("Expected target query");
+		f.interactions.cancel();
+		f.emit("client-item-use-target-result", {
+			sequence: cancelled.sequence,
+			eligible: true,
+		});
+		expect(receive).not.toHaveBeenCalled();
+
+		f.interactions.use(2, false);
+		f.interactions.observeTarget(3, receive);
+		const removed = f.query.mock.calls.at(-1)?.[0];
+		if (removed === undefined) throw new Error("Expected replacement query");
+		f.query.mockClear();
+		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
+			salvage: null,
+			worldContainer: null,
+			upserts: [],
+			removed: [2],
+		});
+		f.emit("client-item-use-target-result", {
+			sequence: removed.sequence,
+			eligible: true,
+		});
+		expect(f.interactions.snapshot().kind).toBe("idle");
+		expect(receive).not.toHaveBeenCalled();
+		expect(f.query).not.toHaveBeenCalled();
+		f.destroy();
+	});
+
+	it("refreshes mounted target eligibility and retires stale or disposed queries", async () => {
+		const f = await fixture();
+		f.interactions.use(2, false);
+		const receive = vi.fn();
+		const stop = f.interactions.observeTarget(3, receive);
+		const first = f.query.mock.calls.at(-1)?.[0];
+		if (first === undefined) throw new Error("Expected target query");
+		f.emit("client-item-use-target-result", {
+			sequence: first.sequence,
+			eligible: false,
+		});
+		expect(receive).toHaveBeenLastCalledWith(false);
+		const read = f.lifecycle.entities.read();
+		if (read.kind !== "current") throw new Error("Expected current entities");
+		const target = read.level.entities.get(3);
+		if (target?.description.kind !== "known")
+			throw new Error("Expected known target");
+		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
+			salvage: null,
+			worldContainer: null,
+			upserts: [
+				{ ...target, description: { ...target.description, stackCount: 2 } },
+			],
+			removed: [],
+		});
+		expect(receive).toHaveBeenLastCalledWith(null);
+		const refreshed = f.query.mock.calls.at(-1)?.[0];
+		if (refreshed === undefined) throw new Error("Expected refreshed query");
+		expect(refreshed.sequence).not.toBe(first.sequence);
+		receive.mockClear();
+		f.emit("client-item-use-target-result", {
+			sequence: first.sequence,
+			eligible: true,
+		});
+		expect(receive).not.toHaveBeenCalled();
+		f.emit("client-item-use-target-result", {
+			sequence: refreshed.sequence,
+			eligible: true,
+		});
+		expect(receive).toHaveBeenCalledExactlyOnceWith(true);
+		stop();
+		receive.mockClear();
+		f.emit("client-item-use-target-result", {
+			sequence: refreshed.sequence,
+			eligible: false,
+		});
+		expect(receive).not.toHaveBeenCalled();
+		expect(f.submit).not.toHaveBeenCalled();
+		f.destroy();
+	});
+
 	it("shares state-based equipment interaction across inventory, selection, and action cells", async () => {
 		const f = await fixture();
 		const inventory = vi.spyOn(f.lifecycle, "submitInventory");

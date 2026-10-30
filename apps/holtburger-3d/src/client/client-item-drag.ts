@@ -1277,7 +1277,7 @@ export class ClientItemDrag {
 		}
 	}
 	#finishGesture(): void {
-		filterDraggedEquipment(this.#root, undefined);
+		filterDraggedEquipment(this.#root, null);
 		this.#clearDimming();
 		this.#gesture = null;
 		this.#draftGesture = null;

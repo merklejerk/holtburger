@@ -47,8 +47,8 @@ pub struct ServerTimeSync {
 /// Hand-writing to `self.entities` or scene body state directly will break the
 /// authority/runtime split and is not allowed.
 pub struct WorldState {
-    /// Optional startup-parsed ACE types for content-derived classification.
-    pub weenie_types: Option<Arc<holtburger_content::WeenieTypeIndex>>,
+    /// Parsed client-DAT identity; never resolved from a server database snapshot.
+    pub housing_storage_wcid: u32,
     pub entities: EntityManager,
     pub player: PlayerState,
     /// Accepted containment/equipment declarations, independent of descriptions.
@@ -481,7 +481,7 @@ impl WorldState {
 
     pub fn new(bootstrap: Arc<WorldBootstrap>) -> Self {
         Self {
-            weenie_types: bootstrap.weenie_types.clone(),
+            housing_storage_wcid: bootstrap.housing_storage_wcid,
             entities: EntityManager::new(),
             player: PlayerState {
                 enchantments: crate::enchantments::PlayerEnchantments::with_rules(

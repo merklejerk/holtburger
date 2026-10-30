@@ -121,7 +121,8 @@ export function selectMapBlips(
 			continue;
 		}
 		// RETAIL DIVERGENCE: InqShowableOnRadar excludes unset radar behavior
-		// (acclient.c:417954-417970). We expose doors and native switches as map landmarks.
+		// (acclient.c:417954-417970). Public doors are live map landmarks; Explorer also exposes
+		// switches identified by its server snapshot.
 		// The 43,913-template census found all 542 doors and 193 switches omit radar behavior;
 		// 92 switches are server-only and cannot reach a normal live-client feed. Restoring the
 		// retail predicate would hide these landmarks. Map drawing cannot affect server content.

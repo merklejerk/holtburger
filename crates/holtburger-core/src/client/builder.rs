@@ -94,7 +94,9 @@ impl ClientRuntimeBuilder {
             .context("failed to load soul emote catalog for client runtime")?;
 
         self.world_bootstrap = Some(Arc::new(WorldBootstrap {
-            weenie_types: None,
+            housing_storage_wcid: content
+                .read_housing_storage_wcid()
+                .context("failed to resolve housing-storage identity for client runtime")?,
             skill_table: Arc::new(skill_table),
             secondary_attribute_table: Arc::new(secondary_attribute_table),
             spell_table: Arc::new(spell_table),
@@ -386,6 +388,9 @@ mod tests {
     use std::path::Path;
     use tempfile::tempdir;
 
+    /// Fixture-owned storage identity, independent of the retail WCID chosen by client DATs.
+    const TEST_STORAGE_WCID: u32 = 1234;
+
     const TEST_MOTION_TABLE_ID: u32 = 0x0900_0001;
     const TEST_ANIMATION_ID: u32 = 0x0300_0003;
     const TEST_STYLE: u32 = 0x8000_003D;
@@ -466,6 +471,15 @@ mod tests {
         }
     }
 
+    fn test_did_mapper_bytes(id: u32, key: u32, value: u32) -> Vec<u8> {
+        let mut bytes = id.to_le_bytes().to_vec();
+        bytes.extend([0, 1]); // Numbering and compressed count for one client ID.
+        bytes.extend(key.to_le_bytes());
+        bytes.extend(value.to_le_bytes());
+        bytes.extend([0; 6]); // Empty client names, server IDs, and server names.
+        bytes
+    }
+
     fn write_hba(path: &Path, ids: &[u32]) {
         let mut writer = HbaWriter::new();
         writer.set_compression(false);
@@ -519,6 +533,26 @@ mod tests {
                     data,
                 )
                 .expect("motion content test HBA entry should be added");
+        }
+
+        // Retail's WCLASSID group 12 and STORAGE key 0x10000001 (acclient.c:418567-418577).
+        let wclassid_mapper = 0x25000015;
+        for (id, key, value) in [
+            (
+                holtburger_content::ui_assets::MASTER_DID_MAPPER,
+                12,
+                wclassid_mapper,
+            ),
+            (wclassid_mapper, 0x10000001, TEST_STORAGE_WCID),
+        ] {
+            writer
+                .add(
+                    EOR_PORTAL_NAMESPACE,
+                    id,
+                    DatFileType::DidMapper as u32,
+                    test_did_mapper_bytes(id, key, value),
+                )
+                .expect("housing-storage mapper fixture should be added");
         }
 
         writer
@@ -605,6 +639,7 @@ mod tests {
             .expect("runtime builder should build after loading assets");
 
         assert_eq!(client.world.skill_table.id, SkillTable::FILE_ID);
+        assert_eq!(client.world.housing_storage_wcid, TEST_STORAGE_WCID);
         assert_eq!(client.world.xp_table.attribute_xp_list, vec![10]);
         assert_eq!(client.world.xp_table.character_level_xp_list, vec![50]);
         assert!(client.world.soul_emote_catalog.is_known_token("wave"));

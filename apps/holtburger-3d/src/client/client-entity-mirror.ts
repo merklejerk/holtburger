@@ -19,10 +19,8 @@ export const NEARBY_ENTITY_CATEGORIES = [
 	"portal",
 	"lifestone",
 	"door",
-	"switch",
+	"useable",
 ] as const;
-/** Shared classification; frontend labels and filter combinations remain app policy. */
-export type NearbyEntityCategory = (typeof NEARBY_ENTITY_CATEGORIES)[number];
 const nearbyEntityFactsSchema = z
 	.object({
 		name: z.string(),
@@ -165,8 +163,6 @@ const clientEntityFactsSchema = z
 					objectFlags: guid,
 					/** Server template identity, independent of scene residency. */
 					wcid: guid.nullable(),
-					/** Optional local catalog type, serialized by the shared enum. */
-					weenieType: z.string().nullable(),
 					/** Server aggregate across packs; null until received. */
 					pyrealBalance: guid.nullable(),
 					/** World-resolved local-player activation; null before the character baseline. */

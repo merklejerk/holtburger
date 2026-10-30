@@ -47,13 +47,6 @@ export function sortContentsItems(
 			const right = b.description;
 			if (left.itemType !== right.itemType)
 				return left.itemType - right.itemType;
-			// Weenie types arrive as names; unknown classifications follow known ones.
-			if (left.weenieType !== right.weenieType) {
-				if (left.weenieType === null) return 1;
-				if (right.weenieType === null) return -1;
-				const typeOrder = itemNames.compare(left.weenieType, right.weenieType);
-				if (typeOrder !== 0) return typeOrder;
-			}
 			if (left.wcid !== right.wcid) {
 				if (left.wcid === null) return 1;
 				if (right.wcid === null) return -1;

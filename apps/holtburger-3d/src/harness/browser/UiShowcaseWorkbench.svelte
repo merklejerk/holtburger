@@ -598,11 +598,6 @@
 						active={tab === "diagnostics"}
 					>
 						<ClientDebugPanel
-							entityMetadata={{
-								status: "available",
-								path: "fixture.hwc",
-								recordCount: 1,
-							}}
 							readDiagnostics={() => null}
 							readSelectedEntity={() => null}
 							entityCollisionDisabled={false}

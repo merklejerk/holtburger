@@ -1,12 +1,8 @@
-//! Optional ACE template catalog shared by client and Explorer content consumers.
+//! Optional ACE server-template snapshot for Explorer and offline diagnostics.
 
-use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use anyhow::{Context, Result};
-use holtburger_common::properties::WeenieType;
 use holtburger_weenie_catalog::{CatalogOpenError, WeenieCatalog};
 use serde::Serialize;
 
@@ -51,53 +47,23 @@ pub enum WeenieCatalogCapability {
     },
 }
 
-/// Immutable parsed types; no file access occurs during a runtime lookup.
-#[derive(Debug)]
-pub struct WeenieTypeIndex(BTreeMap<u32, WeenieType>);
-
-impl WeenieTypeIndex {
-    /// Unknown/custom-server WCIDs remain absent rather than becoming Generic.
-    pub fn get(&self, wcid: u32) -> Option<WeenieType> {
-        self.0.get(&wcid).copied()
-    }
-
-    fn read(catalog: &WeenieCatalog) -> Result<Self> {
-        let mut types = BTreeMap::new();
-        for record in catalog.records() {
-            let template = catalog
-                .lookup(record.wcid)?
-                .context("indexed template disappeared")?;
-            let kind = WeenieType::from_repr(template.weenie_type).with_context(|| {
-                format!(
-                    "WCID {} has invalid weenie type {}",
-                    record.wcid, template.weenie_type
-                )
-            })?;
-            types.insert(record.wcid, kind);
-        }
-        Ok(Self(types))
-    }
-}
-
-/// Catalog capability and its reader/index share one lifetime and cannot disagree.
+/// Catalog capability and its reader share one lifetime and cannot disagree.
 #[derive(Debug)]
 pub struct WeenieCatalogContent {
     state: CatalogState,
 }
 
-/// Private construction keeps the parsed index paired with the reader that produced it.
+/// Private construction keeps capability status paired with its reader.
 #[derive(Debug)]
 enum CatalogState {
-    /// Completely decoded metadata accompanies the validated portable reader.
+    /// Validated catalog structure permits indexed template lookup.
     Available {
         /// Selected catalog path for diagnostics.
         path: PathBuf,
         /// Reader used by content preparation and Explorer search.
         catalog: WeenieCatalog,
-        /// Startup-parsed type facts consumed by live world bootstrap.
-        types: Arc<WeenieTypeIndex>,
     },
-    /// Missing and invalid catalogs are reported explicitly without breaking DAT-only clients.
+    /// Missing and invalid snapshots leave DAT-only Explorer workflows available.
     Unavailable {
         /// Selected catalog path, if a content location was supplied.
         path: Option<PathBuf>,
@@ -116,10 +82,10 @@ impl WeenieCatalogContent {
         }
     }
 
-    /// Expose availability to both mode-specific host surfaces.
+    /// Expose availability to Explorer and offline diagnostic consumers.
     pub fn capability(&self) -> WeenieCatalogCapability {
         match &self.state {
-            CatalogState::Available { path, catalog, .. } => WeenieCatalogCapability::Available {
+            CatalogState::Available { path, catalog } => WeenieCatalogCapability::Available {
                 path: path.clone(),
                 record_count: catalog.len(),
             },
@@ -138,14 +104,6 @@ impl WeenieCatalogContent {
         match &self.state {
             CatalogState::Available { catalog, .. } => Ok(catalog),
             CatalogState::Unavailable { reason, .. } => Err(reason),
-        }
-    }
-
-    /// Share parsed metadata without introducing archive policy into world/core.
-    pub fn types(&self) -> Option<Arc<WeenieTypeIndex>> {
-        match &self.state {
-            CatalogState::Available { types, .. } => Some(Arc::clone(types)),
-            CatalogState::Unavailable { .. } => None,
         }
     }
 }
@@ -188,17 +146,6 @@ impl CatalogState {
                 };
             }
         };
-        match WeenieTypeIndex::read(&catalog) {
-            Ok(types) => Self::Available {
-                path,
-                catalog,
-                types: Arc::new(types),
-            },
-            Err(error) => Self::Unavailable {
-                path: Some(path),
-                kind: WeenieCatalogUnavailableKind::Invalid,
-                reason: format!("{error:#}"),
-            },
-        }
+        Self::Available { path, catalog }
     }
 }

@@ -55,7 +55,7 @@ fn main() -> Result<()> {
     let motion_reference = content.read_motion_reference_data()?;
     let motions = Arc::new(motion_reference.motion_sequences);
     let bootstrap = WorldBootstrap {
-        weenie_types: None,
+        housing_storage_wcid: content.read_housing_storage_wcid()?,
         skill_table: Arc::new(content.read_asset("skills")?),
         secondary_attribute_table: Arc::new(content.read_asset("secondary attributes")?),
         spell_table: Arc::new(content.read_asset("spells")?),

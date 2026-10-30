@@ -14,6 +14,18 @@ use thiserror::Error;
 /// Root of the authored enum-group mapping chain.
 pub const MASTER_DID_MAPPER: u32 = 0x25000000;
 
+/// Retail WCLASSID enum group, resolved through the master mapper.
+const WCLASSID_GROUP: u32 = 12;
+/// Retail's STORAGE identity within WCLASSID; this is an enum key, not a WCID.
+const STORAGE_CLASS_ENUM: u32 = 0x10000001;
+
+impl ContentRepository {
+    /// Resolve retail's housing-storage identity from client assets (acclient.c:418567-418577).
+    pub fn read_housing_storage_wcid(&self) -> Result<u32, UiAssetError> {
+        UiAssetReader::new(self).enum_did(WCLASSID_GROUP, STORAGE_CLASS_ENUM)
+    }
+}
+
 /// A static-content lookup failure with enough identity for user-facing diagnostics.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum UiAssetError {
@@ -212,6 +224,25 @@ mod tests {
         assert!(Arc::ptr_eq(&first, &reader.image(image).unwrap()));
         for id in [MASTER_DID_MAPPER, map, image] {
             assert_eq!(source.read_count(EOR_PORTAL_NAMESPACE, id), 1);
+        }
+    }
+
+    #[test]
+    fn housing_storage_identity_follows_client_data_instead_of_a_fixed_wcid() {
+        let map = 0x25000015;
+        for wcid in [42, 123] {
+            let source = Arc::new(CountingSource::new(HashMap::from([
+                (
+                    (EOR_PORTAL_NAMESPACE.into(), MASTER_DID_MAPPER),
+                    mapper(MASTER_DID_MAPPER, &[], &[(WCLASSID_GROUP, map)]),
+                ),
+                (
+                    (EOR_PORTAL_NAMESPACE.into(), map),
+                    mapper(map, &[(STORAGE_CLASS_ENUM, wcid)], &[]),
+                ),
+            ])));
+            let repository = ContentRepository::from_mounts(vec![source]);
+            assert_eq!(repository.read_housing_storage_wcid().unwrap(), wcid);
         }
     }
     #[test]

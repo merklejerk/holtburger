@@ -28,7 +28,7 @@ pub enum DynamicEntityMapBlipCategory {
     Door,
     /// Door explicitly disabling direct Use in its public useability.
     DoorNoDirectUse,
-    /// Native ACE Switch, including lever/button variants and other activatable scenery.
+    /// Explorer-only server template identity; live entities do not expose this distinction.
     Switch,
     #[default]
     Other,
@@ -38,14 +38,10 @@ pub enum DynamicEntityMapBlipCategory {
 pub fn semantic_dynamic_entity_map_blip_category(
     flags: ObjectDescriptionFlag,
     item_type: Option<ItemType>,
-    weenie_type: Option<WeenieType>,
     usable: Usable,
 ) -> DynamicEntityMapBlipCategory {
     if flags.contains(ObjectDescriptionFlag::DOOR) {
         return door_map_category(usable);
-    }
-    if weenie_type == Some(WeenieType::Switch) {
-        return DynamicEntityMapBlipCategory::Switch;
     }
     let presentation_class = semantic_dynamic_entity_presentation_class(flags, item_type);
     map_blip_category(
@@ -177,7 +173,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn interactable_categories_share_direct_use_semantics_across_modes() {
+    fn door_categories_follow_public_use_admission() {
         for (usable, expected) in [
             (Usable::UNDEF, DynamicEntityMapBlipCategory::Door),
             (Usable::REMOTE, DynamicEntityMapBlipCategory::Door),
@@ -187,44 +183,31 @@ mod tests {
                 DynamicEntityMapBlipCategory::DoorNoDirectUse,
             ),
         ] {
-            // Network door identity remains usable without a catalog, and wins over stale metadata.
-            for kind in [None, Some(WeenieType::Switch)] {
-                assert_eq!(
-                    semantic_dynamic_entity_map_blip_category(
-                        ObjectDescriptionFlag::DOOR,
-                        None,
-                        kind,
-                        usable
-                    ),
-                    expected
-                );
-            }
+            assert_eq!(
+                semantic_dynamic_entity_map_blip_category(
+                    ObjectDescriptionFlag::DOOR,
+                    None,
+                    usable
+                ),
+                expected
+            );
             assert_eq!(
                 explorer_dynamic_entity_map_blip_category(WeenieType::Door, None, None, usable),
                 expected
             );
-            assert_eq!(
-                semantic_dynamic_entity_map_blip_category(
-                    ObjectDescriptionFlag::empty(),
-                    None,
-                    Some(WeenieType::Switch),
-                    usable
-                ),
-                DynamicEntityMapBlipCategory::Switch
-            );
-            assert_eq!(
-                explorer_dynamic_entity_map_blip_category(WeenieType::Switch, None, None, usable),
-                DynamicEntityMapBlipCategory::Switch
-            );
         }
+    }
+
+    #[test]
+    fn explorer_switch_category_uses_its_server_template() {
         assert_eq!(
-            semantic_dynamic_entity_map_blip_category(
-                ObjectDescriptionFlag::empty(),
+            explorer_dynamic_entity_map_blip_category(
+                WeenieType::Switch,
                 None,
                 None,
                 Usable::REMOTE
             ),
-            DynamicEntityMapBlipCategory::Other
+            DynamicEntityMapBlipCategory::Switch
         );
     }
 
@@ -274,7 +257,6 @@ mod tests {
                 semantic_dynamic_entity_map_blip_category(
                     flags,
                     item_type,
-                    None,
                     holtburger_common::properties::Usable::UNDEF
                 ),
                 expected,

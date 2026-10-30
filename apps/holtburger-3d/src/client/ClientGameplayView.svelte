@@ -58,7 +58,6 @@
 		selectedPlayerTarget,
 		type ClientSelectedEntity,
 	} from "./client-selected-entity";
-	import type { WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 
 	import { useClientInput } from "./client-input-context";
@@ -291,8 +290,6 @@
 		readonly onSocialNotice: (message: string) => void;
 		/** Shell-owned confirmation after the minimap clipboard write succeeds. */
 		readonly onCoordinatesCopied: () => void;
-		/** Startup catalog availability for switch classification diagnostics. */
-		readonly entityMetadata: WeenieCatalogCapability | null;
 		readonly cameraController: ClientViewportCameraController | null;
 		readonly debugEnabled: boolean;
 		readonly readMinimapFrame: () => MinimapFrame;
@@ -503,7 +500,6 @@
 		combatEnabled,
 		emotesEnabled,
 		onToggleCombat,
-		entityMetadata,
 		cameraController,
 		debugEnabled,
 		readMinimapFrame,
@@ -1820,7 +1816,6 @@
 						{/key}
 					{:else}
 						<ClientDebugPanel
-							{entityMetadata}
 							{readDiagnostics}
 							{readSelectedEntity}
 							{entityCollisionDisabled}

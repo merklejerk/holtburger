@@ -5,9 +5,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use holtburger_common::Guid;
-use holtburger_common::properties::{WeenieType, WorldObjectExt};
+use holtburger_common::properties::WorldObjectExt;
 
-use super::{ClientRuntime, ClientViewEvent, PendingBusyOperation, PendingOperation};
+use super::{ClientRuntime, ClientViewEvent, PendingOperation};
 use crate::{ActionResultReason, ActionResultSource};
 use holtburger_world::{CollisionReportOutcome, CollisionReportPhase, WorldState};
 
@@ -54,26 +54,12 @@ pub(super) fn collision_script_cues(
     Ok(cues)
 }
 
-/// ACE.Entity/Enum/Sound.cs: sound-table key shared by locked chests, doors, and denied storage.
-const OPEN_FAIL_DUE_TO_LOCK_SOUND: u32 = 0x94;
-
-/// Broadcast sound has no actor identity; matching a live use of this chest is best effort.
-fn matches_pending_chest_lock_failure(
-    pending: &PendingBusyOperation,
-    guid: Guid,
-    sound_id: u32,
-    kind: Option<WeenieType>,
-    now: Instant,
-) -> bool {
-    sound_id == OPEN_FAIL_DUE_TO_LOCK_SOUND
-        && kind == Some(WeenieType::Chest)
-        && pending.deadline > now
-        && matches!(pending.operation, PendingOperation::Use { source } if source == guid)
-}
-
 /// Retail keeps its missing-object placeholder, including queued network blobs, for 25 seconds.
 /// See `CObjectMaint::AddObjectToBeDestroyed` in `acclient.c`.
 const RETAIL_MISSING_OBJECT_LIFETIME: Duration = Duration::from_secs(25);
+
+/// ACE Sound.OpenFailDueToLock, also broadcast for housing storage permission denial.
+const OPEN_FAIL_DUE_TO_LOCK_SOUND: u32 = 0x94;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum PendingEntityCue {
@@ -130,29 +116,31 @@ impl ClientEntityCueInbox {
 }
 
 impl ClientRuntime {
-    /// Interpret at packet receipt, before scene admission can delay sound playback past UseDone.
+    /// Correlate at packet receipt, before scene admission can delay sound playback past UseDone.
     pub(super) fn observe_use_sound(&mut self, guid: Guid, sound_id: u32) {
         let Some(pending) = self.active_busy_operation.as_ref() else {
             return;
         };
+        if sound_id != OPEN_FAIL_DUE_TO_LOCK_SOUND
+            || pending.deadline <= Instant::now()
+            || !matches!(pending.operation, PendingOperation::Use { source } if source == guid)
+        {
+            return;
+        }
         let Some(entity) = self.world.entities.get(guid) else {
             return;
         };
-        let kind = entity.wcid.and_then(|wcid| {
-            self.world
-                .weenie_types
-                .as_ref()
-                .and_then(|types| types.get(wcid))
-        });
-        if matches_pending_chest_lock_failure(pending, guid, sound_id, kind, Instant::now()) {
-            // ACE Chest.cs sends this cue on lock rejection. Storage.cs uses the same key for
-            // permission denial, so unknown types, storage, and doors retain server feedback.
-            // Another player's simultaneous use of the same chest can produce a false match.
-            self.emit_action_result(
-                ActionResultSource::Client,
-                ActionResultReason::General(format!("The {} is locked", entity.name())),
-            );
+        // Retail IsStorage resolves this WCID from client DATs (acclient.c:418567-418577).
+        // ACE Storage.cs sends the same sound for denied access, alongside explicit server text.
+        if entity.wcid == Some(self.world.housing_storage_wcid) {
+            return;
         }
+        // Broadcasts identify the object, not the actor/request. Another player's concurrent
+        // attempt or a custom housing-storage WCID can therefore produce a false locked hint.
+        self.emit_action_result(
+            ActionResultSource::Client,
+            ActionResultReason::General(format!("The {} is locked", entity.name())),
+        );
     }
 
     /// Routes one cue when its entity has usable scene placement, or retains it until admission.
@@ -474,62 +462,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn lock_failure_requires_a_live_direct_use_of_the_same_known_chest() {
-        let guid = Guid(7);
-        let now = Instant::now();
-        let pending = PendingBusyOperation {
-            operation: PendingOperation::Use { source: guid },
-            deadline: now + super::super::BUSY_OPERATION_TIMEOUT,
-            pending_error: None,
-        };
-        let matches = |pending: &PendingBusyOperation, target, sound, kind, time| {
-            matches_pending_chest_lock_failure(pending, target, sound, kind, time)
-        };
-        assert!(matches(
-            &pending,
-            guid,
-            OPEN_FAIL_DUE_TO_LOCK_SOUND,
-            Some(WeenieType::Chest),
-            now
-        ));
-        for kind in [None, Some(WeenieType::Door), Some(WeenieType::Storage)] {
-            assert!(!matches(
-                &pending,
-                guid,
-                OPEN_FAIL_DUE_TO_LOCK_SOUND,
-                kind,
-                now
-            ));
-        }
-        assert!(!matches(
-            &pending,
-            Guid(8),
-            OPEN_FAIL_DUE_TO_LOCK_SOUND,
-            Some(WeenieType::Chest),
-            now
-        ));
-        assert!(!matches(&pending, guid, 0, Some(WeenieType::Chest), now));
-        assert!(!matches(
-            &pending,
-            guid,
-            OPEN_FAIL_DUE_TO_LOCK_SOUND,
-            Some(WeenieType::Chest),
-            pending.deadline
-        ));
-        let targeted = PendingBusyOperation {
-            operation: PendingOperation::UseWithTarget { spell_target: None },
-            ..pending
-        };
-        assert!(!matches(
-            &targeted,
-            guid,
-            OPEN_FAIL_DUE_TO_LOCK_SOUND,
-            Some(WeenieType::Chest),
-            now
-        ));
-    }
-
     #[tokio::test]
     async fn wire_sound_repeats_preserve_packet_gain_and_admitted_world_identity() {
         let guid = Guid(7);
@@ -539,7 +471,7 @@ mod tests {
         let mut bytes = Vec::new();
         GameMessage::PlaySound(Box::new(PlaySoundData {
             target: guid,
-            sound_id: 0x94,
+            sound_id: OPEN_FAIL_DUE_TO_LOCK_SOUND,
             volume: 0.8,
         }))
         .pack(&mut bytes);
@@ -558,11 +490,99 @@ mod tests {
         for _ in 0..2 {
             assert!(
                 matches!(events.try_recv().unwrap(), ClientViewEvent::DynamicSoundCue(crate::ClientDynamicSoundCue {
-                guid: actual, generation: 0, world_generation: 12, sound_id: 0x94, volume: 0.8,
+                guid: actual, generation: 0, world_generation: 12, sound_id: OPEN_FAIL_DUE_TO_LOCK_SOUND, volume: 0.8,
             }) if actual == guid)
             );
         }
         assert!(events.try_recv().is_err());
+    }
+
+    #[test]
+    fn locked_hint_requires_a_live_matching_use_and_excludes_housing_storage() {
+        use crate::client::{BUSY_OPERATION_TIMEOUT, PendingBusyOperation};
+        let guid = Guid(7);
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let mut entity = Entity::new(guid, "Chest".into(), WorldPosition::default());
+        entity.wcid = Some(42);
+        client.world.add_entity(entity);
+        let mut events = client.subscribe_client_view_events();
+        let pending = || PendingBusyOperation {
+            operation: PendingOperation::Use { source: guid },
+            deadline: Instant::now() + BUSY_OPERATION_TIMEOUT,
+            pending_error: None,
+        };
+
+        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
+        assert!(events.try_recv().is_err(), "no pending use");
+        client.active_busy_operation = Some(pending());
+        client.observe_use_sound(Guid(8), OPEN_FAIL_DUE_TO_LOCK_SOUND);
+        assert!(events.try_recv().is_err(), "different sound target");
+        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND + 1);
+        assert!(events.try_recv().is_err(), "different sound");
+        client.active_busy_operation.as_mut().unwrap().deadline = Instant::now();
+        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
+        assert!(events.try_recv().is_err(), "expired use");
+        client.active_busy_operation = Some(PendingBusyOperation {
+            operation: PendingOperation::UseWithTarget { spell_target: None },
+            ..pending()
+        });
+        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
+        assert!(events.try_recv().is_err(), "targeted use");
+        client.active_busy_operation = Some(pending());
+        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
+        assert!(
+            matches!(events.try_recv().unwrap(), ClientViewEvent::ActionResult {
+            source: ActionResultSource::Client,
+            reason: ActionResultReason::General(message),
+        } if message == "The Chest is locked")
+        );
+
+        let entity = client.world.entities.get_mut(guid).unwrap();
+        entity.wcid = Some(client.world.housing_storage_wcid);
+        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
+        assert!(
+            events.try_recv().is_err(),
+            "housing storage uses server feedback"
+        );
+        client.world.entities.remove(guid);
+        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
+        assert!(events.try_recv().is_err(), "missing entity");
+    }
+
+    #[tokio::test]
+    async fn wire_lock_failure_reports_before_scene_admission_or_use_done() {
+        use crate::client::{BUSY_OPERATION_TIMEOUT, PendingBusyOperation};
+        let guid = Guid(7);
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let mut entity = Entity::new(guid, "Door".into(), WorldPosition::default());
+        entity.wcid = Some(42);
+        client.world.add_entity(entity);
+        client.active_busy_operation = Some(PendingBusyOperation {
+            operation: PendingOperation::Use { source: guid },
+            deadline: Instant::now() + BUSY_OPERATION_TIMEOUT,
+            pending_error: None,
+        });
+        let mut events = client.subscribe_client_view_events();
+        let mut bytes = Vec::new();
+        GameMessage::PlaySound(Box::new(PlaySoundData {
+            target: guid,
+            sound_id: OPEN_FAIL_DUE_TO_LOCK_SOUND,
+            volume: 1.0,
+        }))
+        .pack(&mut bytes);
+        client.handle_message(&bytes).await.unwrap();
+        assert!(
+            matches!(events.try_recv().unwrap(), ClientViewEvent::ActionResult {
+            source: ActionResultSource::Client,
+            reason: ActionResultReason::General(message),
+        } if message == "The Door is locked")
+        );
+        while let Ok(event) = events.try_recv() {
+            assert!(
+                !matches!(event, ClientViewEvent::DynamicSoundCue(_)),
+                "sound waits for scene admission"
+            );
+        }
     }
 
     #[test]
@@ -575,7 +595,7 @@ mod tests {
                 .route_entity_cue(
                     guid,
                     PendingEntityCue::Sound {
-                        sound_id: 0x94,
+                        sound_id: OPEN_FAIL_DUE_TO_LOCK_SOUND,
                         volume: 1.0,
                     },
                 )

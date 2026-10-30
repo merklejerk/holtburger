@@ -270,15 +270,18 @@ codec validation rather than bootstrap hashing or a source-corpus census.
 - **`holtburger-common`**: shared math and source-domain primitives.
 - **`binrw`**: binary decoding support for focused content queries.
 
-## Optional entity metadata
+## Optional Explorer server snapshot
 
 `WeenieCatalogContent` resolves the caller-selected `weenies.hwc` path, reports missing
-or invalid content explicitly, and owns the portable catalog reader. At startup it
-parses an immutable `WeenieTypeIndex` for world bootstrap, so live WCID classification
-never opens files. Environment variables remain host inputs; Explorer fuzzy search
-remains app-local. The catalog is optional: network door flags remain authoritative
-without it, while native switch classification needs a known WCID. Authored
-ItemUseable belongs to Explorer catalog preparation; live entities use received state.
+or invalid content explicitly, and owns the catalog reader. Explorer owns discovery
+and uses the snapshot for template search and preparation; offline tools can also
+query it. The snapshot describes one server database and is not authoritative for
+live entities. It is never included in world bootstrap or opened by the live client.
+Environment variables remain host inputs; Explorer fuzzy search remains app-local.
+Live classification, usability, and inventory ordering use received state.
+The standard housing-storage identity is resolved separately from the client DAT's
+WCLASSID mapper during bootstrap. Core uses it to suppress inferred locked notices
+for housing storage, whose permission-denial sound is shared with locked objects.
 
 ### Contract catalog ([src/contracts.rs](src/contracts.rs))
 

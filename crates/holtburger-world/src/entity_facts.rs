@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use holtburger_common::{
     Guid,
     properties::{
-        PropertyBool, PropertyDataId, PropertyInt, PropertyString, WeenieType, WorldObjectExt,
+        PropertyBool, PropertyDataId, PropertyInt, PropertyString, WorldObjectExt,
         WorldObjectPropertyAccessors,
     },
 };
@@ -115,11 +115,8 @@ pub enum EntityDescription {
         /// Public object-description flags consumed by selected-entity diagnostics.
         #[serde(rename = "objectFlags")]
         object_flags: u32,
-        /// Server template identity consumed by selected-entity diagnostics.
+        /// Received template identity consumed by selected diagnostics and inventory grouping.
         wcid: Option<u32>,
-        /// Optional local catalog classification, independent of scene residency.
-        #[serde(rename = "weenieType")]
-        weenie_type: Option<WeenieType>,
         /// Server-maintained coin total across the player's packs, unknown before receipt.
         #[serde(rename = "pyrealBalance")]
         pyreal_balance: Option<u32>,
@@ -236,8 +233,8 @@ pub enum NearbyEntityCategory {
     Lifestone,
     /// Door identity, independent of direct-use capability.
     Door,
-    /// Native switch identity.
-    Switch,
+    /// Otherwise generic object explicitly advertising untargeted use from the world.
+    Useable,
 }
 
 /// Minimal public-description projection, with no dependency on appraisal property storage.
@@ -259,31 +256,41 @@ pub struct NearbyEntityFacts {
 fn nearby_category(
     flags: holtburger_common::properties::ObjectDescriptionFlag,
     item_type: holtburger_common::properties::ItemType,
-    weenie_type: Option<WeenieType>,
+    usable: holtburger_common::properties::Usable,
 ) -> NearbyEntityCategory {
-    use DynamicEntityMapBlipCategory as MapCategory;
+    use crate::entity_classification::{
+        DynamicEntityPresentationClass as Class, semantic_dynamic_entity_presentation_class,
+    };
     use NearbyEntityCategory as Category;
     use holtburger_common::properties::{ItemType, ObjectDescriptionFlag as Flag, Usable};
     if flags.contains(Flag::CORPSE) && !flags.intersects(Flag::PLAYER | Flag::VENDOR) {
         return Category::Corpse;
     }
-    // Catalog grouping collapses both door-usability variants. No invented useability
-    // fact escapes this classification call.
-    match semantic_dynamic_entity_map_blip_category(
-        flags,
-        Some(item_type),
-        weenie_type,
-        Usable::UNDEF,
-    ) {
-        MapCategory::Player => Category::Player,
-        MapCategory::Npc => Category::Npc,
-        MapCategory::Mob => Category::Monster,
-        MapCategory::Portal => Category::Portal,
-        MapCategory::Lifestone => Category::Lifestone,
-        MapCategory::Door | MapCategory::DoorNoDirectUse => Category::Door,
-        MapCategory::Switch => Category::Switch,
-        MapCategory::Other if item_type.contains(ItemType::CONTAINER) => Category::Container,
-        MapCategory::Other => Category::Item,
+    if flags.contains(Flag::DOOR) {
+        return Category::Door;
+    }
+    match semantic_dynamic_entity_presentation_class(flags, Some(item_type)) {
+        Class::Player => Category::Player,
+        Class::Npc => Category::Npc,
+        Class::Mob => Category::Monster,
+        Class::Portal => Category::Portal,
+        Class::Other
+            if flags.intersects(Flag::LIFE_STONE | Flag::BIND_STONE)
+                || item_type.contains(ItemType::LIFE_STONE) =>
+        {
+            Category::Lifestone
+        }
+        Class::Other if item_type.contains(ItemType::CONTAINER) => Category::Container,
+        // Retail permits attempting UNDEF (acclient.c:286680), but it supplies no explicit
+        // affordance. Require a public world-use location and no target requirement.
+        Class::Other
+            if usable.allows_direct_use()
+                && usable.intersects(Usable::VIEWED | Usable::REMOTE)
+                && usable.target_flags().is_empty() =>
+        {
+            Category::Useable
+        }
+        Class::Other => Category::Item,
     }
 }
 
@@ -378,9 +385,6 @@ impl WorldState {
             Some((entity, name, item_type))
         }) {
             Some((entity, name, item_type)) => {
-                let weenie_type = entity
-                    .wcid
-                    .and_then(|wcid| self.weenie_types.as_ref().and_then(|types| types.get(wcid)));
                 let equipment = crate::equipment::EquipmentFacts::from_entity(entity).ok();
                 EntityDescription::Known {
                     name: name.to_owned(),
@@ -396,7 +400,6 @@ impl WorldState {
                     map_category: semantic_dynamic_entity_map_blip_category(
                         entity.flags,
                         Some(item_type),
-                        weenie_type,
                         entity.usable_flags(),
                     ),
                     item_type: item_type.bits(),
@@ -417,7 +420,6 @@ impl WorldState {
                         }),
                     object_flags: entity.flags.bits(),
                     wcid: entity.wcid,
-                    weenie_type,
                     pyreal_balance: entity.get_int_prop(PropertyInt::CoinValue).map(|value| {
                         u32::try_from(value).expect("coin balance must be non-negative")
                     }),
@@ -506,13 +508,7 @@ impl WorldState {
                     }
                     Some(NearbyEntityFacts {
                         name: public.name.clone()?,
-                        category: nearby_category(
-                            entity.flags,
-                            public.item_type,
-                            entity.wcid.and_then(|wcid| {
-                                self.weenie_types.as_ref().and_then(|types| types.get(wcid))
-                            }),
-                        ),
+                        category: nearby_category(entity.flags, public.item_type, public.usable),
                         vendor: entity
                             .flags
                             .contains(holtburger_common::properties::ObjectDescriptionFlag::VENDOR),
@@ -551,6 +547,14 @@ impl WorldState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{PhysicsAttachment, entity::Entity};
+    use holtburger_common::{
+        ParentLocation, Placement,
+        properties::{
+            EquipMask, ItemType, ObjectDescriptionFlag, PropertyInt, Usable,
+            WorldObjectPropertyAccessorsMut,
+        },
+    };
 
     #[test]
     fn nearby_public_facts_ignore_appraisal_and_accept_ordinary_updates() {
@@ -692,85 +696,168 @@ mod tests {
 
     #[test]
     fn nearby_categories_prioritize_identity_over_broad_item_bits() {
-        for (flags, item_type, weenie_type, expected) in [
+        for (flags, item_type, usable, expected) in [
             (
                 ObjectDescriptionFlag::PLAYER | ObjectDescriptionFlag::ATTACKABLE,
                 ItemType::CREATURE,
-                None,
+                Usable::VIEWED_REMOTE,
                 NearbyEntityCategory::Player,
             ),
             (
                 ObjectDescriptionFlag::VENDOR | ObjectDescriptionFlag::ATTACKABLE,
                 ItemType::CREATURE,
-                None,
+                Usable::VIEWED_REMOTE,
                 NearbyEntityCategory::Npc,
             ),
             (
                 ObjectDescriptionFlag::ATTACKABLE,
                 ItemType::CREATURE,
-                None,
+                Usable::VIEWED_REMOTE,
                 NearbyEntityCategory::Monster,
             ),
             (
                 ObjectDescriptionFlag::empty(),
                 ItemType::CREATURE,
-                None,
+                Usable::VIEWED_REMOTE,
                 NearbyEntityCategory::Npc,
             ),
             (
                 ObjectDescriptionFlag::CORPSE,
                 ItemType::CONTAINER,
-                None,
+                Usable::VIEWED_REMOTE,
                 NearbyEntityCategory::Corpse,
             ),
             (
                 ObjectDescriptionFlag::empty(),
                 ItemType::CONTAINER,
-                None,
+                Usable::VIEWED_REMOTE,
                 NearbyEntityCategory::Container,
             ),
             (
                 ObjectDescriptionFlag::PORTAL,
                 ItemType::MISC,
-                None,
+                Usable::VIEWED_REMOTE,
                 NearbyEntityCategory::Portal,
             ),
             (
                 ObjectDescriptionFlag::BIND_STONE,
                 ItemType::MISC,
-                None,
+                Usable::VIEWED_REMOTE,
                 NearbyEntityCategory::Lifestone,
             ),
             (
                 ObjectDescriptionFlag::DOOR,
                 ItemType::MISC,
-                None,
+                Usable::VIEWED_REMOTE,
                 NearbyEntityCategory::Door,
             ),
             (
                 ObjectDescriptionFlag::empty(),
                 ItemType::MISC,
-                Some(WeenieType::Switch),
-                NearbyEntityCategory::Switch,
+                Usable::VIEWED_REMOTE,
+                NearbyEntityCategory::Useable,
             ),
             (
                 ObjectDescriptionFlag::empty(),
                 ItemType::MISC,
-                None,
+                Usable::UNDEF,
                 NearbyEntityCategory::Item,
             ),
         ] {
-            assert_eq!(nearby_category(flags, item_type, weenie_type), expected);
+            assert_eq!(nearby_category(flags, item_type, usable), expected);
         }
     }
-    use crate::{PhysicsAttachment, entity::Entity};
-    use holtburger_common::{
-        ParentLocation, Placement,
-        properties::{
-            EquipMask, ItemType, ObjectDescriptionFlag, PropertyInt, Usable,
-            WorldObjectPropertyAccessorsMut,
-        },
-    };
+
+    #[test]
+    fn nearby_useable_requires_explicit_untargeted_world_use() {
+        for (usable, expected) in [
+            (Usable::VIEWED, NearbyEntityCategory::Useable),
+            (Usable::REMOTE, NearbyEntityCategory::Useable),
+            (Usable::UNDEF, NearbyEntityCategory::Item),
+            (Usable::NO | Usable::REMOTE, NearbyEntityCategory::Item),
+            (Usable::CONTAINED, NearbyEntityCategory::Item),
+            (Usable::WIELDED, NearbyEntityCategory::Item),
+            (Usable::NEVER_WALK, NearbyEntityCategory::Item),
+            (
+                Usable::SOURCE_REMOTE_TARGET_REMOTE,
+                NearbyEntityCategory::Item,
+            ),
+        ] {
+            assert_eq!(
+                nearby_category(ObjectDescriptionFlag::STUCK, ItemType::MISC, usable),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn nearby_levers_use_public_usability_without_a_catalog_or_appraisal() {
+        use holtburger_common::properties::PropertyUpdate;
+        use holtburger_protocol::messages::object::events::IdentifyObjectResponseEventData;
+        use holtburger_protocol::messages::object::messages::description::{
+            ObjectDescriptionData, PublicWeenieDescription,
+        };
+
+        let mut world = WorldState::synthetic();
+        for wcid in [286, 2609] {
+            let guid = Guid(wcid);
+            let mut entity = Entity::new(
+                guid,
+                "Lever".into(),
+                holtburger_common::position::WorldPosition {
+                    landblock_id: Guid(0xda55_0001),
+                    ..Default::default()
+                },
+            );
+            entity.apply_description(&ObjectDescriptionData {
+                pos: Some(holtburger_common::position::WorldPosition {
+                    landblock_id: Guid(0xda55_0001),
+                    ..Default::default()
+                }),
+                public_weenie_desc: PublicWeenieDescription {
+                    guid,
+                    wcid,
+                    name: Some("Lever".into()),
+                    item_type: ItemType::MISC.bits(),
+                    obj_desc_flags: ObjectDescriptionFlag::STUCK
+                        | ObjectDescriptionFlag::ATTACKABLE,
+                    usable: Some(Usable::VIEWED_REMOTE.bits()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            });
+            world.entities.insert(entity);
+            let category = |world: &WorldState| {
+                world
+                    .client_entity_facts(guid)
+                    .unwrap()
+                    .unwrap()
+                    .nearby
+                    .unwrap()
+                    .category
+            };
+            assert_eq!(category(&world), NearbyEntityCategory::Useable);
+            let mut appraisal = IdentifyObjectResponseEventData {
+                success: true,
+                ..Default::default()
+            };
+            appraisal
+                .properties
+                .set_int_prop(PropertyInt::ItemUseable, Usable::NO.bits() as i32);
+            let entity = world.entities.get_mut(guid).unwrap();
+            assert!(entity.apply_identify_response(&appraisal));
+            assert_eq!(category(&world), NearbyEntityCategory::Useable);
+            world
+                .entities
+                .get_mut(guid)
+                .unwrap()
+                .set_property(PropertyUpdate::Int(
+                    PropertyInt::ItemUseable,
+                    Usable::NO.bits() as i32,
+                ));
+            assert_eq!(category(&world), NearbyEntityCategory::Item);
+        }
+    }
 
     #[test]
     fn selected_category_preserves_door_useability_independently_of_use_capability() {
@@ -918,7 +1005,6 @@ mod tests {
             EntityDescription::Known {
                 object_flags: 0,
                 wcid: None,
-                weenie_type: None,
                 pyreal_balance: None,
                 burden: None,
                 aetheria_activation: None,
@@ -1049,7 +1135,6 @@ mod tests {
                 object_flags: holtburger_common::properties::ObjectDescriptionFlag::ATTACKABLE
                     .bits(),
                 wcid: Some(123),
-                weenie_type: None,
                 pyreal_balance: None,
                 burden: None,
                 aetheria_activation: None,
@@ -1103,7 +1188,6 @@ mod tests {
                 consumable: None,
                 object_flags: 0,
                 wcid: None,
-                weenie_type: None,
                 pyreal_balance: None,
                 burden: None,
                 aetheria_activation: None,

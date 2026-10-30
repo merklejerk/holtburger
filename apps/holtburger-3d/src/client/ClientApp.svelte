@@ -1585,6 +1585,7 @@
 	const EMPTY_TRACKED_GUIDS: ReadonlySet<number> = new Set();
 	function readMinimapFrame(): MinimapFrame {
 		const frame = gameplayPresentation?.readMinimapFrame() ?? {
+			surfaceMapEligible: false,
 			waypoint: null,
 			cameraFovRadians: 0,
 			cameraHeadingRadians: 0,

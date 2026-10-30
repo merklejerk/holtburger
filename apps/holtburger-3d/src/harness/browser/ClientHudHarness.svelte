@@ -4010,6 +4010,7 @@
 	}
 	function readMinimapFrame(): MinimapFrame {
 		const frame: MinimapFrame = {
+			surfaceMapEligible: !minimapSubjectIndoor,
 			waypoint: null,
 			cameraFovRadians: Math.PI / 3,
 			cameraHeadingRadians: waypointCameraHeading,

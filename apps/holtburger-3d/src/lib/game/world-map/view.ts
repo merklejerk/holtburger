@@ -1,4 +1,4 @@
-import type { MinimapSubject } from "../../../app/minimap-frame";
+import type { MinimapFrame } from "../../../app/minimap-frame";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
 import type { WorldMapBounds, WorldMapView } from "./types";
 
@@ -73,9 +73,12 @@ interface WorldMapPlayerPlacement {
 	readonly headingDegrees: number;
 }
 
-/** Only a coherent outdoor player supplies a current-position marker. */
+/** Mixed interiors retain surface coordinates; dungeon-only scenes have no world-map marker. */
 export function worldMapPlayer(
-	subject: MinimapSubject | null,
+	{
+		subject,
+		surfaceMapEligible,
+	}: Pick<MinimapFrame, "subject" | "surfaceMapEligible">,
 	view: WorldMapView,
 	width: number,
 	height: number,
@@ -83,7 +86,7 @@ export function worldMapPlayer(
 	if (
 		subject?.kind !== "controlled-entity" ||
 		subject.anchor.residency === null ||
-		subject.anchor.residency.envCellId !== null
+		!surfaceMapEligible
 	)
 		return null;
 	return {

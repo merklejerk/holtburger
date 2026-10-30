@@ -166,6 +166,7 @@ function frame(
 	} = {},
 ): MinimapFrame {
 	return {
+		surfaceMapEligible: false,
 		waypoint: null,
 		cameraFovRadians: overrides.cameraFovRadians ?? 1,
 		cameraHeadingRadians: overrides.cameraHeadingRadians ?? 0,

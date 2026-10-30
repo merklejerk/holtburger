@@ -213,10 +213,8 @@
 		// Overlay drawing reads independent display choices; they must not own this subscription.
 		untrack(refresh);
 		const unsubscribe = source.subscribeFacts(refresh);
-		const timer = setInterval(() => {
-			overlay.refreshTooltips(source.readFacts());
-			drawTooltip();
-		}, CLIENT_TUNING.journal.displayIntervalMs);
+		// Repeat expiry can reveal a quest area without a new server snapshot.
+		const timer = setInterval(refresh, CLIENT_TUNING.journal.displayIntervalMs);
 		return () => {
 			unsubscribe();
 			clearInterval(timer);

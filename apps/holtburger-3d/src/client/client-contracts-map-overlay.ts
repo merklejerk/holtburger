@@ -1,3 +1,4 @@
+import equal from "fast-deep-equal";
 import contactIcon from "../assets/icons/world-map-contract-contact.svg?raw";
 import questIcon from "../assets/icons/world-map-contract-area.svg?raw";
 import { projectWorldMapPoint } from "../lib/game/world-map/view";
@@ -46,10 +47,15 @@ export class ContractMapOverlay {
 		this.#contact = template(contactIcon);
 		this.#quest = template(questIcon);
 	}
-	/** Cold facts replacement, including deletion/reset; local query events never call this. */
+	/** Cold snapshot/aging refresh; retain nodes unless projected destinations change. */
 	setFacts(facts: ContractsSnapshot | null): void {
+		const markers = contractMapMarkers(facts);
+		if (equal(markers, this.#markers)) {
+			this.#tooltips = contractMapTooltips(this.#markers, facts);
+			return;
+		}
 		this.clear();
-		this.#markers = contractMapMarkers(facts);
+		this.#markers = markers;
 		for (const marker of this.#markers) {
 			const contact =
 				marker.entries.length === 1 && marker.entries[0]?.role !== "area";
@@ -62,10 +68,6 @@ export class ContractMapOverlay {
 			this.#root.append(group);
 			this.#nodes.set(marker.key, group);
 		}
-		this.refreshTooltips(facts);
-	}
-	/** Timer aging updates hover content without rebuilding nodes or marker geometry. */
-	refreshTooltips(facts: ContractsSnapshot | null): void {
 		this.#tooltips = contractMapTooltips(this.#markers, facts);
 	}
 	draw(view: WorldMapView, width: number, height: number): void {

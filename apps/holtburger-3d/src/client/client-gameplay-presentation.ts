@@ -1,8 +1,4 @@
 import {
-	projectClientEntityCenter,
-	type ClientEntityScreenPoint,
-} from "./client-entity-projection";
-import {
 	abortError,
 	isAbortError,
 	awaitWithAbort,
@@ -156,6 +152,8 @@ import {
 } from "./client-selection-tracking";
 import {
 	projectClientTargetIndicator,
+	projectClientCombatTarget,
+	type ClientCombatTargetFrame,
 	type ClientTargetIndicatorFrame,
 } from "./client-target-indicator";
 
@@ -587,7 +585,7 @@ export class ClientGameplayPresentation {
 	}
 
 	/** Pull the combat bound and presented camera without publishing frame-hot UI state. */
-	readCombatTargetFrame(): ClientEntityScreenPoint | null {
+	readCombatTargetFrame(): ClientCombatTargetFrame | null {
 		const view = this.#lastPrimaryView;
 		const { spellCastTarget, combat } = this.#session.state();
 		// A pending non-self cast takes presentation priority without changing auto-attack intent.
@@ -597,7 +595,8 @@ export class ClientGameplayPresentation {
 				? null
 				: this.#activeResources?.runtime.dynamicEntityPresentationState(target);
 		if (view === null || state?.kind !== "realized") return null;
-		return projectClientEntityCenter({
+		return projectClientCombatTarget({
+			tuning: CLIENT_TUNING.combatTargetIndicator,
 			bounds: state.frame.localBounds,
 			placement: state.frame.placement,
 			view,

@@ -1,7 +1,9 @@
-import type { AABB3 } from "../lib/game/math/types";
-import type { PrimaryCameraView } from "../lib/game/runtime/types";
-import type { ResolvedScenePlacement } from "../lib/game/scene";
-import { createClientEntityProjector } from "./client-entity-projection";
+import {
+	projectClientEntityCenter,
+	type ClientEntityScreenPoint,
+	type ClientEntityProjectionInput,
+	createClientEntityProjector,
+} from "./client-entity-projection";
 
 const CLIP_EPSILON = 1e-7;
 
@@ -17,13 +19,26 @@ export interface ClientTargetIndicatorFrame {
 	readonly y: number;
 }
 
-export interface ClientTargetIndicatorProjectionInput {
-	readonly bounds: AABB3;
-	readonly cssHeight: number;
-	readonly cssWidth: number;
-	readonly placement: ResolvedScenePlacement;
+/** One combat target has either a centered reticle or an offscreen directional arrow. */
+export type ClientCombatTargetFrame =
+	| (ClientEntityScreenPoint & { readonly kind: "reticle" })
+	| (ClientTargetIndicatorFrame & { readonly kind: "edge" });
+
+/** Shared entity projection inputs plus the caller-owned screen-edge lane. */
+export interface ClientTargetIndicatorProjectionInput extends ClientEntityProjectionInput {
+	/** Minimum edge inset, independent of arrow paint and artwork size. */
 	readonly tuning: ClientTargetIndicatorGeometryTuning;
-	readonly view: PrimaryCameraView;
+}
+
+/** Prefer the centered reticle; reuse selection's full-bound clipping policy for edge guidance. */
+export function projectClientCombatTarget(
+	input: ClientTargetIndicatorProjectionInput,
+): ClientCombatTargetFrame | null {
+	if (input.cssWidth <= 0 || input.cssHeight <= 0) return null;
+	const center = projectClientEntityCenter(input);
+	if (center !== null) return { ...center, kind: "reticle" };
+	const edge = projectClientTargetIndicator(input);
+	return edge === null ? null : { ...edge, kind: "edge" };
 }
 
 /** Project one exact current rigid bound into an offscreen edge marker, or null while on-screen. */

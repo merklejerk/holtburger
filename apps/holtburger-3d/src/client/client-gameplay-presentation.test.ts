@@ -765,6 +765,17 @@ describe("ClientGameplayPresentation", () => {
 			presentation.setSelectedEntityGuid(null);
 			expect(presentation.readCombatTargetFrame()).toEqual(initial);
 
+			runtime.entityFrame = entityFrameInCamera(view, 7, new Vec3(100, 0, -10));
+			const combatEdge = presentation.readCombatTargetFrame();
+			expect(combatEdge?.kind).toBe("edge");
+			presentation.setSelectedEntityGuid(7);
+			const selectedEdge = presentation.readTargetIndicatorFrame();
+			if (combatEdge === null || selectedEdge === null)
+				throw new Error("Expected independent combat and selection arrows.");
+			expect(selectedEdge.x).toBeGreaterThan(combatEdge.x);
+			presentation.setSelectedEntityGuid(null);
+			expect(presentation.readCombatTargetFrame()).toEqual(combatEdge);
+
 			runtime.entityFrame = entityFrameInCamera(view, 9, new Vec3(2, 0, -10));
 			transport.emit("client-combat-status-updated", {
 				...engagement,
@@ -822,6 +833,9 @@ describe("ClientGameplayPresentation", () => {
 			expect(presentation.readCombatTargetFrame()?.x).toBeCloseTo(
 				canvas.clientWidth / 2,
 			);
+			runtime.entityFrame = entityFrameInCamera(view, 7, new Vec3(100, 0, -10));
+			expect(presentation.readCombatTargetFrame()?.kind).toBe("edge");
+
 			presentation.setSelectedEntityGuid(8);
 			expect(presentation.readCombatTargetFrame()).not.toBeNull();
 			transport.emit("client-spell-cast-target-updated", { target: null });

@@ -1,21 +1,27 @@
 <script lang="ts">
 	import { onMount } from "svelte";
-	import type { ClientEntityScreenPoint } from "./client-entity-projection";
+	import type { ClientCombatTargetFrame } from "./client-target-indicator";
+	import TargetIndicatorIcon from "../assets/icons/target-indicator.svg?component";
 
 	interface Props {
 		/** Pull coherent projected presentation facts without routing poses through Svelte. */
-		readonly readFrame: () => ClientEntityScreenPoint | null;
+		readonly readFrame: () => ClientCombatTargetFrame | null;
 	}
 	let { readFrame }: Props = $props();
 	let marker: HTMLDivElement;
+	let edgeMarker: HTMLDivElement;
 
 	onMount(() => {
 		let handle = 0;
 		const update = (): void => {
 			const frame = readFrame();
-			marker.hidden = frame === null;
-			if (frame !== null)
+			marker.hidden = frame?.kind !== "reticle";
+			edgeMarker.hidden = frame?.kind !== "edge";
+			if (frame?.kind === "reticle")
 				marker.style.transform = `translate3d(${frame.x}px, ${frame.y}px, 0)`;
+			if (frame?.kind === "edge")
+				edgeMarker.style.transform = `translate3d(${frame.x}px, ${frame.y}px, 0) translate(-50%, -50%) rotate(${frame.rotationRadians}rad)`;
+
 			handle = requestAnimationFrame(update);
 		};
 		handle = requestAnimationFrame(update);
@@ -42,9 +48,19 @@
 	</div>
 </div>
 
+<div
+	bind:this={edgeMarker}
+	class="combat-target-arrow"
+	hidden
+	aria-hidden="true"
+>
+	<TargetIndicatorIcon />
+</div>
+
 <style>
 	@layer components {
-		.combat-reticle {
+		.combat-reticle,
+		.combat-target-arrow {
 			position: absolute;
 			top: 0;
 			left: 0;
@@ -53,6 +69,28 @@
 			z-index: 3;
 			pointer-events: none;
 		}
+		.combat-target-arrow {
+			width: var(--target-size);
+			height: var(--target-size);
+			filter: drop-shadow(0 0 var(--target-glow-blur) var(--target-glow));
+			--target-size: var(--ui-combat-target-arrow-size);
+			/* Optional arrow paint overrides otherwise resolve the reticle palette at the consumer. */
+			--target-fill: var(
+				--ui-combat-target-arrow-fill-color,
+				var(--ui-combat-reticle-fill-color)
+			);
+			--target-outline: var(
+				--ui-combat-target-arrow-outline-color,
+				var(--ui-combat-reticle-outline-color)
+			);
+			--target-outline-width: var(--ui-combat-target-arrow-outline-width);
+			--target-glow: var(
+				--ui-combat-target-arrow-glow-color,
+				var(--ui-combat-reticle-glow-color)
+			);
+			--target-glow-blur: var(--ui-combat-target-arrow-glow-blur);
+		}
+
 		.combat-reticle-orbit,
 		.combat-reticle-spoke,
 		.combat-reticle-pulse {

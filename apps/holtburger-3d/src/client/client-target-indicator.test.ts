@@ -1,3 +1,4 @@
+import { CLIENT_TUNING } from "./client-tuning";
 import { describe, expect, it } from "vitest";
 
 import { sceneVec3 } from "../lib/assets/ac-frame";
@@ -8,6 +9,7 @@ import type { ResolvedScenePlacement } from "../lib/game/scene";
 import { projectClientEntityCenter } from "./client-entity-projection";
 import {
 	projectClientTargetIndicator,
+	projectClientCombatTarget,
 	type ClientTargetIndicatorGeometryTuning,
 } from "./client-target-indicator";
 
@@ -108,6 +110,53 @@ describe("combat indicator center projection", () => {
 			view: VIEW,
 		});
 		expect(frame?.y).toBeCloseTo(160);
+	});
+});
+
+describe("combat target reticle and edge guidance", () => {
+	const projectCombat = (x: number, y: number, z: number) =>
+		projectClientCombatTarget({
+			bounds: bounds(0.2),
+			placement: placement(x, y, z),
+			cssWidth: 1000,
+			cssHeight: 800,
+			view: VIEW,
+			tuning: CLIENT_TUNING.combatTargetIndicator,
+		});
+	it("uses a centered reticle while the combat target is onscreen", () => {
+		expect(projectCombat(0, 0, -10)).toEqual({
+			kind: "reticle",
+			x: 500,
+			y: 400,
+		});
+	});
+	it("keeps the combat arrow inward of the independent selection arrow", () => {
+		const combat = projectCombat(30, 0, -10);
+		const selected = project(placement(30, 0, -10), bounds(0.2));
+		expect(combat).toMatchObject({
+			kind: "edge",
+			x: 1000 - CLIENT_TUNING.combatTargetIndicator.safeInsetCssPixels,
+			y: 400,
+		});
+		if (combat === null || selected === null)
+			throw new Error("Expected both target arrows.");
+		expect(combat.x).toBeLessThan(selected.x);
+	});
+	it("guides behind-camera targets and switches back to a reticle on return", () => {
+		expect(projectCombat(0, 0, 10)?.kind).toBe("edge");
+		expect(projectCombat(0, 0, -10)?.kind).toBe("reticle");
+	});
+	it("has no marker for a collapsed viewport", () => {
+		expect(
+			projectClientCombatTarget({
+				bounds: bounds(1),
+				placement: placement(0, 0, -10),
+				cssWidth: 0,
+				cssHeight: 0,
+				view: VIEW,
+				tuning: CLIENT_TUNING.combatTargetIndicator,
+			}),
+		).toBeNull();
 	});
 });
 

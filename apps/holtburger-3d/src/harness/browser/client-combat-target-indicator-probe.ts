@@ -1,19 +1,19 @@
 import { createUiThemeLoader } from "../../app/ui-theme";
 import themeUrl from "./themes/combat-indicators.css?url&no-inline";
 import { mount, tick, unmount } from "svelte";
-import ClientCombatReticle from "../../client/ClientCombatReticle.svelte";
+import ClientCombatTargetIndicator from "../../client/ClientCombatTargetIndicator.svelte";
 import ClientTargetIndicator from "../../client/ClientTargetIndicator.svelte";
-import type { ClientEntityScreenPoint } from "../../client/client-entity-projection";
+import type { ClientCombatTargetFrame } from "../../client/client-target-indicator";
 
 /** Verify overlay placement, coexistence, animation policy, and RAF teardown without runtime assets. */
-export async function probeClientCombatReticle() {
+export async function probeClientCombatTargetIndicator() {
 	const target = document.createElement("div");
 	target.id = "combat-reticle-theme-probe";
 	const loader = createUiThemeLoader(document);
 	document.body.append(target);
-	let frame: ClientEntityScreenPoint | null = null;
+	let frame: ClientCombatTargetFrame | null = null;
 	let reads = 0;
-	const reticle = mount(ClientCombatReticle, {
+	const reticle = mount(ClientCombatTargetIndicator, {
 		target,
 		props: {
 			readFrame: () => {
@@ -36,15 +36,18 @@ export async function probeClientCombatReticle() {
 		await nextFrame();
 		const marker = target.querySelector<HTMLDivElement>(".combat-reticle");
 		const arrow = target.querySelector<HTMLDivElement>(".target-indicator");
-		if (marker === null || arrow === null)
+		const combatEdge = target.querySelector<HTMLDivElement>(
+			".combat-target-arrow",
+		);
+		if (marker === null || arrow === null || combatEdge === null)
 			throw new Error("Target overlays did not mount.");
 		const expectPosition = (expected: string): void => {
 			if (marker.style.transform !== expected)
 				throw new Error("Combat overlay did not follow the projected center.");
 		};
-		if (!marker.hidden)
+		if (!marker.hidden || !combatEdge.hidden)
 			throw new Error("Absent engagement displayed a combat reticle.");
-		frame = { x: 125, y: 210 };
+		frame = { kind: "reticle", x: 125, y: 210 };
 		await nextFrame();
 		if (marker.hidden || arrow.hidden)
 			throw new Error(
@@ -56,6 +59,53 @@ export async function probeClientCombatReticle() {
 			target.querySelectorAll(".combat-reticle-diamond").length !== 4
 		)
 			throw new Error("Combat reticle geometry or pointer policy failed.");
+		frame = { kind: "edge", x: 128, y: 210, rotationRadians: Math.PI / 2 };
+		await nextFrame();
+		if (!marker.hidden || combatEdge.hidden || arrow.hidden)
+			throw new Error(
+				"Offscreen combat guidance did not replace only the reticle.",
+			);
+		const edgeTransform = new DOMMatrixReadOnly(
+			getComputedStyle(combatEdge).transform,
+		);
+		if (
+			Math.abs(edgeTransform.a - Math.cos(frame.rotationRadians)) > 1e-5 ||
+			Math.abs(edgeTransform.b - Math.sin(frame.rotationRadians)) > 1e-5
+		)
+			throw new Error(
+				"Offscreen combat arrow did not follow projected direction.",
+			);
+
+		if (
+			getComputedStyle(combatEdge).pointerEvents !== "none" ||
+			!getComputedStyle(combatEdge).filter.includes("drop-shadow")
+		)
+			throw new Error("Combat arrow pointer or glow policy failed.");
+		const combatBounds = combatEdge.getBoundingClientRect();
+		if (
+			Math.abs(combatBounds.left + combatBounds.width / 2 - 128) > 0.01 ||
+			Math.abs(combatBounds.top + combatBounds.height / 2 - 210) > 0.01
+		)
+			throw new Error(
+				"Combat edge artwork was not centered at its projected anchor.",
+			);
+
+		const combatPaint = combatEdge.querySelector(".target-indicator__glass");
+		const selectionPaint = arrow.querySelector(".target-indicator__glass");
+		if (combatPaint === null || selectionPaint === null)
+			throw new Error("Shared target arrow artwork did not mount.");
+		if (
+			getComputedStyle(combatPaint).fill ===
+			getComputedStyle(selectionPaint).fill
+		)
+			throw new Error(
+				"Combat and selection arrow palettes are indistinguishable.",
+			);
+		frame = { kind: "reticle", x: 125, y: 210 };
+		await nextFrame();
+		if (marker.hidden || !combatEdge.hidden)
+			throw new Error("Returning onscreen retained the combat edge arrow.");
+
 		const orbit = target.querySelector(".combat-reticle-orbit");
 		if (orbit === null) throw new Error("Combat reticle orbit did not mount.");
 		const reducedMotion = matchMedia(
@@ -98,6 +148,15 @@ export async function probeClientCombatReticle() {
 				getComputedStyle(pulse).animationDuration !== "0.4s")
 		)
 			throw new Error("Theme reticle animation durations did not inherit.");
+		if (getComputedStyle(combatPaint).fill !== getComputedStyle(body).fill)
+			throw new Error(
+				"Combat edge arrow did not inherit the themed reticle palette.",
+			);
+		target.style.setProperty("--ui-combat-target-arrow-fill-color", "#112233");
+		if (getComputedStyle(combatPaint).fill !== "rgb(17, 34, 51)")
+			throw new Error("Dedicated combat arrow palette override failed.");
+		target.style.removeProperty("--ui-combat-target-arrow-fill-color");
+
 		target.style.setProperty("--ui-combat-reticle-size", "44px");
 		if (getComputedStyle(diamond).width !== "44px")
 			throw new Error("Live inherited reticle size change failed.");
@@ -109,12 +168,12 @@ export async function probeClientCombatReticle() {
 		)
 			throw new Error("Reticle theme removal did not restore base appearance.");
 
-		frame = { x: 230, y: 175 };
+		frame = { kind: "reticle", x: 230, y: 175 };
 		await nextFrame();
 		expectPosition("translate3d(230px, 175px, 0px)");
 		frame = null;
 		await nextFrame();
-		if (!marker.hidden || arrow.hidden)
+		if (!marker.hidden || !combatEdge.hidden || arrow.hidden)
 			throw new Error(
 				"Ending combat changed selection or retained its reticle.",
 			);
@@ -131,6 +190,8 @@ export async function probeClientCombatReticle() {
 	return {
 		passed: true,
 		diamonds: 4,
+		offscreenArrow: true,
+		onscreenOffscreenTransitions: true,
 		followsProjection: true,
 		selectionIndependent: true,
 		themeInheritance: true,

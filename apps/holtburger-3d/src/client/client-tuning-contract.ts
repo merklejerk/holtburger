@@ -1,3 +1,4 @@
+import type { ClientTargetIndicatorGeometryTuning } from "./client-target-indicator";
 import type { ClientVitalWarningTuning } from "./client-vital-warning";
 import type { CycleSelectionPolicy } from "./client-cycle-selection-controller";
 import type { PortalTransitionPolicy } from "../lib/client/portal-transition-controller";
@@ -125,6 +126,9 @@ export interface ClientTuning {
 		/** World-space outer radius of the surface marker. */
 		readonly markerRadius: number;
 	};
+	/** Combat guidance uses a separate screen-edge lane so selection remains distinguishable. */
+	readonly combatTargetIndicator: ClientTargetIndicatorGeometryTuning;
+
 	/** Client-local entity acquisition feedback policy. */
 	readonly entitySelection: {
 		/** One-shot nearest acquisition threshold for all held Tab chords. */

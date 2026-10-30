@@ -79,6 +79,7 @@ const clientHudLayoutSchema = z
 		characterSheet: hudPlacementSchema,
 		inventory: hudPlacementSchema,
 		worldContainer: hudPlacementSchema,
+		locks: hudPlacementSchema,
 		salvage: hudPlacementSchema,
 		vendor: hudPlacementSchema,
 		houseCrystal: hudPlacementSchema,
@@ -120,6 +121,18 @@ export const clientChatSuppressionSettingsSchema = z
 	.readonly();
 export type ClientChatSuppressionSettings = z.infer<
 	typeof clientChatSuppressionSettingsSchema
+>;
+
+/** Local lock interaction policy; server gameplay options do not own this automation. */
+export const clientLockInteractionSettingsSchema = z
+	.object({
+		/** Try distinct inventory key templates before offering lockpicks. Enabled by default. */
+		autoUseKeys: z.boolean().default(true),
+	})
+	.strict()
+	.readonly();
+export type ClientLockInteractionSettings = z.infer<
+	typeof clientLockInteractionSettingsSchema
 >;
 
 /** User-scoped graphics preferences; implementation tuning stays in renderer policy. */
@@ -177,6 +190,8 @@ export const clientUiSettingsSchema = z
 		showFps: z.boolean().default(false),
 		/** Reveal combat control labels on hover; older profiles receive help by default. */
 		showHelpLabels: z.boolean().default(true),
+		/** Enable the unlock window and automatic-key workflow; existing profiles keep it enabled. */
+		useUnlockHelper: z.boolean().default(true),
 		/** Absent choices use the client default; explicit Base/null and saved IDs are retained. */
 		themeId: uiThemeIdSchema.nullable().default(CLIENT_DEFAULT_THEME_ID),
 		/** Older sections inherit neutral scaling without losing fonts or warning thresholds. */
@@ -238,6 +253,7 @@ export const clientUserSettingsSchema = z
 		recentEmotes: z.array(z.string().min(1)).readonly(),
 		chatFilters: chatFiltersSchema,
 		chatSuppression: clientChatSuppressionSettingsSchema,
+		lockInteractions: clientLockInteractionSettingsSchema,
 		graphics: clientGraphicsSettingsSchema,
 		audio: clientAudioSettingsSchema,
 		ui: clientUiSettingsSchema,

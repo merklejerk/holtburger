@@ -127,7 +127,16 @@ pub(super) enum PendingOperation {
         source: Guid,
     },
     UseWithTarget {
-        /// Non-self filtering is applied at publication; only known spell-bearing item uses set this.
+        /// Resolved spell recipient, absent for ordinary targeted items.
+        spell_target: Option<Guid>,
+    },
+    /// Guarded individual use retains frontend correlation, never a batch workflow.
+    GuardedUse {
+        /// Originating frontend identity, attached to terminal receipts.
+        sequence: u32,
+        /// Captured source/target used for kind and direct-use admission.
+        intent: holtburger_world::item_use::ItemUseIntent,
+        /// Resolved spell-bearing item recipient captured at dispatch.
         spell_target: Option<Guid>,
     },
     /// Resolved wire target; untargeted casts cannot correlate automatic turns.
@@ -142,10 +151,28 @@ pub(super) enum PendingOperation {
 }
 
 impl PendingOperation {
+    /// Direct-use target shared by lock feedback and server container-roster admission.
+    fn direct_use_source(&self) -> Option<Guid> {
+        match self {
+            Self::Use { source }
+            | Self::GuardedUse {
+                intent: holtburger_world::item_use::ItemUseIntent::Direct { source, .. },
+                ..
+            } => Some(*source),
+            _ => None,
+        }
+    }
+
     fn kind(&self) -> BusyOperationKind {
         match self {
             Self::Use { .. } => BusyOperationKind::Use,
             Self::UseWithTarget { .. } => BusyOperationKind::UseWithTarget,
+            Self::GuardedUse { intent, .. } => match intent {
+                holtburger_world::item_use::ItemUseIntent::Direct { .. } => BusyOperationKind::Use,
+                holtburger_world::item_use::ItemUseIntent::Targeted { .. } => {
+                    BusyOperationKind::UseWithTarget
+                }
+            },
             Self::SpellCast { .. } => BusyOperationKind::SpellCast,
             Self::Vendor(execution) => execution.kind(),
             Self::Housing(execution) => execution.kind(),
@@ -782,6 +809,10 @@ impl ClientRuntime {
                 PendingOperation::SpellCast { target }
                 | PendingOperation::UseWithTarget {
                     spell_target: target,
+                }
+                | PendingOperation::GuardedUse {
+                    spell_target: target,
+                    ..
                 },
             ) => target.filter(|target| *target != Guid::NULL && *target != self.world.player.guid),
             _ => None,

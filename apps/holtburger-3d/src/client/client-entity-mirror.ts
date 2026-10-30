@@ -7,6 +7,17 @@ import {
 import { z } from "zod";
 import { DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES } from "../lib/game/map/map-blip-category";
 
+/** Shared public tool identity and optional authored template bonus. */
+export const lockToolFactsSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("key") }).strict(),
+	z
+		.object({
+			kind: z.literal("lockpick"),
+			bonus: z.number().int().min(-0x8000_0000).max(0x7fff_ffff).nullable(),
+		})
+		.strict(),
+]);
+
 const guid = z.number().int().nonnegative().max(0xffff_ffff);
 /** World-owned broad groups from public descriptions, independent of appraisal. */
 export const NEARBY_ENTITY_CATEGORIES = [
@@ -212,6 +223,9 @@ const clientEntityFactsSchema = z
 		canReceiveGive: z.boolean(),
 		canTrade: z.boolean(),
 		canOfferTrade: z.boolean(),
+		/** Shared tool identity and template bonus; grouping belongs to the frontend. */
+		lockTool: lockToolFactsSchema.nullable(),
+		isLocked: z.boolean().nullable(),
 		salvage: salvageCandidateSchema,
 		scenePlacement: z.enum(["available", "unavailable"]),
 		/** World-owned acquisition category, independent of rendering and disposition. */

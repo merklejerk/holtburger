@@ -332,6 +332,7 @@ pub fn format_action_result_message(reason: &ActionResultReason) -> String {
                 )
             }
         }
+        ActionResultReason::Locked { name, .. } => format!("The {name} is locked"),
         ActionResultReason::Character(error) => format!("Character error: {:?}", error),
         ActionResultReason::General(message)
         | ActionResultReason::Transport(message)

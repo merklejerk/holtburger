@@ -1,5 +1,8 @@
 <script lang="ts">
-	import type { ClientChatSuppressionSettings } from "./client-settings-contract";
+	import type {
+		ClientChatSuppressionSettings,
+		ClientLockInteractionSettings,
+	} from "./client-settings-contract";
 	import ClientGameplaySettingsControls from "./ClientGameplaySettingsControls.svelte";
 	import type {
 		ClientGameplayOption,
@@ -66,6 +69,12 @@
 	interface Props {
 		/** Local chat admission preferences, independent of server character options. */
 		readonly chatSuppression: ClientChatSuppressionSettings;
+		/** Local persisted policy for key automation and chooser presentation. */
+		readonly lockInteractions: ClientLockInteractionSettings;
+		/** Persist local lock policy through the settings owner. */
+		readonly onLockInteractionsChange: (
+			settings: ClientLockInteractionSettings,
+		) => void;
 		readonly onChatSuppressionChange: (
 			settings: ClientChatSuppressionSettings,
 		) => void;
@@ -104,6 +113,8 @@
 		readonly onResetHudPlacements: () => void;
 	}
 	let {
+		lockInteractions,
+		onLockInteractionsChange,
 		chatSuppression,
 		onChatSuppressionChange,
 		gameplayPreferences,
@@ -379,10 +390,22 @@
 							/>
 							Hide spell incantations
 						</label>
-						<p>
-							Hidden messages are discarded. Changes apply to future messages
-							only.
-						</p>
+					</div>
+				</details>
+				<details class="ui-disclosure ui-disclosure-section" open>
+					<summary>Locks</summary>
+					<div class="settings-section ui-disclosure-body">
+						<label class="ui-checkbox">
+							<input
+								type="checkbox"
+								checked={lockInteractions.autoUseKeys}
+								onchange={(event) =>
+									onLockInteractionsChange({
+										autoUseKeys: event.currentTarget.checked,
+									})}
+							/>
+							Automatically try inventory keys
+						</label>
 					</div>
 				</details>
 				<ClientGameplaySettingsControls
@@ -445,6 +468,17 @@
 										alwaysShowEntityNameplates: event.currentTarget.checked,
 									})}
 							/> Always show entity nameplates</label
+						>
+						<label class="ui-checkbox"
+							><input
+								type="checkbox"
+								checked={ui.useUnlockHelper}
+								onchange={(event) =>
+									onUiChange({
+										...ui,
+										useUnlockHelper: event.currentTarget.checked,
+									})}
+							/> Use unlock helper</label
 						>
 						<label class="ui-checkbox"
 							><input

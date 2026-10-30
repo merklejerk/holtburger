@@ -40,6 +40,8 @@
 		powerControl={null}
 	/>
 	<ClientSettingsPanel
+		lockInteractions={defaults.lockInteractions}
+		onLockInteractionsChange={() => {}}
 		chatSuppression={defaults.chatSuppression}
 		onChatSuppressionChange={() => {}}
 		gameplayPreferences={null}

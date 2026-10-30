@@ -294,6 +294,34 @@ fn nearby_category(
     }
 }
 
+/// Public tool classification and authored template knowledge for targeted lock interactions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum LockToolFacts {
+    /// Template grouping and use policy remain frontend concerns.
+    Key,
+    /// Authored additive template bonus; None means the WCID/property is unavailable.
+    Lockpick { bonus: Option<i32> },
+}
+
+pub(crate) fn lock_tool_facts(
+    flags: holtburger_common::properties::ObjectDescriptionFlag,
+    item_type: Option<holtburger_common::properties::ItemType>,
+    wcid: Option<u32>,
+) -> Option<LockToolFacts> {
+    use holtburger_common::properties::{ItemType, ObjectDescriptionFlag};
+    // ACE Lockpick.cs supplies this specific flag; it takes precedence over broad item bits.
+    if flags.contains(ObjectDescriptionFlag::LOCKPICK) {
+        Some(LockToolFacts::Lockpick {
+            bonus: wcid.and_then(holtburger_content::lockpick_bonus),
+        })
+    } else if item_type.is_some_and(|kind| kind.intersects(ItemType::KEY)) {
+        Some(LockToolFacts::Key)
+    } else {
+        None
+    }
+}
+
 /// One accepted identity's facts; browser consumers never replay raw entity properties.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -320,6 +348,10 @@ pub struct ClientEntityFacts {
     pub can_offer_trade: bool,
     /// Shared whole-item salvage admission and normalized review inputs.
     pub salvage: crate::crafting::salvage::SalvageCandidate,
+    /// Tool classification and template bonus consumed by lock interactions.
+    pub lock_tool: Option<LockToolFacts>,
+    /// Current authoritative lock state; absent until supplied by the server.
+    pub is_locked: Option<bool>,
     /// Scene capability independent of loaded renderer assets.
     pub scene_placement: SceneAvailability,
     /// Consumed by keyboard acquisition; not a renderer visibility decision.
@@ -531,6 +563,9 @@ impl WorldState {
             can_trade: self.trade_partner_candidate(guid),
             can_offer_trade: self.can_offer_trade_item(guid),
             salvage: self.salvage_candidate(guid),
+            lock_tool: entity
+                .and_then(|entity| lock_tool_facts(entity.flags, entity.item_type(), entity.wcid)),
+            is_locked: entity.and_then(|entity| entity.get_bool_prop_opt(PropertyBool::Locked)),
             scene_placement,
             targeting,
             corpse: entity.and_then(|entity| {
@@ -555,6 +590,58 @@ mod tests {
             WorldObjectPropertyAccessorsMut,
         },
     };
+
+    #[test]
+    fn lock_tools_share_reference_bonuses_with_inspection() {
+        use crate::inspection::{InspectionContext, ObjectInspection, ObjectInspectionDetails};
+        let mut world = WorldState::synthetic();
+        let guid = Guid(12);
+        let mut item = Entity::new(guid, "Tool".into(), Default::default());
+        item.set_int_prop(PropertyInt::ItemType, ItemType::KEY.bits() as i32);
+        assert_eq!(
+            lock_tool_facts(item.flags, item.item_type(), item.wcid),
+            Some(LockToolFacts::Key)
+        );
+        item.flags.insert(ObjectDescriptionFlag::LOCKPICK);
+        world.entities.insert(item);
+        for wcid in [
+            Some(510),
+            Some(512),
+            Some(513),
+            Some(27672),
+            Some(999),
+            None,
+        ] {
+            world.entities.get_mut(guid).expect("tool").wcid = wcid;
+            let facts = world
+                .client_entity_facts(guid)
+                .expect("placement")
+                .expect("facts");
+            let inspection = ObjectInspection::from_entity(
+                world.entities.get(guid).expect("tool"),
+                InspectionContext::new(&world.character_titles),
+            )
+            .expect("inspection");
+            let ObjectInspectionDetails::Item(item) = inspection.details else {
+                panic!("item inspection")
+            };
+            assert_eq!(
+                facts.lock_tool,
+                Some(LockToolFacts::Lockpick {
+                    bonus: wcid.and_then(holtburger_content::lockpick_bonus)
+                })
+            );
+            assert_eq!(item.lock_tool, facts.lock_tool);
+        }
+        assert_eq!(
+            lock_tool_facts(
+                ObjectDescriptionFlag::empty(),
+                Some(ItemType::CONTAINER),
+                Some(512)
+            ),
+            None
+        );
+    }
 
     #[test]
     fn nearby_public_facts_ignore_appraisal_and_accept_ordinary_updates() {

@@ -377,7 +377,7 @@
 		</section>
 	{/if}
 
-	{#if item.mana !== null || item.stack !== null || item.uses !== null || item.capacity.items !== null || item.capacity.containers !== null || statuses.length > 0 || item.lockpicking !== null}
+	{#if item.mana !== null || item.stack !== null || item.uses !== null || item.capacity.items !== null || item.capacity.containers !== null || statuses.length > 0 || item.lockpicking !== null || item.lockTool?.kind === "lockpick"}
 		<section>
 			<h3 class="ui-section-heading">State</h3>
 			<dl class="inspection-facts">
@@ -419,6 +419,14 @@
 				{#if item.capacity.containers !== null}<div>
 						<dt>Container capacity</dt>
 						<dd>{formatInspectionNumber(item.capacity.containers)}</dd>
+					</div>{/if}
+				{#if item.lockTool?.kind === "lockpick"}<div>
+						<dt>Lockpick bonus</dt>
+						<dd>
+							{item.lockTool.bonus === null
+								? "Unknown"
+								: `${item.lockTool.bonus >= 0 ? "+" : ""}${item.lockTool.bonus}`}
+						</dd>
 					</div>{/if}
 				{#if lockpickingText !== null}<div>
 						<dt>Lockpick difficulty</dt>

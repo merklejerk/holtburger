@@ -17,6 +17,7 @@
 	} from "./ui-showcase-fixture";
 	import { provideItemCooldowns } from "../../app/item-cooldowns.svelte";
 	import { createSalvageFixture } from "./client-salvage-fixture";
+	import { ClientLocksState } from "../../client/client-locks-state";
 	import { ClientSalvageState } from "../../client/client-salvage-state";
 	import "../../client/client-canvas.css";
 	import { createClientMouseMovementFixture } from "./client-mouse-movement-fixture";
@@ -131,6 +132,7 @@
 	import { probeFriends } from "./client-friends-probe";
 	import { probeParty } from "./client-party-probe";
 	import { probeWorldContainer } from "./client-world-container-probe";
+	import { probeClientLocks } from "./client-locks-probe";
 	import { probeClientInventory } from "./client-inventory-probe";
 	import type { DynamicEntityMapBlipCategory } from "../../lib/game/map/map-blip-category";
 	import { mapBlipFillStyle } from "../../lib/game/map/map-appearance";
@@ -315,7 +317,9 @@
 		);
 		environmentIssue = environmentBinding.issue;
 	}
-	const characterInput = clientInput.characterContext(() => {});
+	const characterInput = clientInput.characterContext((_action, pressed) => {
+		if (pressed) locks?.cancel();
+	});
 	function changeInput(input: ClientInputConfiguration) {
 		const accepted = clientInputSettingsSchema.parse(input);
 		if (!clientKeyboardSettingsEqual(userSettings.input, accepted)) {
@@ -491,6 +495,7 @@
 			emitInteractionEvent("client-item-use-target-result", {
 				sequence: state.sequence,
 				eligible: true,
+				lockpickSuccessPercent: null,
 			});
 		},
 		restoreCaster: () => {
@@ -1257,6 +1262,7 @@
 		>;
 		/** Verify live inventory, shared placement, geometry, selection, and recovery. */
 		readonly probeInventory: typeof probeInventory;
+		readonly probeLocks: () => ReturnType<typeof probeClientLocks>;
 		/** Synthetic replies through the real vendor session and HUD. */
 		/** Salvage authority replies exercise the production window and session. */
 		readonly salvageProbe: ReturnType<typeof createSalvageFixture>;
@@ -1469,6 +1475,10 @@
 		);
 	});
 	let salvage = $state<ClientSalvageState | null>(null);
+	let locks = $state<ClientLocksState | null>(null);
+	$effect(() => {
+		if (!userSettings.ui.useUnlockHelper) locks?.close();
+	});
 	let inventory = $state<ClientInventoryState | null>(null);
 	let vendor = $state<ClientVendorState | null>(null);
 	let houseCrystal = $state<ClientHouseCrystalState | null>(null);
@@ -1582,6 +1592,8 @@
 					canReceiveGive: false,
 					canTrade: false,
 					canOfferTrade: false,
+					lockTool: null,
+					isLocked: null,
 					salvage: {
 						kind: "ineligible",
 						reason: "Fixture item cannot be salvaged.",
@@ -1844,6 +1856,8 @@
 						canReceiveGive: true,
 						canTrade: false,
 						canOfferTrade: false,
+						lockTool: null,
+						isLocked: null,
 						salvage: {
 							kind: "ineligible",
 							reason: "Fixture item cannot be salvaged.",
@@ -2287,6 +2301,7 @@
 								secondsLeft: 3723,
 							},
 							lockpicking: null,
+							lockTool: null,
 							status: {
 								bonded: "bonded",
 								attuned: "Attuned",
@@ -2408,7 +2423,6 @@
 		if (guid !== null) void objectInspectionOwner.examine(guid);
 	}
 	function examineHarnessItem(guid: number): void {
-		selection.selectContentsItem(guid, "select");
 		void objectInspectionOwner.examine(guid);
 	}
 	const objectInspectionProbe: ObjectInspectionProbe = {
@@ -4765,6 +4779,19 @@
 				gameplayView?.showInventory();
 			},
 		);
+		const locksOwner = new ClientLocksState(
+			interactionLifecycle,
+			keyboard,
+			() => itemInteractions.cancel(),
+			(message, tone) => inventoryToasts.publish({ message, tone }),
+			() => ({
+				enabled: userSettings.ui.useUnlockHelper,
+				autoUseKeys: userSettings.lockInteractions.autoUseKeys,
+			}),
+			(message) => appendChat({ kind: "system", message }),
+			selection,
+		);
+		locks = locksOwner;
 		salvage = salvageOwner;
 		const sessionDialogs = new ClientDialogs(interactionLifecycle);
 		const unbindSalvage = sessionDialogs.bindLocal(salvageOwner);
@@ -5284,6 +5311,29 @@
 				return keyboardFixture;
 			},
 			probeInventory,
+			probeLocks: () =>
+				probeClientLocks({
+					selection,
+					model: locksOwner,
+					setAutomaticKeys: (autoUseKeys) =>
+						(userSettings = {
+							...userSettings,
+							lockInteractions: { autoUseKeys },
+						}),
+					readToast: () => inventoryToasts.snapshot(),
+					emit: emitInteractionEvent,
+					commands: interactionCommands,
+					bindMovement: () =>
+						keyboard.bindGame({
+							keydown: (event) => {
+								characterInput.apply(event, true);
+							},
+							keyup: (event) => {
+								characterInput.apply(event, false);
+							},
+							cancel: () => characterInput.reset(),
+						}),
+				}),
 			tradeProbe: createTradeFixture({
 				emit: emitInteractionEvent,
 				baseline: emitInteractionBaseline,
@@ -5859,6 +5909,8 @@
 			vendorOwner.destroy();
 			unbindHousingDialogs();
 			unbindSalvage();
+			locksOwner.destroy();
+			locks = null;
 			salvageOwner.destroy();
 			salvage = null;
 			unbindItemDialogs();
@@ -5919,6 +5971,9 @@
 			></canvas>
 			{#if gameplayCanvas !== null && interactionRoot !== null}
 				<ClientGameplayView
+					lockInteractions={userSettings.lockInteractions}
+					onLockInteractionsChange={(lockInteractions) =>
+						(userSettings = { ...userSettings, lockInteractions })}
 					chatSuppression={userSettings.chatSuppression}
 					onChatSuppressionChange={(chatSuppression) =>
 						(userSettings = { ...userSettings, chatSuppression })}
@@ -6124,7 +6179,6 @@
 					}}
 					onViewportExamine={(x, y) => {
 						viewportSelectionPoints.push({ x, y, interact: false });
-						selectEntity(7);
 						void objectInspectionOwner.examine(7);
 					}}
 					onViewportHover={(x, y) => {
@@ -6161,6 +6215,7 @@
 					{inventory}
 					{worldContainer}
 					{vendor}
+					{locks}
 					{salvage}
 					{trade}
 					onSelectContentsItem={(guid, mode) =>

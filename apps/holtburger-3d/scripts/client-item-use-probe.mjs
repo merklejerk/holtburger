@@ -49,7 +49,7 @@ export async function probeItemUse(client, evaluateExpression) {
 		const pending = await state();
 		assert.equal(pending.kind, "resolving");
 		await read(
-			`${api}.itemUseProbe().targetReply(${JSON.stringify({ sequence: pending.sequence, eligible })})`,
+			`${api}.itemUseProbe().targetReply(${JSON.stringify({ sequence: pending.sequence, eligible, lockpickSuccessPercent: null })})`,
 		);
 	};
 	const food =
@@ -117,7 +117,7 @@ export async function probeItemUse(client, evaluateExpression) {
 			const cells = queries.filter(query => query.target === 91);
 			if (cells.length !== 1) throw new Error('Expected one query for both food cells');
 			for (const query of queries)
-				${api}.itemUseProbe().targetReply({ sequence: query.sequence, eligible: query.target === 91 });
+				${api}.itemUseProbe().targetReply({ sequence: query.sequence, eligible: query.target === 91, lockpickSuccessPercent: null });
 			await new Promise(requestAnimationFrame);
 			const considered = ${api}.itemUseProbe().snapshot().considered?.sequence;
 			const equipped = queries.find(query => query.target === 95 && query.sequence !== considered);
@@ -172,7 +172,7 @@ export async function probeItemUse(client, evaluateExpression) {
                     JSON.stringify(${api}.itemUseProbe().queryCommands().at(-1)));
             })()`);
 			await read(
-				`${api}.itemUseProbe().targetReply(${JSON.stringify({ sequence, eligible })})`,
+				`${api}.itemUseProbe().targetReply(${JSON.stringify({ sequence, eligible, lockpickSuccessPercent: null })})`,
 			);
 			const asset = eligible
 				? "combine-cursor-eligible.svg"
@@ -202,7 +202,7 @@ export async function probeItemUse(client, evaluateExpression) {
 		// The equipped target's authority verdict must control its effective opacity,
 		// including while the pointer is over an item that cannot be equipped there.
 		await read(`(async () => {
-			${api}.itemUseProbe().targetReply({ sequence: ${equippedTargetSequence}, eligible: true });
+			${api}.itemUseProbe().targetReply({ sequence: ${equippedTargetSequence}, eligible: true, lockpickSuccessPercent: null });
 			const cell = document.querySelector(${JSON.stringify(tool)});
 			const row = cell.closest('.equipment-row');
 			const deadline = performance.now() + 5000;

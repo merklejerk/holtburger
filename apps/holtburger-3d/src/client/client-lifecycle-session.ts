@@ -137,8 +137,12 @@ import {
 	type ClientItemUseTargetResult,
 	itemUseRequestSchema,
 	itemUseResultSchema,
+	itemUseFinishedSchema,
+	lockedTargetSchema,
 	type ClientItemUseRequest,
 	type ClientItemUseResult,
+	type ClientItemUseFinished,
+	type ClientLockedTarget,
 } from "./client-item-use-contract";
 import {
 	inventoryIntentSchema,
@@ -361,6 +365,8 @@ type ClientEventName = Extract<
 	| "client-salvage-preview"
 	| "client-salvage-result"
 	| "client-item-use-result"
+	| "client-item-use-finished"
+	| "client-locked-target"
 	| "client-state-resyncing"
 	| "client-entity-facts-changed"
 	| "client-entity-collision-disabled"
@@ -471,6 +477,8 @@ export interface ClientLifecycleSessionState {
 
 /** One accepted authority update delivered to app-local lifecycle consumers. */
 export type ClientLifecycleSessionEvent =
+	/** Retained character facts changed; feature owners read the authoritative sheet. */
+	| { readonly type: "character-sheet" }
 	| { readonly type: "salvage-preview"; readonly result: SalvagePreviewResult }
 	| { readonly type: "salvage-result"; readonly result: SalvageSubmitResult }
 	| { readonly type: "death-locations"; readonly result: DeathLocationResult }
@@ -542,6 +550,11 @@ export type ClientLifecycleSessionEvent =
 			readonly result: ClientItemUseTargetResult;
 	  }
 	| { readonly type: "item-use-result"; readonly result: ClientItemUseResult }
+	| {
+			readonly type: "item-use-finished";
+			readonly result: ClientItemUseFinished;
+	  }
+	| { readonly type: "locked-target"; readonly target: ClientLockedTarget }
 	| {
 			readonly type: "inventory-preview";
 			readonly result: ClientInventoryPreviewResult;
@@ -1655,6 +1668,7 @@ export class ClientLifecycleSession {
 					)
 						return;
 					this.characterSheet.replace(sheet);
+					this.#emit({ type: "character-sheet" });
 				}),
 				await listen("client-progression-evaluated", (payload) => {
 					const result = progressionEvaluatedSchema.parse(payload);
@@ -1757,6 +1771,18 @@ export class ClientLifecycleSession {
 				}),
 			);
 			unlisteners.push(
+				await listen("client-item-use-finished", (payload) => {
+					this.#emit({
+						type: "item-use-finished",
+						result: itemUseFinishedSchema.parse(payload),
+					});
+				}),
+				await listen("client-locked-target", (payload) => {
+					this.#emit({
+						type: "locked-target",
+						target: lockedTargetSchema.parse(payload),
+					});
+				}),
 				await listen("client-item-use-result", (payload) => {
 					this.#emit({
 						type: "item-use-result",

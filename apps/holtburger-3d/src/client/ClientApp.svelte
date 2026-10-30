@@ -65,6 +65,7 @@
 	import { ClientSpellState, type ClientSpellServices } from "./client-spells";
 	import { ClientTradeState } from "./client-trade-state";
 	import { ClientItemInteractions } from "./client-item-interactions";
+	import { ClientLocksState } from "./client-locks-state";
 	import { ClientSalvageState } from "./client-salvage-state";
 	import { ClientInventoryState } from "./client-inventory-state";
 	import {
@@ -486,6 +487,10 @@
 	);
 
 	let salvage = $state<ClientSalvageState | null>(null);
+	let locks = $state<ClientLocksState | null>(null);
+	$effect(() => {
+		if (!userSettings.ui.useUnlockHelper) locks?.close();
+	});
 	let inventory = $state<ClientInventoryState | null>(null);
 	let vendor = $state<ClientVendorState | null>(null);
 	let houseCrystal = $state<ClientHouseCrystalState | null>(null);
@@ -937,8 +942,14 @@
 	}
 	let facingInput: ClientFacingInputDispatch | null = null;
 	const mouseMovement: ClientMouseMovementInput = {
-		onForward: (source, down) => inputArbiter?.applyForward(source, down),
-		onTurn: (delta) => facingInput?.add(delta),
+		onForward: (source, down) => {
+			if (down) locks?.cancel();
+			inputArbiter?.applyForward(source, down);
+		},
+		onTurn: (delta) => {
+			if (delta !== 0) locks?.cancel();
+			facingInput?.add(delta);
+		},
 		onCancelTurn: () => facingInput?.cancel(),
 		onError: (message) => toastCenter.publish({ message, tone: "warning" }),
 	};
@@ -950,6 +961,7 @@
 			!inputArbiter?.preciseActive
 		)
 			return;
+		if (pressed) locks?.cancel();
 		inputArbiter?.applyAction(action, pressed);
 	});
 
@@ -1456,9 +1468,8 @@
 		void objectInspectionOwner?.examine(guid);
 	}
 
-	/** HUD item identities are already resolved; select and inspect that exact target. */
+	/** Inspect the explicit HUD identity without changing the gameplay selection. */
 	function examineItem(guid: number): void {
-		entitySelection?.selectContentsItem(guid, "select");
 		void objectInspectionOwner?.examine(guid);
 	}
 
@@ -1515,6 +1526,7 @@
 			inputArbiter !== null
 		) {
 			event.preventDefault();
+			locks?.cancel();
 			if (!event.repeat) inputArbiter.toggleAutoRun();
 			return;
 		}
@@ -2184,11 +2196,28 @@
 				toastCenter.publish({ message, tone: "warning" }),
 			beginAcquisition: () => {
 				// A newer tool-targeting intent supersedes any pending viewport action.
+				locks?.cancel();
 				selection.beginAcquisition("external");
 				inputArbiter?.cancelPrecise();
 				keyboard.returnToGame();
 			},
 		});
+		const locksOwner = new ClientLocksState(
+			owner,
+			keyboard,
+			() => {
+				items.cancel();
+				inputArbiter?.cancelPrecise();
+			},
+			(message, tone) => toastCenter.publish({ message, tone }),
+			() => ({
+				enabled: userSettings.ui.useUnlockHelper,
+				autoUseKeys: userSettings.lockInteractions.autoUseKeys,
+			}),
+			(message) => appendChatLine({ kind: "system", message }),
+			selection,
+		);
+		locks = locksOwner;
 		itemInteractions = items;
 		const unbindItems = dialogOwner.bindLocal(items);
 		unrestrictedUse = false;
@@ -2253,6 +2282,8 @@
 				nearbyOwner.destroy();
 				nearby = null;
 				unbindSalvage();
+				locksOwner.destroy();
+				locks = null;
 				salvageOwner.destroy();
 				salvage = null;
 				inventoryOwner.destroy();
@@ -2493,6 +2524,7 @@
 			{readSelectedEntityDisplay}
 			{spells}
 			{enchantments}
+			{locks}
 			{salvage}
 			{inventory}
 			{worldContainer}
@@ -2527,6 +2559,9 @@
 			readConnection={() => session?.connectionSample() ?? null}
 			{appearanceOptions}
 			{gameplayPreferences}
+			lockInteractions={userSettings.lockInteractions}
+			onLockInteractionsChange={(settings) =>
+				changeUserSection("lockInteractions", settings)}
 			chatSuppression={userSettings.chatSuppression}
 			onChatSuppressionChange={(settings) =>
 				changeUserSection("chatSuppression", settings)}
@@ -2611,8 +2646,16 @@
 				} else pointerSelection?.acquireViewportPoint(clientX, clientY);
 			}}
 			onViewportExamine={(clientX, clientY) => {
-				pointerSelection?.acquireViewportPoint(clientX, clientY, (guid) => {
-					void objectInspectionOwner?.examine(guid);
+				const pointer = pointerSelection;
+				if (pointer === null) return;
+				pointer.acquireTarget(clientX, clientY, {
+					isCurrent: () => pointerSelection === pointer,
+					commit: (result) => {
+						if (result.kind === "entity")
+							void objectInspectionOwner?.examine(result.guid);
+						else if (result.kind === "unavailable")
+							toastCenter.publish({ message: result.reason, tone: "warning" });
+					},
 				});
 			}}
 			onViewportHover={(clientX, clientY) =>

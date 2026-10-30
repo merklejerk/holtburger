@@ -51,6 +51,29 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it("defaults automatic keys on for existing profiles and persists explicit opt-outs", async () => {
+		const path = await temporarySettingsPath();
+		try {
+			const store = new ClientSettingsStore(path, initialWindow);
+			await store.load();
+			const loaded = await store.loadUser(defaultUser, "persisted");
+			expect({ ...defaultUser, ...loaded.sections }.lockInteractions).toEqual({
+				autoUseKeys: true,
+			});
+			await store.saveUserPatch({
+				sections: { lockInteractions: { autoUseKeys: false } },
+			});
+			const reloaded = new ClientSettingsStore(path, initialWindow);
+			await reloaded.load();
+			expect(await reloaded.loadUser(defaultUser, "persisted")).toMatchObject({
+				sections: { lockInteractions: { autoUseKeys: false } },
+				unavailable: [],
+			});
+		} finally {
+			await rm(dirname(path), { recursive: true, force: true });
+		}
+	});
+
 	it("defaults chat suppression on for old profiles and persists explicit opt-outs", async () => {
 		const path = await temporarySettingsPath();
 		try {
@@ -149,6 +172,7 @@ describe("ClientSettingsStore", () => {
 				themeId: CLIENT_DEFAULT_THEME_ID,
 				showFps: false,
 				showHelpLabels: true,
+				useUnlockHelper: true,
 				fonts,
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.initial,
@@ -158,6 +182,7 @@ describe("ClientSettingsStore", () => {
 				themeId: "Midnight 雪",
 				showFps: true,
 				showHelpLabels: false,
+				useUnlockHelper: false,
 				fonts,
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.maximum,

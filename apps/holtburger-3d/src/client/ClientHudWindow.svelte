@@ -23,6 +23,10 @@
 		readonly minWidth: number;
 		readonly placement: ClientHudPlacement;
 		readonly title: string;
+		/** Whether this floating window exposes border resize handles. */
+		readonly resizable?: boolean;
+		/** Natural content determines height instead of saved height and the vertical minimum. */
+		readonly fitContentHeight?: boolean;
 		/** Same glyph used by the panel's launcher in the system shortcut dock. */
 		readonly icon: ClientHudIconName;
 		readonly viewport: ClientHudViewport;
@@ -40,6 +44,8 @@
 		minWidth,
 		placement,
 		title,
+		resizable = true,
+		fitContentHeight = false,
 		icon,
 		viewport,
 		focusRevision = 0,
@@ -48,9 +54,19 @@
 		onPlacementChange,
 	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
-	const minimum = $derived({ width: minWidth, height: minHeight });
+	// Dimension binding follows cold content/theme changes and includes the window frame.
+	let measuredHeight = $state(0);
+	const sizedPlacement = $derived(
+		fitContentHeight
+			? { ...placement, preferredHeight: measuredHeight }
+			: placement,
+	);
+	const minimum = $derived({
+		width: minWidth,
+		height: fitContentHeight ? 0 : minHeight,
+	});
 	const resolved = $derived(
-		resolveClientHudPlacement(placement, viewport, minimum),
+		resolveClientHudPlacement(sizedPlacement, viewport, minimum),
 	);
 	let cancelPointerGesture: (() => void) | null = null;
 	let escapeContext: EscapeContextHandle | null = null;
@@ -101,8 +117,8 @@
 		const start = resolved;
 		const startViewport = viewport;
 		const preferred = {
-			width: placement.preferredWidth,
-			height: placement.preferredHeight,
+			width: sizedPlacement.preferredWidth,
+			height: sizedPlacement.preferredHeight,
 		};
 		cancelPointerGesture?.();
 		cancelPointerGesture = trackPointerGesture(
@@ -159,13 +175,15 @@
 	<section
 		class="hud-window ui-panel"
 		bind:this={element}
+		bind:offsetHeight={measuredHeight}
 		hidden={!visible}
 		inert={!visible}
 		style:display={visible ? undefined : "none"}
 		style:left={`${resolved.left}px`}
 		style:top={`${resolved.top}px`}
 		style:width={`${resolved.width}px`}
-		style:height={`${resolved.height}px`}
+		style:height={fitContentHeight ? undefined : `${resolved.height}px`}
+		style:max-height={fitContentHeight ? `${viewport.height}px` : undefined}
 		style:z-index={CLIENT_UI_LAYERS.windowBase + depth}
 		aria-label={title}
 		onpointerdowncapture={focusWindow}
@@ -189,7 +207,10 @@
 			>
 		</header>
 		<div class="hud-window-content">{@render children()}</div>
-		<ResizeBorders onresize={beginResize} axes="both" />
+		{#if resizable}<ResizeBorders
+				onresize={beginResize}
+				axes={fitContentHeight ? "horizontal" : "both"}
+			/>{/if}
 	</section>
 {/if}
 

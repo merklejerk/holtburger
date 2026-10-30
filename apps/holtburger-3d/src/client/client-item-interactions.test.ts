@@ -155,6 +155,7 @@ async function fixture() {
 			emit("client-item-use-target-result", {
 				sequence: state.sequence,
 				eligible,
+				lockpickSuccessPercent: null,
 			});
 		},
 		emit,
@@ -180,6 +181,7 @@ describe("shared frontend item interaction flow", () => {
 		f.emit("client-item-use-target-result", {
 			sequence: cancelled.sequence,
 			eligible: true,
+			lockpickSuccessPercent: null,
 		});
 		expect(receive).not.toHaveBeenCalled();
 
@@ -198,6 +200,7 @@ describe("shared frontend item interaction flow", () => {
 		f.emit("client-item-use-target-result", {
 			sequence: removed.sequence,
 			eligible: true,
+			lockpickSuccessPercent: null,
 		});
 		expect(f.interactions.snapshot().kind).toBe("idle");
 		expect(receive).not.toHaveBeenCalled();
@@ -215,6 +218,7 @@ describe("shared frontend item interaction flow", () => {
 		f.emit("client-item-use-target-result", {
 			sequence: first.sequence,
 			eligible: false,
+			lockpickSuccessPercent: null,
 		});
 		expect(receive).toHaveBeenLastCalledWith(false);
 		const read = f.lifecycle.entities.read();
@@ -239,11 +243,13 @@ describe("shared frontend item interaction flow", () => {
 		f.emit("client-item-use-target-result", {
 			sequence: first.sequence,
 			eligible: true,
+			lockpickSuccessPercent: null,
 		});
 		expect(receive).not.toHaveBeenCalled();
 		f.emit("client-item-use-target-result", {
 			sequence: refreshed.sequence,
 			eligible: true,
+			lockpickSuccessPercent: null,
 		});
 		expect(receive).toHaveBeenCalledExactlyOnceWith(true);
 		stop();
@@ -251,6 +257,7 @@ describe("shared frontend item interaction flow", () => {
 		f.emit("client-item-use-target-result", {
 			sequence: refreshed.sequence,
 			eligible: false,
+			lockpickSuccessPercent: null,
 		});
 		expect(receive).not.toHaveBeenCalled();
 		expect(f.submit).not.toHaveBeenCalled();
@@ -691,6 +698,7 @@ describe("shared frontend item interaction flow", () => {
 		f.emit("client-item-use-target-result", {
 			sequence: pending.sequence,
 			eligible: true,
+			lockpickSuccessPercent: null,
 		});
 		expect(f.interactions.snapshot().kind).toBe("idle");
 		expect(f.submit).not.toHaveBeenCalled();
@@ -751,6 +759,7 @@ describe("shared frontend item interaction flow", () => {
 		f.emit("client-item-use-target-result", {
 			sequence: first.sequence,
 			eligible: true,
+			lockpickSuccessPercent: null,
 		});
 		expect(f.interactions.snapshot()).toMatchObject({
 			considered: { target: 1, eligibility: "pending" },
@@ -758,6 +767,7 @@ describe("shared frontend item interaction flow", () => {
 		f.emit("client-item-use-target-result", {
 			sequence: second.sequence,
 			eligible: false,
+			lockpickSuccessPercent: null,
 		});
 		expect(f.interactions.snapshot()).toMatchObject({
 			considered: { target: 1, eligibility: "ineligible" },
@@ -766,6 +776,7 @@ describe("shared frontend item interaction flow", () => {
 		f.emit("client-item-use-target-result", {
 			sequence: second.sequence,
 			eligible: true,
+			lockpickSuccessPercent: null,
 		});
 		expect(f.interactions.snapshot()).toMatchObject({ considered: null });
 		expect(f.submit).not.toHaveBeenCalled();

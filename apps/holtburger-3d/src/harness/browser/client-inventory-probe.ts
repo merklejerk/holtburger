@@ -12,7 +12,7 @@ import type { ClientInputConfiguration } from "../../lib/input/input-contract";
 import { formatInputBindings } from "../../lib/input/input-presentation";
 
 /** Browser-only fixture record; wire delivery still passes through the real session decoder. */
-function item(
+export function inventoryFixtureItem(
 	guid: number,
 	overrides: Partial<ClientEntityFacts> = {},
 ): ClientEntityFacts {
@@ -24,6 +24,8 @@ function item(
 		canReceiveGive: false,
 		canTrade: false,
 		canOfferTrade: false,
+		lockTool: null,
+		isLocked: null,
 		salvage: { kind: "ineligible", reason: "Fixture item cannot be salvaged." },
 		description: {
 			kind: "known",
@@ -140,7 +142,7 @@ export async function probeClientInventory(options: {
 		};
 	};
 	const owned = (guid: number, parentGuid: number, index: number) =>
-		item(guid, {
+		inventoryFixtureItem(guid, {
 			ownedByPlayer: true,
 			location: {
 				kind: "contained",
@@ -151,7 +153,7 @@ export async function probeClientInventory(options: {
 			scenePlacement: "unavailable",
 		});
 	let records = [
-		item(1, {
+		inventoryFixtureItem(1, {
 			description: {
 				kind: "known",
 				name: "Player",
@@ -180,7 +182,7 @@ export async function probeClientInventory(options: {
 				itemCapacity: 24,
 			},
 		}),
-		item(7, {
+		inventoryFixtureItem(7, {
 			description: {
 				kind: "known",
 				name: "Creature",

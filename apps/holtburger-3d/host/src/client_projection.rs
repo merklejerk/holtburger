@@ -1372,6 +1372,13 @@ pub enum ClientHostEvent {
     SalvageResult(holtburger_core::client::salvage::SalvageSubmitResult),
     /// Correlated semantic item-use outcome.
     ItemUseResult(holtburger_core::client::item_use::ItemUseResult),
+    ItemUseFinished(holtburger_core::client::item_use::ItemUseFinished),
+    LockedTarget {
+        /// Original guarded direct-use receipt identity.
+        sequence: u32,
+        target: Guid,
+        name: String,
+    },
     ItemUseTargetResult(holtburger_core::client::item_use::ItemUseTargetResult),
     /// Core-derived inventory preview, correlated with the active gesture.
     InventoryPreview(holtburger_core::client::inventory_plan::InventoryPreviewResult),
@@ -1767,6 +1774,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::SalvagePreview(result) => Some(ClientHostEvent::SalvagePreview(result)),
         ClientViewEvent::SalvageSubmitted(result) => Some(ClientHostEvent::SalvageResult(result)),
         ClientViewEvent::ItemUseResult(result) => Some(ClientHostEvent::ItemUseResult(result)),
+        ClientViewEvent::ItemUseFinished(result) => Some(ClientHostEvent::ItemUseFinished(result)),
         ClientViewEvent::ItemUseTargetResult(result) => {
             Some(ClientHostEvent::ItemUseTargetResult(result))
         }
@@ -1882,6 +1890,19 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
                 vitals: project_vitals(&vitals),
             })
         }
+        ClientViewEvent::ActionResult {
+            reason:
+                ActionResultReason::Locked {
+                    target,
+                    name,
+                    sequence,
+                },
+            ..
+        } => Some(ClientHostEvent::LockedTarget {
+            target,
+            name,
+            sequence,
+        }),
         ClientViewEvent::ActionResult { reason, .. } => {
             if let ActionResultReason::Weenie(error, _) = &reason
                 && matches!(

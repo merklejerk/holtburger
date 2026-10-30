@@ -1,5 +1,6 @@
 //! Operation-specific completion routing over the runtime's single admission owner.
 
+use super::item_use::{ItemUseCompletion, ItemUseFinished};
 use super::{BUSY_OPERATION_TIMEOUT, ClientRuntime, PendingBusyOperation, PendingOperation};
 use crate::{ActionResultReason, ActionResultSource, BusyOperationKind, BusyOperationResult};
 use holtburger_protocol::errors::WeenieError;
@@ -10,6 +11,7 @@ impl ClientRuntime {
     pub(super) fn clear_busy_operation(&mut self) {
         if let Some(pending) = self.active_busy_operation.take() {
             self.emit_pending_abort(&pending.operation, "Interaction ended".into());
+            self.emit_item_use_finished(&pending.operation, ItemUseCompletion::Aborted);
             if matches!(
                 pending.operation,
                 PendingOperation::Housing(_) | PendingOperation::HousingManagement(_)
@@ -84,6 +86,16 @@ impl ClientRuntime {
             } else {
                 (error, None)
             };
+            self.emit_item_use_finished(
+                &pending.operation,
+                ItemUseCompletion::Completed {
+                    error: resolved_error,
+                    message: crate::errors::format_weenie_error(
+                        resolved_error,
+                        parameter.as_deref(),
+                    ),
+                },
+            );
             self.publish_busy_completion(
                 pending.operation.kind(),
                 BusyOperationResult::Completed {
@@ -99,6 +111,17 @@ impl ClientRuntime {
             );
         }
         Ok(())
+    }
+
+    fn emit_item_use_finished(&self, operation: &PendingOperation, outcome: ItemUseCompletion) {
+        if let PendingOperation::GuardedUse { sequence, .. } = operation {
+            let _ = self
+                .client_view_event_tx
+                .send(super::ClientViewEvent::ItemUseFinished(ItemUseFinished {
+                    sequence: *sequence,
+                    outcome,
+                }));
+        }
     }
 
     /// One publication path for terminal operations; modules publish their own receipts first.
@@ -128,6 +151,7 @@ impl ClientRuntime {
             }
             PendingOperation::Use { .. }
             | PendingOperation::UseWithTarget { .. }
+            | PendingOperation::GuardedUse { .. }
             | PendingOperation::SpellCast { .. } => {}
         }
     }
@@ -138,6 +162,7 @@ impl ClientRuntime {
             .take_if(|pending| now >= pending.deadline)
         {
             self.emit_pending_abort(&pending.operation, "Transaction timed out".into());
+            self.emit_item_use_finished(&pending.operation, ItemUseCompletion::TimedOut);
             self.publish_busy_completion(pending.operation.kind(), BusyOperationResult::TimedOut);
         }
     }
@@ -145,6 +170,66 @@ impl ClientRuntime {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn guarded_receipts_resolve_errors_and_retire_exactly_once() {
+        use holtburger_common::Guid;
+        use holtburger_world::item_use::ItemUseIntent;
+        for terminal in ["completion", "timeout", "abort"] {
+            let mut client =
+                super::super::builder::build_test_client(super::super::ClientState::InWorld);
+            let mut events = client.subscribe_client_view_events();
+            client.arm_busy_operation(PendingOperation::GuardedUse {
+                sequence: 42,
+                spell_target: None,
+                intent: ItemUseIntent::Targeted {
+                    source: Guid(2),
+                    target: Guid(3),
+                },
+            });
+            client.note_busy_error(WeenieError::KeyDoesntFitThisLock, None);
+            match terminal {
+                "completion" => client
+                    .finish_busy_operation_from_use_done(WeenieError::None)
+                    .await
+                    .unwrap(),
+                "timeout" => client.expire_busy_operation(Instant::now() + BUSY_OPERATION_TIMEOUT),
+                "abort" => client.clear_busy_operation(),
+                _ => unreachable!(),
+            }
+            client
+                .finish_busy_operation_from_use_done(WeenieError::None)
+                .await
+                .unwrap();
+            let receipts: Vec<_> = std::iter::from_fn(|| events.try_recv().ok())
+                .filter_map(|event| {
+                    if let super::super::ClientViewEvent::ItemUseFinished(result) = event {
+                        Some(result)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(receipts.len(), 1);
+            assert_eq!(receipts[0].sequence, 42);
+            assert_eq!(
+                receipts[0].outcome,
+                match terminal {
+                    "completion" => ItemUseCompletion::Completed {
+                        error: WeenieError::KeyDoesntFitThisLock,
+                        message: crate::errors::format_weenie_error(
+                            WeenieError::KeyDoesntFitThisLock,
+                            None
+                        ),
+                    },
+                    "timeout" => ItemUseCompletion::TimedOut,
+                    "abort" => ItemUseCompletion::Aborted,
+                    _ => unreachable!(),
+                }
+            );
+            assert!(client.active_busy_operation.is_none());
+        }
+    }
+
     use super::*;
     use crate::{ClientExitCause, ClientViewEvent};
     use holtburger_common::Guid;
@@ -156,6 +241,14 @@ mod tests {
                 for operation in [
                     PendingOperation::SpellCast { target },
                     PendingOperation::UseWithTarget {
+                        spell_target: target,
+                    },
+                    PendingOperation::GuardedUse {
+                        sequence: 42,
+                        intent: holtburger_world::item_use::ItemUseIntent::Targeted {
+                            source: Guid(100),
+                            target: Guid(2),
+                        },
                         spell_target: target,
                     },
                 ] {

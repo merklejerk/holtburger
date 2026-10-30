@@ -458,6 +458,15 @@ pub enum ActionResultReason {
         error: WeenieError,
     },
     Character(CharacterError),
+    /// Matched lock rejection for a pending direct use; broadcast evidence is best effort.
+    Locked {
+        /// Guarded direct-use receipt identity; consumers wait for this use to finish.
+        sequence: u32,
+        /// Matched pending direct-use identity, never inferred from current selection.
+        target: Guid,
+        /// Captured label used by shared feedback formatting.
+        name: String,
+    },
     General(String),
     Transport(String),
     /// Equipment requests affected by a local or attributed server refusal.
@@ -1044,6 +1053,8 @@ pub enum ClientViewEvent {
     SalvageSubmitted(super::salvage::SalvageSubmitResult),
     /// Correlated guarded-use evaluation or dispatch result.
     ItemUseResult(super::item_use::ItemUseResult),
+    /// Terminal receipt for a guarded individual use.
+    ItemUseFinished(super::item_use::ItemUseFinished),
     /// Read-only considered-target compatibility result.
     ItemUseTargetResult(super::item_use::ItemUseTargetResult),
     /// Shared inventory interpretation for one frontend drag target.

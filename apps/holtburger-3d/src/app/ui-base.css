@@ -96,7 +96,7 @@
 		--ui-spell-scrollbar-thumb-opacity: 18%;
 		--ui-spell-scrollbar-hover-track-opacity: 25%;
 		--ui-spell-scrollbar-hover-thumb-opacity: 70%;
-		/* Auto-attack reticle paint and motion; SVG silhouette stays component-owned. */
+		/* Combat-target reticle paint and motion; SVG silhouette stays component-owned. */
 		--ui-combat-reticle-radius: 28px;
 		--ui-combat-reticle-pulse-travel: 6px;
 		--ui-combat-reticle-size: 28px;

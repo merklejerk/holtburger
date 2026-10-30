@@ -692,6 +692,8 @@ pub struct ClientCurrentState {
     pub combat_mode: ClientCombatMode,
     /// Desired targeted combat and shared repeat lifecycle.
     pub combat: ClientCombatStatusWire,
+    /// Non-self recipient retained by the current spell operation until completion or retirement.
+    pub spell_cast_target: Option<Guid>,
     /// Accepted local-player entity response override.
     pub entity_collision_disabled: bool,
     /// Complete renderer-facing lifecycle level.
@@ -1411,6 +1413,10 @@ pub enum ClientHostEvent {
         mode: ClientCombatMode,
     },
     CombatStatusUpdated(ClientCombatStatusWire),
+    /// Complete replacement for the pending spell operation's non-self recipient.
+    SpellCastTargetUpdated {
+        target: Option<Guid>,
+    },
     PlayerSpellsUpdated {
         spell_ids: Vec<u32>,
     },
@@ -1653,6 +1659,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             gameplay_preferences: snapshot.character_options.map(Into::into),
             combat_mode: snapshot.combat_mode.into(),
             combat: snapshot.combat.into(),
+            spell_cast_target: snapshot.spell_cast_target,
             lifecycle: (&snapshot.lifecycle).into(),
             connection: snapshot.connection,
             entity_collision_disabled: snapshot.entity_collision_disabled,
@@ -1822,6 +1829,9 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         }),
         ClientViewEvent::CombatModeUpdated { mode } => {
             Some(ClientHostEvent::CombatModeUpdated { mode: mode.into() })
+        }
+        ClientViewEvent::SpellCastTargetUpdated { target } => {
+            Some(ClientHostEvent::SpellCastTargetUpdated { target })
         }
         ClientViewEvent::CombatStatusUpdated(status) => {
             Some(ClientHostEvent::CombatStatusUpdated(status.into()))
@@ -2237,6 +2247,25 @@ mod tests {
         CreatureRatings, InspectionContext, InspectionSupplement, ObjectInspection,
         ObjectInspectionOutcome, ObjectInspectionResult,
     };
+
+    #[test]
+    fn spell_cast_target_projects_replacement_and_terminal_levels() {
+        for target in [Some(Guid(42)), None] {
+            let projected =
+                project_client_event(ClientViewEvent::SpellCastTargetUpdated { target });
+            let Some(ClientHostEvent::SpellCastTargetUpdated { target: actual }) = projected else {
+                panic!("Spell cast target must survive host projection");
+            };
+            assert_eq!(actual, target);
+            let wire = crate::protocol::HostEvent::ClientSpellCastTargetUpdated { target: actual };
+            let value = serde_json::to_value(wire).unwrap();
+            assert_eq!(value["event"], "client-spell-cast-target-updated");
+            assert_eq!(
+                value["payload"]["target"],
+                serde_json::to_value(target).unwrap()
+            );
+        }
+    }
 
     #[test]
     fn npc_tell_projection_retains_reply_identity_and_unknown_category() {

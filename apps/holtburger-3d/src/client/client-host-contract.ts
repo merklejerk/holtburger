@@ -131,6 +131,11 @@ export function decodeClientCombatMode(value: unknown): {
 }
 
 const guid = z.number().int().nonnegative().max(0xffff_ffff);
+/** Replacement for the core-resolved non-self recipient of the pending spell operation. */
+export const spellCastTargetSchema = z
+	.object({ target: guid.positive().nullable() })
+	.strict();
+
 const finiteNumber = z.number().finite();
 
 /** Server-authored text shared by notice and popup payloads, preserved verbatim. */
@@ -561,6 +566,7 @@ const currentStateSchema = z
 		friendsPreferences: friendsPreferencesSchema.nullable(),
 		combatMode: combatModeSchema,
 		combat: combatStatusSchema,
+		spellCastTarget: spellCastTargetSchema.shape.target,
 		vitals: z.array(vitalSchema),
 		characterSheet: characterSheetSchema.nullable(),
 		trade: tradeSnapshotSchema,

@@ -605,6 +605,8 @@ pub struct ClientApplicationSnapshot {
     pub combat_mode: CombatMode,
     /// Shared desired attack and server-repeat lifecycle.
     pub combat: ClientCombatStatus,
+    /// Resolved non-self recipient of the pending spell cast, absent for self/untargeted casts.
+    pub spell_cast_target: Option<Guid>,
     /// Complete shell-facing lifecycle level.
     pub lifecycle: ClientLifecycleState,
     /// Accepted local-player debug override; never changes server physics flags.
@@ -1091,6 +1093,11 @@ pub enum ClientViewEvent {
     },
     ActiveCharacterConfirmationUpdated {
         confirmation: Option<ActiveCharacterConfirmation>,
+    },
+    /// Replacement level derived from the current spell operation, cleared on every terminal path.
+    SpellCastTargetUpdated {
+        /// Resolved non-self recipient; never inferred from current selection.
+        target: Option<Guid>,
     },
     BusyStateUpdated {
         busy: Option<BusyOperationKind>,

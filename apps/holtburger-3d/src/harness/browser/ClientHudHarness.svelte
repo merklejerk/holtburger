@@ -328,6 +328,23 @@
 	}
 	async function probeBindings() {
 		const targeting = await probeClientTargeting(keyboard);
+		const previousSpellTarget = interactionLifecycle.state().spellCastTarget;
+		try {
+			emitInteractionEvent("client-spell-cast-target-updated", { target: 7 });
+			if (interactionLifecycle.state().spellCastTarget !== 7)
+				throw new Error(
+					"Browser session did not retain the accepted spell target.",
+				);
+			emitInteractionEvent("client-spell-cast-target-updated", {
+				target: null,
+			});
+			if (interactionLifecycle.state().spellCastTarget !== null)
+				throw new Error("Browser session retained a completed cast target.");
+		} finally {
+			emitInteractionEvent("client-spell-cast-target-updated", {
+				target: previousSpellTarget,
+			});
+		}
 		const previous = userSettings.input;
 		emitInteractionEvent("client-entity-facts-changed", {
 			projectileSupply: null,
@@ -361,7 +378,7 @@
 						(command) => command.command === "submit_client_item_use",
 					).length,
 			});
-			return { ...bindings, targeting };
+			return { ...bindings, targeting, spellCastTargetLifecycle: true };
 		} finally {
 			fixture.destroy();
 			changeInput(previous);
@@ -1492,6 +1509,7 @@
 			friendsPreferences: null,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
+			spellCastTarget: null,
 			vitals: [],
 			characterSheet: null,
 			trade: { trade: null, pending_items: [] },

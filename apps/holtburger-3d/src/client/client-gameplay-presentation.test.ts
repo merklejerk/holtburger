@@ -752,29 +752,7 @@ describe("ClientGameplayPresentation", () => {
 			const view = runtime.primaryViews.at(-1);
 			if (view === undefined)
 				throw new Error("Fixture has no presented camera.");
-			const origin = createLandblockWorldOrigin(
-				view.camera.placement.landblockId,
-			);
-			const forward = rotateRenderVector(
-				new Vec3(0, 0, -10),
-				view.camera.placement.rotation,
-			);
-			const localToLandblock = Mat4.identity();
-			localToLandblock.m41 =
-				view.camera.placement.position.x - origin.x + forward.x;
-			localToLandblock.m42 = view.camera.placement.position.y + forward.y;
-			localToLandblock.m43 =
-				view.camera.placement.position.z - origin.z + forward.z;
-			runtime.entityFrame = {
-				guid: 7,
-				localBounds: new AABB3(new Vec3(-1, -1, -1), new Vec3(1, 1, 1)),
-				placement: {
-					envCellId: null,
-					landblockId: view.camera.placement.landblockId,
-					localToLandblock,
-					scope: { kind: "outdoor" },
-				},
-			};
+			runtime.entityFrame = entityFrameInCamera(view, 7, new Vec3(0, 0, -10));
 			expect(presentation.readCombatTargetFrame()?.x).toBeCloseTo(
 				canvas.clientWidth / 2,
 			);
@@ -787,22 +765,7 @@ describe("ClientGameplayPresentation", () => {
 			presentation.setSelectedEntityGuid(null);
 			expect(presentation.readCombatTargetFrame()).toEqual(initial);
 
-			const replacementOffset = rotateRenderVector(
-				new Vec3(2, 0, 0),
-				view.camera.placement.rotation,
-			);
-			const replacementPlacement = localToLandblock.clone();
-			replacementPlacement.m41 += replacementOffset.x;
-			replacementPlacement.m42 += replacementOffset.y;
-			replacementPlacement.m43 += replacementOffset.z;
-			runtime.entityFrame = {
-				...runtime.entityFrame,
-				guid: 9,
-				placement: {
-					...runtime.entityFrame.placement,
-					localToLandblock: replacementPlacement,
-				},
-			};
+			runtime.entityFrame = entityFrameInCamera(view, 9, new Vec3(2, 0, -10));
 			transport.emit("client-combat-status-updated", {
 				...engagement,
 				desired: { ...engagement.desired, target: 9 },
@@ -826,6 +789,61 @@ describe("ClientGameplayPresentation", () => {
 				state: "retiring",
 				refill: null,
 			});
+			expect(presentation.readCombatTargetFrame()).toBeNull();
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+		}
+	});
+
+	it("recovers a casting recipient, follows accepted cast replacement, and clears after completion", async () => {
+		const transport = new FakeClientTransport({
+			...currentState(0x0101_0001),
+			spellCastTarget: 7,
+		});
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const canvas = fakeCanvas();
+		const presentation = new ClientGameplayPresentation({
+			canvas,
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+		});
+		try {
+			await presentation.start();
+			await vi.waitFor(() =>
+				expect(presentation.frame(1000).rendered).toBe(true),
+			);
+			const view = runtime.primaryViews.at(-1);
+			if (view === undefined)
+				throw new Error("Fixture has no presented camera.");
+			runtime.entityFrame = entityFrameInCamera(view, 7, new Vec3(0, 0, -10));
+			expect(presentation.readCombatTargetFrame()?.x).toBeCloseTo(
+				canvas.clientWidth / 2,
+			);
+			presentation.setSelectedEntityGuid(8);
+			expect(presentation.readCombatTargetFrame()).not.toBeNull();
+			transport.emit("client-spell-cast-target-updated", { target: null });
+			expect(presentation.readCombatTargetFrame()).toBeNull();
+			transport.emit("client-spell-cast-target-updated", { target: 7 });
+			expect(presentation.readCombatTargetFrame()).not.toBeNull();
+			// A non-self spell recipient takes priority over any retained auto-attack intent.
+			transport.emit("client-combat-status-updated", {
+				desired: {
+					target: 9,
+					profile: { kind: "melee", height: "medium", power: 0.5 },
+				},
+				state: "active",
+				refill: null,
+			});
+			expect(presentation.readCombatTargetFrame()).not.toBeNull();
+			transport.emit("client-spell-cast-target-updated", { target: null });
+			expect(presentation.readCombatTargetFrame()).toBeNull();
+			runtime.entityFrame = { ...runtime.entityFrame, guid: 9 };
+			expect(presentation.readCombatTargetFrame()).not.toBeNull();
+			// A replacement snapshot is authoritative, including an absent cast and auto-attack.
+			transport.emit("client-current-state", currentState(0x0101_0001));
 			expect(presentation.readCombatTargetFrame()).toBeNull();
 		} finally {
 			await presentation.destroy();
@@ -1959,6 +1977,33 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 	}
 }
 
+/** Place a rigid entity relative to the fixture's actual presented camera. */
+function entityFrameInCamera(
+	view: PrimaryCameraView,
+	guid: number,
+	cameraOffset: Vec3,
+): DynamicEntityPresentationFrame {
+	const origin = createLandblockWorldOrigin(view.camera.placement.landblockId);
+	const offset = rotateRenderVector(
+		cameraOffset,
+		view.camera.placement.rotation,
+	);
+	const localToLandblock = Mat4.identity();
+	localToLandblock.m41 = view.camera.placement.position.x - origin.x + offset.x;
+	localToLandblock.m42 = view.camera.placement.position.y + offset.y;
+	localToLandblock.m43 = view.camera.placement.position.z - origin.z + offset.z;
+	return {
+		guid,
+		localBounds: new AABB3(new Vec3(-1, -1, -1), new Vec3(1, 1, 1)),
+		placement: {
+			envCellId: null,
+			landblockId: view.camera.placement.landblockId,
+			localToLandblock,
+			scope: { kind: "outdoor" },
+		},
+	};
+}
+
 function fakeOwner(
 	runtime: FakePresentationRuntime,
 	region: ActiveRegionSource,
@@ -2089,6 +2134,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		friendsPreferences: null,
 		combatMode: "peace",
 		combat: { desired: null, state: "idle", refill: null },
+		spellCastTarget: null,
 		vitals: [],
 		characterMotion: null,
 		activeConfirmation: null,

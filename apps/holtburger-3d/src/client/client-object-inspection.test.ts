@@ -75,6 +75,7 @@ class FakeInspectionSession {
 			gameplayPreferences: null,
 			combatMode: "peace",
 			combat: { desired: null, state: "idle", refill: null },
+			spellCastTarget: null,
 			vitals: [],
 			characterMotion: null,
 			activeConfirmation: null,

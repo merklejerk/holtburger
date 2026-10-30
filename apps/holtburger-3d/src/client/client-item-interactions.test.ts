@@ -88,6 +88,7 @@ async function fixture() {
 		friendsPreferences: null,
 		combatMode: "peace",
 		combat: { desired: null, state: "idle", refill: null },
+		spellCastTarget: null,
 		vitals: [],
 		characterSheet: null,
 		trade: { trade: null, pending_items: [] },

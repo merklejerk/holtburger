@@ -268,14 +268,21 @@ physical press, selection, an open panel, or disabled controls.
 | `--ui-option-background`, `--ui-option-border-color`                                                                                                        | Full background and border color for `ui-option` list rows. Rows implemented as `ui-button` use button properties.                    |
 | `--ui-input-background`, `--ui-input-border-color`                                                                                                          | Full background and border color for inputs. Use `::placeholder`, `:disabled`, and `[aria-invalid="true"]` for text and state colors. |
 
-The auto-attack reticle uses `--ui-combat-reticle-*` tokens. `size`, `radius`,
+The combat-target reticle uses `--ui-combat-reticle-*` tokens. `size`, `radius`,
 `pulse-travel`, and `glow-blur` are CSS lengths; `orbit-duration` and
 `pulse-duration` are positive CSS times. `fill-color`, `outline-color`,
 `border-color`, and `glow-color` accept CSS colors. `outline-width` and
 `border-width` are unitless stroke widths in the SVG's 24-unit viewBox and scale
 with artwork size. These tokens inherit from the theme and update the mounted
 reticle immediately. The four inward-pointing silhouettes and target placement
-remain component-owned. Reduced-motion preferences disable both animations.
+remain component-owned. A pending non-self spell cast, including a known
+spell-bearing targeted item use, takes priority over the auto-attack target.
+The casting marker follows the operation through recovery until `UseDone`, send
+failure, the existing 10-second operation timeout, or lifecycle retirement.
+Failure messages and target death alone do not retire the operation; timeout
+withdraws local ownership without asserting that the server cancelled the cast.
+Self and untargeted casts provide no spell marker. Clearing the cast reveals any
+still-active auto-attack target. Reduced-motion preferences disable both animations.
 
 The Enchantments window shares the spell panel's padding, row, filter, and color
 tokens. Its affected-stat headings use `--ui-enchantments-heading-margin`,

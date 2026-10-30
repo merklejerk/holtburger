@@ -127,7 +127,7 @@ impl ClientRuntime {
                 self.emit_housing_management_abort(execution, message)
             }
             PendingOperation::Use { .. }
-            | PendingOperation::UseWithTarget
+            | PendingOperation::UseWithTarget { .. }
             | PendingOperation::SpellCast { .. } => {}
         }
     }
@@ -149,10 +149,65 @@ mod tests {
     use crate::{ClientExitCause, ClientViewEvent};
     use holtburger_common::Guid;
 
+    #[tokio::test]
+    async fn spell_target_level_matches_snapshot_and_all_operation_endings() {
+        for target in [None, Some(Guid::NULL), Some(Guid(1)), Some(Guid(2))] {
+            for ending in ["success", "fizzle", "timeout", "disconnect", "clear"] {
+                for operation in [
+                    PendingOperation::SpellCast { target },
+                    PendingOperation::UseWithTarget {
+                        spell_target: target,
+                    },
+                ] {
+                    let mut client = super::super::builder::build_test_client(
+                        super::super::ClientState::InWorld,
+                    );
+                    client.world.player.guid = Guid(1);
+                    let mut events = client.subscribe_client_view_events();
+                    assert!(client.arm_busy_operation(operation));
+                    let expected = target.filter(|guid| *guid == Guid(2));
+                    assert_eq!(client.application_snapshot().spell_cast_target, expected);
+                    // A refused overlapping operation cannot replace the retained recipient.
+                    assert!(!client.arm_busy_operation(PendingOperation::SpellCast {
+                        target: Some(Guid(3))
+                    }));
+                    assert_eq!(client.application_snapshot().spell_cast_target, expected);
+                    match ending {
+                        "success" => client
+                            .finish_busy_operation_from_use_done(WeenieError::None)
+                            .await
+                            .unwrap(),
+                        "fizzle" => client
+                            .finish_busy_operation_from_use_done(WeenieError::YourSpellFizzled)
+                            .await
+                            .unwrap(),
+                        "timeout" => {
+                            client.expire_busy_operation(Instant::now() + BUSY_OPERATION_TIMEOUT)
+                        }
+                        "disconnect" => client.set_exit_cause(ClientExitCause::ServerDisconnect),
+                        "clear" => client.clear_busy_operation(),
+                        _ => unreachable!(),
+                    }
+                    assert_eq!(client.application_snapshot().spell_cast_target, None);
+                    let targets: Vec<_> = std::iter::from_fn(|| events.try_recv().ok())
+                        .filter_map(|event| {
+                            if let ClientViewEvent::SpellCastTargetUpdated { target } = event {
+                                Some(target)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    assert_eq!(targets, vec![expected, None], "{ending}");
+                }
+            }
+        }
+    }
+
     fn ordinary_operations() -> [PendingOperation; 3] {
         [
             PendingOperation::Use { source: Guid(100) },
-            PendingOperation::UseWithTarget,
+            PendingOperation::UseWithTarget { spell_target: None },
             PendingOperation::SpellCast {
                 target: Some(Guid(200)),
             },

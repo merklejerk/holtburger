@@ -589,7 +589,9 @@ export class ClientGameplayPresentation {
 	/** Pull the combat bound and presented camera without publishing frame-hot UI state. */
 	readCombatTargetFrame(): ClientEntityScreenPoint | null {
 		const view = this.#lastPrimaryView;
-		const target = this.#session.state().combat.desired?.target ?? null;
+		const { spellCastTarget, combat } = this.#session.state();
+		// A pending non-self cast takes presentation priority without changing auto-attack intent.
+		const target = spellCastTarget ?? combat.desired?.target ?? null;
 		const state =
 			target === null
 				? null

@@ -157,13 +157,25 @@ impl ClientRuntime {
         if let ItemUseIntent::Direct { source, .. } = intent {
             self.prepare_container_use(*source).await?;
         }
+        // ACE Player_Use.cs:60-89 routes spell-bearing targeted item use through spell casting.
+        let targeted_spell = match intent {
+            ItemUseIntent::Targeted { source, target } => self
+                .world
+                .entities
+                .get(*source)
+                .and_then(|item| item.spell())
+                .map(|spell| (*target, spell.0)),
+            ItemUseIntent::Direct { .. } => None,
+        };
         let (operation, action) = match intent {
             ItemUseIntent::Direct { source, .. } => (
                 super::PendingOperation::Use { source: *source },
                 GameAction::Use(Box::new(UseActionData { guid: *source })),
             ),
             ItemUseIntent::Targeted { source, target } => (
-                super::PendingOperation::UseWithTarget,
+                super::PendingOperation::UseWithTarget {
+                    spell_target: targeted_spell.map(|(target, _)| target),
+                },
                 GameAction::UseWithTarget(Box::new(UseWithTargetActionData {
                     item_guid: *source,
                     target_guid: *target,
@@ -179,16 +191,9 @@ impl ClientRuntime {
             self.clear_busy_operation();
             return Err(error);
         }
-        // ACE Player_Use.cs:60-89 turns a spell-bearing UseWithTarget into a targeted cast.
-        // Record only after dispatch succeeds, just as for an explicit spell request.
-        if let ItemUseIntent::Targeted { source, target } = intent
-            && let Some(spell) = self
-                .world
-                .entities
-                .get(*source)
-                .and_then(|item| item.spell())
-        {
-            self.record_sent_targeted_spell(*target, spell.0);
+        // Attribute only successfully dispatched casts, using the same identity admitted above.
+        if let Some((target, spell_id)) = targeted_spell {
+            self.record_sent_targeted_spell(target, spell_id);
         }
         if let ItemUseIntent::Direct { source, .. } = intent
             && let Some(feedback) =

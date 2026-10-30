@@ -7,6 +7,7 @@
 	import LayoutControls, {
 		type LayoutMoveInset,
 	} from "../app/LayoutControls.svelte";
+	import type { ResizeEdges } from "../app/resize-edges";
 	import { trackPointerGesture } from "../app/pointer-gesture";
 	import {
 		anchorClientHudPlacement,
@@ -25,10 +26,12 @@
 		readonly snapId?: HudSurfaceId;
 		/** Reserved header space before the unlocked move handle. */
 		readonly moveInset?: LayoutMoveInset;
+		/** Measured content height overrides saved height and permits width-only resizing. */
+		readonly contentHeight?: number;
 		readonly minHeight: number;
 		readonly minWidth: number;
 		readonly placement: ClientHudPlacement;
-		/** Whether unlocked layout editing exposes the bottom-right resize affordance. */
+		/** Whether unlocked layout editing allows dragging the borders to resize. */
 		readonly resizable: boolean;
 		/** Whether the entire HUD rectangle or only explicit descendants participate in hit testing. */
 		readonly contentHitTesting: "surface" | "descendants";
@@ -43,6 +46,7 @@
 		snapId,
 		moveInset,
 		minHeight,
+		contentHeight,
 		minWidth,
 		placement,
 		resizable,
@@ -55,11 +59,18 @@
 		if (snapId === undefined) return;
 		return geometry.register({ id: snapId, readBounds: () => resolved });
 	});
+	// Content owns the vertical extent when supplied; retained user height must not create blank hit area.
+	const sizedPlacement = $derived(
+		contentHeight === undefined
+			? placement
+			: { ...placement, preferredHeight: contentHeight },
+	);
+	const minimum = $derived({
+		width: minWidth,
+		height: contentHeight === undefined ? minHeight : contentHeight,
+	});
 	const resolved = $derived(
-		resolveClientHudPlacement(placement, viewport, {
-			width: minWidth,
-			height: minHeight,
-		}),
+		resolveClientHudPlacement(sizedPlacement, viewport, minimum),
 	);
 	let cancelPointerGesture: (() => void) | null = null;
 	onDestroy(() => cancelPointerGesture?.());
@@ -73,8 +84,8 @@
 		const start = resolved;
 		const startViewport = viewport;
 		const preferred = {
-			width: placement.preferredWidth,
-			height: placement.preferredHeight,
+			width: sizedPlacement.preferredWidth,
+			height: sizedPlacement.preferredHeight,
 		};
 		cancelPointerGesture?.();
 		cancelPointerGesture = trackPointerGesture(
@@ -84,7 +95,7 @@
 				const rectangle = moveClientHudRectangle(
 					start,
 					startViewport,
-					{ width: minWidth, height: minHeight },
+					minimum,
 					preferred,
 					{ x: moved.clientX - startX, y: moved.clientY - startY },
 				);
@@ -106,7 +117,7 @@
 		);
 	}
 
-	function beginResize(event: PointerEvent): void {
+	function beginResize(event: PointerEvent, edges: ResizeEdges): void {
 		if (event.button !== 0) return;
 		event.preventDefault();
 		event.stopPropagation();
@@ -122,9 +133,9 @@
 				const rectangle = resizeClientPanelRectangle(
 					start,
 					startViewport,
-					{ width: minWidth, height: minHeight },
+					minimum,
 					{ x: moved.clientX - startX, y: moved.clientY - startY },
-					{ horizontal: "right", vertical: "bottom" },
+					edges,
 				);
 				onPlacementChange(
 					anchorClientHudPlacement(rectangle, startViewport, {
@@ -156,7 +167,11 @@
 		<LayoutControls
 			{moveInset}
 			{label}
-			{resizable}
+			resize={!resizable
+				? "none"
+				: contentHeight === undefined
+					? "both"
+					: "horizontal"}
 			onmove={beginDrag}
 			onresize={beginResize}
 		/>

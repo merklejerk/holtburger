@@ -930,7 +930,7 @@ export async function probeClientInventory(options: {
 
 	const resize = async (width: number) => {
 		const rect = windowRect();
-		const handle = document.querySelector(".hud-window-resize-left");
+		const handle = document.querySelector(".hud-window .resize-border-left");
 		if (handle === null) throw new Error("Panel resize handle is missing.");
 		handle.dispatchEvent(
 			new PointerEvent("pointerdown", {

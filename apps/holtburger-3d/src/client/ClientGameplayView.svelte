@@ -791,7 +791,7 @@
 		height: 0,
 	});
 	/** Intrinsic character text/bar height, published only when its CSS rows change size. */
-	let characterMinimumHeight = $state(0);
+	let characterContentHeight = $state(0);
 	const minimapViewport = $derived({
 		...viewport,
 		height: Math.max(0, viewport.height - minimapFooterExtent.height),
@@ -1128,6 +1128,10 @@
 			{onClearWaypoint}
 			viewState={minimap}
 			minSize={CLIENT_UI_DEFAULTS.minimap.minSize}
+			resizeBounds={{
+				...minimapViewport,
+				footerWidth: minimapFooterExtent.width,
+			}}
 			resizable={CLIENT_UI_DEFAULTS.minimap.resizable}
 			editable={hudMode === "layout"}
 			onStateChange={updateMinimap}
@@ -1239,10 +1243,8 @@
 			placement={hudLayout.character}
 			editable={hudMode === "layout"}
 			minWidth={CLIENT_UI_DEFAULTS.character.minSize.width}
-			minHeight={Math.max(
-				CLIENT_UI_DEFAULTS.character.minSize.height,
-				characterMinimumHeight,
-			)}
+			minHeight={CLIENT_UI_DEFAULTS.character.minSize.height}
+			contentHeight={characterContentHeight}
 			resizable={CLIENT_UI_DEFAULTS.character.resizable}
 			contentHitTesting="surface"
 			{viewport}
@@ -1250,7 +1252,7 @@
 				changeHudPlacement("character", placement)}
 		>
 			<ClientCharacterHud
-				onMinimumHeightChange={(height) => (characterMinimumHeight = height)}
+				onContentHeightChange={(height) => (characterContentHeight = height)}
 				{playerName}
 				{worldName}
 				{vitals}

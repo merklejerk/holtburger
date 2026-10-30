@@ -3056,7 +3056,9 @@
 				if (element === null) throw new Error("Missing party HUD grid");
 				return element;
 			};
-			const resize = panel().querySelector<HTMLButtonElement>(".layout-resize");
+			const resize = panel().querySelector<HTMLElement>(
+				".resize-border-bottom-right",
+			);
 			if (resize === null) throw new Error("Missing party HUD resize handle");
 			const start = userSettings.hudLayout.partyHud;
 			const bounds = resize.getBoundingClientRect();

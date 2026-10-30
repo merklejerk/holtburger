@@ -1,3 +1,4 @@
+import type { ResizeEdges } from "./resize-edges";
 import type { MapEntity } from "../lib/game/map/map-blips";
 import type { MapWaypointDisplay } from "../lib/game/map/map-waypoint";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
@@ -46,6 +47,69 @@ export interface MinimapState {
 	readonly top: number;
 	readonly size: number;
 	readonly viewDiameters: MinimapViewDiameters;
+}
+
+/** Client-shell limits for the disc; viewport height already reserves the footer's height. */
+export interface MinimapResizeBounds {
+	/** Usable horizontal viewport extent in CSS pixels. */
+	readonly width: number;
+	/** Usable vertical disc extent in CSS pixels. */
+	readonly height: number;
+	/** Centered readout width, which can extend beyond a small disc. */
+	readonly footerWidth: number;
+}
+
+/** Resize the square map, keeping the opposing borders stationary on the dragged axes. */
+export function resizeMinimapBounds(
+	start: Pick<MinimapState, "left" | "top" | "size">,
+	minimumSize: number,
+	deltaX: number,
+	deltaY: number,
+	edges: ResizeEdges,
+	bounds: MinimapResizeBounds | null,
+): Pick<MinimapState, "left" | "top" | "size"> {
+	let delta: number;
+	if (edges.horizontal === undefined) {
+		delta = edges.vertical === "top" ? -deltaY : deltaY;
+	} else {
+		const horizontal = edges.horizontal === "left" ? -deltaX : deltaX;
+		const vertical = edges.vertical === "top" ? -deltaY : deltaY;
+		// Corners follow the dominant axis for both growth and shrinkage.
+		delta =
+			edges.vertical === undefined || Math.abs(horizontal) >= Math.abs(vertical)
+				? horizontal
+				: vertical;
+	}
+	let size = Math.max(minimumSize, Math.round(start.size + delta));
+	if (bounds !== null) {
+		const horizontalSpace =
+			edges.horizontal === "left"
+				? start.left + start.size
+				: bounds.width - start.left;
+		const verticalSpace =
+			edges.vertical === "top"
+				? start.top + start.size
+				: bounds.height - start.top;
+		// A centered footer needs half its width on either side of the disc center.
+		// Solve that constraint before anchoring, so the shell does not have to shift the resized disc.
+		const footerWidth = Math.min(bounds.footerWidth, bounds.width);
+		const maximum = Math.max(
+			0,
+			Math.min(
+				horizontalSpace,
+				2 * horizontalSpace - footerWidth,
+				verticalSpace,
+			),
+		);
+		// Shrinking cannot make the footer overhang the stationary side of the disc.
+		const footerMinimum = footerWidth - 2 * (bounds.width - horizontalSpace);
+		size = Math.min(Math.max(size, footerMinimum), maximum);
+	}
+	return {
+		size,
+		left: start.left + (edges.horizontal === "left" ? start.size - size : 0),
+		top: start.top + (edges.vertical === "top" ? start.size - size : 0),
+	};
 }
 
 /** One imperative read of every hot input the map and compass render. */

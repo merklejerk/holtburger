@@ -9,22 +9,24 @@
 </script>
 
 <script lang="ts">
+	import ResizeBorders from "./ResizeBorders.svelte";
+	import type { ResizeEdges } from "./resize-edges";
 	import LayoutHandleIcon from "./LayoutHandleIcon.svelte";
 
-	/** Shared corner controls; each surface retains ownership of its layout gestures. */
+	/** Shared layout controls; each surface retains ownership of its layout gestures. */
 	interface Props {
 		/** Accessible name of the surface being edited. */
 		label: string;
 		/** Optional content inset keeps the move handle clear of an interactive header. */
 		moveInset?: LayoutMoveInset;
-		/** Whether this surface allows resizing. */
-		resizable: boolean;
+		/** Dimensions this surface allows the user to resize. */
+		resize: "none" | "horizontal" | "both";
 		/** Starts the owning surface's move gesture. */
 		onmove: (event: PointerEvent) => void;
 		/** Starts the owning surface's resize gesture. */
-		onresize: (event: PointerEvent) => void;
+		onresize: (event: PointerEvent, edges: ResizeEdges) => void;
 	}
-	let { label, resizable, onmove, onresize, moveInset }: Props = $props();
+	let { label, resize, onmove, onresize, moveInset }: Props = $props();
 </script>
 
 <button
@@ -35,20 +37,16 @@
 	onpointerdown={onmove}
 	aria-label={`Move ${label}`}><LayoutHandleIcon action="move" /></button
 >
-{#if resizable}
-	<button
-		type="button"
-		class="ui-button ui-icon-button layout-handle layout-resize"
-		onpointerdown={onresize}
-		aria-label={`Resize ${label}`}><LayoutHandleIcon action="resize" /></button
-	>
+{#if resize !== "none"}
+	<ResizeBorders {onresize} axes={resize} />
 {/if}
 
 <style>
 	@layer components {
 		.layout-handle {
 			position: absolute;
-			z-index: 2;
+			/* Keep the move button above overlapping border targets. */
+			z-index: 3;
 			width: 22px;
 			height: 22px;
 			pointer-events: auto;
@@ -60,11 +58,6 @@
 		}
 		.layout-move:active {
 			cursor: grabbing;
-		}
-		.layout-resize {
-			right: 2px;
-			bottom: 2px;
-			cursor: nwse-resize;
 		}
 	}
 </style>

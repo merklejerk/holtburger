@@ -52,6 +52,7 @@
 	import MapWaypointPinIcon from "../assets/icons/map-waypoint-pin.svg?component";
 	import { formatWaypointDistance } from "../lib/game/map/map-waypoint";
 	import { onDestroy, onMount, type Snippet } from "svelte";
+	import type { ResizeEdges } from "./resize-edges";
 	import LayoutControls from "./LayoutControls.svelte";
 
 	import { trackPointerGesture } from "./pointer-gesture";
@@ -75,9 +76,11 @@
 	import { formatWorldMapCoordinates } from "../lib/game/map/map-coordinates";
 	import {
 		captureMinimapGpuDrawState,
+		resizeMinimapBounds,
 		minimapViewDiameter,
 		sameMinimapGpuDrawState,
 		type MinimapFrame,
+		type MinimapResizeBounds,
 		type MinimapFooterExtent,
 		type MinimapGpuDrawState,
 		type MinimapState,
@@ -163,6 +166,8 @@
 		readonly editable: boolean;
 		/** Shell-owned minimum editable diameter in CSS pixels. */
 		readonly minSize: number;
+		/** Shell-authored resize limits; null preserves unrestricted Explorer placement. */
+		readonly resizeBounds: MinimapResizeBounds | null;
 		/** Whether editing exposes the resize handle, independently of moving. */
 		readonly resizable: boolean;
 		readonly onStateChange: (state: MinimapState) => void;
@@ -185,6 +190,7 @@
 		viewState,
 		editable,
 		minSize,
+		resizeBounds,
 		resizable,
 		onStateChange,
 		onSelectEntity,
@@ -866,23 +872,29 @@
 		);
 	}
 
-	function beginResize(event: PointerEvent): void {
+	function beginResize(event: PointerEvent, edges: ResizeEdges): void {
 		if (event.button !== 0) return;
 		event.preventDefault();
 		event.stopPropagation();
 		const startX = event.clientX;
 		const startY = event.clientY;
-		const startSize = viewState.size;
+		const start = viewState;
+		const bounds = resizeBounds;
 		cancelPointerGesture?.();
 		cancelPointerGesture = trackPointerGesture(
 			window,
 			event.pointerId,
 			(moved) => {
-				// Square by construction, so the larger drag axis wins.
-				const delta = Math.max(moved.clientX - startX, moved.clientY - startY);
 				onStateChange({
 					...viewState,
-					size: Math.max(minSize, Math.round(startSize + delta)),
+					...resizeMinimapBounds(
+						start,
+						minSize,
+						moved.clientX - startX,
+						moved.clientY - startY,
+						edges,
+						bounds,
+					),
 				});
 			},
 		);
@@ -1049,7 +1061,7 @@
 	{#if editable}
 		<LayoutControls
 			label="minimap"
-			{resizable}
+			resize={resizable ? "both" : "none"}
 			onmove={beginDrag}
 			onresize={beginResize}
 		/>

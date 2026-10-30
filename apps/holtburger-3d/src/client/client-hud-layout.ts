@@ -1,3 +1,4 @@
+import type { ResizeEdges } from "../app/resize-edges";
 import type { ClientUiDefaults, ClientUiPanel } from "./client-ui-contract";
 
 /** Viewport reference point that owns one axis of a HUD surface's canonical offset. */
@@ -30,12 +31,6 @@ export interface ResolvedClientHudPlacement {
 	readonly top: number;
 	readonly width: number;
 	readonly height: number;
-}
-
-/** Border ownership for one HUD-window resize gesture. */
-export interface ClientPanelResizeEdges {
-	readonly horizontal?: "left" | "right";
-	readonly vertical?: "top" | "bottom";
 }
 
 /** Live geometry for exactly the surfaces declared by the UI contract. */
@@ -254,7 +249,7 @@ export function resizeClientPanelRectangle(
 	viewport: ClientHudViewport,
 	minimum: PreferredClientHudExtent,
 	delta: ClientPointerDelta,
-	edges: ClientPanelResizeEdges,
+	edges: ResizeEdges,
 ): ResolvedClientHudPlacement {
 	let left = start.left;
 	let top = start.top;

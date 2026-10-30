@@ -18,8 +18,8 @@
 		readonly vitals: readonly ClientVital[];
 		/** Session-owned progression; sampled at the character sheet's display cadence. */
 		readonly characterSheet: ClientCharacterSheetState | null;
-		/** Natural text/bar height lets the viewport fit the HUD without rewriting saved placement. */
-		readonly onMinimumHeightChange: (height: number) => void;
+		/** Natural text/bar height owns the outer HUD rectangle independently of saved placement. */
+		readonly onContentHeightChange: (height: number) => void;
 	}
 
 	const {
@@ -28,19 +28,19 @@
 		vitals,
 		readConnection,
 		characterSheet,
-		onMinimumHeightChange,
+		onContentHeightChange,
 	}: Props = $props();
 	let focusedKind = $state<ClientVital["kind"]>("health");
 	/** Only the level facts used by the identity and XP bar enter the bounded HUD display graph. */
 	let level = $state.raw<CharacterSheet["level"] | null>(null);
-	/** Measure intrinsic rows, independent of the preferred height, so shrinking text can shrink the minimum. */
-	function measureMinimumHeight(node: HTMLElement) {
+	/** Measure intrinsic rows independently of the outer rectangle so theme changes can grow or shrink it. */
+	function measureContentHeight(node: HTMLElement) {
 		const rows = Array.from(node.children);
 		const update = () => {
 			const gap = Number.parseFloat(getComputedStyle(node).rowGap);
 			if (!Number.isFinite(gap))
 				throw new Error("Character HUD row gap must resolve to a CSS length");
-			onMinimumHeightChange(
+			onContentHeightChange(
 				rows.reduce(
 					(height, row) => height + row.getBoundingClientRect().height,
 					gap,
@@ -112,7 +112,7 @@
 	}
 </script>
 
-<section class="character-hud" use:measureMinimumHeight>
+<section class="character-hud" use:measureContentHeight>
 	<div class="identity-block">
 		<header class="ui-readout">
 			<span class="identity">

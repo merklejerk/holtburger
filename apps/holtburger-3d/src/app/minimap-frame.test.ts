@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ResizeEdges } from "./resize-edges";
 
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
 import { scenePointFromPrintedCoordinates } from "../lib/game/map/map-coordinates";
@@ -10,6 +11,7 @@ import type {
 import {
 	captureMinimapGpuDrawState,
 	minimapViewDiameter,
+	resizeMinimapBounds,
 	sameMinimapGpuDrawState,
 } from "./minimap-frame";
 
@@ -242,3 +244,152 @@ function gpuDrawStateAtCenter(
 				},
 	);
 }
+
+describe("minimap border resizing", () => {
+	const start = { ...minimapState(), left: 100, top: 120, size: 200 };
+	const minimum = 80;
+	const cases: {
+		edges: ResizeEdges;
+		dx: number;
+		dy: number;
+		left: number;
+		top: number;
+	}[] = [
+		{ edges: { horizontal: "left" }, dx: -30, dy: 99, left: 70, top: 120 },
+		{ edges: { horizontal: "right" }, dx: 30, dy: 99, left: 100, top: 120 },
+		{ edges: { vertical: "top" }, dx: 99, dy: -30, left: 100, top: 90 },
+		{ edges: { vertical: "bottom" }, dx: 99, dy: 30, left: 100, top: 120 },
+		{
+			edges: { horizontal: "left", vertical: "top" },
+			dx: -20,
+			dy: -30,
+			left: 70,
+			top: 90,
+		},
+		{
+			edges: { horizontal: "right", vertical: "top" },
+			dx: 20,
+			dy: -30,
+			left: 100,
+			top: 90,
+		},
+		{
+			edges: { horizontal: "left", vertical: "bottom" },
+			dx: -30,
+			dy: 20,
+			left: 70,
+			top: 120,
+		},
+		{
+			edges: { horizontal: "right", vertical: "bottom" },
+			dx: 30,
+			dy: 20,
+			left: 100,
+			top: 120,
+		},
+	];
+	it.each(cases)(
+		"resizes from $edges with the opposite borders stationary",
+		({ edges, dx, dy, left, top }) => {
+			expect(resizeMinimapBounds(start, minimum, dx, dy, edges, null)).toEqual({
+				left,
+				top,
+				size: 230,
+			});
+		},
+	);
+	it("shrinks with the dominant corner axis even when the other axis moves outward", () => {
+		expect(
+			resizeMinimapBounds(
+				start,
+				minimum,
+				-60,
+				10,
+				{
+					horizontal: "right",
+					vertical: "bottom",
+				},
+				null,
+			),
+		).toEqual({ left: 100, top: 120, size: 140 });
+	});
+	it("stops top-left shrinkage at the minimum without shifting opposite borders", () => {
+		const result = resizeMinimapBounds(
+			start,
+			minimum,
+			start.size,
+			start.size,
+			{
+				horizontal: "left",
+				vertical: "top",
+			},
+			null,
+		);
+		expect(result.size).toBe(minimum);
+		expect(result.left + result.size).toBe(start.left + start.size);
+		expect(result.top + result.size).toBe(start.top + start.size);
+	});
+	it("stops horizontal growth at the bottom of the usable viewport", () => {
+		expect(
+			resizeMinimapBounds(
+				start,
+				minimum,
+				-500,
+				0,
+				{ horizontal: "left" },
+				{ width: 800, height: 400, footerWidth: 100 },
+			),
+		).toEqual({ left: 20, top: 120, size: 280 });
+	});
+	it("stops top-left growth at the fixed right border's distance to the viewport edge", () => {
+		expect(
+			resizeMinimapBounds(
+				start,
+				minimum,
+				-500,
+				-500,
+				{ horizontal: "left", vertical: "top" },
+				{ width: 800, height: 600, footerWidth: 100 },
+			),
+		).toEqual({ left: 0, top: 20, size: 300 });
+	});
+	it("keeps an overhanging footer inside the viewport without moving the opposite border", () => {
+		const small = { left: 30, top: 20, size: 100 };
+		expect(
+			resizeMinimapBounds(
+				small,
+				minimum,
+				-100,
+				0,
+				{ horizontal: "left" },
+				{ width: 800, height: 600, footerWidth: 140 },
+			),
+		).toEqual({ left: 10, top: 20, size: 120 });
+	});
+	it("relaxes the minimum when the viewport cannot fit it", () => {
+		const small = { left: 0, top: 0, size: 50 };
+		expect(
+			resizeMinimapBounds(
+				small,
+				minimum,
+				100,
+				100,
+				{ horizontal: "right", vertical: "bottom" },
+				{ width: 60, height: 50, footerWidth: 100 },
+			),
+		).toEqual({ left: 0, top: 0, size: 50 });
+	});
+	it("stops shrinking before the footer overhangs the stationary viewport edge", () => {
+		const atRight = { left: 580, top: 20, size: 220 };
+		expect(
+			resizeMinimapBounds(
+				atRight,
+				minimum,
+				200,
+				0,
+				{ horizontal: "left" },
+				{ width: 800, height: 600, footerWidth: 140 },
+			),
+		).toEqual({ left: 660, top: 20, size: 140 });
+	});
+});

@@ -444,7 +444,7 @@ export async function probeWorldContainer(options: {
 		moved.top !== before.top, "Container window did not move");
 	await gesture(
 		element<HTMLElement>(
-			'.hud-window[aria-label="Iron Chest"] .hud-window-resize-bottom-right',
+			'.hud-window[aria-label="Iron Chest"] .resize-border-bottom-right',
 		),
 		moved.right,
 		moved.bottom,

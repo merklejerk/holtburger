@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ResizeBorders from "../app/ResizeBorders.svelte";
+	import type { ResizeEdges } from "../app/resize-edges";
 	import { onDestroy, untrack, type Snippet } from "svelte";
 	import { trackPointerGesture } from "../app/pointer-gesture";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
@@ -13,7 +15,6 @@
 		resolveClientHudPlacement,
 		type ClientHudPlacement,
 		type ClientHudViewport,
-		type ClientPanelResizeEdges,
 	} from "./client-hud-layout";
 
 	interface Props {
@@ -90,25 +91,6 @@
 		// Pointer intent promotes the window; automatic editor/modal focus restoration does not.
 		escapeContext?.promote();
 	}
-	const resizeHandles: readonly {
-		readonly name: string;
-		readonly edges: ClientPanelResizeEdges;
-	}[] = [
-		{ name: "top", edges: { vertical: "top" } },
-		{ name: "right", edges: { horizontal: "right" } },
-		{ name: "bottom", edges: { vertical: "bottom" } },
-		{ name: "left", edges: { horizontal: "left" } },
-		{ name: "top-left", edges: { horizontal: "left", vertical: "top" } },
-		{ name: "top-right", edges: { horizontal: "right", vertical: "top" } },
-		{
-			name: "bottom-right",
-			edges: { horizontal: "right", vertical: "bottom" },
-		},
-		{
-			name: "bottom-left",
-			edges: { horizontal: "left", vertical: "bottom" },
-		},
-	];
 
 	function beginDrag(event: PointerEvent): void {
 		if (event.button !== 0) return;
@@ -142,10 +124,7 @@
 		);
 	}
 
-	function beginResize(
-		event: PointerEvent,
-		edges: ClientPanelResizeEdges,
-	): void {
+	function beginResize(event: PointerEvent, edges: ResizeEdges): void {
 		if (event.button !== 0) return;
 		event.preventDefault();
 		event.stopPropagation();
@@ -210,13 +189,7 @@
 			>
 		</header>
 		<div class="hud-window-content">{@render children()}</div>
-		{#each resizeHandles as handle}
-			<div
-				class={`hud-window-resize hud-window-resize-${handle.name}`}
-				role="presentation"
-				onpointerdown={(event) => beginResize(event, handle.edges)}
-			></div>
-		{/each}
+		<ResizeBorders onresize={beginResize} axes="both" />
 	</section>
 {/if}
 
@@ -225,7 +198,7 @@
 		.hud-window {
 			/* Absolute children start inside ui-panel's 1px border. Include it so
 			 * targets reach the outermost frame paint while keeping their inner reach. */
-			--_ui-window-resize-outset: calc(var(--ui-window-frame-outset) + 1px);
+			--ui-resize-outset: calc(var(--ui-window-frame-outset) + 1px);
 			position: absolute;
 			z-index: 100;
 			display: grid;
@@ -275,78 +248,6 @@
 			min-height: 0;
 			overflow: hidden;
 			user-select: text;
-		}
-
-		.hud-window-resize {
-			position: absolute;
-			z-index: 2;
-			touch-action: none;
-		}
-
-		.hud-window-resize-top,
-		.hud-window-resize-bottom {
-			left: 8px;
-			width: calc(100% - 16px);
-			height: calc(8px + var(--_ui-window-resize-outset));
-		}
-
-		.hud-window-resize-left,
-		.hud-window-resize-right {
-			top: 8px;
-			width: calc(8px + var(--_ui-window-resize-outset));
-			height: calc(100% - 16px);
-		}
-
-		.hud-window-resize-top {
-			top: calc(-1 * var(--_ui-window-resize-outset));
-			cursor: ns-resize;
-		}
-
-		.hud-window-resize-right {
-			right: calc(-1 * var(--_ui-window-resize-outset));
-			cursor: ew-resize;
-		}
-
-		.hud-window-resize-bottom {
-			bottom: calc(-1 * var(--_ui-window-resize-outset));
-			cursor: ns-resize;
-		}
-
-		.hud-window-resize-left {
-			left: calc(-1 * var(--_ui-window-resize-outset));
-			cursor: ew-resize;
-		}
-
-		.hud-window-resize-top-left,
-		.hud-window-resize-top-right,
-		.hud-window-resize-bottom-right,
-		.hud-window-resize-bottom-left {
-			width: calc(12px + var(--_ui-window-resize-outset));
-			height: calc(12px + var(--_ui-window-resize-outset));
-		}
-
-		.hud-window-resize-top-left {
-			top: calc(-1 * var(--_ui-window-resize-outset));
-			left: calc(-1 * var(--_ui-window-resize-outset));
-			cursor: nwse-resize;
-		}
-
-		.hud-window-resize-top-right {
-			top: calc(-1 * var(--_ui-window-resize-outset));
-			right: calc(-1 * var(--_ui-window-resize-outset));
-			cursor: nesw-resize;
-		}
-
-		.hud-window-resize-bottom-right {
-			right: calc(-1 * var(--_ui-window-resize-outset));
-			bottom: calc(-1 * var(--_ui-window-resize-outset));
-			cursor: nwse-resize;
-		}
-
-		.hud-window-resize-bottom-left {
-			bottom: calc(-1 * var(--_ui-window-resize-outset));
-			left: calc(-1 * var(--_ui-window-resize-outset));
-			cursor: nesw-resize;
 		}
 	}
 </style>

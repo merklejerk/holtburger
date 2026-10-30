@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { probeLayoutResizing } from "./layout-resize-probe.mjs";
 import { probeUiShowcasePanels } from "./ui-showcase-panels-probe.mjs";
 
 /** Verify pregame control styles and preference inheritance against the loaded theme. */
@@ -135,10 +136,10 @@ export async function probeUiShowcase(client, evaluate) {
 				top: rect.top - outset + 0.5,
 				bottom: rect.bottom + outset - 0.5,
 			};
-			return [...panel.querySelectorAll(".hud-window-resize")].map((handle) => {
+			return [...panel.querySelectorAll(".resize-border")].map((handle) => {
 				const name = [...handle.classList]
-					.find((value) => value.startsWith("hud-window-resize-"))
-					.slice("hud-window-resize-".length);
+					.find((value) => value.startsWith("resize-border-"))
+					.slice("resize-border-".length);
 				const point = {
 					x: name.includes("left")
 						? x.left
@@ -481,6 +482,7 @@ export async function probeUiShowcase(client, evaluate) {
 		"Retained draft",
 	);
 	await click("Hide control samples");
+	const layoutResizing = await probeLayoutResizing(client, evaluate);
 	const panels = await probeUiShowcasePanels(client, evaluate);
 	await click("Show control samples");
 	await wait(
@@ -581,6 +583,7 @@ export async function probeUiShowcase(client, evaluate) {
 		panels,
 		baseRestored: true,
 		frameResizeTargets: true,
+		layoutResizing,
 		hudFamilies,
 		retainedClientAndMinimap: true,
 	};

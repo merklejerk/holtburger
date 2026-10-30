@@ -444,7 +444,7 @@ export async function probeClientHud(
 		client,
 		`(() => {
 		const panel = document.querySelector('[aria-label="Enchantments"]');
-		const handle = panel.querySelector('.hud-window-resize-bottom-left');
+		const handle = panel.querySelector('.resize-border-bottom-left');
 		const bounds = panel.getBoundingClientRect();
 		const grip = handle.getBoundingClientRect();
 		return {
@@ -796,8 +796,8 @@ export async function probeClientHud(
 		client,
 		`(() => {
 		const tray = document.querySelector('section[aria-label="Game shortcuts"]');
-		if (tray.querySelector('[aria-label="Resize Game shortcuts"]'))
-			throw new Error('Game shortcuts still exposes resizing.');
+		if (tray.querySelector(".resize-border"))
+			throw new Error('Fixed-size Game shortcuts exposes resizing.');
 		tray.querySelector('[aria-label="Rotate game shortcuts"]').click();
 	})()`,
 	);

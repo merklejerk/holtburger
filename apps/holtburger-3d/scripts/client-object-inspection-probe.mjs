@@ -500,7 +500,7 @@ export async function probeObjectInspection(
 		assert.notEqual(moved.window.rectangle.top, initialRectangle.top);
 
 		const resizeFrom = await point(
-			'section[aria-label^="Ancient Atlan"] .hud-window-resize-bottom-left',
+			'section[aria-label^="Ancient Atlan"] .resize-border-bottom-left',
 		);
 		await client.send("Input.dispatchMouseEvent", {
 			type: "mousePressed",

@@ -86,6 +86,7 @@ export default tseslint.config(
 		files: [
 			"scripts/ui-theme-probe.mjs",
 			"scripts/ui-showcase-probe.mjs",
+			"scripts/item-cell-pulse-probe.mjs",
 			"scripts/indexed-texture-readback.mjs",
 			"scripts/ui-showcase-panels-probe.mjs",
 			"scripts/client-theme-probe.mjs",

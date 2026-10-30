@@ -1,3 +1,4 @@
+import { pulseItemCell } from "../app/item-cell-pulse";
 import type { ClientItemInteractions } from "./client-item-interactions";
 
 /** Mounted cell activation: target acquisition wins over selection and double-click actions. */
@@ -31,6 +32,7 @@ export function bindContentsActivation(
 				event.stopImmediatePropagation();
 				if (event.detail <= 1 && state.kind === "acquiring") {
 					consumedClickSequence = true;
+					pulseItemCell(cell, "interaction");
 					interactions.target(guid, state.generation);
 				}
 			}
@@ -47,6 +49,7 @@ export function bindContentsActivation(
 			event.stopImmediatePropagation();
 			if (!consumedClickSequence) {
 				if (selectedGuid() !== guid) onSelect(guid);
+				pulseItemCell(cell, "interaction");
 				activate(guid);
 			}
 		},

@@ -536,6 +536,12 @@ export class ClientGameplayPresentation {
 				? null
 				: resources.runtime.spawnedEntityPlacement(playerGuid);
 		return {
+			surfaceMapEligible:
+				resources !== null &&
+				placement !== null &&
+				resources.runtime
+					.sceneInterestMembership()
+					.surfaceMapEligible(placement) === true,
 			waypoint: null,
 			cameraFovRadians:
 				((this.#lastPrimaryView?.camera.fov ?? this.#fieldOfView) * Math.PI) /

@@ -114,6 +114,8 @@ export function resizeMinimapBounds(
 
 /** One imperative read of every hot input the map and compass render. */
 export interface MinimapFrame {
+	/** Profile-resolved surface-map eligibility for the subject; false until scene demand admits it. */
+	readonly surfaceMapEligible: boolean;
 	/** Local navigation display; null in modes without a waypoint or before one is set. */
 	readonly waypoint: MapWaypointDisplay | null;
 	/** Null until the runtime is ready; the map remains blank meanwhile. */

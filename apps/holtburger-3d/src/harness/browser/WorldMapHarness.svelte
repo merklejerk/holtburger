@@ -77,8 +77,12 @@
 	const navigation = new ClientNavigationWaypointOwner(
 		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
 	);
+	// Imperative scene facts let the projection probe exercise mixed and dungeon contexts.
+	let markerInterior = false;
+	let markerSurfaceMapEligible = true;
 	const readFrame = (): MinimapFrame => {
 		const frame: MinimapFrame = {
+			surfaceMapEligible: markerSurfaceMapEligible,
 			source: null,
 			subject: {
 				kind: "controlled-entity",
@@ -88,7 +92,10 @@
 					worldY: 0,
 					worldZ: -16500,
 					headingRadians: 0,
-					residency: { landblockId: "0xda55ffff", envCellId: null },
+					residency: {
+						landblockId: "0xda55ffff",
+						envCellId: markerInterior ? "0xda550100" : null,
+					},
 				},
 			},
 			presentedEntities: () => [],
@@ -801,6 +808,7 @@
 			await visibility(true);
 			const samples = [];
 			for (let sample = 0; sample < 5; sample++) {
+				markerInterior = sample % 2 === 1;
 				await zoom(sample % 2 === 0 ? 768 : 4096);
 				await pan();
 				const result = read();
@@ -822,10 +830,21 @@
 					Math.abs(result.marker.y - expected.y) > 0.001
 				)
 					throw new Error("Player marker missed the image draw frame.");
-				samples.push({ actual: result.marker, expected });
+				samples.push({
+					interior: markerInterior,
+					actual: result.marker,
+					expected,
+				});
 			}
+			markerInterior = true;
+			markerSurfaceMapEligible = false;
+			await pan();
+			if (!read().marker.hidden)
+				throw new Error("Dungeon-only player marker remained visible.");
 			return samples;
 		} finally {
+			markerInterior = false;
+			markerSurfaceMapEligible = true;
 			globalThis.setInterval = interval;
 			await visibility(false);
 			await visibility(true);

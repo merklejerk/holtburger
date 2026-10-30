@@ -551,7 +551,7 @@
 		}
 		waypointMarker.style.display = waypointPlacement === null ? "none" : "";
 		const player = worldMapPlayer(
-			frame.subject,
+			frame,
 			view,
 			canvas.clientWidth,
 			canvas.clientHeight,

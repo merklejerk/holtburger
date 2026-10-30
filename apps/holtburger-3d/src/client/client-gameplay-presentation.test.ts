@@ -531,6 +531,63 @@ describe("ClientGameplayPresentation", () => {
 		await presentation.destroy();
 	});
 
+	it("publishes surface-map eligibility for outdoor, mixed interior, and dungeon player placements", async () => {
+		const playerGuid = 0x0101_0001;
+		const lifecycle = new ClientLifecycleSession(
+			new FakeClientTransport(currentState(playerGuid)),
+		);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientGameplayPresentation({
+			canvas: fakeCanvas(),
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+		});
+		try {
+			expect(presentation.readMinimapFrame().surfaceMapEligible).toBe(false);
+			await presentation.start();
+			await vi.waitFor(() =>
+				expect(presentation.frame(1_016).rendered).toBe(true),
+			);
+			const landblockId = "0x0100ffff";
+			const request: SceneInterestRequest = {
+				ambientOutdoorEnvCellOwners: new Set([landblockId]),
+				radii: {
+					terrainRadius: 0,
+					buildingRadius: 0,
+					envCellRadius: 0,
+					explicitObjectRadius: null,
+					generatedObjectRadius: null,
+				},
+				target: {
+					kind: "outdoor",
+					requested: { kind: "outdoor", landblockId },
+				},
+			};
+			runtime.sceneMembership.replace(request);
+			expect(presentation.readMinimapFrame().surfaceMapEligible).toBe(true);
+			runtime.dynamicOriginEnvCellId = "0x01000100";
+			const mixed = presentation.readMinimapFrame();
+			expect(mixed.surfaceMapEligible).toBe(true);
+			expect(mixed.subject?.anchor.residency?.envCellId).toBe(
+				runtime.dynamicOriginEnvCellId,
+			);
+			runtime.sceneMembership.replace({
+				...request,
+				target: {
+					kind: "dungeon",
+					requested: { kind: "automatic-landblock", landblockId },
+				},
+			});
+			expect(presentation.readMinimapFrame().surfaceMapEligible).toBe(false);
+			runtime.sceneMembership.clear();
+			expect(presentation.readMinimapFrame().surfaceMapEligible).toBe(false);
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+		}
+	});
+
 	it("samples aim from the exact presented CSS viewport and camera identity", async () => {
 		const playerGuid = 0x0101_0001;
 		const transport = new FakeClientTransport(currentState(playerGuid));

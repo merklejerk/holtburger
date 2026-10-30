@@ -307,7 +307,13 @@
 		const controlledGuid = explorerPossession?.guid ?? null;
 		const controlledAnchor = anchorFromPossession();
 		const freeCameraAnchor = anchorFromCamera();
+		const residency = (controlledAnchor ?? freeCameraAnchor)?.residency;
 		return {
+			surfaceMapEligible:
+				runtime !== null &&
+				residency != null &&
+				runtime.sceneInterestMembership().surfaceMapEligible(residency) ===
+					true,
 			waypoint: null,
 			cameraFovRadians: (EXPLORER_TUNING.camera.framing.fov * Math.PI) / 180,
 			cameraHeadingRadians: cameraYawRadians,

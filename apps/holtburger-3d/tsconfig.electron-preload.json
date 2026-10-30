@@ -1,6 +1,7 @@
 {
 	"extends": "./tsconfig.node.json",
 	"compilerOptions": {
+		"lib": ["ES2023", "DOM"],
 		"module": "NodeNext",
 		"moduleResolution": "NodeNext",
 		"verbatimModuleSyntax": false,

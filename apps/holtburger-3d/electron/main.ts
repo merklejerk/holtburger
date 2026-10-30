@@ -9,6 +9,10 @@ import {
 } from "./client-application.js";
 import { DocumentAdmission, type DocumentRole } from "./document-admission.js";
 import { observeWindowGeometry } from "./window-geometry.js";
+import {
+	PointerLockHover,
+	pointerPositionSchema,
+} from "./pointer-lock-hover.js";
 import { LauncherStore } from "./launcher-store.js";
 import { ServerDirectoryCatalog } from "./server-directory.js";
 import { clientFailureDiagnostic } from "../src/client/client-close-contract.js";
@@ -579,6 +583,11 @@ function createWindow(entry: {
 	noLauncher: boolean;
 }): BrowserWindow {
 	const developmentOrigin = electronDevOrigin(entry.mode);
+	const ozonePlatform = app.commandLine.getSwitchValue("ozone-platform");
+	const restoreWaylandPointer =
+		process.platform === "linux" &&
+		ozonePlatform !== "x11" &&
+		(ozonePlatform === "wayland" || process.env.XDG_SESSION_TYPE === "wayland");
 	const window = new BrowserWindow({
 		title: entry.title,
 		icon: applicationIconPath,
@@ -595,6 +604,9 @@ function createWindow(entry: {
 			additionalArguments: [
 				`--holtburger-mode=${entry.mode}`,
 				...(entry.noLauncher ? ["--holtburger-launcher-disabled"] : []),
+				...(restoreWaylandPointer
+					? ["--holtburger-wayland-pointer-restore"]
+					: []),
 			],
 			nodeIntegration: false,
 			contextIsolation: true,
@@ -606,6 +618,18 @@ function createWindow(entry: {
 			devTools: true,
 		},
 	});
+	if (restoreWaylandPointer) {
+		const pointerHover = new PointerLockHover(window.webContents);
+		window.webContents.on("before-mouse-event", (event, input) =>
+			pointerHover.beforeMouse(event, input),
+		);
+		window.on("blur", () => pointerHover.clear());
+		window.webContents.on("did-start-navigation", () => pointerHover.clear());
+		handle("window:restore-pointer", undefined, (event, point: unknown) => {
+			requireApplicationFrame(event, window);
+			pointerHover.restore(pointerPositionSchema.parse(point));
+		});
+	}
 	// Electron/Wayland can negotiate the constructor width down to minWidth. Reapply the
 	// content size while hidden so the first visible frame keeps the configured inner dimensions.
 	window.setContentSize(

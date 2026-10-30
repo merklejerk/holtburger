@@ -2657,7 +2657,7 @@
 		spawnedEntities = [changed];
 		await waitForTwoAnimationFrames();
 		const afterDataUrl = canvas.toDataURL("image/png");
-		const selected = activeRuntime.selectedEntityPresentationState(
+		const selected = activeRuntime.dynamicEntityPresentationState(
 			current.identity.guid,
 		);
 		if (selected.kind !== "realized")
@@ -2741,7 +2741,7 @@
 		activeRuntime.setSelectedEntityGuid(guid);
 		await waitForTwoAnimationFrames();
 		const sample = (): BrowserHarnessSpawnedSelectionSample => {
-			const state = activeRuntime.selectedEntityPresentationState(guid);
+			const state = activeRuntime.dynamicEntityPresentationState(guid);
 			if (state.kind !== "realized" || state.frame.guid !== guid)
 				throw new Error(
 					`Spawned selection target ${guid} is not realized: ${JSON.stringify(state)}.`,

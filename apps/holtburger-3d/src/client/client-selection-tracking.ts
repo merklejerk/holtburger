@@ -5,7 +5,7 @@ import {
 } from "../lib/game/landblocks";
 import { transformAABB3 } from "../lib/game/math/matrices";
 import { Vec3 } from "../lib/game/math/types";
-import type { SelectedDynamicEntityFrame } from "../lib/game/runtime/game-presentation-runtime";
+import type { DynamicEntityPresentationFrame } from "../lib/game/runtime/game-presentation-runtime";
 import type { PrimaryCameraView } from "../lib/game/runtime/types";
 
 /** Current presentation-owned evidence consumed by app-local selection validity policy. */
@@ -17,7 +17,7 @@ export type ClientSelectedEntityTrackingStatus =
 /** Measure from the presented camera to the nearest point of the transformed rigid AABB. */
 export function clientSelectedEntityDistance(
 	view: PrimaryCameraView,
-	selected: SelectedDynamicEntityFrame,
+	selected: DynamicEntityPresentationFrame,
 ): number {
 	const cameraLandblockId = view.camera.placement.landblockId;
 	const cameraOrigin = createLandblockWorldOrigin(cameraLandblockId);

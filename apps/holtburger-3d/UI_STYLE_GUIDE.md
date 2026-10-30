@@ -268,6 +268,15 @@ physical press, selection, an open panel, or disabled controls.
 | `--ui-option-background`, `--ui-option-border-color`                                                                                                        | Full background and border color for `ui-option` list rows. Rows implemented as `ui-button` use button properties.                    |
 | `--ui-input-background`, `--ui-input-border-color`                                                                                                          | Full background and border color for inputs. Use `::placeholder`, `:disabled`, and `[aria-invalid="true"]` for text and state colors. |
 
+The auto-attack reticle uses `--ui-combat-reticle-*` tokens. `size`, `radius`,
+`pulse-travel`, and `glow-blur` are CSS lengths; `orbit-duration` and
+`pulse-duration` are positive CSS times. `fill-color`, `outline-color`,
+`border-color`, and `glow-color` accept CSS colors. `outline-width` and
+`border-width` are unitless stroke widths in the SVG's 24-unit viewBox and scale
+with artwork size. These tokens inherit from the theme and update the mounted
+reticle immediately. The four inward-pointing silhouettes and target placement
+remain component-owned. Reduced-motion preferences disable both animations.
+
 The Enchantments window shares the spell panel's padding, row, filter, and color
 tokens. Its affected-stat headings use `--ui-enchantments-heading-margin`,
 `--ui-enchantments-heading-font-size`, `--ui-enchantments-heading-letter-spacing`,

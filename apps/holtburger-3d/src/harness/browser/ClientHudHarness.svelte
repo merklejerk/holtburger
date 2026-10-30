@@ -6109,6 +6109,7 @@
 					{readSelectedEntity}
 					{readFrameRates}
 					readTargetIndicatorFrame={() => targetIndicatorFrame}
+					readCombatTargetFrame={() => null}
 					readSelectedEntityDisplay={() =>
 						interactions.display(unrestrictedUse)}
 					{spells}

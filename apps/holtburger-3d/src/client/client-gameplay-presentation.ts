@@ -1,4 +1,8 @@
 import {
+	projectClientEntityCenter,
+	type ClientEntityScreenPoint,
+} from "./client-entity-projection";
+import {
 	abortError,
 	isAbortError,
 	awaitWithAbort,
@@ -144,7 +148,7 @@ import {
 } from "../lib/game/selection/entity-selection-intersection";
 import type {
 	PortalTransitionRuntimeDiagnostics,
-	SelectedDynamicEntityPresentationState,
+	DynamicEntityPresentationState,
 } from "../lib/game/runtime/game-presentation-runtime";
 import {
 	clientSelectedEntityDistance,
@@ -315,9 +319,7 @@ export interface ClientGameplayRuntime extends MapTerrainSource {
 		guid: number,
 		decoration: Pick<NameplateContent, "indicators" | "strikeThrough">,
 	): void;
-	selectedEntityPresentationState(
-		guid: number,
-	): SelectedDynamicEntityPresentationState;
+	dynamicEntityPresentationState(guid: number): DynamicEntityPresentationState;
 	/** Latest authority-backed display value for one desired dynamic entity. */
 	setPortalTransition(
 		transition: PortalTransitionPresentationPlan | undefined,
@@ -584,6 +586,24 @@ export class ClientGameplayPresentation {
 		this.#activeResources?.runtime.setSelectedEntityGuid(guid);
 	}
 
+	/** Pull the combat bound and presented camera without publishing frame-hot UI state. */
+	readCombatTargetFrame(): ClientEntityScreenPoint | null {
+		const view = this.#lastPrimaryView;
+		const target = this.#session.state().combat.desired?.target ?? null;
+		const state =
+			target === null
+				? null
+				: this.#activeResources?.runtime.dynamicEntityPresentationState(target);
+		if (view === null || state?.kind !== "realized") return null;
+		return projectClientEntityCenter({
+			bounds: state.frame.localBounds,
+			placement: state.frame.placement,
+			view,
+			cssWidth: this.#canvas.clientWidth,
+			cssHeight: this.#canvas.clientHeight,
+		});
+	}
+
 	setHoveredEntityGuid(guid: number | null): void {
 		this.#hoveredEntityGuid = guid;
 		this.#activeResources?.runtime.setHoveredEntityGuid(guid);
@@ -595,7 +615,7 @@ export class ClientGameplayPresentation {
 	): ClientSelectedEntityTrackingStatus {
 		const view = this.#lastPrimaryView;
 		const state =
-			this.#activeResources?.runtime.selectedEntityPresentationState(guid);
+			this.#activeResources?.runtime.dynamicEntityPresentationState(guid);
 		if (state?.kind === "frontend-evicted") return state;
 		if (view === null || state?.kind !== "realized")
 			return { kind: "temporarily-unrealized" };
@@ -611,7 +631,7 @@ export class ClientGameplayPresentation {
 		const state =
 			this.#selectedEntityGuid === null
 				? null
-				: (this.#activeResources?.runtime.selectedEntityPresentationState(
+				: (this.#activeResources?.runtime.dynamicEntityPresentationState(
 						this.#selectedEntityGuid,
 					) ?? null);
 		const selected = state?.kind === "realized" ? state.frame : null;

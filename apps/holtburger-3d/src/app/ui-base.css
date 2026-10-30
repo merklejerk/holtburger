@@ -96,6 +96,21 @@
 		--ui-spell-scrollbar-thumb-opacity: 18%;
 		--ui-spell-scrollbar-hover-track-opacity: 25%;
 		--ui-spell-scrollbar-hover-thumb-opacity: 70%;
+		/* Auto-attack reticle paint and motion; SVG silhouette stays component-owned. */
+		--ui-combat-reticle-radius: 28px;
+		--ui-combat-reticle-pulse-travel: 6px;
+		--ui-combat-reticle-size: 28px;
+		--ui-combat-reticle-orbit-duration: 2.5s;
+		--ui-combat-reticle-pulse-duration: 0.65s;
+		--ui-combat-reticle-fill-color: #ff6655;
+		--ui-combat-reticle-outline-color: #fff4dd;
+		--ui-combat-reticle-border-color: #17100f;
+		/* Stroke widths use the SVG's 24-unit viewBox and scale with artwork size. */
+		--ui-combat-reticle-outline-width: 2;
+		--ui-combat-reticle-border-width: 5;
+		--ui-combat-reticle-glow-color: #fff4ddcc;
+		--ui-combat-reticle-glow-blur: 4px;
+
 		/* World combat text appearance; optional --ui-combat-text-font overrides the UI body role. */
 		--ui-combat-text-damage-color: #ffffff;
 		--ui-combat-text-critical-color: #ffb833;

@@ -1,4 +1,4 @@
-import { probeClientCombatReticle } from "./client-combat-reticle-probe";
+import { probeClientCombatTargetIndicator } from "./client-combat-target-indicator-probe";
 import { ClientEntityMirror } from "../../client/client-entity-mirror";
 import { entityFacts } from "../../client/client-entity-mirror.test-support";
 import { ClientEntitySelection } from "../../client/client-entity-selection";
@@ -34,7 +34,7 @@ import { Vec3 } from "../../lib/game/math/types";
 
 /** Real browser input with production acquisition owners and asset-free accepted host records. */
 export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
-	const combatReticle = await probeClientCombatReticle();
+	const combatTargetIndicator = await probeClientCombatTargetIndicator();
 	const entities = new ClientEntityMirror();
 	const motion = new DynamicEntityMirror();
 	const listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
@@ -447,7 +447,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		timed.sort((a, b) => a - b);
 		return {
 			passed: true,
-			combatReticle,
+			combatTargetIndicator,
 			holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,
 			holdAndFocusChecks: true,
 			escapeFallbackOrdering: true,

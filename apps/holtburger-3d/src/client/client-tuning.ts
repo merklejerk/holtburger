@@ -189,6 +189,8 @@ export const CLIENT_TUNING = {
 		/** World-space outer radius of the compact surface-aligned target ring. */
 		markerRadius: 0.65,
 	},
+	/** Keep the combat arrow inward of the selected-target arrow, including artwork and glow. */
+	combatTargetIndicator: { safeInsetCssPixels: 128 },
 	entitySelection: {
 		/** Hold any cycle binding to acquire the nearest target once. */
 		holdDelayMs: 500,

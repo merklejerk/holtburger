@@ -123,8 +123,8 @@
 		type ClientSystemPanel,
 	} from "./ClientShortcutDock.svelte";
 	import ClientToastOverlay from "./ClientToastOverlay.svelte";
-	import ClientCombatReticle from "./ClientCombatReticle.svelte";
-	import type { ClientEntityScreenPoint } from "./client-entity-projection";
+	import ClientCombatTargetIndicator from "./ClientCombatTargetIndicator.svelte";
+	import type { ClientCombatTargetFrame } from "./client-target-indicator";
 	import ClientTargetIndicator from "./ClientTargetIndicator.svelte";
 	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
 	import type { ClientObjectInspectionState } from "./client-object-inspection";
@@ -365,7 +365,7 @@
 		/** Select and examine an entity represented by an item-backed HUD cell. */
 		readonly onExamineItem: (guid: number) => void;
 		readonly onCloseInspection: () => void;
-		readonly readCombatTargetFrame: () => ClientEntityScreenPoint | null;
+		readonly readCombatTargetFrame: () => ClientCombatTargetFrame | null;
 		readonly readTargetIndicatorFrame: () => ClientTargetIndicatorFrame | null;
 		readonly selectedEntityGuid: number | null;
 		readonly hoveredEntityGuid: number | null;
@@ -1110,7 +1110,7 @@
 				thresholds={ui.vitalWarningThresholds}
 			/>
 		{/key}
-		<ClientCombatReticle readFrame={readCombatTargetFrame} />
+		<ClientCombatTargetIndicator readFrame={readCombatTargetFrame} />
 		<ClientTargetIndicator
 			readFrame={readTargetIndicatorFrame}
 			selectedGuid={selectedEntityGuid}

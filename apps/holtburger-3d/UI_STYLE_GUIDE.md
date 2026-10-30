@@ -284,6 +284,18 @@ withdraws local ownership without asserting that the server cancelled the cast.
 Self and untargeted casts provide no spell marker. Clearing the cast reveals any
 still-active auto-attack target. Reduced-motion preferences disable both animations.
 
+Offscreen combat targets use the same edge-arrow projection and artwork as
+selection, with a separate inward lane controlled by
+`CLIENT_TUNING.combatTargetIndicator.safeInsetCssPixels`. Both arrows remain
+independent, including when they point at the same entity. The combat arrow uses
+`--ui-combat-target-arrow-size` and `--ui-combat-target-arrow-glow-blur` as CSS
+lengths, and `--ui-combat-target-arrow-outline-width` as an SVG stroke width in
+its 28-unit viewBox. Optional `--ui-combat-target-arrow-fill-color`,
+`--ui-combat-target-arrow-outline-color`, and `--ui-combat-target-arrow-glow-color`
+override the reticle palette; without them, reticle color changes apply live.
+Edge guidance starts when the complete target bounds leave the view, matching
+selection's policy. Neither combat marker tests wall occlusion.
+
 The Enchantments window shares the spell panel's padding, row, filter, and color
 tokens. Its affected-stat headings use `--ui-enchantments-heading-margin`,
 `--ui-enchantments-heading-font-size`, `--ui-enchantments-heading-letter-spacing`,

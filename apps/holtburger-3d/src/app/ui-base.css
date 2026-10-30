@@ -111,6 +111,11 @@
 		--ui-combat-reticle-glow-color: #fff4ddcc;
 		--ui-combat-reticle-glow-blur: 4px;
 
+		/* Offscreen combat guidance inherits reticle paint unless the theme overrides arrow colors. */
+		--ui-combat-target-arrow-size: 48px;
+		--ui-combat-target-arrow-outline-width: 2;
+		--ui-combat-target-arrow-glow-blur: 8px;
+
 		/* World combat text appearance; optional --ui-combat-text-font overrides the UI body role. */
 		--ui-combat-text-damage-color: #ffffff;
 		--ui-combat-text-critical-color: #ffb833;

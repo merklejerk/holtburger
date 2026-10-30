@@ -2,12 +2,11 @@ import { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
 import { ViewportInputGate } from "../lib/input/viewport-input-gate";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClientEntityMirror } from "./client-entity-mirror";
-import { entityFacts } from "./client-entity-mirror.test-support";
+import { playerEntitySnapshot } from "./client-entity-mirror.test-support";
 import { ClientEntitySelection } from "./client-entity-selection";
 import {
 	ClientCycleSelectionController,
 	type CycleCandidate,
-	type CycleCategory,
 } from "./client-cycle-selection-controller";
 import { ClientSelectionInput } from "./client-selection-input";
 import { AppInput } from "../lib/input/app-input";
@@ -33,23 +32,7 @@ function key(options: Partial<KeyboardEvent> = {}): KeyboardEvent {
 }
 function fixture() {
 	const entities = new ClientEntityMirror();
-	entities.commit(
-		entities.prepareSnapshot(
-			{
-				projectileSupply: { kind: "not-applicable" },
-				salvage: {
-					skills: {
-						salvagingSkill: 0,
-						tinkeringSkill: 0,
-						augmentationBonusSalvage: 0,
-					},
-				},
-				worldContainer: { kind: "closed" },
-				entities: [entityFacts(1)],
-			},
-			1,
-		),
-	);
+	entities.commit(entities.prepareSnapshot(playerEntitySnapshot(1), 1));
 	const listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
 	const selection = new ClientEntitySelection({
 		lifecycle: {
@@ -63,21 +46,58 @@ function fixture() {
 		},
 		presentation: () => null,
 	});
-	const candidates: Record<CycleCategory, readonly CycleCandidate[]> = {
+	const candidates: Record<
+		"creature" | "non-creature",
+		readonly CycleCandidate[]
+	> = {
 		creature: [
-			{ guid: 2, distanceSquared: 1 },
-			{ guid: 3, distanceSquared: 4 },
+			{
+				targeting: "creature",
+				guid: 2,
+				distanceBand: 0,
+				angularSector: 0,
+				distanceSquared: 1,
+			},
+			{
+				targeting: "creature",
+				guid: 3,
+				distanceBand: 0,
+				angularSector: 0,
+				distanceSquared: 4,
+			},
 		],
 		"non-creature": [
-			{ guid: 8, distanceSquared: 9 },
-			{ guid: 9, distanceSquared: 4, unopenedCorpse: true },
+			{
+				targeting: "non-creature",
+				guid: 8,
+				distanceBand: 0,
+				angularSector: 0,
+				distanceSquared: 9,
+			},
+			{
+				guid: 9,
+				distanceBand: 0,
+				angularSector: 0,
+				distanceSquared: 4,
+				targeting: "unopened-corpse",
+			},
 		],
 	};
-	const sample = vi.fn((category: CycleCategory) => candidates[category]);
+	const sample = vi.fn(() => [
+		...candidates.creature,
+		...candidates["non-creature"],
+	]);
 	const cycle = new ClientCycleSelectionController({
 		selection,
 		sample,
-		policy: { radiusMeters: 50, idleResetMs: 10, viewMarginMeters: 2 },
+		policy: {
+			radiusMeters: 50,
+			distanceBandMeters: 5,
+			angularSectorCount: 8,
+			resetDivergence: 0.5,
+			adjacentRegionWeight: 0.25,
+			viewMarginMeters: 2,
+		},
 	});
 	const keyboard = new KeyboardInputPolicy(new ViewportInputGate());
 	const input = new ClientSelectionInput({
@@ -104,6 +124,52 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("selection press lifecycle", () => {
+	it.each([false, true])(
+		"Ctrl+V cycles hostiles with Shift=%s, while holding acquires nearest hostile",
+		(shiftKey) => {
+			const f = fixture();
+			f.candidates.creature = [
+				{
+					targeting: "creature",
+					guid: 2,
+					distanceBand: 0,
+					angularSector: 0,
+					distanceSquared: 1,
+				},
+				{
+					targeting: "hostile",
+					guid: 4,
+					distanceBand: 0,
+					angularSector: 0,
+					distanceSquared: 4,
+				},
+				{
+					targeting: "hostile",
+					guid: 6,
+					distanceBand: 0,
+					angularSector: 0,
+					distanceSquared: 9,
+				},
+			];
+			f.selection.select(2);
+			const chord = () =>
+				key({
+					key: shiftKey ? "V" : "v",
+					code: "KeyV",
+					ctrlKey: true,
+					shiftKey,
+				});
+			f.input.keydown(chord(), 0);
+			f.input.keyup(chord(), HOLD_MS - 1);
+			expect(f.selection.selectedGuid()).toBe(shiftKey ? 6 : 4);
+			f.input.keydown(chord(), HOLD_MS);
+			vi.advanceTimersByTime(HOLD_MS);
+			expect(f.selection.selectedGuid()).toBe(4);
+			f.input.keyup(chord(), HOLD_MS * 2);
+			f.input.destroy();
+		},
+	);
+
 	it.each([
 		[false, false, 2],
 		[false, true, 3],
@@ -132,8 +198,20 @@ describe("selection press lifecycle", () => {
 		vi.advanceTimersByTime(HOLD_MS - 1);
 		expect(f.sample).not.toHaveBeenCalled();
 		f.candidates.creature = [
-			{ guid: 4, distanceSquared: 1 },
-			{ guid: 2, distanceSquared: 4 },
+			{
+				targeting: "creature",
+				guid: 4,
+				distanceBand: 0,
+				angularSector: 0,
+				distanceSquared: 1,
+			},
+			{
+				targeting: "creature",
+				guid: 2,
+				distanceBand: 0,
+				angularSector: 0,
+				distanceSquared: 4,
+			},
 		];
 		f.input.keydown(key({ repeat: true }), HOLD_MS - 1);
 		vi.advanceTimersByTime(1);
@@ -154,9 +232,7 @@ describe("selection press lifecycle", () => {
 		expect(f.selection.selectedGuid()).toBe(9);
 		f.input.keyup(key({ ctrlKey: true }), HOLD_MS);
 		expect(f.selection.selectedGuid()).toBe(9);
-		expect(f.sample.mock.calls.map(([category]) => category)).toEqual([
-			"non-creature",
-		]);
+		expect(f.sample).toHaveBeenCalledTimes(1);
 		f.input.destroy();
 	});
 	it.each([false, true])(
@@ -167,7 +243,7 @@ describe("selection press lifecycle", () => {
 			f.input.keydown(event, 0);
 			f.input.keyup(event, HOLD_MS - 1);
 			expect(f.selection.selectedGuid()).toBe(9);
-			expect(f.sample).toHaveBeenCalledWith("non-creature");
+			expect(f.sample).toHaveBeenCalledWith();
 			f.input.destroy();
 		},
 	);
@@ -263,15 +339,33 @@ describe("selection press lifecycle", () => {
 	});
 	it("nearest acquisition ignores stable cycle order and breaks distance ties by GUID", () => {
 		const f = fixture();
-		f.cycle.cycle("creature", 1, 0);
+		f.cycle.cycle("creature", 1);
 		f.candidates.creature = [
-			{ guid: 5, distanceSquared: 1 },
-			{ guid: 4, distanceSquared: 1 },
-			{ guid: 2, distanceSquared: 4 },
+			{
+				targeting: "creature",
+				guid: 5,
+				distanceBand: 0,
+				angularSector: 0,
+				distanceSquared: 1,
+			},
+			{
+				targeting: "creature",
+				guid: 4,
+				distanceBand: 0,
+				angularSector: 0,
+				distanceSquared: 1,
+			},
+			{
+				targeting: "creature",
+				guid: 2,
+				distanceBand: 0,
+				angularSector: 0,
+				distanceSquared: 4,
+			},
 		];
 		f.cycle.selectNearest("creature");
 		expect(f.selection.selectedGuid()).toBe(4);
-		f.cycle.cycle("creature", 1, 1);
+		f.cycle.cycle("creature", 1);
 		expect(f.selection.selectedGuid()).toBe(5);
 		f.input.destroy();
 	});

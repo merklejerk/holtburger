@@ -195,7 +195,14 @@ export const CLIENT_TUNING = {
 		/** Hold any cycle binding to acquire the nearest target once. */
 		holdDelayMs: 500,
 		/** Input-only candidate admission and ordering. */
-		cycle: { radiusMeters: 75, idleResetMs: 300, viewMarginMeters: 2 },
+		cycle: {
+			radiusMeters: 75,
+			viewMarginMeters: 2,
+			distanceBandMeters: 5,
+			angularSectorCount: 8,
+			resetDivergence: 0.5,
+			adjacentRegionWeight: 0.25,
+		},
 		/** Modest staleness is sufficient for cursor feedback and selection range expiry. */
 		sampleIntervalMs: 1_000 / 15,
 		offscreenIndicator: {

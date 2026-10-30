@@ -2140,12 +2140,11 @@
 		const cycle = new ClientCycleSelectionController({
 			selection,
 			policy: CLIENT_TUNING.entitySelection.cycle,
-			sample: (category) =>
+			sample: () =>
 				sampleCycleCandidates(
 					owner.entities,
 					owner.mirror,
 					gameplayPresentation?.targetingView() ?? null,
-					category,
 					CLIENT_TUNING.entitySelection.cycle,
 				),
 		});

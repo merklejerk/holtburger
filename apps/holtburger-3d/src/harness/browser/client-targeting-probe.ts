@@ -1,11 +1,18 @@
 import { probeClientCombatTargetIndicator } from "./client-combat-target-indicator-probe";
-import { ClientEntityMirror } from "../../client/client-entity-mirror";
-import { entityFacts } from "../../client/client-entity-mirror.test-support";
+import {
+	ClientEntityMirror,
+	type ClientEntityFacts,
+} from "../../client/client-entity-mirror";
+import {
+	entityFacts,
+	playerEntitySnapshot,
+} from "../../client/client-entity-mirror.test-support";
 import { ClientEntitySelection } from "../../client/client-entity-selection";
 import { ClientPointerSelectionController } from "../../client/client-pointer-selection-controller";
 import {
 	ClientCycleSelectionController,
 	sampleCycleCandidates,
+	type CycleSelectionPolicy,
 } from "../../client/client-cycle-selection-controller";
 import { ClientSelectionInput } from "../../client/client-selection-input";
 import { AppInput } from "../../lib/input/app-input";
@@ -30,7 +37,17 @@ import {
 } from "../../lib/game/runtime/dynamic-entity-feed";
 import type { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
 import { landblockVector3 } from "../../lib/assets/ac-frame";
-import { Vec3 } from "../../lib/game/math/types";
+import { Quat, Vec3 } from "../../lib/game/math/types";
+
+/** Fixture-owned geometry policy; changing production tuning must not rewrite targeting scenarios. */
+const CYCLE_POLICY: CycleSelectionPolicy = {
+	radiusMeters: 75,
+	distanceBandMeters: 5,
+	angularSectorCount: 8,
+	resetDivergence: 0.5,
+	adjacentRegionWeight: 0.25,
+	viewMarginMeters: 2,
+};
 
 /** Real browser input with production acquisition owners and asset-free accepted host records. */
 export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
@@ -85,18 +102,13 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		}),
 	});
 	let scans = 0;
+	let view = TARGETING_TEST_VIEW;
 	const cycle = new ClientCycleSelectionController({
 		selection,
-		policy: CLIENT_TUNING.entitySelection.cycle,
-		sample: (category) => {
+		policy: CYCLE_POLICY,
+		sample: () => {
 			scans++;
-			return sampleCycleCandidates(
-				entities,
-				motion,
-				TARGETING_TEST_VIEW,
-				category,
-				CLIENT_TUNING.entitySelection.cycle,
-			);
+			return sampleCycleCandidates(entities, motion, view, CYCLE_POLICY);
 		},
 	});
 	const arbiter = new ClientInputArbiter({
@@ -172,6 +184,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			guid: number;
 			distance: number;
 			creature: boolean;
+			hostile?: boolean;
 			corpse?: "unopened" | "opened";
 		}[],
 	) => {
@@ -189,23 +202,30 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		entities.commit(
 			entities.prepareSnapshot(
 				{
-					projectileSupply: { kind: "not-applicable" },
-					salvage: {
-						skills: {
-							salvagingSkill: 0,
-							tinkeringSkill: 0,
-							augmentationBonusSalvage: 0,
-						},
-					},
-					worldContainer: { kind: "closed" },
+					...playerEntitySnapshot(1),
 					entities: [
 						entityFacts(1, { targeting: "creature" }),
-						...records.map((record) =>
-							entityFacts(record.guid, {
+						...records.map((record): ClientEntityFacts => {
+							const facts = entityFacts(record.guid, {
 								corpse: record.corpse ?? null,
 								targeting: record.creature ? "creature" : "non-creature",
-							}),
-						),
+							});
+							if (facts.description.kind !== "known")
+								throw new Error(
+									"Targeting fixture requires a known description.",
+								);
+							return {
+								...facts,
+								description: {
+									...facts.description,
+									mapCategory: record.hostile
+										? "mob"
+										: record.creature
+											? "npc"
+											: "other",
+								},
+							};
+						}),
 					],
 				},
 				1,
@@ -218,10 +238,11 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	};
 	try {
 		keyboard.returnToGame();
+		const bandWidth = CYCLE_POLICY.distanceBandMeters;
 		const base: Parameters<typeof replace>[0] = [
-			{ guid: 2, distance: 5, creature: true },
-			{ guid: 3, distance: 10, creature: true },
-			{ guid: 4, distance: 15, creature: true },
+			{ guid: 2, distance: bandWidth * 1.2, creature: true },
+			{ guid: 3, distance: bandWidth * 1.4, creature: true },
+			{ guid: 4, distance: bandWidth * 1.6, creature: true },
 			{ guid: 9, distance: -5, creature: false, corpse: "unopened" },
 			{ guid: 10, distance: -8, creature: false, corpse: "unopened" },
 		];
@@ -232,12 +253,16 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			base.map((record) => ({
 				...record,
 				distance:
-					record.guid === 2 ? 12 : record.guid === 3 ? 4 : record.distance,
+					record.guid === 2
+						? bandWidth * 1.5
+						: record.guid === 3
+							? bandWidth * 1.1
+							: record.distance,
 			})),
 		);
 		press("Tab");
 		expectSelected(3, "distance crossing preserves order");
-		replace([...base, { guid: 5, distance: 2, creature: true }]);
+		replace([...base, { guid: 5, distance: bandWidth * 1.05, creature: true }]);
 		press("Tab");
 		expectSelected(4, "newcomer does not reorder survivors");
 		press("Tab");
@@ -248,13 +273,58 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		press("Tab", false, true);
 		expectSelected(3, "removed cursor retains reverse gap");
 		press("Tab", true);
-		expectSelected(9, "rear non-creature");
+		expectSelected(10, "object traversal continues from the creature cursor");
 		press("Tab", true, true);
-		expectSelected(10, "reverse non-creature traversal");
+		expectSelected(9, "reverse non-creature traversal");
 		press("v");
-		expectSelected(9, "corpse subset shares forward non-creature cursor");
+		expectSelected(10, "corpse filter shares forward traversal cursor");
 		press("V", false, true);
-		expectSelected(10, "corpse subset shares reverse non-creature cursor");
+		expectSelected(9, "corpse filter shares reverse traversal cursor");
+		selection.select(null);
+		replace([
+			{ guid: 30, distance: bandWidth * 1.2, creature: false },
+			{ guid: 31, distance: bandWidth * 1.4, creature: true },
+			{
+				guid: 32,
+				distance: bandWidth * 1.6,
+				creature: false,
+				corpse: "unopened",
+			},
+			{ guid: 33, distance: bandWidth * 1.8, creature: true },
+		]);
+		press("Tab");
+		expectSelected(31, "interleaved ring starts at nearest creature B");
+		press("Tab", true);
+		expectSelected(
+			32,
+			"switching to objects advances to C rather than restarting at A",
+		);
+		press("Tab");
+		expectSelected(33, "switching back to creatures advances to D");
+		press("v");
+		expectSelected(32, "corpse filter wraps from the shared creature cursor");
+		selection.select(null);
+		replace([
+			{ guid: 40, distance: bandWidth * 1.2, creature: true },
+			{ guid: 41, distance: bandWidth * 1.4, creature: true, hostile: true },
+			{ guid: 42, distance: bandWidth * 1.6, creature: false },
+			{ guid: 43, distance: bandWidth * 1.8, creature: true, hostile: true },
+			{ guid: 44, distance: -bandWidth * 1.1, creature: true, hostile: true },
+		]);
+		press("Tab");
+		expectSelected(40, "ordinary creature traversal includes friendly NPCs");
+		press("v", true);
+		expectSelected(
+			41,
+			"Ctrl+V advances to the next hostile in the shared ring",
+		);
+		press("v", true);
+		expectSelected(43, "Ctrl+V skips world objects and offscreen hostiles");
+		press("V", true, true);
+		expectSelected(41, "Ctrl+Shift+V reverses hostile traversal");
+		press("Tab", true);
+		expectSelected(42, "object traversal continues from the hostile cursor");
+		replace(base);
 		press("x");
 		expectSelected(1, "self binding");
 		const remappedSelf = clientKeyboardSettingsSchema.parse(
@@ -429,6 +499,56 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		if (systemMenuRequests !== beforeMenu + 1)
 			throw new Error("Empty Escape stack did not reach the system menu.");
 
+		// Spatial changes, rather than elapsed time, start a fresh nearest acquisition.
+		selection.select(null);
+		replace(base);
+		press("Tab");
+		press("Tab");
+		expectSelected(3, "spatial baseline cursor");
+		replace(
+			base.map((record) => ({
+				...record,
+				distance: record.creature
+					? record.distance + bandWidth * 2
+					: record.distance,
+			})),
+		);
+		press("Tab");
+		expectSelected(
+			2,
+			"radial divergence reacquires nearest instead of advancing",
+		);
+		replace(
+			base.map((record) => ({
+				...record,
+				distance: record.creature
+					? record.distance + bandWidth * 4
+					: record.distance,
+			})),
+		);
+		press("Tab");
+		expectSelected(3, "radial reset skips the already selected nearest target");
+		replace([
+			...base,
+			{ guid: 20, distance: -bandWidth * 1.2, creature: true },
+			{ guid: 21, distance: -bandWidth * 1.4, creature: true },
+		]);
+		view = {
+			...TARGETING_TEST_VIEW,
+			camera: {
+				...TARGETING_TEST_VIEW.camera,
+				placement: {
+					...TARGETING_TEST_VIEW.camera.placement,
+					rotation: new Quat(0, 0, 1, 0),
+				},
+			},
+		};
+		press("Tab");
+		expectSelected(20, "camera turn reacquires nearest in the new view");
+		press("Tab");
+		expectSelected(21, "new view continues outward");
+		view = TARGETING_TEST_VIEW;
+
 		// Explicit population measurement, not a general renderer performance claim.
 		const population = 1000;
 		replace(
@@ -450,6 +570,9 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			combatTargetIndicator,
 			holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,
 			holdAndFocusChecks: true,
+			spatialResetChecks: true,
+			sharedFilterTraversal: true,
+			hostileTraversal: true,
 			escapeFallbackOrdering: true,
 			remapCancellation: true,
 			remappedSelfWithoutPresentation: true,
@@ -458,7 +581,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			population,
 			keypressSamples: timed,
 			medianKeypressMs: timed[Math.floor(timed.length / 2)],
-			viewMarginMeters: CLIENT_TUNING.entitySelection.cycle.viewMarginMeters,
+			viewMarginMeters: CYCLE_POLICY.viewMarginMeters,
 		};
 	} finally {
 		unbind();

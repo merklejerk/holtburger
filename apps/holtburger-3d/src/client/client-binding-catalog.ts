@@ -80,6 +80,8 @@ const CLIENT_LABELS: Readonly<Record<ClientShortcut, string>> = {
 	selectSelf: "Select self",
 	nextCreature: "Next creature",
 	previousCreature: "Previous creature",
+	nextHostile: "Next hostile",
+	previousHostile: "Previous hostile",
 	nextNonCreature: "Next world object",
 	previousNonCreature: "Previous world object",
 	nextUnopenedCorpse: "Next unopened corpse",

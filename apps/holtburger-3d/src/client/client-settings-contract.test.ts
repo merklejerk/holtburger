@@ -409,6 +409,7 @@ it("preserves keyboard preferences and round-trips mouse settings", () => {
 });
 
 it.each([
+	"targetOnlyInView",
 	"invertCameraHorizontal",
 	"invertCameraVertical",
 	"invertSteeringHorizontal",
@@ -422,9 +423,10 @@ it.each([
 	).toThrow();
 });
 
-it("preserves physical key ownership for mouse edits but detects binding changes", () => {
+it("preserves physical key ownership for acquisition and mouse edits but detects binding changes", () => {
 	const changed = {
 		...CLIENT_INPUT_DEFAULTS,
+		targetOnlyInView: !CLIENT_INPUT_DEFAULTS.targetOnlyInView,
 		mouseMovement: !CLIENT_INPUT_DEFAULTS.mouseMovement,
 		invertCameraHorizontal: !CLIENT_INPUT_DEFAULTS.invertCameraHorizontal,
 		invertCameraVertical: !CLIENT_INPUT_DEFAULTS.invertCameraVertical,
@@ -451,3 +453,17 @@ it("does not treat settings normalization as a keyboard edit", () => {
 		),
 	).toBe(true);
 });
+
+it.each([false, true])(
+	"restores absent targeting preferences and preserves an explicit view restriction of %s",
+	(targetOnlyInView) => {
+		const initial = clientInputSettingsSchema.parse(CLIENT_KEYBOARD_DEFAULTS);
+		expect(initial.targetOnlyInView).toBe(
+			CLIENT_INPUT_DEFAULTS.targetOnlyInView,
+		);
+		const changed = { ...initial, targetOnlyInView };
+		expect(
+			clientInputSettingsSchema.parse(JSON.parse(JSON.stringify(changed))),
+		).toEqual(changed);
+	},
+);

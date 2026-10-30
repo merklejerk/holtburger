@@ -19,12 +19,16 @@ export async function probeClientBindings(options: {
 	const target = document.createElement("div");
 	target.className = "ui-theme";
 	document.body.append(target);
+	let acceptedInput = options.initial;
 	const component = mount(ClientBindingProbe, {
 		target,
 		context: options.context,
 		props: {
 			initial: options.initial,
-			accept: options.accept,
+			accept: (input) => {
+				acceptedInput = options.accept(input);
+				return acceptedInput;
+			},
 			interact: options.interact,
 		},
 	});
@@ -76,6 +80,22 @@ export async function probeClientBindings(options: {
 	};
 	try {
 		await tick();
+		const targetView = target.querySelector<HTMLInputElement>(
+			'input[name="targetOnlyInView"]',
+		);
+		if (targetView === null)
+			throw new Error("Missing target view restriction setting.");
+		const beforeTargetView = acceptedInput.targetOnlyInView;
+		targetView.click();
+		await tick();
+		require(acceptedInput.targetOnlyInView === !beforeTargetView &&
+			targetView.checked ===
+				!beforeTargetView, "Target view setting did not publish the accepted preference.");
+		targetView.click();
+		await tick();
+		require(acceptedInput.targetOnlyInView === beforeTargetView &&
+			targetView.checked ===
+				beforeTargetView, "Target view setting did not restore the accepted preference.");
 		const original = target.querySelector<HTMLButtonElement>(
 			'button[aria-label="Trade"]',
 		)?.title;

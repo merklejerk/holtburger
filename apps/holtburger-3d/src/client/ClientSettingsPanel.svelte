@@ -533,6 +533,27 @@
 					>Restore default input settings</button
 				>
 				<details class="ui-disclosure ui-disclosure-section" open>
+					<summary>Targeting</summary>
+					<div class="settings-section">
+						<label class="ui-checkbox"
+							><input
+								type="checkbox"
+								name="targetOnlyInView"
+								checked={input.targetOnlyInView}
+								onchange={(event) =>
+									onInputChange({
+										...input,
+										targetOnlyInView: event.currentTarget.checked,
+									})}
+							/>Only select targets in view</label
+						>
+						<p class="ui-muted">
+							Applies to Select next target and Select previous target.
+							Hostile-only cycling remains limited to targets in view.
+						</p>
+					</div>
+				</details>
+				<details class="ui-disclosure ui-disclosure-section" open>
 					<summary>Mouse</summary>
 					<div class="settings-section">
 						<label class="ui-checkbox"

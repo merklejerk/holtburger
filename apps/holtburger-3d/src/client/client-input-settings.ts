@@ -65,6 +65,15 @@ const keyboardSettingsBaseSchema = z
 					holdChatHistory: INPUT_DEFAULTS.client.holdChatHistory,
 					...value,
 				};
+				// Rename saved actions without replacing explicit new-name bindings (including unbound lists).
+				for (const [oldAction, action] of [
+					["nextCreature", "nextInteractable"],
+					["previousCreature", "previousInteractable"],
+				] as const) {
+					if (!Reflect.has(current, action))
+						Reflect.set(current, action, Reflect.get(current, oldAction));
+					Reflect.deleteProperty(current, oldAction);
+				}
 				Reflect.deleteProperty(current, "preciseJumpPowerUp");
 				Reflect.deleteProperty(current, "preciseJumpPowerDown");
 				return current;
@@ -128,6 +137,7 @@ export const CLIENT_KEYBOARD_DEFAULTS: ClientKeyboardConfiguration = {
 /** Complete client input defaults, shared by resets and missing-field normalization. */
 export const CLIENT_INPUT_DEFAULTS: ClientInputConfiguration = {
 	...CLIENT_KEYBOARD_DEFAULTS,
+	targetOnlyInView: false,
 	mouseMovement: true,
 	invertCameraHorizontal: false,
 	invertCameraVertical: false,
@@ -147,6 +157,10 @@ export const clientInputSettingsSchema = z.preprocess(
 	clientKeyboardSettingsSchema
 		.unwrap()
 		.extend({
+			/** Profiles without this preference inherit the default target acquisition policy. */
+			targetOnlyInView: z
+				.boolean()
+				.default(CLIENT_INPUT_DEFAULTS.targetOnlyInView),
 			mouseMovement: z.boolean().default(CLIENT_INPUT_DEFAULTS.mouseMovement),
 			invertCameraHorizontal: z
 				.boolean()
@@ -175,7 +189,7 @@ export function clientInputConfiguration(
 	};
 }
 
-/** Axis preferences do not change physical key ownership; only binding edits require cancellation. */
+/** Acquisition and axis preferences do not change physical key ownership; only binding edits require cancellation. */
 export function clientKeyboardSettingsEqual(
 	left: ClientKeyboardConfiguration,
 	right: ClientKeyboardConfiguration,

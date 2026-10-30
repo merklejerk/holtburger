@@ -103,12 +103,19 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	});
 	let scans = 0;
 	let view = TARGETING_TEST_VIEW;
+	let targetOnlyInView = true;
 	const cycle = new ClientCycleSelectionController({
 		selection,
 		policy: CYCLE_POLICY,
 		sample: () => {
 			scans++;
-			return sampleCycleCandidates(entities, motion, view, CYCLE_POLICY);
+			return sampleCycleCandidates(
+				entities,
+				motion,
+				view,
+				CYCLE_POLICY,
+				targetOnlyInView,
+			);
 		},
 	});
 	const arbiter = new ClientInputArbiter({
@@ -185,6 +192,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			distance: number;
 			creature: boolean;
 			hostile?: boolean;
+			usable?: boolean;
 			corpse?: "unopened" | "opened";
 		}[],
 	) => {
@@ -218,6 +226,8 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 								...facts,
 								description: {
 									...facts.description,
+									useCapability:
+										record.creature || record.usable ? "direct" : "unsupported",
 									mapCategory: record.hostile
 										? "mob"
 										: record.creature
@@ -293,7 +303,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			{ guid: 33, distance: bandWidth * 1.8, creature: true },
 		]);
 		press("Tab");
-		expectSelected(31, "interleaved ring starts at nearest creature B");
+		expectSelected(31, "interleaved ring starts at nearest interactable B");
 		press("Tab", true);
 		expectSelected(
 			32,
@@ -312,7 +322,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			{ guid: 44, distance: -bandWidth * 1.1, creature: true, hostile: true },
 		]);
 		press("Tab");
-		expectSelected(40, "ordinary creature traversal includes friendly NPCs");
+		expectSelected(40, "interactable traversal includes friendly NPCs");
 		press("v", true);
 		expectSelected(
 			41,
@@ -324,6 +334,89 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		expectSelected(41, "Ctrl+Shift+V reverses hostile traversal");
 		press("Tab", true);
 		expectSelected(42, "object traversal continues from the hostile cursor");
+		selection.select(null);
+		replace([
+			{ guid: 50, distance: bandWidth * 1.4, creature: true, hostile: true },
+			{ guid: 51, distance: bandWidth * 1.2, creature: false, usable: true },
+			{ guid: 52, distance: bandWidth * 1.3, creature: false },
+			{ guid: 53, distance: bandWidth * 1.6, creature: false, usable: true },
+			{ guid: 54, distance: -bandWidth * 1.1, creature: false, usable: true },
+			{ guid: 57, distance: -bandWidth * 1.05, creature: true, hostile: true },
+			{
+				guid: 55,
+				distance: bandWidth * 0.8,
+				creature: false,
+				usable: true,
+				corpse: "opened",
+			},
+			{
+				guid: 56,
+				distance: bandWidth * 0.9,
+				creature: false,
+				usable: true,
+				corpse: "unopened",
+			},
+		]);
+		press("Tab");
+		expectSelected(
+			51,
+			"Tab selects the nearest usable non-corpse object in view",
+		);
+		press("Tab");
+		expectSelected(
+			50,
+			"Tab interleaves creatures with usable objects and skips unsupported objects",
+		);
+		press("Tab");
+		expectSelected(53, "Tab continues to the next usable object");
+		press("Tab", false, true);
+		expectSelected(50, "Shift+Tab reverses the expanded interactable ring");
+		press("Tab", true);
+		expectSelected(53, "object traversal shares the interactable cursor");
+		press("Tab", true, true);
+		expectSelected(
+			52,
+			"object-only cycling still includes unsupported world objects",
+		);
+		press("Tab", true, true);
+		expectSelected(
+			51,
+			"reverse object traversal reaches the preceding usable object",
+		);
+		press("Tab", true, true);
+		expectSelected(
+			54,
+			"object-only cycling retains usable objects behind the camera",
+		);
+		press("v");
+		expectSelected(56, "corpse cycling still selects unopened usable corpses");
+		press("Tab");
+		expectSelected(
+			51,
+			"interactable cycling skips the corpse selected by another filter",
+		);
+		targetOnlyInView = false;
+		selection.select(null);
+		press("Tab");
+		expectSelected(57, "unrestricted target cycling admits a rear creature");
+		press("Tab");
+		expectSelected(
+			54,
+			"unrestricted target cycling admits a rear usable object",
+		);
+		selection.select(null);
+		press("v", true);
+		expectSelected(
+			50,
+			"hostile cycling remains view restricted when target cycling is unrestricted",
+		);
+		targetOnlyInView = true;
+		selection.select(null);
+		press("Tab");
+		expectSelected(
+			51,
+			"restoring the target view restriction excludes rear targets",
+		);
 		replace(base);
 		press("x");
 		expectSelected(1, "self binding");
@@ -454,7 +547,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		const remappedCycle = clientKeyboardSettingsSchema.parse(
 			replaceClientBinding(
 				CLIENT_KEYBOARD_DEFAULTS,
-				{ kind: "client", action: "nextCreature" },
+				{ kind: "client", action: "nextInteractable" },
 				[{ key: "q" }],
 			),
 		);
@@ -573,6 +666,8 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			spatialResetChecks: true,
 			sharedFilterTraversal: true,
 			hostileTraversal: true,
+			interactableObjectTraversal: true,
+			targetViewOption: true,
 			escapeFallbackOrdering: true,
 			remapCancellation: true,
 			remappedSelfWithoutPresentation: true,

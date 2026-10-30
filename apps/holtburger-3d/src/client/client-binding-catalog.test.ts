@@ -34,6 +34,23 @@ const ctrlDigitTwo = {
 };
 
 describe("client binding catalog", () => {
+	it("renames saved creature shortcuts without losing remaps or overriding explicit interactable bindings", () => {
+		const savedClient = { ...CLIENT_KEYBOARD_DEFAULTS.client };
+		Reflect.deleteProperty(savedClient, "nextInteractable");
+		Reflect.deleteProperty(savedClient, "previousInteractable");
+		Reflect.set(savedClient, "nextCreature", [{ key: "F8" }]);
+		Reflect.set(savedClient, "previousCreature", []);
+		const saved = { ...CLIENT_KEYBOARD_DEFAULTS, client: savedClient };
+		const restored = clientKeyboardSettingsSchema.parse(saved);
+		expect(restored.client.nextInteractable).toEqual([{ key: "F8" }]);
+		expect(restored.client.previousInteractable).toEqual([]);
+		const explicit = clientKeyboardSettingsSchema.parse({
+			...saved,
+			client: { ...savedClient, nextInteractable: [] },
+		});
+		expect(explicit.client.nextInteractable).toEqual([]);
+	});
+
 	it("fills new hostile shortcuts in saved settings and preserves explicit remaps", () => {
 		const savedClient = { ...CLIENT_KEYBOARD_DEFAULTS.client };
 		Reflect.deleteProperty(savedClient, "nextHostile");

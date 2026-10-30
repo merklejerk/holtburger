@@ -47,19 +47,19 @@ function fixture() {
 		presentation: () => null,
 	});
 	const candidates: Record<
-		"creature" | "non-creature",
+		"interactable" | "non-creature",
 		readonly CycleCandidate[]
 	> = {
-		creature: [
+		interactable: [
 			{
-				targeting: "creature",
+				filters: ["interactable"],
 				guid: 2,
 				distanceBand: 0,
 				angularSector: 0,
 				distanceSquared: 1,
 			},
 			{
-				targeting: "creature",
+				filters: ["interactable"],
 				guid: 3,
 				distanceBand: 0,
 				angularSector: 0,
@@ -68,7 +68,7 @@ function fixture() {
 		],
 		"non-creature": [
 			{
-				targeting: "non-creature",
+				filters: ["non-creature"],
 				guid: 8,
 				distanceBand: 0,
 				angularSector: 0,
@@ -79,12 +79,12 @@ function fixture() {
 				distanceBand: 0,
 				angularSector: 0,
 				distanceSquared: 4,
-				targeting: "unopened-corpse",
+				filters: ["non-creature", "unopened-corpse"],
 			},
 		],
 	};
 	const sample = vi.fn(() => [
-		...candidates.creature,
+		...candidates.interactable,
 		...candidates["non-creature"],
 	]);
 	const cycle = new ClientCycleSelectionController({
@@ -128,23 +128,23 @@ describe("selection press lifecycle", () => {
 		"Ctrl+V cycles hostiles with Shift=%s, while holding acquires nearest hostile",
 		(shiftKey) => {
 			const f = fixture();
-			f.candidates.creature = [
+			f.candidates.interactable = [
 				{
-					targeting: "creature",
+					filters: ["interactable"],
 					guid: 2,
 					distanceBand: 0,
 					angularSector: 0,
 					distanceSquared: 1,
 				},
 				{
-					targeting: "hostile",
+					filters: ["interactable", "hostile"],
 					guid: 4,
 					distanceBand: 0,
 					angularSector: 0,
 					distanceSquared: 4,
 				},
 				{
-					targeting: "hostile",
+					filters: ["interactable", "hostile"],
 					guid: 6,
 					distanceBand: 0,
 					angularSector: 0,
@@ -197,16 +197,16 @@ describe("selection press lifecycle", () => {
 		expect(f.selection.selectedGuid()).toBe(2);
 		vi.advanceTimersByTime(HOLD_MS - 1);
 		expect(f.sample).not.toHaveBeenCalled();
-		f.candidates.creature = [
+		f.candidates.interactable = [
 			{
-				targeting: "creature",
+				filters: ["interactable"],
 				guid: 4,
 				distanceBand: 0,
 				angularSector: 0,
 				distanceSquared: 1,
 			},
 			{
-				targeting: "creature",
+				filters: ["interactable"],
 				guid: 2,
 				distanceBand: 0,
 				angularSector: 0,
@@ -330,7 +330,7 @@ describe("selection press lifecycle", () => {
 		const f = fixture();
 		f.selection.select(2);
 		f.input.keydown(key(), 0);
-		f.candidates.creature = [];
+		f.candidates.interactable = [];
 		vi.advanceTimersByTime(HOLD_MS);
 		f.input.keyup(key(), HOLD_MS);
 		expect(f.selection.selectedGuid()).toBe(2);
@@ -339,33 +339,33 @@ describe("selection press lifecycle", () => {
 	});
 	it("nearest acquisition ignores stable cycle order and breaks distance ties by GUID", () => {
 		const f = fixture();
-		f.cycle.cycle("creature", 1);
-		f.candidates.creature = [
+		f.cycle.cycle("interactable", 1);
+		f.candidates.interactable = [
 			{
-				targeting: "creature",
+				filters: ["interactable"],
 				guid: 5,
 				distanceBand: 0,
 				angularSector: 0,
 				distanceSquared: 1,
 			},
 			{
-				targeting: "creature",
+				filters: ["interactable"],
 				guid: 4,
 				distanceBand: 0,
 				angularSector: 0,
 				distanceSquared: 1,
 			},
 			{
-				targeting: "creature",
+				filters: ["interactable"],
 				guid: 2,
 				distanceBand: 0,
 				angularSector: 0,
 				distanceSquared: 4,
 			},
 		];
-		f.cycle.selectNearest("creature");
+		f.cycle.selectNearest("interactable");
 		expect(f.selection.selectedGuid()).toBe(4);
-		f.cycle.cycle("creature", 1);
+		f.cycle.cycle("interactable", 1);
 		expect(f.selection.selectedGuid()).toBe(5);
 		f.input.destroy();
 	});

@@ -78,12 +78,12 @@ export const INPUT_DEFAULTS = {
 
 		/** Select the authoritative local player identity. */
 		selectSelf: [{ key: "x", ctrl: false, alt: false, meta: false }],
-		/** Stable forward creature traversal. */
-		nextCreature: [
+		/** Forward traversal over creatures and usable non-corpse objects, honoring the target view preference. */
+		nextInteractable: [
 			{ key: "Tab", shift: false, ctrl: false, alt: false, meta: false },
 		],
-		/** Stable reverse creature traversal. */
-		previousCreature: [
+		/** Reverse traversal over creatures and usable non-corpse objects, honoring the target view preference. */
+		previousInteractable: [
 			{ key: "Tab", shift: true, ctrl: false, alt: false, meta: false },
 		],
 		/** World objects can be acquired behind the camera. */

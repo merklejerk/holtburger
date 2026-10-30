@@ -7,9 +7,9 @@ import type { PrimaryCameraView } from "../lib/game/runtime/types";
 import type { ClientEntityMirror } from "./client-entity-mirror";
 import type { ClientEntitySelection } from "./client-entity-selection";
 
-/** Binding-specific eligibility; hostiles refine creatures and corpses refine non-creatures. */
+/** Binding-specific views over one shared target ring; memberships may overlap. */
 export type CycleFilter =
-	"creature" | "hostile" | "non-creature" | "unopened-corpse";
+	"interactable" | "hostile" | "non-creature" | "unopened-corpse";
 /** App-local acquisition knobs, sampled only on input. */
 export interface CycleSelectionPolicy {
 	/** Player-to-origin acquisition radius in meters for both categories. */
@@ -35,8 +35,8 @@ export interface CycleCandidate {
 	readonly distanceBand: number;
 	/** Wrapped view-relative horizontal sector, computed by the candidate sampler. */
 	readonly angularSector: number;
-	/** Sampler-owned eligibility classification, including creature and object refinements. */
-	readonly targeting: CycleFilter;
+	/** Nonempty sampler-owned memberships, including view eligibility and world use capability. */
+	readonly filters: readonly [CycleFilter, ...CycleFilter[]];
 }
 
 /** Cheap origin-based camera test; intentionally ignores portal scopes and occlusion. */
@@ -77,6 +77,7 @@ export function sampleCycleCandidates(
 	motion: DynamicEntityMirror,
 	view: PrimaryCameraView | null,
 	policy: CycleSelectionPolicy,
+	targetOnlyInView: boolean,
 ): readonly CycleCandidate[] | null {
 	const read = entities.read();
 	if (
@@ -113,10 +114,34 @@ export function sampleCycleCandidates(
 			(position.x - player.x) ** 2 +
 			(position.y - player.y) ** 2 +
 			(position.z - player.z) ** 2;
-		if (
-			distanceSquared <= radiusSquared &&
-			(facts.targeting !== "creature" || (inView !== null && inView(position)))
-		) {
+		if (distanceSquared <= radiusSquared) {
+			const visible = inView !== null && inView(position);
+			const inTargetView = !targetOnlyInView || visible;
+			let filters: [CycleFilter, ...CycleFilter[]];
+			if (facts.targeting === "creature") {
+				if (!inTargetView) continue;
+				filters = ["interactable"];
+				// World classification excludes players/vendors before applying ACE's Attackable flag.
+				if (
+					visible &&
+					facts.description.kind === "known" &&
+					facts.description.mapCategory === "mob"
+				)
+					filters.push("hostile");
+			} else {
+				filters = ["non-creature"];
+				if (facts.corpse === "unopened") filters.push("unopened-corpse");
+				// Corpses retain dedicated acquisition even when their authored use is supported.
+				if (
+					facts.corpse === null &&
+					inTargetView &&
+					facts.description.kind === "known" &&
+					(facts.description.useCapability === "direct" ||
+						facts.description.useCapability === "targeted" ||
+						facts.description.useCapability === "salvage-tool")
+				)
+					filters.push("interactable");
+			}
 			const bearing = Math.atan2(
 				(position.x - player.x) * right.x + (position.z - player.z) * right.z,
 				(position.x - player.x) * right.z - (position.z - player.z) * right.x,
@@ -134,16 +159,7 @@ export function sampleCycleCandidates(
 				angularSector:
 					((sector % policy.angularSectorCount) + policy.angularSectorCount) %
 					policy.angularSectorCount,
-				// World classification excludes players/vendors before applying ACE's Attackable flag.
-				targeting:
-					facts.targeting === "creature"
-						? facts.description.kind === "known" &&
-							facts.description.mapCategory === "mob"
-							? "hostile"
-							: "creature"
-						: facts.corpse === "unopened"
-							? "unopened-corpse"
-							: "non-creature",
+				filters,
 			});
 		}
 	}
@@ -152,26 +168,6 @@ export function sampleCycleCandidates(
 
 function nearestFirst(left: CycleCandidate, right: CycleCandidate): number {
 	return left.distanceSquared - right.distanceSquared || left.guid - right.guid;
-}
-
-/** Match binding eligibility without changing the shared traversal order. */
-function matchesFilter(
-	candidate: CycleCandidate,
-	filter: CycleFilter,
-): boolean {
-	switch (filter) {
-		case "creature":
-			return (
-				candidate.targeting === "creature" || candidate.targeting === "hostile"
-			);
-		case "non-creature":
-			return (
-				candidate.targeting === "non-creature" ||
-				candidate.targeting === "unopened-corpse"
-			);
-		default:
-			return candidate.targeting === filter;
-	}
 }
 
 /** Mean change over the union of identities; the acquisition snapshot never drifts with taps. */
@@ -244,7 +240,7 @@ export class ClientCycleSelectionController {
 		}
 		const previous = this.#cycle;
 		const matching = candidates.filter((candidate) =>
-			matchesFilter(candidate, filter),
+			candidate.filters.includes(filter),
 		);
 		const baselines =
 			previous === null
@@ -334,7 +330,7 @@ export class ClientCycleSelectionController {
 		if (candidates === null) return;
 		let nearest: CycleCandidate | null = null;
 		for (const candidate of candidates) {
-			if (!matchesFilter(candidate, filter)) continue;
+			if (!candidate.filters.includes(filter)) continue;
 			if (nearest === null || nearestFirst(candidate, nearest) < 0)
 				nearest = candidate;
 		}

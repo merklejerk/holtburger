@@ -192,6 +192,23 @@ mod tests {
     }
 
     #[test]
+    fn npc_busy_refusal_preserves_wire_error_and_name() {
+        // ACE GiveObjectToNPC sends AiRefuseItemDuringEmote (0x04CE),
+        // distinct from the busy-player refusal (0x001E).
+        let mut data = 0x04CE_u32.to_le_bytes().to_vec();
+        write_string16(&mut data, "Town Crier");
+        let mut offset = 0;
+        let unpacked = WeenieErrorWithStringEventData::unpack(&data, &mut offset).unwrap();
+        assert_eq!(unpacked.error, WeenieError::AiRefuseItemDuringEmote);
+        assert_eq!(unpacked.parameter, "Town Crier");
+        assert_eq!(offset, data.len());
+
+        let mut packed = Vec::new();
+        unpacked.pack(&mut packed);
+        assert_eq!(packed, data);
+    }
+
+    #[test]
     fn test_character_confirmation_request_fixture() {
         let expected = GameMessage::GameEvent(Box::new(GameEventMessage {
             target: Guid::NULL,

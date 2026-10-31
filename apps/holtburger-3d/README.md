@@ -473,7 +473,7 @@ The jump HUD uses `--ui-jump-bar-width`, `--ui-jump-readout-font-size`,
 and appearance. The percentage follows the fill edge, with an underline extending left to the bar.
 A rotated PRECISE JUMP / MANUAL JUMP label sits closely beside the bar, aligned
 to its bottom edge.
-Enter precise targeting with its configured shortcut (Shift+J by default),
+Enter precise targeting with its configured shortcut (Ctrl+Space by default),
 and return to manual controls with Escape. Arc feedback remains in the viewport. Position and outer
 bounds belong to HUD layout editing, including resizing; themes style the contents
 within those bounds.

@@ -37,8 +37,6 @@ pub enum ClientDynamicEntityViewError {
     /// The retained attachment graph contains a contradictory relationship.
     #[error(transparent)]
     Placement(#[from] ScenePlacementError),
-    #[error("client entity 0x{guid:08X} is not registered")]
-    NotRegistered { guid: u32 },
     #[error("client entity 0x{guid:08X} has no WCID")]
     MissingWcid { guid: u32 },
     #[error("client entity 0x{guid:08X} has no display name")]
@@ -52,14 +50,16 @@ pub enum ClientDynamicEntityViewError {
 }
 
 /// Adapts current client authority and solver facts into the same pure projector used by Explorer.
+/// Absent entities and unresolved placements have no view; malformed retained entities are errors.
 pub fn project_client_dynamic_entity(
     world: &WorldState,
     guid: Guid,
 ) -> Result<Option<crate::DynamicEntityView>, ClientDynamicEntityViewError> {
-    let entity = world
-        .entities
-        .get(guid)
-        .ok_or(ClientDynamicEntityViewError::NotRegistered { guid: guid.0 })?;
+    // Property events can refer to objects outside the retained entity lifetime. Retail likewise
+    // ignores unknown property targets (acclient.c:374129-374158); they cannot produce a view.
+    let Some(entity) = world.entities.get(guid) else {
+        return Ok(None);
+    };
     let scene_placement = world.resolve_scene_placement(guid)?;
     if matches!(scene_placement, ResolvedScenePlacement::Unresolved(_)) {
         return Ok(None);
@@ -1024,17 +1024,68 @@ mod tests {
     }
 
     #[test]
+    fn projectile_property_updates_project_only_during_retained_lifetime() {
+        use holtburger_protocol::messages::GameMessage;
+        use holtburger_protocol::messages::object::messages::properties::UpdatePropertyInt;
+
+        let guid = Guid(0x8000_51e1);
+        let mut client = builder::build_test_client(ClientState::InWorld);
+        let mut views = client.subscribe_client_view_events();
+        // ACE Creature_Missile.cs:130 broadcasts PK status for each launched projectile.
+        let message = GameMessage::PublicUpdatePropertyInt(Box::new(UpdatePropertyInt {
+            sequence: 1,
+            guid,
+            property: PropertyInt::PlayerKillerStatus as u32,
+            value: 1,
+        }));
+        let entity = projectable_entity(
+            guid,
+            WorldPosition {
+                landblock_id: Guid(0xda55_0001),
+                ..WorldPosition::default()
+            },
+        );
+
+        for retained in [false, true, false] {
+            if retained {
+                client.world.add_entity(entity.clone());
+            } else {
+                client.world.remove_entity(guid);
+            }
+            let events = client.world.handle_message(&message);
+            assert!(events.iter().any(|event| matches!(
+                event,
+                holtburger_world::WorldEvent::PropertiesUpdated { guid: target, .. }
+                    if *target == guid
+            )));
+            for event in events {
+                client.handle_world_event(&event);
+            }
+            let projected = project_client_dynamic_entity(&client.world, guid)
+                .expect("an absent projectile is not malformed");
+            assert_eq!(projected.is_some(), retained);
+            let published = std::iter::from_fn(|| views.try_recv().ok())
+                .filter_map(|event| match event {
+                    ClientViewEvent::DynamicEntity(event) => Some(event),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            let expected = projected
+                .map(|entity| DynamicEntityEvent::Upserted {
+                    entity: Box::new(entity),
+                })
+                .into_iter()
+                .collect::<Vec<_>>();
+            assert_eq!(published, expected);
+        }
+    }
+
+    #[test]
     fn client_projection_rejections_each_have_a_reachable_source_shape() {
         let pose = WorldPosition {
             landblock_id: Guid(0xda55_0001),
             ..WorldPosition::default()
         };
-
-        let world = WorldState::synthetic();
-        assert_eq!(
-            project_client_dynamic_entity(&world, Guid(1)),
-            Err(ClientDynamicEntityViewError::NotRegistered { guid: 1 })
-        );
 
         let mut world = WorldState::synthetic();
         let missing_wcid = Entity::new(Guid(2), "No WCID".to_owned(), pose);

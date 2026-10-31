@@ -7,9 +7,9 @@ import fixture from "./fixtures/object-inspection-wire.json";
 import { decodeObjectInspectionResult } from "./client-object-inspection-contract";
 import { decodeObjectPreviewResult } from "./client-object-preview-contract";
 import {
-	ClientObjectInspection,
-	type ClientObjectInspectionState,
-} from "./client-object-inspection";
+	ClientInspection,
+	type ClientInspectionState,
+} from "./client-inspection";
 import type {
 	ClientLifecycleSessionEvent,
 	ClientLifecycleSessionState,
@@ -105,17 +105,71 @@ class FakeInspectionSession {
 	}
 }
 
-describe("ClientObjectInspection", () => {
+describe("ClientInspection", () => {
 	beforeEach(() => vi.useFakeTimers());
 	afterEach(() => {
 		vi.clearAllTimers();
 		vi.useRealTimers();
 	});
 
+	it("replaces a pending appraisal with a local spell and ignores its late result", async () => {
+		const session = new FakeInspectionSession();
+		const owner = new ClientInspection(session, vi.fn());
+		await owner.examine(itemFixture.guid);
+		owner.examineSpell(itemFixture.guid);
+		session.emit({ type: "object-inspection-result", result: itemFixture });
+		expect(owner.read()).toEqual({ kind: "spell", spellId: itemFixture.guid });
+		expect(session.requests).toEqual([itemFixture.guid]);
+		await vi.runOnlyPendingTimersAsync();
+		expect(session.requests).toEqual([itemFixture.guid]);
+		owner.close();
+		expect(owner.read()).toEqual({ kind: "idle" });
+		owner.destroy();
+	});
+
+	it("cancels object refresh on spell inspection and permits a fresh object examination", async () => {
+		const session = new FakeInspectionSession();
+		const owner = new ClientInspection(session, vi.fn());
+		await owner.examine(itemFixture.guid);
+		session.emit({ type: "object-inspection-result", result: itemFixture });
+		owner.examineSpell(1);
+		owner.examineSpell(2);
+		await vi.runOnlyPendingTimersAsync();
+		expect(owner.read()).toEqual({ kind: "spell", spellId: 2 });
+		expect(session.requests).toEqual([itemFixture.guid]);
+		await owner.examine(itemFixture.guid);
+		expect(owner.read()).toEqual({ kind: "pending", guid: itemFixture.guid });
+		expect(session.requests).toEqual([itemFixture.guid, itemFixture.guid]);
+		session.emit({ type: "object-inspection-result", result: itemFixture });
+		expect(owner.read().kind).toBe("ready");
+		owner.destroy();
+	});
+
+	it.each([
+		{ type: "resyncing" },
+		{ type: "lifecycle", lifecycle: { kind: "connecting" } },
+		{
+			type: "exit-requested",
+			exit: { cause: "explicit-disconnect", diagnostic: "Test disconnect" },
+		},
+	] satisfies ClientLifecycleSessionEvent[])(
+		"closes a local spell on $type",
+		(event) => {
+			const session = new FakeInspectionSession();
+			const owner = new ClientInspection(session, vi.fn());
+			owner.examineSpell(1);
+			session.emit(event);
+			expect(owner.read()).toEqual({ kind: "idle" });
+			expect(session.requests).toEqual([]);
+			owner.destroy();
+			expect(() => owner.examineSpell(1)).toThrow("Inspection is unavailable.");
+		},
+	);
+
 	it("suppresses a duplicate pending target and accepts only the latest GUID", async () => {
 		const session = new FakeInspectionSession();
 		const failures: string[] = [];
-		const owner = new ClientObjectInspection(session, (message) =>
+		const owner = new ClientInspection(session, (message) =>
 			failures.push(message),
 		);
 
@@ -141,8 +195,8 @@ describe("ClientObjectInspection", () => {
 
 	it("opens a matching immutable snapshot and closes without a command", async () => {
 		const session = new FakeInspectionSession();
-		const owner = new ClientObjectInspection(session, () => undefined);
-		const states: ClientObjectInspectionState[] = [];
+		const owner = new ClientInspection(session, () => undefined);
+		const states: ClientInspectionState[] = [];
 		owner.subscribe((state) => states.push(state));
 
 		await owner.examine(itemFixture.guid);
@@ -197,7 +251,7 @@ describe("ClientObjectInspection", () => {
 				playerGuid: 99,
 			},
 		});
-		const owner = new ClientObjectInspection(session, () => undefined);
+		const owner = new ClientInspection(session, () => undefined);
 
 		await owner.examine(itemFixture.guid);
 		session.emit({ type: "object-inspection-result", result: itemFixture });
@@ -216,7 +270,7 @@ describe("ClientObjectInspection", () => {
 		if (previewFixture.outcome.kind !== "ready")
 			throw new Error("Preview fixture must be ready.");
 		const session = new FakeInspectionSession();
-		const owner = new ClientObjectInspection(session, () => undefined);
+		const owner = new ClientInspection(session, () => undefined);
 		await owner.examine(creatureFixture.guid);
 		session.emit({ type: "object-preview-result", result: previewFixture });
 		expect(owner.read()).toEqual({
@@ -273,7 +327,7 @@ describe("ClientObjectInspection", () => {
 
 	it("refreshes only a visible inspection and never overlaps requests", async () => {
 		const session = new FakeInspectionSession();
-		const owner = new ClientObjectInspection(session, () => undefined);
+		const owner = new ClientInspection(session, () => undefined);
 		await owner.examine(itemFixture.guid);
 		session.emit({ type: "object-inspection-result", result: itemFixture });
 		const visible = owner.read();
@@ -326,10 +380,10 @@ describe("ClientObjectInspection", () => {
 		] as const) {
 			const session = new FakeInspectionSession();
 			const observed: Array<{
-				state: ClientObjectInspectionState;
+				state: ClientInspectionState;
 				message: string;
 			}> = [];
-			const owner = new ClientObjectInspection(session, (reported) =>
+			const owner = new ClientInspection(session, (reported) =>
 				observed.push({ state: owner.read(), message: reported }),
 			);
 			await owner.examine(result.guid);
@@ -340,7 +394,7 @@ describe("ClientObjectInspection", () => {
 		const session = new FakeInspectionSession();
 		session.failNext(new Error("transport unavailable"));
 		const failures: string[] = [];
-		const owner = new ClientObjectInspection(session, (message) =>
+		const owner = new ClientInspection(session, (message) =>
 			failures.push(message),
 		);
 		await owner.examine(5);
@@ -351,7 +405,7 @@ describe("ClientObjectInspection", () => {
 	it("does not apply background appraisals or failures to a ready inspector", async () => {
 		const session = new FakeInspectionSession();
 		const failure = vi.fn();
-		const owner = new ClientObjectInspection(session, failure);
+		const owner = new ClientInspection(session, failure);
 		await owner.examine(itemFixture.guid);
 		session.emit({ type: "object-inspection-result", result: itemFixture });
 		const visible = owner.read();
@@ -389,7 +443,7 @@ describe("ClientObjectInspection", () => {
 
 	it("closing and reopening cancels only the window subscription to a shared request", async () => {
 		const session = new FakeInspectionSession();
-		const owner = new ClientObjectInspection(session, vi.fn());
+		const owner = new ClientInspection(session, vi.fn());
 		const background = vi.fn();
 		await session.appraisals.request(itemFixture.guid, background).sent;
 		await owner.examine(itemFixture.guid);
@@ -410,7 +464,7 @@ describe("ClientObjectInspection", () => {
 
 	it("invalidates on resync, leaving the world, and teardown", async () => {
 		const session = new FakeInspectionSession();
-		const owner = new ClientObjectInspection(session, () => undefined);
+		const owner = new ClientInspection(session, () => undefined);
 		await owner.examine(1);
 		session.emit({ type: "resyncing" });
 		expect(owner.read()).toEqual({ kind: "idle" });

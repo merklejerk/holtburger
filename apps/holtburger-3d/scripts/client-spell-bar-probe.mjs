@@ -31,6 +31,33 @@ export async function probeSpellBar(
 		await mouse("mousePressed", p, 1);
 		await mouse("mouseReleased", p, 0);
 	};
+	const rightClick = async (selector) => {
+		const p = await point(selector);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...p,
+			button: "right",
+			buttons: 2,
+			clickCount: 1,
+		});
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			...p,
+			button: "right",
+			buttons: 0,
+			clickCount: 1,
+		});
+	};
+	const waitFor = (condition) =>
+		read(
+			`new Promise((resolve,reject)=>{const start=performance.now();const timer=setInterval(()=>{if(${condition}){clearInterval(timer);resolve(true);}else if(performance.now()-start>5000){clearInterval(timer);reject(new Error('Spell inspection did not settle: '+${JSON.stringify(condition)}));}},20);})`,
+		);
+	const inspectionSnapshot = () =>
+		read(`(() => {
+  const view = document.querySelector('.inspection-spell');
+  return {name: view?.querySelector('h2')?.textContent, description: view?.querySelector('.inspection-description')?.textContent, facts: Object.fromEntries([...view.querySelectorAll('dt')].map(dt=>[dt.textContent, dt.nextElementSibling.textContent.trim()])), components: [...view.querySelectorAll('[aria-label="Spell formula"] li')].map(li=>li.textContent.trim())};
+ })()`);
+
 	const openSpellbook = async () => {
 		const closed = await read(`(() => {
 			const panel = document.querySelector('[aria-label="Character sheet"]');
@@ -124,6 +151,60 @@ export async function probeSpellBar(
 	await drag('[data-spell-drag-source="1"]', cell(0));
 	assert.equal(await binding(0), 1);
 	assert.equal((await casts()).length, initialCasts, "Binding must not cast");
+	// Local examination shares the existing window and never submits gameplay commands.
+	const appraisalCount = () =>
+		read(
+			`${api}.inventoryDragCommands().filter(c=>c.command==='examine_client_entity').length`,
+		);
+	const appraisalsBefore = await appraisalCount();
+	const selectionBefore = await read(
+		`${api}.objectInspectionProbe().snapshot().selectedGuid`,
+	);
+	await rightClick(cell(0));
+	await waitFor(
+		`document.querySelector('.inspection-spell .inspection-artwork-image img') && document.querySelectorAll('.inspection-spell .component-icon img').length === 2`,
+	);
+	const inspected = await inspectionSnapshot();
+	assert.ok(inspected.name.includes("Spell 0001"));
+	assert.equal(inspected.description, "Fixture spell description.");
+	assert.equal(inspected.facts.School, "Item Enchantment");
+	assert.equal(inspected.facts.Level, "1");
+	assert.equal(inspected.facts.Mana, "10 + 2 per target");
+	assert.equal(inspected.facts.Duration, "1 min.");
+	assert.equal(inspected.facts["Authored recipient"], "Creature");
+	assert.ok(inspected.facts.Range.endsWith(" yds."));
+	assert.equal(inspected.components.length, 2);
+	assert.equal((await casts()).length, initialCasts);
+	assert.equal(await appraisalCount(), appraisalsBefore);
+	assert.equal(
+		await read(`${api}.objectInspectionProbe().snapshot().selectedGuid`),
+		selectionBefore,
+	);
+	await key("Escape", "Escape");
+	await waitFor(`document.querySelector('.inspection-spell') === null`);
+	// Empty slots cannot inspect; unavailable bound spells can still be examined.
+	await rightClick(cell(2));
+	assert.equal(
+		await read(`document.querySelector('.inspection-spell') === null`),
+		true,
+	);
+	await read(`${probe}.knowledge([2,3])`);
+	await rightClick(cell(0));
+	await waitFor(
+		`document.querySelector('.inspection-spell .inspection-artwork-image img') !== null`,
+	);
+	assert.ok((await inspectionSnapshot()).name.includes("Spell 0001"));
+	await key("Escape", "Escape");
+	await read(`${probe}.knowledge([1,2,3])`);
+	// Missing local definitions remain explicit and closable.
+	await read(`${probe}.bind(2,999999)`);
+	await rightClick(cell(2));
+	await waitFor(
+		`document.querySelector('.inspection-spell')?.textContent.includes('Spell definition is missing.')`,
+	);
+	await key("Escape", "Escape");
+	await read(`${probe}.bind(2,null)`);
+
 	await drag('[data-spell-drag-source="2"]', cell(1));
 	await drag(cell(0), cell(1));
 	assert.equal(await binding(0), 2);
@@ -346,6 +427,14 @@ export async function probeSpellBar(
 	await read(`${probe}.bind(0,null)`);
 	await read(`${probe}.knowledge([1,2,3])`);
 	await read(`${probe}.deferBoundSpell()`);
+	await rightClick(cell(9));
+	await waitFor(
+		`document.querySelector('[aria-label="Close Spell 1800"]') !== null`,
+	);
+	await key("Escape", "Escape");
+	await waitFor(
+		`document.querySelector('[aria-label="Close Spell 1800"]') === null`,
+	);
 	await key("@", "Digit2", 8);
 	await read(`${probe}.releaseBoundSpell()`);
 	await settled();
@@ -358,6 +447,11 @@ export async function probeSpellBar(
 		await read(`document.querySelector('${cell(9)} img') === null`),
 		true,
 		"Late reference does not publish artwork into another tab",
+	);
+	assert.equal(
+		await read(`document.querySelector('.inspection-spell') === null`),
+		true,
+		"Closing during lookup cannot reopen spell inspection",
 	);
 	await key("!", "Digit1", 8);
 	await settled();
@@ -667,6 +761,13 @@ export async function probeSpellBar(
 		await read(`document.querySelector('[data-caster-spell] button').title`),
 		/Ctrl \+ Shift \+ 1/,
 	);
+	await rightClick("[data-caster-spell] button");
+	await waitFor(
+		`document.querySelector('.inspection-spell .inspection-artwork-image img') !== null`,
+	);
+	assert.ok((await inspectionSnapshot()).name.includes("Spell 0001"));
+	await key("Escape", "Escape");
+
 	await click("[data-caster-spell] button");
 	await read(`${probe}.resolveCaster()`);
 	const itemCast = await read(
@@ -734,5 +835,6 @@ export async function probeSpellBar(
 		layout: true,
 		knowledge: true,
 		caster: true,
+		inspection: true,
 	};
 }

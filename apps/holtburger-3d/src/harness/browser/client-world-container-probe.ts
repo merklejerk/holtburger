@@ -176,6 +176,7 @@ export async function probeWorldContainer(options: {
 			vitals: [],
 			characterSheet: null,
 			trade: { trade: null, pending_items: [] },
+			barber: { interaction: null, result: null, particles: null },
 			characterMotion: null,
 			activeConfirmation: null,
 			dynamic: { hostTime: { seconds: 10 }, entities: [] },

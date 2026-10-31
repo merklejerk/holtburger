@@ -8,14 +8,13 @@
 		matchesSpellSearch,
 		type SpellSearch,
 	} from "./client-spell-search";
-	import ClientSpellFormula from "./ClientSpellFormula.svelte";
+	import ClientSpellDetails from "./ClientSpellDetails.svelte";
 	import UiIcon from "../app/UiIcon.svelte";
 	import type { UiIconDisplay, UiIconOwner } from "../app/ui-icon-repository";
 	import {
 		prepareSpellRow,
 		type SpellRow,
 		type ClientSpellServices,
-		type SpellInspectionDisplay,
 	} from "./client-spells";
 	import { CLIENT_TUNING } from "./client-tuning";
 
@@ -35,26 +34,6 @@
 	} = $props();
 	/** The expanded spell identity survives unrelated list refreshes. */
 	let expandedId = $state<number | null>(null);
-	/** Cold detail presentation from inspection replies. */
-	let inspection = $state<SpellInspectionDisplay>({ kind: "pending" });
-	$effect(() => {
-		const id = expandedId;
-		if (!visible || id === null) return;
-		// Reads inside callbacks cannot own this consumer's subscription lifetime.
-		return untrack(() =>
-			spells.inspect(id, (value) => {
-				inspection = value;
-			}),
-		);
-	});
-	const schoolNames: Readonly<Record<number, string>> = {
-		0: "None",
-		1: "War Magic",
-		2: "Life Magic",
-		3: "Item Enchantment",
-		4: "Creature Enchantment",
-		5: "Void Magic",
-	};
 	let rows = $state<readonly SpellRow[]>([]);
 	/** Cold query state changes only when controls or character identity change. */
 	// The owner is fixed for this mounted panel; sample saved cold state once.
@@ -281,62 +260,12 @@
 						>
 						{#if expandedId === row.id}
 							<div class="spell-details ui-catalog-details">
-								{#if row.details !== null}
-									{#if inspection.kind === "ready"}
-										{#if inspection.rangeMetres !== 0}<div>
-												Range: {(inspection.rangeMetres / 0.9144).toFixed(1)} yds.
-											</div>{/if}
-									{:else if inspection.kind === "failed"}<div>
-											{inspection.detail}
-										</div>
-									{:else if inspection.kind === "missing"}<div>
-											Runtime spell definition unavailable.
-										</div>
-									{:else}<div>Waiting for character details…</div>{/if}
-									<div>
-										School: {schoolNames[row.details.school] ??
-											`Unknown school ${row.details.school}`}
-									</div>
-									<div>
-										Mana: {row.details
-											.baseMana}{#if row.details.manaPerTarget > 0}
-											+ {row.details.manaPerTarget} per target{/if}
-									</div>
-									{#if row.details.durationSeconds !== null}
-										<div>
-											Duration: {row.details.durationSeconds >= 60
-												? `${Math.floor(row.details.durationSeconds / 60)} min.`
-												: `${Math.floor(row.details.durationSeconds)} sec.`}
-										</div>
-									{/if}
-									{#if row.details.classification.recipient !== null}
-										<div
-											title="Authored spell metadata; casting requirements and valid targets may differ."
-										>
-											Authored recipient: {row.details.classification
-												.recipient === "creature"
-												? "Creature"
-												: "Item"}
-										</div>
-									{/if}
-									<p>{row.details.description}</p>
-									{#if visible && inspection.kind === "ready"}
-										{#if inspection.formula.kind === "ready"}
-											{#key inspection.formula.components}
-												<ClientSpellFormula
-													{spells}
-													spellId={row.id}
-													components={inspection.formula.components}
-												/>
-											{/key}
-										{:else if inspection.formula.kind === "failed"}<p>
-												{inspection.formula.detail}
-											</p>
-										{:else}<p>Waiting for formula context…</p>{/if}
-									{/if}
-								{:else}
-									<p>Spell details unavailable.</p>
-								{/if}
+								<ClientSpellDetails
+									{spells}
+									spellId={row.id}
+									details={row.details}
+									{visible}
+								/>
 							</div>
 						{/if}
 					</li>
@@ -442,9 +371,6 @@
 		.expansion-indicator {
 			margin-left: auto;
 			padding-left: var(--ui-spell-expansion-indicator-gap);
-		}
-		.spell-details p {
-			white-space: pre-wrap;
 		}
 		.cast-spell {
 			font: inherit;

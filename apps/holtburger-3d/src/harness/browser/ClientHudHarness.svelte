@@ -186,9 +186,9 @@
 		ClientBookOpened,
 	} from "../../client/client-book-contract";
 	import {
-		ClientObjectInspection,
-		type ClientObjectInspectionState,
-	} from "../../client/client-object-inspection";
+		ClientInspection,
+		type ClientInspectionState,
+	} from "../../client/client-inspection";
 	import {
 		decodeObjectInspectionResult,
 		type ObjectInspectionResult,
@@ -1742,22 +1742,22 @@
 		},
 		() => {},
 	);
-	let objectInspection = $state<ClientObjectInspectionState>({ kind: "idle" });
+	let inspection = $state<ClientInspectionState>({ kind: "idle" });
 	let bookReader = $state<ClientBookReaderState>({ kind: "idle" });
 	const bookReaderOwner = new ClientBookReader(interactionLifecycle);
 	const unsubscribeBookReader = bookReaderOwner.subscribe(
 		(state) => (bookReader = state),
 	);
 	let inspectionFailure = $state<string | null>(null);
-	const objectInspectionOwner = new ClientObjectInspection(
+	const inspectionOwner = new ClientInspection(
 		interactionLifecycle,
 		(message) => {
 			inspectionFailure = message;
 			toast = { id: 9001, message, tone: "warning" };
 		},
 	);
-	const unsubscribeObjectInspection = objectInspectionOwner.subscribe(
-		(state) => (objectInspection = state),
+	const unsubscribeInspection = inspectionOwner.subscribe(
+		(state) => (inspection = state),
 	);
 	const selection = new ClientEntitySelection({
 		lifecycle: interactionLifecycle,
@@ -2017,7 +2017,7 @@
 		readonly commands: readonly unknown[];
 		readonly failure: string | null;
 		readonly selectedGuid: number | null;
-		readonly state: ClientObjectInspectionState;
+		readonly state: ClientInspectionState;
 		readonly window: null | {
 			readonly count: number;
 			readonly rectangle: ClientHudHarnessRectangle;
@@ -2431,20 +2431,20 @@
 	let inspectionCommandOffset = 0;
 	function examineHarnessSelection(): void {
 		const guid = selection.selectedGuid();
-		if (guid !== null) void objectInspectionOwner.examine(guid);
+		if (guid !== null) void inspectionOwner.examine(guid);
 	}
 	function examineHarnessItem(guid: number): void {
-		void objectInspectionOwner.examine(guid);
+		void inspectionOwner.examine(guid);
 	}
 	const objectInspectionProbe: ObjectInspectionProbe = {
 		async crosstalk() {
-			objectInspectionOwner.close();
-			await objectInspectionOwner.examine(7);
+			inspectionOwner.close();
+			await inspectionOwner.examine(7);
 			emitInteractionEvent(
 				"client-object-inspection-result",
 				inspectionResult("item", 7),
 			);
-			const visible = objectInspectionOwner.read();
+			const visible = inspectionOwner.read();
 			const previousFailure = inspectionFailure;
 			for (const [kind, guid] of [
 				["rejected", 7],
@@ -2461,7 +2461,7 @@
 				);
 				if (
 					!delivered ||
-					objectInspectionOwner.read() !== visible ||
+					inspectionOwner.read() !== visible ||
 					inspectionFailure !== previousFailure
 				)
 					throw new Error(
@@ -2474,16 +2474,16 @@
 			});
 			await shared.sent;
 			const beforeJoin = interactionCommands.length;
-			await objectInspectionOwner.examine(7);
+			await inspectionOwner.examine(7);
 			if (interactionCommands.length !== beforeJoin)
 				throw new Error("Inspector duplicated shared appraisal work.");
-			objectInspectionOwner.close();
+			inspectionOwner.close();
 			emitInteractionEvent(
 				"client-object-inspection-result",
 				inspectionResult("item", 7),
 			);
 			await tick();
-			if (!delivered || objectInspectionOwner.read().kind !== "idle")
+			if (!delivered || inspectionOwner.read().kind !== "idle")
 				throw new Error(
 					"Closing the inspector cancelled background work or reopened the window.",
 				);
@@ -2492,7 +2492,7 @@
 		binding: INPUT_DEFAULTS.client.examine[0],
 		begin: () => {
 			releaseInspectionKeys?.();
-			objectInspectionOwner.close();
+			inspectionOwner.close();
 			inspectionFailure = null;
 			inspectionCommandOffset = interactionCommands.length;
 			selection.select(null);
@@ -2513,7 +2513,7 @@
 			releaseInspectionKeys = null;
 			releaseInspectionSpellReferences?.();
 			releaseInspectionSpellReferences = null;
-			objectInspectionOwner.close();
+			inspectionOwner.close();
 			selection.select(null);
 		},
 		select: (guid) => selection.select(guid),
@@ -2553,7 +2553,7 @@
 				commands,
 				failure: inspectionFailure,
 				selectedGuid: selection.selectedGuid(),
-				state: objectInspectionOwner.read(),
+				state: inspectionOwner.read(),
 				window:
 					body === null || panel === null
 						? null
@@ -5141,7 +5141,7 @@
 			showWaypointContent: async (surface) => {
 				waypointContentProbeEnabled = true;
 				waypointControls.enable();
-				objectInspectionOwner.close();
+				inspectionOwner.close();
 				bookReaderOwner.close();
 				if (surface === "chat") {
 					messages = [
@@ -5186,7 +5186,7 @@
 						),
 					});
 				} else {
-					await objectInspectionOwner.examine(7);
+					await inspectionOwner.examine(7);
 					emitInteractionEvent(
 						"client-object-inspection-result",
 						inspectionResult(surface, 7),
@@ -5767,7 +5767,7 @@
 				api.tradeProbe.register();
 				api.tradeProbe.acknowledge();
 			} else if (panel === "inspection") {
-				await objectInspectionOwner.examine(7);
+				await inspectionOwner.examine(7);
 				emitInteractionEvent(
 					"client-object-inspection-result",
 					inspectionResult("item", 7),
@@ -5937,10 +5937,10 @@
 			unsubscribeChat();
 			objectInspectionProbe.end();
 			unsubscribePanelAuthority();
-			unsubscribeObjectInspection();
+			unsubscribeInspection();
 			unsubscribeBookReader();
 			bookReaderOwner.destroy();
-			objectInspectionOwner.destroy();
+			inspectionOwner.destroy();
 			keyboardFixture?.dispose();
 			spellState.destroy();
 			references.dispose();
@@ -6227,7 +6227,7 @@
 					}}
 					onViewportExamine={(x, y) => {
 						viewportSelectionPoints.push({ x, y, interact: false });
-						void objectInspectionOwner.examine(7);
+						void inspectionOwner.examine(7);
 					}}
 					onViewportHover={(x, y) => {
 						viewportHoverPoints.push({ x, y });
@@ -6270,13 +6270,14 @@
 						selection.selectContentsItem(guid, mode)}
 					onInteractEntity={() =>
 						itemInteractions.interactSelected(unrestrictedUse)}
-					{objectInspection}
+					{inspection}
 					{bookReader}
 					onCloseBook={() => bookReaderOwner.close()}
 					onRetryBook={() => bookReaderOwner.retry()}
 					onExamineEntity={examineHarnessSelection}
 					onExamineItem={examineHarnessItem}
-					onCloseInspection={() => objectInspectionOwner.close()}
+					onExamineSpell={(spellId) => inspectionOwner.examineSpell(spellId)}
+					onCloseInspection={() => inspectionOwner.close()}
 					selectedEntityGuid={selectedGuid}
 					hoveredEntityGuid={hoveredGuid}
 					showRetailHiddenGeometry={false}

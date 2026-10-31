@@ -2,7 +2,6 @@
 	import type { MapWaypointTarget } from "../lib/game/map/map-waypoint";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { onDestroy } from "svelte";
-	import type { HexRgbaColor } from "../lib/frontend-color";
 	import type { UiIconRepository } from "../app/ui-icon-repository";
 	import { trackPointerGesture } from "../app/pointer-gesture";
 	import ClientCreatureInspection from "./ClientCreatureInspection.svelte";
@@ -12,8 +11,9 @@
 	import ClientItemInspection from "./ClientItemInspection.svelte";
 	import ClientPlayerKillerStatusIcon from "./ClientPlayerKillerStatusIcon.svelte";
 	import type { ClientSpellServices } from "./client-spells";
-	import type { ObjectInspection } from "./client-object-inspection-contract";
-	import type { ClientObjectPreviewState } from "./client-object-inspection";
+	import type { ClientInspectionState } from "./client-inspection";
+	import type { SpellReference } from "../app/spell-references";
+	import ClientSpellInspection from "./ClientSpellInspection.svelte";
 	import type { ClientObjectPreviewService } from "./client-object-preview-service";
 	import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
 	import { CLIENT_TUNING } from "./client-tuning";
@@ -26,9 +26,11 @@
 	interface Props {
 		/** Set the current local destination without submitting chat. */
 		readonly onSetWaypoint: (target: MapWaypointTarget) => void;
-		readonly inspection: ObjectInspection;
-		readonly nameColor: HexRgbaColor | null;
-		readonly preview: ClientObjectPreviewState | null;
+		/** Window subjects keep spell identities separate from appraised object GUIDs. */
+		readonly subject: Extract<
+			ClientInspectionState,
+			{ kind: "ready" | "spell" }
+		>;
 		readonly objectPreviewService: ClientObjectPreviewService;
 		readonly spells: ClientSpellServices | null;
 		readonly icons: UiIconRepository | null;
@@ -41,9 +43,7 @@
 	}
 	const {
 		onSetWaypoint,
-		inspection,
-		nameColor,
-		preview,
+		subject,
 		objectPreviewService,
 		spells,
 		icons,
@@ -54,6 +54,41 @@
 		onPlacementChange,
 		onPreviewHeightChange,
 	}: Props = $props();
+	/** Static resolution is scoped to this keyed window's subject and released on replacement. */
+	let spell = $state<
+		| { kind: "loading" }
+		| { kind: "ready"; reference: SpellReference }
+		| { kind: "failed"; detail: string }
+	>({ kind: "loading" });
+	$effect(() => {
+		if (subject.kind !== "spell") return;
+		if (spells === null)
+			throw new Error("Spell inspection requires spell services.");
+		let disposed = false;
+		spell = { kind: "loading" };
+		void spells
+			.reference(subject.spellId)
+			.then((reference) => {
+				if (!disposed) spell = { kind: "ready", reference };
+			})
+			.catch((error: unknown) => {
+				if (!disposed)
+					spell = {
+						kind: "failed",
+						detail: error instanceof Error ? error.message : String(error),
+					};
+			});
+		return () => {
+			disposed = true;
+		};
+	});
+	const title = $derived(
+		subject.kind === "ready"
+			? subject.inspection.name
+			: spell.kind === "ready" && spell.reference.kind === "known"
+				? spell.reference.name
+				: `Spell ${subject.spellId}`,
+	);
 	const { keyboard } = useAppInputPolicy();
 	const previewHeightTuning = CLIENT_TUNING.objectPreview.height;
 	let cancelPreviewResize: (() => void) | null = null;
@@ -100,7 +135,7 @@
 
 <ClientHudWindow
 	icon="examine"
-	title={inspection.name}
+	{title}
 	{placement}
 	{viewport}
 	{onClose}
@@ -108,90 +143,108 @@
 	minWidth={CLIENT_UI_DEFAULTS.inspection.minSize.width}
 	minHeight={CLIENT_UI_DEFAULTS.inspection.minSize.height}
 >
-	{#if inspection.details.kind === "item"}
+	{#if subject.kind === "spell"}
 		<div
 			class="inspection-scroll"
 			use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
 		>
-			<ClientItemInspection
-				{onSetWaypoint}
-				{inspection}
-				item={inspection.details.details}
-				{spells}
-				{icons}
-				{nameColor}
-			/>
+			{#if spell.kind === "ready" && spells !== null}
+				<ClientSpellInspection {spells} reference={spell.reference} />
+			{:else}<article class="inspection-body">
+					<p class="inspection-diagnostic">
+						{spell.kind === "failed" ? spell.detail : "Loading spell…"}
+					</p>
+				</article>{/if}
 		</div>
 	{:else}
-		{@const creatureIdentity = inspection.details.details.identity}
-		<div
-			class="inspection-creature-layout"
-			style:grid-template-rows={`${previewHeight}px minmax(0, 1fr)`}
-		>
-			<div class="inspection-preview-pane">
-				<header class="inspection-preview-identity">
-					<h2 class="inspection-name" style:color={nameColor}>
-						{inspection.name}
-					</h2>
-					{#if inspection.level !== null}<p class="inspection-preview-level">
-							Level {formatInspectionNumber(inspection.level)}
-						</p>{/if}
-					{#if creatureIdentity.kind === "character" && creatureIdentity.role !== null}<p
-							class="inspection-preview-title"
-						>
-							{creatureIdentity.role}
-						</p>{/if}
-					{#if creatureIdentity.lineage !== null || creatureIdentity.kind === "character"}
-						<div class="inspection-preview-metadata">
-							{#if creatureIdentity.lineage !== null}<p>
-									{creatureIdentity.lineage}
-								</p>{/if}
-							{#if creatureIdentity.kind === "character"}
-								<span class="inspection-preview-pk-status">
-									<ClientPlayerKillerStatusIcon
-										status={creatureIdentity.playerKillerStatus}
-									/>
-								</span>
-							{/if}
-						</div>
-					{/if}
-				</header>
-				<ClientModelPreview
-					source={preview?.kind === "ready"
-						? objectPreviewSourceForRendering(preview.source)
-						: null}
-					emptyMessage={preview?.kind === "pending"
-						? "Preparing model…"
-						: "Model preview unavailable"}
-					service={objectPreviewService}
-					rotation="orbit"
-					keyboardNavigation={true}
-					framing={{ kind: "body" }}
-				/>
-				<div
-					class="inspection-preview-resize"
-					role="slider"
-					tabindex="0"
-					aria-label="Creature preview height"
-					aria-orientation="vertical"
-					aria-valuemin={previewHeightTuning.minimum}
-					aria-valuemax={previewHeightTuning.maximum}
-					aria-valuenow={previewHeight}
-					onpointerdown={beginPreviewResize}
-					onkeydown={resizePreviewWithKeyboard}
-				></div>
-			</div>
+		{@const inspection = subject.inspection}
+		{@const nameColor = subject.nameColor}
+		{@const preview = subject.preview}
+		{#if inspection.details.kind === "item"}
 			<div
 				class="inspection-scroll"
 				use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
 			>
-				<ClientCreatureInspection
+				<ClientItemInspection
 					{onSetWaypoint}
 					{inspection}
-					creature={inspection.details.details}
+					item={inspection.details.details}
+					{spells}
+					{icons}
+					{nameColor}
 				/>
 			</div>
-		</div>
+		{:else}
+			{@const creatureIdentity = inspection.details.details.identity}
+			<div
+				class="inspection-creature-layout"
+				style:grid-template-rows={`${previewHeight}px minmax(0, 1fr)`}
+			>
+				<div class="inspection-preview-pane">
+					<header class="inspection-preview-identity">
+						<h2 class="inspection-name" style:color={nameColor}>
+							{inspection.name}
+						</h2>
+						{#if inspection.level !== null}<p class="inspection-preview-level">
+								Level {formatInspectionNumber(inspection.level)}
+							</p>{/if}
+						{#if creatureIdentity.kind === "character" && creatureIdentity.role !== null}<p
+								class="inspection-preview-title"
+							>
+								{creatureIdentity.role}
+							</p>{/if}
+						{#if creatureIdentity.lineage !== null || creatureIdentity.kind === "character"}
+							<div class="inspection-preview-metadata">
+								{#if creatureIdentity.lineage !== null}<p>
+										{creatureIdentity.lineage}
+									</p>{/if}
+								{#if creatureIdentity.kind === "character"}
+									<span class="inspection-preview-pk-status">
+										<ClientPlayerKillerStatusIcon
+											status={creatureIdentity.playerKillerStatus}
+										/>
+									</span>
+								{/if}
+							</div>
+						{/if}
+					</header>
+					<ClientModelPreview
+						source={preview?.kind === "ready"
+							? objectPreviewSourceForRendering(preview.source)
+							: null}
+						emptyMessage={preview?.kind === "pending"
+							? "Preparing model…"
+							: "Model preview unavailable"}
+						service={objectPreviewService}
+						rotation="orbit"
+						keyboardNavigation={true}
+						framing={{ kind: "body" }}
+					/>
+					<div
+						class="inspection-preview-resize"
+						role="slider"
+						tabindex="0"
+						aria-label="Creature preview height"
+						aria-orientation="vertical"
+						aria-valuemin={previewHeightTuning.minimum}
+						aria-valuemax={previewHeightTuning.maximum}
+						aria-valuenow={previewHeight}
+						onpointerdown={beginPreviewResize}
+						onkeydown={resizePreviewWithKeyboard}
+					></div>
+				</div>
+				<div
+					class="inspection-scroll"
+					use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
+				>
+					<ClientCreatureInspection
+						{onSetWaypoint}
+						{inspection}
+						creature={inspection.details.details}
+					/>
+				</div>
+			</div>
+		{/if}
 	{/if}
 </ClientHudWindow>
 

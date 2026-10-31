@@ -22,6 +22,8 @@
 		available: boolean;
 		/** App-owned activation shared with keyboard input. */
 		onactivate: () => void;
+		/** Examine the bound spell even when activation is unavailable. */
+		onexamine: (spellId: number) => void;
 	}
 	let {
 		gridPosition,
@@ -32,16 +34,22 @@
 		display,
 		available,
 		onactivate,
+		onexamine,
 	}: Props = $props();
 	const digit = $derived(
 		shortcut === null || address === null
 			? null
 			: String((address.slot + 1) % 10),
 	);
-	const accessibleLabel = $derived(
+	const activationLabel = $derived(
 		shortcut === null
 			? label
 			: `${digit === null ? "" : `${digit}: `}${label} (key: ${shortcut.description})`,
+	);
+	const accessibleLabel = $derived(
+		spell === null
+			? activationLabel
+			: `${activationLabel}. Right-click to inspect.`,
 	);
 </script>
 
@@ -58,6 +66,10 @@
 	aria-label={accessibleLabel}
 	aria-disabled={!available}
 	title={accessibleLabel}
+	oncontextmenu={(event) => {
+		event.preventDefault();
+		if (spell !== null) onexamine(spell);
+	}}
 	onclick={() => {
 		if (available) onactivate();
 	}}

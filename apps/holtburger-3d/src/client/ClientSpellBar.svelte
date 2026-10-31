@@ -63,6 +63,8 @@
 		onActivateCell: (slot: number) => void;
 		/** The caster cell and its shortcut use the same app-owned activation. */
 		onActivateCaster: () => void;
+		/** Inspect a spell independently of cast availability. */
+		onExamineSpell: (spellId: number) => void;
 	}
 	let {
 		input,
@@ -81,6 +83,7 @@
 		onSelectTab,
 		onActivateCell,
 		onActivateCaster,
+		onExamineSpell,
 	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	/** Bounded inventory-cadence display snapshot; never subscribes to raw world publications. */
@@ -316,6 +319,7 @@
 							displayPlatform,
 						)}
 						spell={caster.spell}
+						onexamine={onExamineSpell}
 						label={`${row?.name ?? `Spell ${caster.spell}`} (${caster.name})${row?.artwork.kind === "failed" ? `: ${row.artwork.detail}` : ""}`}
 						display={row?.artwork.kind === "icon"
 							? displays.get(row.artwork.key)
@@ -385,6 +389,7 @@
 								address={{ tab: configuration.selected, slot }}
 								shortcut={shortcut(slot)}
 								{spell}
+								onexamine={onExamineSpell}
 								label={spell === null
 									? "Empty spell slot"
 									: `${row === undefined ? `Spell ${spell}` : row.artwork.kind === "failed" ? `${row.name}: ${row.artwork.detail}` : row.name}${known?.includes(spell) === true ? "" : " (unavailable)"}`}

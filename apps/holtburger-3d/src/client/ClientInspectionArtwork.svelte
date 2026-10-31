@@ -1,40 +1,41 @@
+<script module lang="ts">
+	import type { UiIconSpec } from "../app/ui-icon-source";
+
+	/** Consumer-selected icon recipe or an explicit reason no recipe is available. */
+	export type InspectionArtwork =
+		| { readonly kind: "ready"; readonly spec: UiIconSpec }
+		| { readonly kind: "failed"; readonly detail: string };
+</script>
+
 <script lang="ts">
-	import { onMount, tick } from "svelte";
+	import { tick } from "svelte";
 	import UiIcon from "../app/UiIcon.svelte";
 	import type {
 		UiIconDisplay,
 		UiIconRepository,
 	} from "../app/ui-icon-repository";
 	import { CLIENT_TUNING } from "./client-tuning";
-	import type { ItemInspection } from "./client-object-inspection-contract";
 
 	interface Props {
-		readonly artwork: ItemInspection["artwork"];
+		/** The item or spell view owns which recipe, or unavailable reason, to present. */
+		readonly artwork: InspectionArtwork;
+		/** Shared repository; this mounted display owns only its own lease. */
 		readonly icons: UiIconRepository | null;
+		/** Accessible artwork identity, independent of preparation success. */
 		readonly name: string;
 	}
-
 	const { artwork, icons, name }: Props = $props();
-	const authored = $derived(
-		artwork.base !== null ||
-			artwork.overlay !== null ||
-			artwork.underlay !== null ||
-			artwork.uiEffects !== 0,
-	);
 	let display = $state<UiIconDisplay | undefined>();
-
-	onMount(() => {
-		if (!authored || icons === null) return;
-		const owner = icons.createOwner("display");
-		const key = icons.retain(owner, {
-			kind: "item",
-			base: artwork.base,
-			itemType: artwork.itemType,
-			overlay: artwork.overlay,
-			underlay: artwork.underlay,
-			uiEffects: artwork.uiEffects,
-		});
-		const refresh = () => (display = icons.read(key));
+	$effect(() => {
+		const repository = icons;
+		const source = artwork;
+		display = undefined;
+		if (source.kind !== "ready" || repository === null) return;
+		const owner = repository.createOwner("display");
+		const key = repository.retain(owner, source.spec);
+		const refresh = () => {
+			display = repository.read(key);
+		};
 		refresh();
 		const timer = window.setInterval(
 			refresh,
@@ -42,7 +43,7 @@
 		);
 		return () => {
 			window.clearInterval(timer);
-			void tick().then(() => icons.releaseOwner(owner));
+			void tick().then(() => repository.releaseOwner(owner));
 		};
 	});
 
@@ -54,7 +55,7 @@
 </script>
 
 <div class="inspection-artwork" aria-label={`${name} artwork`}>
-	{#if authored && icons !== null}
+	{#if artwork.kind === "ready" && icons !== null}
 		<div class="inspection-artwork-image">
 			<UiIcon {display} {name} tooltipLabel={`${name} artwork`} />
 		</div>
@@ -68,14 +69,14 @@
 					: "Artwork incomplete"}: {issue}
 			</p>
 		{/if}
-	{:else if !authored}
+	{:else if artwork.kind === "failed"}
 		<div
 			class="inspection-artwork-image inspection-artwork-empty"
 			aria-hidden="true"
 		>
 			?
 		</div>
-		<p class="inspection-diagnostic">No item artwork was disclosed.</p>
+		<p class="inspection-diagnostic">{artwork.detail}</p>
 	{:else}
 		<div
 			class="inspection-artwork-image inspection-artwork-empty"

@@ -243,18 +243,19 @@ export async function probeClientSpells(
 			?.textContent?.includes("Fixture spell description.")
 	)
 		throw new Error("Expanded spell omitted authored details.");
-	if (
-		!document
-			.querySelector('[data-spell-id="1"] .spell-details')
-			?.textContent?.includes("Authored recipient: Creature")
-	)
+	const fact = (label: string) =>
+		[...document.querySelectorAll('[data-spell-id="1"] dt')]
+			.find((node) => node.textContent === label)
+			?.nextElementSibling?.textContent?.trim();
+	if (fact("Level") !== "1")
+		throw new Error(
+			"Expanded spell omitted approximate formula-derived level.",
+		);
+	if (fact("Authored recipient") !== "Creature")
 		throw new Error("Expanded spell omitted authored recipient metadata.");
-	if (
-		!document
-			.querySelector('[data-spell-id="1"] .spell-details')
-			?.textContent?.includes("Range: 27.3 yds.")
-	)
+	if (fact("Range") !== "27.3 yds.")
 		throw new Error("Expanded spell omitted character-derived range.");
+
 	await waitFor(
 		() =>
 			document.querySelectorAll('[data-spell-id="1"] .component-icon img')
@@ -269,9 +270,7 @@ export async function probeClientSpells(
 	emit("client-spell-inspection-context", { revision: 2, player: 1 });
 	await waitFor(
 		() =>
-			document
-				.querySelector('[data-spell-id="1"] .spell-details')
-				?.textContent?.includes("Range: 32.8 yds.") === true &&
+			fact("Range") === "32.8 yds." &&
 			document.querySelectorAll('[data-spell-id="1"] .component-icon img')
 				.length === 2,
 	);

@@ -7,7 +7,9 @@
 	import type { SpellReference } from "../app/spell-references";
 	import type { UiIconRepository } from "../app/ui-icon-repository";
 	import type { HexRgbaColor } from "../lib/frontend-color";
-	import ClientInspectionArtwork from "./ClientInspectionArtwork.svelte";
+	import ClientInspectionArtwork, {
+		type InspectionArtwork,
+	} from "./ClientInspectionArtwork.svelte";
 	import { summarizeItemCantrips } from "./client-item-cantrips";
 	import type { ClientSpellServices } from "./client-spells";
 	import { CLIENT_TUNING } from "./client-tuning";
@@ -43,6 +45,15 @@
 
 	const { inspection, nameColor, item, spells, icons, onSetWaypoint }: Props =
 		$props();
+	/** Item disclosure policy stays with the item view; the artwork display accepts icon recipes. */
+	const artwork = $derived<InspectionArtwork>(
+		item.artwork.base !== null ||
+			item.artwork.overlay !== null ||
+			item.artwork.underlay !== null ||
+			item.artwork.uiEffects !== 0
+			? { kind: "ready", spec: { kind: "item", ...item.artwork } }
+			: { kind: "failed", detail: "No item artwork was disclosed." },
+	);
 	const statuses = $derived(formatItemStatuses(item.status));
 	const lockpickingText = $derived(
 		item.lockpicking === null
@@ -184,11 +195,7 @@
 <article class="inspection-body inspection-item">
 	<header class="inspection-hero">
 		<div class="inspection-hero-aside">
-			<ClientInspectionArtwork
-				artwork={item.artwork}
-				{icons}
-				name={inspection.name}
-			/>
+			<ClientInspectionArtwork {artwork} {icons} name={inspection.name} />
 			{#if cantripSummary.kind === "loading"}
 				<div
 					class="inspection-cantrip-pills"

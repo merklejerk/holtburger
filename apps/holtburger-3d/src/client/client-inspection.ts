@@ -22,9 +22,11 @@ type InspectionSession = Pick<
 	readonly entities: Pick<ClientLifecycleSession["entities"], "read">;
 };
 
-/** Latest-target presentation retained independently of mutable selection and entity mirrors. */
-export type ClientObjectInspectionState =
+/** Latest-subject presentation retained independently of mutable selection and entity mirrors. */
+export type ClientInspectionState =
 	| { readonly kind: "idle" }
+	/** Local spell identity; definition and character-context consumers belong to the view. */
+	| { readonly kind: "spell"; readonly spellId: number }
 	| { readonly kind: "pending"; readonly guid: number }
 	| {
 			readonly kind: "ready";
@@ -37,7 +39,7 @@ export type ClientObjectInspectionState =
 	  };
 
 /** Cold asset-readiness state for a ready creature examination. */
-export type ClientObjectPreviewState =
+type ClientObjectPreviewState =
 	| { readonly kind: "pending" }
 	| {
 			readonly kind: "ready";
@@ -48,19 +50,20 @@ export type ClientObjectPreviewState =
 	| { readonly kind: "unavailable" };
 
 /**
- * Owns the one-target/one-window inspection lifetime for a client session.
+ * Owns the one-subject/one-window inspection lifetime for a client session.
  *
  * Appraisal callbacks belong to this window; unrelated session results cannot change it.
- * The session deduplicates wire requests; visible targets refresh on a cold, tunable cadence.
+ * The session deduplicates wire requests; visible objects refresh on a cold, tunable cadence.
+ * Local spell subjects never acquire appraisal work.
  * Selection changes and entity residency do not control this state machine; the entity mirror is
  * sampled only to capture presentation facts for the exact requested target.
  */
-export class ClientObjectInspection {
+export class ClientInspection {
 	readonly #session: InspectionSession;
 	readonly #reportFailure: (message: string) => void;
-	readonly #listeners = new Set<(state: ClientObjectInspectionState) => void>();
+	readonly #listeners = new Set<(state: ClientInspectionState) => void>();
 	readonly #unsubscribe: () => void;
-	#state: ClientObjectInspectionState = { kind: "idle" };
+	#state: ClientInspectionState = { kind: "idle" };
 	#playerGuid: number | null;
 	#refreshTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Only this subscription may apply an appraisal to the window. */
@@ -83,20 +86,18 @@ export class ClientObjectInspection {
 		this.#unsubscribe = session.subscribe((event) => this.#receive(event));
 	}
 
-	read(): ClientObjectInspectionState {
+	read(): ClientInspectionState {
 		return this.#state;
 	}
 
-	subscribe(
-		listener: (state: ClientObjectInspectionState) => void,
-	): () => void {
+	subscribe(listener: (state: ClientInspectionState) => void): () => void {
 		this.#listeners.add(listener);
 		return () => this.#listeners.delete(listener);
 	}
 
 	/** Acquire this exact target, or immediately refresh it when its window is already ready. */
 	async examine(guid: number): Promise<void> {
-		if (this.#destroyed) throw new Error("Object inspection is unavailable.");
+		if (this.#destroyed) throw new Error("Inspection is unavailable.");
 		if (this.#state.kind === "pending" && this.#state.guid === guid) return;
 		if (this.#state.kind === "ready" && this.#state.guid === guid) {
 			this.#cancelRefreshTimer();
@@ -122,6 +123,15 @@ export class ClientObjectInspection {
 			this.#replace({ kind: "idle" });
 			this.#reportFailure(failureText(error));
 		}
+	}
+
+	/** Replace any appraisal with a local spell subject, without changing gameplay selection. */
+	examineSpell(spellId: number): void {
+		if (this.#destroyed) throw new Error("Inspection is unavailable.");
+		this.#resetRefresh();
+		this.#resetPreviewIdentity();
+		this.#nameColor = null;
+		this.#replace({ kind: "spell", spellId });
 	}
 
 	/** Close presentation only; no server command and no selection mutation occurs. */
@@ -170,7 +180,11 @@ export class ClientObjectInspection {
 	}
 
 	#accept(result: ObjectInspectionResult): void {
-		if (this.#state.kind === "idle" || result.guid !== this.#state.guid) return;
+		if (
+			(this.#state.kind !== "pending" && this.#state.kind !== "ready") ||
+			result.guid !== this.#state.guid
+		)
+			return;
 		const guid = this.#state.guid;
 		this.#refreshFailureReported = false;
 		switch (result.outcome.kind) {
@@ -336,7 +350,7 @@ export class ClientObjectInspection {
 		);
 	}
 
-	#replace(state: ClientObjectInspectionState): void {
+	#replace(state: ClientInspectionState): void {
 		if (this.#state.kind === "idle" && state.kind === "idle") return;
 		this.#state = state;
 		for (const listener of this.#listeners) listener(state);

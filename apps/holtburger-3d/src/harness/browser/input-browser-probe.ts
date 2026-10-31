@@ -9,6 +9,7 @@ import type { ViewportInputGate } from "../../lib/input/viewport-input-gate";
 import { CharacterInputController } from "../../lib/game/controls/character-input-controller";
 import { ClientInputArbiter } from "../../client/client-input-arbiter";
 import { InputContext } from "../../lib/input/input-context";
+import { captureClientBinding } from "../../client/client-binding-catalog";
 
 /** Exercise configured Explorer input and DOM focus cancellation without runtime assets. */
 export function probeBrowserInput(
@@ -93,6 +94,7 @@ export function probeBrowserInput(
 		editor.remove();
 	}
 	probeClientAutorun(keyboard);
+	probeUnidentifiedSpace(keyboard);
 }
 
 /** Exercise real DOM focus with the production client movement owners, without a server. */
@@ -258,5 +260,60 @@ function probeClientAutorun(keyboard: KeyboardInputPolicy): void {
 		otherEditor.remove();
 		dialog.remove();
 		keyboard.returnToGame();
+	}
+}
+
+/** Verify DOM routing and capture when the platform supplies only Space's physical identity. */
+function probeUnidentifiedSpace(keyboard: KeyboardInputPolicy): void {
+	const input = new AppInput(INPUT_DEFAULTS);
+	let precise = false;
+	let jumped = false;
+	const character = input.characterContext((action, pressed) => {
+		if (action === "jump" && pressed) jumped = true;
+	});
+	const detach = keyboard.bindGame({
+		keydown: (event) => {
+			if (input.shortcut("preciseJump", event)) {
+				precise = true;
+				event.preventDefault();
+			} else character.apply(event, true);
+		},
+		keyup: (event) => {
+			character.apply(event, false);
+		},
+		cancel: () => character.reset(),
+	});
+	try {
+		keyboard.returnToGame();
+		const event = new KeyboardEvent("keydown", {
+			key: "Unidentified",
+			code: "Space",
+			ctrlKey: true,
+			bubbles: true,
+			cancelable: true,
+		});
+		window.dispatchEvent(event);
+		if (!precise || jumped || !event.defaultPrevented)
+			throw new Error(
+				"Unidentified Ctrl+Space failed to enter precise targeting exclusively.",
+			);
+		const captured = new InputContext(
+			{ precise: [captureClientBinding(event)] },
+			() => {},
+		);
+		if (!captured.apply(event, true))
+			throw new Error(
+				"Captured unidentified Ctrl+Space failed to match its physical key.",
+			);
+		window.dispatchEvent(
+			new KeyboardEvent("keyup", { key: "Unidentified", code: "Space" }),
+		);
+		window.dispatchEvent(
+			new KeyboardEvent("keydown", { key: " ", code: "Space" }),
+		);
+		if (!jumped)
+			throw new Error("Ordinary Space failed after unidentified Ctrl+Space.");
+	} finally {
+		detach();
 	}
 }

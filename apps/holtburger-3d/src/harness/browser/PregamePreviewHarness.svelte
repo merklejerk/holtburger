@@ -241,6 +241,7 @@
 				pickerShowcase = {
 					state: {
 						kind: "character-selection",
+						rejection: null,
 						maxSlots: 10,
 						selectedGuid: guid,
 						characters: [

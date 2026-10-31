@@ -30,6 +30,11 @@ mod combat_runtime;
 pub mod combat_tuning;
 mod commands;
 pub mod connection;
+pub mod connection_failure;
+pub use connection_failure::{
+    CharacterErrorCode, ClientExitOutcome, ConnectionFailure, ConnectionFailureCause,
+    ConnectionOperation,
+};
 mod contracts;
 pub mod corpse;
 mod dynamic_entity_view;
@@ -257,9 +262,7 @@ pub struct ClientRuntime {
     /// Character-bound inspection inputs and their publication revision.
     spell_inspection: spell_inspection::SpellInspectionState,
     /// Terminal cause selected by the authority before it publishes `Exiting`.
-    exit_cause: Option<ClientExitCause>,
-    /// Authority-owned explanation retained after a normal runtime termination.
-    exit_diagnostic: Option<String>,
+    exit_outcome: Option<ClientExitOutcome>,
     client_view_event_tx: broadcast::Sender<ClientViewEvent>,
     /// Monotonic origin shared by focused dynamic-entity snapshots and deltas.
     dynamic_entity_time_origin: Instant,
@@ -368,6 +371,7 @@ impl ClientRuntime {
             ClientState::Connected if self.authenticating => ClientLifecycleState::Authenticating,
             ClientState::Connected => ClientLifecycleState::Connecting,
             ClientState::CharacterSelection => ClientLifecycleState::CharacterSelection {
+                rejection: self.character_selection.entry_rejection.clone(),
                 max_slots: self.character_selection.max_slots,
                 characters: self
                     .character_selection
@@ -401,7 +405,10 @@ impl ClientRuntime {
                 }),
             ClientState::LoggingOut => ClientLifecycleState::LoggingOut,
             ClientState::Disconnected => ClientLifecycleState::Exiting {
-                cause: self.exit_cause.unwrap_or(ClientExitCause::ServerDisconnect),
+                outcome: self.exit_outcome.clone().unwrap_or(ClientExitOutcome {
+                    cause: ClientExitCause::ServerDisconnect,
+                    failure: None,
+                }),
             },
         }
     }
@@ -570,7 +577,16 @@ impl ClientRuntime {
             self.emit_character_management();
         }
         self.stop_character_actions();
-        self.exit_cause = Some(cause);
+        if self
+            .exit_outcome
+            .as_ref()
+            .is_none_or(|outcome| outcome.failure.is_none())
+        {
+            self.exit_outcome = Some(ClientExitOutcome {
+                cause,
+                failure: None,
+            });
+        }
     }
 
     pub(crate) fn bump_world_generation(&mut self) -> u64 {
@@ -3661,6 +3677,7 @@ mod tests {
         assert_eq!(
             client.lifecycle(),
             ClientLifecycleState::CharacterSelection {
+                rejection: None,
                 max_slots: 11,
                 characters: vec![
                     ClientCharacterSummary {

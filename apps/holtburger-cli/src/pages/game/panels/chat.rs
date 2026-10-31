@@ -186,17 +186,7 @@ impl ChatState {
             ClientViewEvent::CombatFeedback(feedback) => {
                 self.log_combat_feedback(feedback);
             }
-            ClientViewEvent::PingResponse
-            | ClientViewEvent::ConnectionUpdated(_)
-            | ClientViewEvent::Disconnected => {}
-            ClientViewEvent::BootAccount(reason) => {
-                let message = if reason.trim().is_empty() {
-                    "Disconnected: Booted from server.".to_string()
-                } else {
-                    format!("Disconnected: Booted from server: {}", reason)
-                };
-                self.log(ChatMessageTags::error(), message);
-            }
+            ClientViewEvent::PingResponse | ClientViewEvent::ConnectionUpdated(_) => {}
             _ => {}
         }
     }

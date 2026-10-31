@@ -509,6 +509,15 @@ impl ClientRuntime {
                 self.session
                     .send_login_request(&self.character_selection.account_name, &password)
                     .await
+                    .inspect_err(|error| {
+                        self.fail_connection(
+                            super::ConnectionFailureCause::Local {
+                                operation: super::ConnectionOperation::SendLogin,
+                                diagnostic: format!("{error:#}"),
+                            },
+                            ClientExitCause::RuntimeFailure,
+                        )
+                    })
             }
             ClientCommand::SelectCharacter(id) => {
                 log::info!("Selecting character: 0x{:08X}", id);
@@ -516,11 +525,21 @@ impl ClientRuntime {
                 // activation barrier. `select_character` also stores it, but only after the
                 // asynchronous request setup; beginning the transition first would leave the
                 // barrier without the identity it is required to hydrate.
+                self.character_selection.entry_rejection = None;
                 self.character_selection.character_id = Some(id);
                 self.begin_world_entry_transition().await?;
                 self.character_selection
                     .select_character(id, &mut self.session)
                     .await
+                    .inspect_err(|error| {
+                        self.fail_connection(
+                            super::ConnectionFailureCause::Local {
+                                operation: super::ConnectionOperation::ServerTraffic,
+                                diagnostic: format!("{error:#}"),
+                            },
+                            ClientExitCause::RuntimeFailure,
+                        )
+                    })
             }
             ClientCommand::CreateCharacter(request) => {
                 log::info!("Creating character: {}", request.name);

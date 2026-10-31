@@ -209,17 +209,32 @@ impl ClientRuntimeBuilder {
         })?;
 
         let target = tokio::net::lookup_host(format!("{}:{}", endpoint.host, endpoint.port))
-            .await?
+            .await
+            .map_err(|error| super::ConnectionFailure {
+                state: None,
+                cause: super::ConnectionFailureCause::Local {
+                    operation: super::ConnectionOperation::ResolveAddress,
+                    diagnostic: error.to_string(),
+                },
+            })?
             .next()
-            .ok_or_else(|| {
-                anyhow!(
-                    "Could not resolve server address: {}:{}",
-                    endpoint.host,
-                    endpoint.port
-                )
+            .ok_or_else(|| super::ConnectionFailure {
+                state: None,
+                cause: super::ConnectionFailureCause::Local {
+                    operation: super::ConnectionOperation::ResolveAddress,
+                    diagnostic: format!("No addresses for {}:{}", endpoint.host, endpoint.port),
+                },
             })?;
 
-        let session = Session::new(target).await?;
+        let session = Session::new(target)
+            .await
+            .map_err(|error| super::ConnectionFailure {
+                state: None,
+                cause: super::ConnectionFailureCause::Local {
+                    operation: super::ConnectionOperation::OpenSocket,
+                    diagnostic: format!("{error:#}"),
+                },
+            })?;
 
         self.finish(session)
     }
@@ -282,8 +297,7 @@ impl ClientRuntimeBuilder {
             world_name: None,
             described_character: None,
             spell_inspection: super::spell_inspection::SpellInspectionState::default(),
-            exit_cause: None,
-            exit_diagnostic: None,
+            exit_outcome: None,
             client_view_event_tx,
             dynamic_entity_time_origin: Instant::now(),
             published_character_motion_capabilities:
@@ -358,8 +372,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
         world_name: None,
         described_character: None,
         spell_inspection: super::spell_inspection::SpellInspectionState::default(),
-        exit_cause: None,
-        exit_diagnostic: None,
+        exit_outcome: None,
         client_view_event_tx,
         dynamic_entity_time_origin: Instant::now(),
         published_character_motion_capabilities: PublishedCharacterMotionCapabilities::Unpublished,

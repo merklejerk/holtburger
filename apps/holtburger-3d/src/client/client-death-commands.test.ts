@@ -41,6 +41,7 @@ function fixture() {
 				playerGuid: null,
 				lifecycle: {
 					kind: "character-selection",
+					rejection: null,
 					maxSlots: 11,
 					characters: [],
 				},

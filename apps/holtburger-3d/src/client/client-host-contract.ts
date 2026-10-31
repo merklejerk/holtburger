@@ -383,6 +383,7 @@ const lifecycleSchema = z.discriminatedUnion("kind", [
 	z
 		.object({
 			kind: z.literal("character-selection"),
+			rejection: z.string().nullable(),
 			maxSlots: z.number().int().nonnegative(),
 			characters: z.array(characterSchema),
 		})

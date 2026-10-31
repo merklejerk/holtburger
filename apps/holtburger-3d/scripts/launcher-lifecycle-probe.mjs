@@ -26,6 +26,7 @@ const { values } = parseArgs({
 		package: { type: "string" },
 		"quit-during-attempt": { type: "boolean" },
 		"tree-stats": { type: "boolean" },
+		"connection-failure-only": { type: "boolean" },
 	},
 });
 const directory = await mkdtemp(join(tmpdir(), "h3d-launcher-probe-"));
@@ -205,7 +206,7 @@ async function snapshot(label) {
 	report.snapshots.push({ label, native, renderer });
 	return { native, renderer };
 }
-try {
+async function runProbe() {
 	if (preview) {
 		for (const stream of [preview.stdout, preview.stderr])
 			stream.on("data", (chunk) => {
@@ -281,6 +282,118 @@ try {
 	browser = await createCdpClient(browserEndpoint);
 	inspector = await createCdpClient(inspectorEndpoint);
 	await attach("launcher");
+	if (values["connection-failure-only"]) {
+		requireCondition(
+			Boolean(values.assets),
+			"Connection failure probe requires --assets",
+		);
+		const serverId = randomUUID();
+		await evaluate(
+			page,
+			`window.holtburgerLauncher.saveServer(${JSON.stringify({ id: serverId, name: "Connection failure probe", endpoint: { host: "127.0.0.1", port: 1 } })})`,
+		);
+		await evaluate(
+			page,
+			`window.holtburgerLauncher.play(${JSON.stringify({ serverId, profileId: null, credentials: { account: "launcher-probe", password: "probe-secret" } })})`,
+		);
+		await attach("client");
+		await attach("launcher");
+		const returned = await evaluate(
+			page,
+			"window.holtburgerLauncher.snapshot()",
+		);
+		requireCondition(
+			returned.canPlay &&
+				returned.failure?.includes(
+					"Login failed: Connection timed out: no server traffic",
+				),
+			"Shared timeout explanation was lost during native return",
+		);
+		const resources = await snapshot("picker after connection failure");
+		requireCondition(
+			resources.native.children.length === 0 &&
+				resources.renderer.canvases === 0,
+			"Failed attempt retained native or renderer resources",
+		);
+		requireCondition(
+			await evaluate(
+				page,
+				"document.querySelector('.launcher-error[role=alert]')?.textContent.includes('no server traffic')",
+			),
+			"Launcher did not render the shared timeout explanation",
+		);
+		const desktopNotice = await evaluate(
+			page,
+			`(() => {
+            const notice = document.querySelector('.launcher-error');
+            const box = notice.getBoundingClientRect();
+            const brand = document.querySelector('.pregame-brand').getBoundingClientRect();
+            const content = document.querySelector('.pregame-content').getBoundingClientRect();
+            return { besideBrand: box.left >= brand.right, aboveContent: box.bottom <= content.top,
+                framed: parseFloat(getComputedStyle(notice).borderTopWidth) > 0,
+                insideViewport: box.right <= innerWidth };
+        })()`,
+		);
+		requireCondition(
+			Object.values(desktopNotice).every(Boolean),
+			`Invalid header notice layout: ${JSON.stringify(desktopNotice)}`,
+		);
+		await evaluate(
+			inspector,
+			"Promise.resolve(process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron')).then(electron => electron.BrowserWindow.getAllWindows()[0].setContentSize(680, 760))",
+		);
+		await waitFor(
+			() => evaluate(page, "innerWidth <= 720"),
+			"narrow launcher viewport",
+		);
+		requireCondition(
+			await evaluate(
+				page,
+				`(() => {
+            const notice = document.querySelector('.launcher-error').getBoundingClientRect();
+            const brand = document.querySelector('.pregame-brand').getBoundingClientRect();
+            const content = document.querySelector('.pregame-content').getBoundingClientRect();
+            return notice.top >= brand.bottom && notice.right <= innerWidth && notice.bottom <= content.top;
+        })()`,
+			),
+			"Narrow header notice overlaps branding or controls",
+		);
+		await evaluate(
+			page,
+			"document.querySelector('button[aria-label=\"Dismiss error\"]').click()",
+		);
+		await waitFor(
+			() =>
+				evaluate(page, "document.querySelector('.launcher-error') === null"),
+			"dismissed header notice",
+		);
+		requireCondition(
+			await evaluate(
+				page,
+				"window.holtburgerLauncher.snapshot().then(value => value.canPlay && value.failure !== null)",
+			),
+			"Dismissal altered the retained failure or disabled Play",
+		);
+		await evaluate(
+			page,
+			`window.holtburgerLauncher.play(${JSON.stringify({ serverId, profileId: null, credentials: { account: "launcher-probe", password: "probe-secret" } })})`,
+		);
+		await attach("client");
+		await attach("launcher");
+		requireCondition(
+			await evaluate(
+				page,
+				"document.querySelector('.launcher-error[role=alert]')?.textContent.includes('no server traffic')",
+			),
+			"A later failure did not show a new notice",
+		);
+		report.scenarios.push(
+			"framed header notice sits beside branding, wraps above controls in a narrow window, dismisses locally, and reappears for a later failure",
+			"login timeout survives native retirement and renders in the usable launcher; no host or canvas remains",
+		);
+		await quitAndReport();
+		return;
+	}
 	const initial = await snapshot("picker initial");
 	requireCondition(
 		initial.native.visible,
@@ -1080,9 +1193,9 @@ try {
 			requireCondition(
 				await evaluate(
 					page,
-					"window.holtburgerLauncher.snapshot().then((value) => Boolean(value.failure))",
+					"window.holtburgerLauncher.snapshot().then((value) => value.failure?.includes('Login failed: Connection timed out: no server traffic'))",
 				),
-				"Connection failure diagnostic was lost",
+				"Shared login timeout explanation was lost during automatic native return",
 			);
 			report.scenarios.push(
 				"real connection timeout returns to picker with diagnostic",
@@ -1390,6 +1503,10 @@ try {
 		);
 		await attach("client");
 	}
+	await quitAndReport();
+}
+
+async function quitAndReport() {
 	const quitting = evaluate(page, "window.holtburgerClient.quit()").catch(
 		() => {},
 	);
@@ -1412,6 +1529,10 @@ try {
 			: "picker Quit flushes and exits cleanly",
 	);
 	console.log(JSON.stringify(report, null, 2));
+}
+
+try {
+	await runProbe();
 } catch (error) {
 	console.error(output);
 	throw error;

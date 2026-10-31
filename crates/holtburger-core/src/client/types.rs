@@ -12,7 +12,7 @@ use crate::client::recall::RecallDestination;
 use crate::client::selection_query::{EntitySelectionQueryRequest, EntitySelectionQueryResult};
 use holtburger_common::properties::DamageType;
 use holtburger_common::{CharacterOption, ConfirmationType, Guid};
-use holtburger_protocol::errors::{CharacterError, WeenieError};
+use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::combat::{
     AttackConditions, AttackHeight, CombatMode, DamageLocation,
 };
@@ -457,7 +457,8 @@ pub enum ActionResultReason {
         item_guid: Guid,
         error: WeenieError,
     },
-    Character(CharacterError),
+    /// Lossless interpretation of the server character error.
+    Character(super::CharacterErrorCode),
     /// Matched lock rejection for a pending direct use; broadcast evidence is best effort.
     Locked {
         /// Guarded direct-use receipt identity; consumers wait for this use to finish.
@@ -478,7 +479,7 @@ pub enum ActionResultReason {
     },
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ClientState {
     Connected,
     CharacterSelection,
@@ -499,6 +500,8 @@ pub enum ClientLifecycleState {
     Connecting,
     Authenticating,
     CharacterSelection {
+        /// Entry refusal retained until a new entry request or character retirement.
+        rejection: Option<super::ConnectionFailure>,
         /// Advertised server capacity; pending deletion entries still occupy roster slots.
         max_slots: u32,
         characters: Vec<ClientCharacterSummary>,
@@ -519,7 +522,8 @@ pub enum ClientLifecycleState {
     /// The login connection remains alive while the character leaves the world.
     LoggingOut,
     Exiting {
-        cause: ClientExitCause,
+        /// Terminal explanation and ownership captured before teardown.
+        outcome: super::ClientExitOutcome,
     },
 }
 
@@ -1357,13 +1361,11 @@ pub enum ClientViewEvent {
     PingResponse,
     LogMessage(String),
     CombatFeedback(CombatFeedback),
-    BootAccount(String),
     EntityDebugInfoSnapshot {
         entity: Box<Entity>,
     },
     /// Completed shared transport observation.
     ConnectionUpdated(super::connection::ConnectionSample),
-    Disconnected,
 }
 
 #[derive(Debug, Clone)]

@@ -1071,6 +1071,13 @@ export async function probeClientPresentation(
 			),
 			false,
 		);
+		await read(`${api}.refuseNextEntry()`);
+		await click("Enter World");
+		await wait(
+			"document.querySelector('.client-character-select [role=alert]')?.textContent.includes('This character is still in the world.') || [...document.querySelectorAll('[role=alert]')].some(element => element.textContent.includes('This character is still in the world.'))",
+		);
+		await wait("document.querySelector('.enter-world')?.disabled === false");
+		assert.equal((await read(`${api}.read()`)).portalReveals, 0);
 		await click("Enter World");
 		await wait(
 			`${api}.read().portalReveals === 1 && ${visible} && document.querySelector('.client-world') !== null`,

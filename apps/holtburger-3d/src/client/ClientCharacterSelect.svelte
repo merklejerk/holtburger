@@ -357,6 +357,9 @@
 						Create character</button
 					>
 				</div>
+				{#if selection.rejection !== null}<p class="ui-error" role="alert">
+						{selection.rejection}
+					</p>{/if}
 				{#if actionError !== null && deletion === null}<p
 						class="ui-error"
 						role="alert"

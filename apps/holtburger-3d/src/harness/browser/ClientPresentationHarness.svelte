@@ -177,6 +177,8 @@
 				};
 				/** Terminal authority edge carrying the connection-loss diagnostic. */
 				failSession(): void;
+				/** Exercise production selection recovery after a refused initial entry. */
+				refuseNextEntry(): void;
 				releaseConnection(): void;
 				releaseScene(): void;
 				holdRetirement(): void;
@@ -378,6 +380,10 @@
 					expectedErrors,
 					closeResult,
 				}),
+				refuseNextEntry: () =>
+					authority.refuseNextEntry(
+						"World entry failed: This character is still in the world.",
+					),
 				failSession: () =>
 					authority.exit(
 						"server-disconnect",

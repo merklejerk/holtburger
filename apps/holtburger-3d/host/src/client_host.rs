@@ -10,8 +10,8 @@ use holtburger_core::client::movement_types::{
     CharacterDrive, Gait, LateralMotion, LongitudinalMotion, PlayerDriveIntent, Turn,
 };
 use holtburger_core::{
-    CharacterMotionEvent, CharacterMotionSequence, ClientExitCause, ClientLifecycleState,
-    ClientViewEvent, JumpExtent, SequencedCharacterMotionEvent,
+    CharacterMotionEvent, CharacterMotionSequence, ClientExitCause, ClientViewEvent, JumpExtent,
+    SequencedCharacterMotionEvent,
 };
 use serde::Deserialize;
 use tokio::sync::{broadcast, mpsc};
@@ -179,37 +179,44 @@ pub async fn run_client_task(
     supervise_client_runtime(
         async move {
             let result = client.run().await;
-            let (cause, diagnostic) = match result {
-                Ok(()) if shutdown_requested.load(std::sync::atomic::Ordering::Acquire) => (
-                    ClientExitCause::HostShutdown,
-                    "client host shutdown".to_string(),
-                ),
-                Ok(()) => {
-                    let cause = match client.lifecycle() {
-                        ClientLifecycleState::Exiting { cause } => cause,
-                        _ => ClientExitCause::ServerDisconnect,
-                    };
-                    let diagnostic = client.exit_diagnostic().map(str::to_owned).unwrap_or_else(
-                        || match cause {
-                            ClientExitCause::ExplicitDisconnect => {
-                                "Disconnected from the server.".into()
-                            }
-                            _ => "The server connection ended.".into(),
-                        },
-                    );
-                    (cause, diagnostic)
-                }
-                Err(error) => (ClientExitCause::RuntimeFailure, error.to_string()),
-            };
+            let exit = client_task_exit(
+                client.exit_outcome(),
+                result,
+                shutdown_requested.load(std::sync::atomic::Ordering::Acquire),
+            );
             // Dropping the sole authority also closes its event sender. The forwarder drains
             // that ordered stream before the supervisor publishes the terminal outcome.
-            client_exit_requested(cause, diagnostic)
+            exit
         },
         events,
         command_tx,
         sink,
     )
     .await
+}
+
+/// Specific authority evidence wins over a shutdown request or a generic task error.
+fn client_task_exit(
+    outcome: Option<&holtburger_core::ClientExitOutcome>,
+    result: anyhow::Result<()>,
+    shutdown_requested: bool,
+) -> ClientHostEvent {
+    if let Some(outcome) = outcome.filter(|outcome| outcome.failure.is_some()) {
+        return client_exit_requested(outcome.cause, outcome.diagnostic());
+    }
+    match result {
+        Ok(()) if shutdown_requested => {
+            client_exit_requested(ClientExitCause::HostShutdown, "client host shutdown")
+        }
+        Ok(()) => match outcome {
+            Some(outcome) => client_exit_requested(outcome.cause, outcome.diagnostic()),
+            None => client_exit_requested(
+                ClientExitCause::ServerDisconnect,
+                "The server connection ended.",
+            ),
+        },
+        Err(error) => client_exit_requested(ClientExitCause::RuntimeFailure, format!("{error:#}")),
+    }
 }
 
 /// The runtime future owns the event sender; completion or panic must close its stream.
@@ -1162,6 +1169,7 @@ mod tests {
     #[test]
     fn lifecycle_projects_character_selection_while_snapshot_owns_local_identity() {
         let lifecycle = ClientLifecycleWire::from(&ClientLifecycleState::CharacterSelection {
+            rejection: None,
             max_slots: 11,
             characters: vec![holtburger_core::ClientCharacterSummary {
                 guid: Guid(0x5000_0007),
@@ -1174,6 +1182,7 @@ mod tests {
             serde_json::to_value(lifecycle).expect("wire lifecycle should serialize"),
             serde_json::json!({
                 "kind": "character-selection",
+                "rejection": null,
                 "maxSlots": 11,
                 "characters": [{
                     "guid": 0x5000_0007u64,
@@ -1239,11 +1248,6 @@ mod tests {
     }
 
     #[test]
-    fn broad_core_events_stop_at_the_client_host_boundary() {
-        assert!(project_client_event(ClientViewEvent::Disconnected).is_none());
-    }
-
-    #[test]
     fn local_player_identity_crosses_independently_of_lifecycle() {
         let player_guid = Guid(0x5000_0009);
         assert!(matches!(
@@ -1269,5 +1273,31 @@ mod tests {
             projected,
             Some(ClientHostEvent::CameraStarted(receipt)) if receipt.identity == identity
         ));
+    }
+    #[test]
+    fn retained_server_rejection_survives_shutdown_and_task_error() {
+        let outcome = holtburger_core::ClientExitOutcome {
+            cause: ClientExitCause::ServerDisconnect,
+            failure: Some(holtburger_core::ConnectionFailure {
+                state: Some(holtburger_core::ClientState::Connected),
+                cause: holtburger_core::ConnectionFailureCause::Character(
+                    holtburger_core::CharacterErrorCode::Unknown(0xfedc_ba98),
+                ),
+            }),
+        };
+        for shutdown in [false, true] {
+            for result in [Ok(()), Err(anyhow::anyhow!("generic task failure"))] {
+                let ClientHostEvent::ExitRequested(exit) =
+                    client_task_exit(Some(&outcome), result, shutdown)
+                else {
+                    panic!("expected terminal projection")
+                };
+                assert_eq!(exit.diagnostic, outcome.diagnostic());
+                assert!(matches!(
+                    exit.cause,
+                    crate::client_projection::ClientExitCauseWire::ServerDisconnect
+                ));
+            }
+        }
     }
 }

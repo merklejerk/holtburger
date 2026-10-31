@@ -724,7 +724,12 @@ describe("salvage draft", () => {
 		rejectSubmission(f);
 		f.emit({
 			type: "lifecycle",
-			lifecycle: { kind: "character-selection", maxSlots: 11, characters: [] },
+			lifecycle: {
+				kind: "character-selection",
+				rejection: null,
+				maxSlots: 11,
+				characters: [],
+			},
 		});
 		f.model.add(4);
 		f.reply();

@@ -101,6 +101,7 @@
 		Extract<ClientAppPhase, { kind: "character-selection" }>
 	>({
 		kind: "character-selection",
+		rejection: null,
 		maxSlots: 11,
 		selectedGuid: null,
 		characters: [

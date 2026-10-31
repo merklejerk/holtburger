@@ -220,7 +220,7 @@ pub enum GameOpcode {
 
     // --- Server & Account Status ---
     // /// S2C: Account has been banned.
-    // AccountBanned = 0xF7C1,
+    AccountBanned = 0xF7C1,
     /// S2C: Kick player from server.
     /// Sent when the account is logged out or banned.
     AccountBoot = 0xF7DC,

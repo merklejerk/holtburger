@@ -10,7 +10,22 @@ use ratatui::layout::Rect;
 impl SelectionState {
     pub fn render(&mut self, f: &mut Frame, _area: Rect, _ctx: &RenderContext) {
         // Selection state doesn't need AppState, it renders its own characters.
-        render_character_selection(f, self, _area);
+        if let Some(message) = &self.entry_rejection {
+            let areas = ratatui::layout::Layout::vertical([
+                ratatui::layout::Constraint::Length(3),
+                ratatui::layout::Constraint::Min(0),
+            ])
+            .split(_area);
+            f.render_widget(
+                ratatui::widgets::Paragraph::new(message.as_str())
+                    .wrap(ratatui::widgets::Wrap { trim: false })
+                    .style(ratatui::style::Style::default().fg(crate::theme::ERROR_FG)),
+                areas[0],
+            );
+            render_character_selection(f, self, areas[1]);
+        } else {
+            render_character_selection(f, self, _area);
+        }
     }
 }
 

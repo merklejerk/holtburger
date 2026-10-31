@@ -29,14 +29,27 @@ impl ClientRuntime {
         for index in 0..NETWORK_BATCH_LIMIT {
             let events = received.inspect_err(|error| {
                 log::error!("Session error: {error}");
-                self.set_exit_cause(ClientExitCause::RuntimeFailure);
-                self.state = ClientState::Disconnected;
-                self.send_status_event();
+                self.fail_connection(
+                    super::ConnectionFailureCause::Local {
+                        operation: super::ConnectionOperation::ServerTraffic,
+                        diagnostic: format!("{error:#}"),
+                    },
+                    ClientExitCause::RuntimeFailure,
+                );
             })?;
             for event in events {
                 match event {
                     SessionEvent::Message(data) => {
-                        self.handle_message(&data).await?;
+                        self.handle_message(&data).await.inspect_err(|_| {
+                            // Handler errors may be content/invariant failures. Only actual
+                            // network boundaries record a ConnectionFailure; keep other errors
+                            // in the existing runtime-failure domain.
+                            if self.state != ClientState::Disconnected {
+                                self.set_exit_cause(ClientExitCause::RuntimeFailure);
+                                self.state = ClientState::Disconnected;
+                                self.send_status_event();
+                            }
+                        })?;
                     }
                     SessionEvent::TimeSync(time) => self.sync_server_time(time, Instant::now()),
                 }
@@ -231,11 +244,7 @@ impl ClientRuntime {
 
                     if now.duration_since(self.session.last_recv_time) > super::connection::CONNECTION_TIMEOUT {
                         log::warn!("Connection timed out (no data for {}s)", super::connection::CONNECTION_TIMEOUT.as_secs());
-                        self.exit_diagnostic = Some(format!("Connection timed out: no server traffic for {} seconds.", super::connection::CONNECTION_TIMEOUT.as_secs()));
-                        self.set_exit_cause(ClientExitCause::ServerDisconnect);
-                        self.state = ClientState::Disconnected;
-                        let _ = self.client_view_event_tx.send(ClientViewEvent::Disconnected);
-                        self.send_status_event();
+                        self.fail_connection(super::ConnectionFailureCause::Inactivity { seconds: now.duration_since(self.session.last_recv_time).as_secs() }, ClientExitCause::ServerDisconnect);
                         break;
                     }
 
@@ -635,7 +644,10 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.to_string(), "test receive failure");
         assert!(matches!(client.state, ClientState::Disconnected));
-        assert_eq!(client.exit_cause, Some(ClientExitCause::RuntimeFailure));
+        assert_eq!(
+            client.exit_outcome.as_ref().map(|outcome| outcome.cause),
+            Some(ClientExitCause::RuntimeFailure)
+        );
     }
 
     #[tokio::test]
@@ -681,7 +693,10 @@ mod tests {
             .unwrap();
         assert!(matches!(client.state, ClientState::Disconnected));
         assert_eq!(client.command_rx.as_ref().unwrap().len(), 1);
-        assert_eq!(client.exit_cause, Some(ClientExitCause::ExplicitDisconnect));
+        assert_eq!(
+            client.exit_outcome.as_ref().map(|outcome| outcome.cause),
+            Some(ClientExitCause::ExplicitDisconnect)
+        );
     }
 
     #[tokio::test]
@@ -737,7 +752,10 @@ mod tests {
             .unwrap();
         assert!(client.process_command_batch(None).await.is_err());
         assert!(matches!(client.state, ClientState::Disconnected));
-        assert_eq!(client.exit_cause, Some(ClientExitCause::RuntimeFailure));
+        assert_eq!(
+            client.exit_outcome.as_ref().map(|outcome| outcome.cause),
+            Some(ClientExitCause::RuntimeFailure)
+        );
         assert_eq!(client.command_rx.as_ref().unwrap().len(), 1);
     }
 
@@ -756,5 +774,34 @@ mod tests {
         let mut in_world = builder::build_test_client(ClientState::InWorld);
         in_world.session.last_send_time = now - Duration::from_secs(6);
         assert!(in_world.should_send_keepalive_ping(now));
+    }
+    #[tokio::test]
+    async fn malformed_lifecycle_reply_is_a_terminal_operational_failure() {
+        for opcode in [
+            holtburger_protocol::opcodes::GameOpcode::CharacterError,
+            holtburger_protocol::opcodes::GameOpcode::AccountBanned,
+        ] {
+            let mut client = builder::build_test_client(ClientState::Connected);
+            client.authenticating = true;
+            let error = client
+                .process_network_batch(Ok(vec![SessionEvent::Message(
+                    (opcode as u32).to_le_bytes().to_vec(),
+                )]))
+                .await
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("Malformed server lifecycle reply")
+            );
+            assert_eq!(client.state, ClientState::Disconnected);
+            assert!(
+                client
+                    .exit_outcome()
+                    .unwrap()
+                    .diagnostic()
+                    .contains("Malformed server lifecycle reply")
+            );
+        }
     }
 }

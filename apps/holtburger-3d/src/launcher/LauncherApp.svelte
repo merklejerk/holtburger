@@ -22,6 +22,15 @@
 	const { keyboard } = provideAppInputPolicy();
 	let snapshot = $state<LauncherSnapshot | null>(null);
 	let failure = $state<string | null>(null);
+	/** Native diagnostics survive refresh; dismissal belongs only to this launcher document. */
+	let dismissedSnapshotFailure = $state<string | null>(null);
+	const notice = $derived(
+		failure ??
+			(snapshot?.failure === dismissedSnapshotFailure
+				? null
+				: snapshot?.failure) ??
+			null,
+	);
 	let busy = $state(false);
 	let browsingServers = $state(false);
 	let selectedServerId = $state("");
@@ -121,6 +130,10 @@
 			busy = false;
 		}
 	}
+	function dismissFailure(): void {
+		failure = null;
+		dismissedSnapshotFailure = snapshot?.failure ?? null;
+	}
 	async function saveEditor(): Promise<void> {
 		const value = editor;
 		if (!value) return;
@@ -208,16 +221,33 @@
 	});
 </script>
 
-<ClientPregameScreen branding="corner" showPortalLogo={true} backdrop={false}>
+{#snippet errorNotice()}
+	<div class="launcher-error ui-panel" role="alert">
+		<p class="launcher-error-message">{notice}</p>
+		<div class="ui-icon-actions">
+			<button
+				class="ui-button ui-icon-button pregame-quiet"
+				type="button"
+				aria-label="Dismiss error"
+				title="Dismiss error"
+				onclick={dismissFailure}>×</button
+			>
+		</div>
+	</div>
+{/snippet}
+
+<ClientPregameScreen
+	branding="corner"
+	showPortalLogo={true}
+	backdrop={false}
+	headerAside={notice !== null ? errorNotice : undefined}
+>
 	<section
 		class="launcher"
 		aria-label="Server and profile launcher"
 		aria-busy={busy}
 	>
 		{#if !snapshot || snapshot.recoveryRequired}{@render heading()}{/if}
-		{#if failure || snapshot?.failure}<p class="launcher-error" role="alert">
-				{failure ?? snapshot?.failure}
-			</p>{/if}
 		{#if snapshot?.recoveryRequired}
 			<p>
 				Your launcher settings need attention. Recovery preserves the original
@@ -658,8 +688,19 @@
 			margin-top: auto;
 		}
 		.launcher-error {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: start;
+			gap: 12px;
+			padding: 12px;
 			color: var(--ui-color-danger);
+		}
+		.launcher-error-message {
+			margin: 0;
 			white-space: pre-wrap;
+			overflow-wrap: anywhere;
+			max-height: min(24vh, 10rem);
+			overflow: auto;
 		}
 		@media (max-width: 720px) {
 			.launcher-columns {

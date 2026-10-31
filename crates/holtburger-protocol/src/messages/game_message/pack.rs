@@ -68,6 +68,11 @@ impl ProtocolPack for GameMessage {
                     .unwrap();
                 data.pack(buf);
             }
+            GameMessage::AccountBanned(data) => {
+                buf.write_u32::<LittleEndian>(GameOpcode::AccountBanned as u32)
+                    .unwrap();
+                data.pack(buf);
+            }
             GameMessage::AccountBoot(data) => {
                 buf.write_u32::<LittleEndian>(GameOpcode::AccountBoot as u32)
                     .unwrap();

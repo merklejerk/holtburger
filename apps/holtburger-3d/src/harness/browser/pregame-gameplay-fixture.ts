@@ -211,8 +211,23 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 		entities: { ...playerEntitySnapshot(guid), entities: [] },
 		dynamic: { ...state.dynamic, entities: [] },
 	});
+	let nextEntryRefusal: string | null = null;
 	const enter = async () => {
+		const roster = state.lifecycle;
 		const worldGeneration = state.worldGeneration + 1;
+		if (nextEntryRefusal !== null && roster.kind === "character-selection") {
+			const rejection = nextEntryRefusal;
+			nextEntryRefusal = null;
+			state = playerlessState(
+				{ kind: "portal-space", worldGeneration, cause: "initial-entry" },
+				worldGeneration,
+			);
+			emit("client-current-state", state);
+			await Promise.resolve();
+			state = playerlessState({ ...roster, rejection }, worldGeneration);
+			emit("client-current-state", state);
+			return;
+		}
 		state = {
 			...currentState(player),
 			worldGeneration,
@@ -228,6 +243,7 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 		state = playerlessState(
 			{
 				kind: "character-selection",
+				rejection: null,
 				maxSlots: 10,
 				characters: empty
 					? []
@@ -415,6 +431,10 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 			};
 			emit("client-lifecycle-changed", state.lifecycle);
 			emit("client-exit-requested", { cause, diagnostic });
+		},
+		/** Refuse one entry before player establishment, as ACE CharacterHandler does. */
+		refuseNextEntry: (message: string) => {
+			nextEntryRefusal = message;
 		},
 		snapshot: () => state,
 		acknowledgements: () => acknowledgements,

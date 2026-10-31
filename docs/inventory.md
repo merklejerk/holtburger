@@ -24,7 +24,7 @@ indices at or after its destination. The item and pack domains shift independent
 - An item target merges compatible stacks, otherwise inserts before the target's
   current native position after accounting for source removal.
 - A stack-only target permits merging without authorizing positional movement.
-- A container target appends after the highest remaining native index. Explicit
+- A container target uses the frontend's automatic insertion preference. Explicit
   full-container drops fail; they do not redirect to another container.
 - An unequip target requires player-owned equipped gear and allocates carried
   storage in the main pack, then other packs in native order. Full or incomplete
@@ -65,7 +65,13 @@ updates; the client does not wait for them to release an interaction lock.
 and equipment replacement. It reserves currently free positions in the preferred source
 container, then main pack, then remaining containers in native pack order.
 Fallback containers are inspected only as needed; unhydrated required storage
-rejects preflight rather than being treated as empty.
+rejects preflight rather than being treated as empty. Capacity allocation reports
+an append boundary independently of the frontend-selected insertion preference.
+The 3D host selects prepend for pickups, unequipping, equipment replacement, and
+container targets; the TUI retains append. Explicit item targets keep their requested
+insertion position. The 3D split policy inserts immediately after the source in
+its current container. If capacity redirects the split to another container, or
+the source is equipped, the new stack prepends in the selected container.
 
 In the 3D frontend, ordinary Interact, inventory double-click, and equipment action
 cells equip carried gear and unequip owned worn gear. Worn items without an authored
@@ -85,8 +91,9 @@ or player ownership. The shared entity projection exposes `canPickUp`; this is
 permission to attempt pickup, not a guarantee against server restrictions.
 Core rechecks the same rule at submission and allocates main-pack space first,
 then carried packs in native order, respecting separate item and pack slots.
-Pickup appends with one `PutItemInContainer`; internal `Get` is merely a fixed
-main-pack/placement-zero convenience for that same wire action.
+Pickup sends one `PutItemInContainer` using the frontend's insertion preference;
+internal `Get` is merely a fixed main-pack/placement-zero convenience for that
+same wire action.
 
 Ground drop uses one `DropItem` with the source GUID. ACE `Player_Inventory.cs`
 `HandleActionDropItem` accepts carried and equipped sources and handles dequipping
@@ -191,14 +198,16 @@ quantity and capacity, and Escape or Cancel closes without sending a split.
 Electron's browser context menu is removed globally; Ctrl+Shift+I toggles DevTools.
 
 In non-native sort modes, contents cells can be dragged onto the ground, equipment slots, or
-compatible stacks, but cannot perform positional moves or header appends.
+compatible stacks, but cannot perform positional moves or header transfers.
 During these drags, core merge-only previews identify contents cells to leave
 undimmed; incompatible and full stacks remain dimmed. Equipment candidates use
 the existing compatibility hint. Merge hints refresh on inventory view changes
 and are retired when the drag ends; the drop still requires a fresh preview.
-Equipped items remain draggable: dropping on a contents cell or container header
-appends to that container's native order, with no implicit merge or positional insertion.
-A full destination is rejected rather than redirected. Pack swaps still use native
+Equipped items remain draggable. In Native sorting, contents cells remain explicit
+item targets. In sorted views, an equipped-item drop on a contents cell targets
+that cell's container instead, using automatic insertion without an implicit merge.
+Container headers also use automatic insertion. A full destination is rejected
+rather than redirected. Pack swaps still use native
 indices. The pack strip shows the main pack, real containers
 in native order, foci in native order, then unused capacity.
 

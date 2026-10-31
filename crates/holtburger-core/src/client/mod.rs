@@ -196,6 +196,8 @@ enum PublishedCharacterMotionCapabilities {
 }
 
 pub struct ClientRuntime {
+    /// Frontend-owned preference consumed by inventory and equipment planning.
+    inventory_placement: inventory_storage::InventoryPlacementPolicy,
     /// Ordered diagnostic inputs; credentials and outgoing transport packets are excluded.
     #[cfg(feature = "runtime-fixture")]
     runtime_fixture: Option<runtime_fixture::RuntimeFixtureCapture>,

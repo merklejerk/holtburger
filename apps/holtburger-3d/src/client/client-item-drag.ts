@@ -777,8 +777,8 @@ export class ClientItemDrag {
 								};
 				}
 			} else if (surface !== null && hit.closest(".item-grid-cell") === null) {
-				// Section background appends regardless of display sorting. Disabled item
-				// cells still own their footprint; they must not become background targets.
+				// Section background uses automatic insertion regardless of display sorting.
+				// Disabled item cells still own their footprint; they must not become background targets.
 				const section = hit.closest<HTMLElement>(
 					".contents-scroll [data-container-guid]",
 				);

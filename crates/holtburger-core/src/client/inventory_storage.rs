@@ -5,6 +5,36 @@ use holtburger_world::{
     state::storage::{PackEntryKind, RosterCoverage, StorageSlot},
 };
 
+/// Frontend-selected placement for operations without an explicit drop position.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InventoryPlacementPolicy {
+    /// Where automatically stored items enter the selected container.
+    pub automatic: InventoryInsertion,
+    /// Insert a split immediately after its source when the destination is the same container.
+    /// Equipped sources and capacity fallbacks use `automatic` instead.
+    pub split_after_source: bool,
+}
+
+/// Insertion preference within an independently ordered item or pack domain.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum InventoryInsertion {
+    /// Preserve existing positions and insert after the last occupant.
+    #[default]
+    Append,
+    /// Insert at zero, shifting existing occupants forward.
+    Prepend,
+}
+
+impl InventoryInsertion {
+    /// Select a position after capacity allocation has established the append boundary.
+    pub(super) fn position(self, append: u32) -> u32 {
+        match self {
+            Self::Append => append,
+            Self::Prepend => 0,
+        }
+    }
+}
+
 /// Failure to allocate known, currently free native storage.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StorageAllocationError {

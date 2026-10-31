@@ -164,9 +164,23 @@ impl EquipmentOperation {
             world,
             self.plan.item,
             Some(TargetSlot::EquipMask(self.plan.target)),
+            self.plan.insertion,
         )
         .map_err(|error| error.to_string())?;
-        if current.source != self.plan.source
+        // Conflict removals can prepend into the source pack and shift its index.
+        // Wielding depends on the ownership relationship, not its position in that pack.
+        let source_unchanged = match (current.source, self.plan.source) {
+            (
+                StorageLocation::Contained {
+                    parent: current, ..
+                },
+                StorageLocation::Contained {
+                    parent: original, ..
+                },
+            ) => current == original,
+            (current, original) => current == original,
+        };
+        if !source_unchanged
             || current.target != self.plan.target
             || current.unequips != self.plan.unequips[self.completed..]
         {
@@ -253,7 +267,12 @@ impl ClientRuntime {
             );
             return Ok(());
         }
-        let plan = match plan_equipment_change(&self.world, item, slot) {
+        let plan = match plan_equipment_change(
+            &self.world,
+            item,
+            slot,
+            self.inventory_placement.automatic,
+        ) {
             Ok(plan) => plan,
             Err(error) => {
                 self.emit_action_result(
@@ -360,6 +379,7 @@ impl ClientRuntime {
 mod tests {
     use super::super::equipment_plan::tests::{event, outfit};
     use super::*;
+    use crate::client::inventory_storage::InventoryInsertion;
     use holtburger_common::properties::{InventoryEntryKind, PropertyInt};
     use holtburger_protocol::messages::{
         GameEvent, InventoryPutObjInContainerEventData, WieldObjectEventData,
@@ -370,7 +390,8 @@ mod tests {
 
     fn operation(world: &WorldState, now: Instant) -> EquipmentOperation {
         EquipmentOperation {
-            plan: plan_equipment_change(world, INCOMING, None).expect("complete outfit plan"),
+            plan: plan_equipment_change(world, INCOMING, None, InventoryInsertion::Append)
+                .expect("complete outfit plan"),
             completed: 0,
             stage: EquipmentStage::Ready,
             deadline: now + EQUIPMENT_STEP_TIMEOUT,
@@ -393,24 +414,60 @@ mod tests {
 
     #[test]
     fn each_unequip_requires_authoritative_confirmation_before_wield() {
-        let mut world = outfit(2, 1);
-        let now = Instant::now();
-        let mut operation = operation(&world, now);
-        let mut next = operation.advance(&world, now);
-        for step in operation.plan.unequips.clone() {
+        for insertion in [InventoryInsertion::Append, InventoryInsertion::Prepend] {
+            let mut world = outfit(2, 1);
+            let now = Instant::now();
+            let mut operation = operation(&world, now);
+            operation.plan = plan_equipment_change(&world, INCOMING, None, insertion).unwrap();
+            let mut next = operation.advance(&world, now);
+            for step in operation.plan.unequips.clone() {
+                assert!(
+                    matches!(next, Ok(EquipmentAdvance::Send(GameAction::PutItemInContainer(data))) if data.item_guid == step.item && data.placement == step.placement)
+                );
+                assert!(matches!(
+                    operation.advance(&world, now),
+                    Ok(EquipmentAdvance::Waiting)
+                ));
+                confirm_unequip(&mut world, step.item, step.placement);
+                next = operation.advance(&world, now);
+            }
             assert!(
-                matches!(next, Ok(EquipmentAdvance::Send(GameAction::PutItemInContainer(data))) if data.item_guid == step.item && data.placement == step.placement)
+                matches!(next, Ok(EquipmentAdvance::SendFinal(GameAction::GetAndWieldItem(data))) if data.item_guid == INCOMING)
             );
-            assert!(matches!(
-                operation.advance(&world, now),
-                Ok(EquipmentAdvance::Waiting)
-            ));
-            confirm_unequip(&mut world, step.item, step.placement);
-            next = operation.advance(&world, now);
         }
-        assert!(
-            matches!(next, Ok(EquipmentAdvance::SendFinal(GameAction::GetAndWieldItem(data))) if data.item_guid == INCOMING)
-        );
+    }
+
+    #[test]
+    fn prepending_conflicts_to_source_pack_keeps_replacement_valid() {
+        let mut world = outfit(0, 3);
+        let now = Instant::now();
+        let mut pending = operation(&world, now);
+        pending.plan =
+            plan_equipment_change(&world, INCOMING, None, InventoryInsertion::Prepend).unwrap();
+        let source_parent = pending.plan.source.parent();
+        for step in pending.plan.unequips.clone() {
+            assert_eq!(step.container, source_parent);
+            assert_eq!(step.placement, 0);
+            assert!(matches!(
+                pending.advance(&world, now),
+                Ok(EquipmentAdvance::Send(_))
+            ));
+            event(
+                &mut world,
+                GameEvent::InventoryPutObjInContainer(Box::new(
+                    InventoryPutObjInContainerEventData {
+                        item_guid: step.item,
+                        container_guid: step.container,
+                        slot: step.placement,
+                        container_type: InventoryEntryKind::Item,
+                    },
+                )),
+            );
+        }
+        assert!(matches!(
+            pending.advance(&world, now),
+            Ok(EquipmentAdvance::SendFinal(GameAction::GetAndWieldItem(_)))
+        ));
     }
 
     #[test]

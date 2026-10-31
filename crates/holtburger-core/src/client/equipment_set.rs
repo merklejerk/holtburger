@@ -9,7 +9,9 @@ use super::{
     equipment_plan::{
         EquipmentPlanError, EquipmentReplacement, EquipmentUnequip, resolve_equipment_change,
     },
-    inventory_storage::{StorageDestination, allocate_storage_with_reservations},
+    inventory_storage::{
+        InventoryInsertion, StorageDestination, allocate_storage_with_reservations,
+    },
     types::TargetSlot,
 };
 use anyhow::Result as RuntimeResult;
@@ -93,10 +95,11 @@ pub(super) struct EquipmentSetPlan {
     pub requires_peace: bool,
 }
 
-/// Plan one best-effort set using confirmed capacity; never assume a future wield frees space.
-pub(super) fn plan_equipment_set(
+/// Resolve all capacity reservations before selecting each removal's insertion position.
+fn plan_equipment_set(
     world: &WorldState,
     bindings: &[EquipmentBinding],
+    insertion: InventoryInsertion,
 ) -> EquipmentSetPlan {
     let mut admitted: Vec<EquipmentSetWield> = Vec::new();
     let mut removals: Vec<EquipmentSetRemoval> = Vec::new();
@@ -151,6 +154,9 @@ pub(super) fn plan_equipment_set(
         || removals
             .iter()
             .any(|removal| removal.step.from == EquipMask::MISSILE_AMMO);
+    for removal in &mut removals {
+        removal.step.placement = insertion.position(removal.step.placement);
+    }
     EquipmentSetPlan {
         removals,
         wields,
@@ -390,7 +396,7 @@ impl ClientRuntime {
             );
             return Ok(());
         }
-        let plan = plan_equipment_set(&self.world, &bindings);
+        let plan = plan_equipment_set(&self.world, &bindings, self.inventory_placement.automatic);
         if plan.requires_stable_stance && self.pending_combat_mode.is_some() {
             self.equipment_set_failure(
                 bindings,
@@ -441,7 +447,11 @@ impl ClientRuntime {
             );
             return Ok(());
         }
-        let plan = plan_equipment_set(&self.world, &pending.bindings);
+        let plan = plan_equipment_set(
+            &self.world,
+            &pending.bindings,
+            self.inventory_placement.automatic,
+        );
         self.submit_equipment_set(plan, true).await
     }
 
@@ -666,13 +676,34 @@ mod tests {
     }
 
     #[test]
+    fn prepend_set_reserves_capacity_for_every_displaced_item() {
+        let world = outfit(2, 1);
+        let requested = [
+            empty(EquipMask::CHEST_ARMOR),
+            empty(EquipMask::UPPER_ARM_ARMOR),
+        ];
+        let plan = plan_equipment_set(&world, &requested, InventoryInsertion::Prepend);
+        assert!(plan.issues.is_empty());
+        assert_eq!(plan.removals.len(), requested.len());
+        assert!(
+            plan.removals
+                .iter()
+                .all(|removal| removal.step.placement == 0)
+        );
+        let full = outfit(1, 1);
+        let plan = plan_equipment_set(&full, &requested, InventoryInsertion::Prepend);
+        assert_eq!(plan.removals.len(), 1);
+        assert_eq!(plan.issues.len(), 1);
+    }
+
+    #[test]
     fn empty_bindings_remove_whole_items_once_and_keep_slot_attribution() {
         let world = outfit(2, 1);
         let requested = [
             empty(EquipMask::CHEST_ARMOR),
             empty(EquipMask::UPPER_ARM_ARMOR),
         ];
-        let plan = plan_equipment_set(&world, &requested);
+        let plan = plan_equipment_set(&world, &requested, Default::default());
         assert!(plan.issues.is_empty());
         assert!(plan.wields.is_empty());
         assert_eq!(plan.removals.len(), 2);
@@ -689,7 +720,8 @@ mod tests {
                 },
             )),
         );
-        let partial = plan_equipment_set(&world, &[empty(EquipMask::FOOT_WEAR)]);
+        let partial =
+            plan_equipment_set(&world, &[empty(EquipMask::FOOT_WEAR)], Default::default());
         assert_eq!(partial.removals.len(), 1);
         assert_eq!(partial.removals[0].step.from, coverage);
         assert!(partial.wields.is_empty());
@@ -701,7 +733,7 @@ mod tests {
         let clear = empty(EquipMask::CHEST_ARMOR);
         let equip = binding(INCOMING, EquipMask::CHEST_ARMOR);
         for requested in [[clear, equip], [equip, clear]] {
-            let plan = plan_equipment_set(&world, &requested);
+            let plan = plan_equipment_set(&world, &requested, Default::default());
             assert_eq!(plan.issues.len(), 1);
             assert_eq!(plan.issues[0].binding, requested[1]);
             assert_eq!(
@@ -724,7 +756,11 @@ mod tests {
             .ints
             .insert(PropertyInt::ItemType, ItemType::JEWELRY.bits() as i32);
         let clear = empty(EquipMask::CHEST_ARMOR);
-        let plan = plan_equipment_set(&world, &[clear, binding(INCOMING, EquipMask::NECK_WEAR)]);
+        let plan = plan_equipment_set(
+            &world,
+            &[clear, binding(INCOMING, EquipMask::NECK_WEAR)],
+            Default::default(),
+        );
         assert_eq!(plan.issues.len(), 1);
         assert_eq!(plan.issues[0].binding, clear);
         assert!(plan.removals.is_empty());
@@ -837,6 +873,7 @@ mod tests {
                 binding(INCOMING, EquipMask::CHEST_ARMOR),
                 binding(INCOMING, EquipMask::UPPER_ARM_ARMOR),
             ],
+            Default::default(),
         );
         assert!(plan.issues.is_empty());
         assert_eq!(plan.wields.len(), 1);
@@ -860,6 +897,7 @@ mod tests {
                 binding(INCOMING, EquipMask::CHEST_ARMOR),
                 binding(Guid(4), EquipMask::CHEST_ARMOR),
             ],
+            Default::default(),
         );
         assert_eq!(plan.wields.len(), 1);
         assert_eq!(plan.issues.len(), 2);
@@ -872,7 +910,11 @@ mod tests {
     #[test]
     fn satisfied_bindings_send_nothing_and_protect_desired_compatibility() {
         let world = outfit(2, 1);
-        let plan = plan_equipment_set(&world, &[binding(Guid(4), EquipMask::CHEST_ARMOR)]);
+        let plan = plan_equipment_set(
+            &world,
+            &[binding(Guid(4), EquipMask::CHEST_ARMOR)],
+            Default::default(),
+        );
         assert!(plan.wields.is_empty());
         assert!(plan.removals.is_empty());
         assert!(!plan.requires_peace);
@@ -887,6 +929,7 @@ mod tests {
                 binding(INCOMING, EquipMask::CHEST_ARMOR),
                 binding(Guid(4), EquipMask::CHEST_ARMOR),
             ],
+            Default::default(),
         );
         assert_eq!(plan.issues.len(), 1);
         assert!(plan.wields.is_empty());
@@ -973,7 +1016,11 @@ mod tests {
                     },
                 )),
             );
-            let plan = plan_equipment_set(&world, &[binding(INCOMING, EquipMask::MISSILE_AMMO)]);
+            let plan = plan_equipment_set(
+                &world,
+                &[binding(INCOMING, EquipMask::MISSILE_AMMO)],
+                Default::default(),
+            );
             assert!(plan.issues.is_empty());
             assert_eq!(plan.requires_peace, mode == CombatMode::Missile);
         }
@@ -1091,8 +1138,11 @@ mod tests {
                     )),
                 );
             }
-            let plan =
-                plan_equipment_set(&world, &[binding(Guid(4), right), binding(Guid(5), left)]);
+            let plan = plan_equipment_set(
+                &world,
+                &[binding(Guid(4), right), binding(Guid(5), left)],
+                Default::default(),
+            );
             assert!(plan.issues.is_empty());
             assert_eq!(plan.removals.len(), 2);
             assert_eq!(plan.wields.len(), 2);
@@ -1120,7 +1170,11 @@ mod tests {
                 },
             )),
         );
-        let plan = plan_equipment_set(&world, &[binding(INCOMING, EquipMask::SHIELD)]);
+        let plan = plan_equipment_set(
+            &world,
+            &[binding(INCOMING, EquipMask::SHIELD)],
+            Default::default(),
+        );
         assert!(plan.issues.is_empty());
         assert!(plan.removals.is_empty());
         assert_eq!(plan.wields[0].replacement.target, EquipMask::SHIELD);

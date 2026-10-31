@@ -205,7 +205,7 @@ mod tests {
         assert!(
             matches!(plan_inventory_intent(&client.world, InventoryIntent {
             item, target: InventoryTarget::Container { guid: sack },
-        }), Ok(InventoryPlan::Move(step)) if step.container == sack && step.placement == 0)
+        }, Default::default()), Ok(InventoryPlan::Move(step)) if step.container == sack && step.placement == 0)
         );
         assert!(
             client

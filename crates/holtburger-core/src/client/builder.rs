@@ -33,6 +33,8 @@ pub struct ClientRuntimeBuilder {
     selection_envelope_source:
         Option<Arc<dyn super::selection_envelope::ClientSelectionEnvelopeSource>>,
     combat_tuning: ClientCombatTuning,
+    /// Placement selected by this frontend; default clients retain append behavior.
+    inventory_placement: super::inventory_storage::InventoryPlacementPolicy,
     /// Whether an external 3D presentation must acknowledge the first pure-destination frame.
     /// Non-rendering clients retain the immediate adapter default.
     requires_external_world_reveal: bool,
@@ -49,9 +51,19 @@ impl ClientRuntimeBuilder {
             dynamic_script_source: None,
             selection_envelope_source: None,
             combat_tuning: ClientCombatTuning::default(),
+            inventory_placement: Default::default(),
             requires_external_world_reveal: false,
             message_dump_dir: None,
         }
+    }
+
+    /// Choose automatic inventory insertion and split placement for this frontend.
+    pub fn inventory_placement(
+        mut self,
+        policy: super::inventory_storage::InventoryPlacementPolicy,
+    ) -> Self {
+        self.inventory_placement = policy;
+        self
     }
 
     pub fn server(mut self, host: impl Into<String>, port: u16) -> Self {
@@ -237,6 +249,7 @@ impl ClientRuntimeBuilder {
                 sources.bodies.movement_policy()
             });
         Ok(ClientRuntime {
+            inventory_placement: self.inventory_placement,
             #[cfg(feature = "runtime-fixture")]
             runtime_fixture: None,
             session,
@@ -312,6 +325,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
     let (client_view_event_tx, _) = broadcast::channel(4096);
 
     let mut client = ClientRuntime {
+        inventory_placement: Default::default(),
         #[cfg(feature = "runtime-fixture")]
         runtime_fixture: None,
         session: Session::new_test(),

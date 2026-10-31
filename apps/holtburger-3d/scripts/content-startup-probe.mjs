@@ -88,8 +88,12 @@ for (const stream of vite === null ? [] : [vite.stdout, vite.stderr])
 async function waitFor(read, label) {
 	const deadline = Date.now() + 30_000;
 	while (Date.now() < deadline) {
-		const result = await read();
-		if (result) return result;
+		try {
+			const result = await read();
+			if (result) return result;
+		} catch (error) {
+			throw new Error(`Failed while waiting for ${label}`, { cause: error });
+		}
 		await new Promise((resolveWait) => setTimeout(resolveWait, 100));
 	}
 	throw new Error(`Timed out waiting for ${label}`);
@@ -335,9 +339,11 @@ try {
 							"location.pathname.includes('/launcher/') && window.holtburgerLauncher.snapshot().then((value) => value.canPlay && Boolean(value.failure))",
 						);
 					} catch (error) {
+						// Failed startup retires the client document before loading the launcher.
+						// Retry interrupted evaluations here; disconnects and other errors remain fatal.
 						if (
 							error instanceof Error &&
-							/Execution context was destroyed|Document request admission is closed/.test(
+							/Execution context was destroyed|Document request admission is closed|Inspected target navigated or closed/.test(
 								error.message,
 							)
 						)

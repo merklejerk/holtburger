@@ -1005,7 +1005,10 @@ fn upward_recovery_preserves_upper_only_cell_reach_and_motion_provenance() {
                     reciprocal_visibility_vertices: None,
                     positive_side: true,
                     target: CellCollisionPortalTarget::Outdoor,
-                    outdoor_building: None,
+                    outdoor_building: Some(holtburger_content::OutdoorBuildingTransit {
+                        building_index: 0,
+                        building_origin: Vector3::new(96.0, 96.0, 0.0),
+                    }),
                 },
                 CellCollisionPortal {
                     plane: Plane {
@@ -1016,7 +1019,10 @@ fn upward_recovery_preserves_upper_only_cell_reach_and_motion_provenance() {
                     reciprocal_visibility_vertices: None,
                     positive_side: true,
                     target: CellCollisionPortalTarget::Outdoor,
-                    outdoor_building: None,
+                    outdoor_building: Some(holtburger_content::OutdoorBuildingTransit {
+                        building_index: 0,
+                        building_origin: Vector3::new(96.0, 96.0, 0.0),
+                    }),
                 },
             ],
         }],

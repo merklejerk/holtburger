@@ -1288,7 +1288,10 @@ mod tests {
                     // The legacy endpoint-placement runner never checked this direction.
                     positive_side: false,
                     target: CellCollisionPortalTarget::Outdoor,
-                    outdoor_building: None,
+                    outdoor_building: Some(holtburger_content::OutdoorBuildingTransit {
+                        building_index: 0,
+                        building_origin: Vector3::new(10.0, 20.0, 0.0),
+                    }),
                 }],
             };
             let mut scene = CollisionScene::new();

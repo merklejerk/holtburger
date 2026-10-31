@@ -49,6 +49,8 @@ export interface MapInteriorInstallation {
  * component membership its floor is; outdoors every entrance is worth marking.
  */
 interface MapTransitionAccent {
+	/** A registered building crossing makes this exit an entrance visible on the outdoor map. */
+	readonly outdoorEntrance: boolean;
 	readonly envCellId: EnvCellId;
 	readonly surface: ResolvedMapSurface;
 }
@@ -204,7 +206,14 @@ function buildTransitionAccents(
 			);
 		}
 		seen.add(crossing.sourceApertureIndex);
+		const reciprocal =
+			crossing.reciprocalCrossingIndex === null
+				? null
+				: installation.crossings[crossing.reciprocalCrossingIndex];
 		accents.push({
+			outdoorEntrance:
+				crossing.sourcePortal.kind === "building-transition" ||
+				reciprocal?.sourcePortal.kind === "building-transition",
 			envCellId: inside.envCellId,
 			surface: buildTransitionAccentSurface(
 				aperture.landblockBounds,

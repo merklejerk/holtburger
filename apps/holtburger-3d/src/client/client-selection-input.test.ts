@@ -11,9 +11,29 @@ import {
 import { ClientSelectionInput } from "./client-selection-input";
 import { AppInput } from "../lib/input/app-input";
 import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
+import type { InputConfiguration } from "../lib/input/input-contract";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 
 const HOLD_MS = 100;
+// Own every binding consumed by ClientSelectionInput so editable defaults cannot
+// change the tap, hold, modifier, or cancellation scenarios below.
+const TEST_INPUT = {
+	...INPUT_DEFAULTS,
+	client: {
+		...INPUT_DEFAULTS.client,
+		selectSelf: [],
+		nextInteractable: [{ key: "Tab", shift: false, ctrl: false }],
+		previousInteractable: [{ key: "Tab", shift: true, ctrl: false }],
+		nextNonCreature: [{ key: "Tab", shift: false, ctrl: true }],
+		previousNonCreature: [{ key: "Tab", shift: true, ctrl: true }],
+		nextUnopenedCorpse: [{ key: "v", shift: false, ctrl: false }],
+		previousUnopenedCorpse: [{ key: "v", shift: true, ctrl: false }],
+		nextHostile: [{ key: "v", shift: false, ctrl: true }],
+		previousHostile: [{ key: "v", shift: true, ctrl: true }],
+		cancel: [{ key: "Escape" }],
+	},
+} satisfies InputConfiguration;
+
 function key(options: Partial<KeyboardEvent> = {}): KeyboardEvent {
 	return Object.assign(
 		new Event("keydown", { cancelable: true }),
@@ -102,7 +122,7 @@ function fixture() {
 	const keyboard = new KeyboardInputPolicy(new ViewportInputGate());
 	const input = new ClientSelectionInput({
 		keyboard,
-		input: new AppInput(INPUT_DEFAULTS),
+		input: new AppInput(TEST_INPUT),
 		selection,
 		cycle,
 		holdDelayMs: HOLD_MS,

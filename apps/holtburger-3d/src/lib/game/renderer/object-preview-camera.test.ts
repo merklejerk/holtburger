@@ -11,7 +11,7 @@ import { resolveObjectPreviewViewport } from "../preview/object-preview-viewport
 import type { RenderExtent } from "./render-extent";
 import type { ModelFit } from "../geometry/model-fit";
 
-const BOUNDS = new AABB3(new Vec3(-1, 0, -2), new Vec3(3, 6, 2));
+const BOUNDS = new AABB3(new Vec3(-1, 0, -2), new Vec3(3, 6, 4));
 
 describe("object preview yaw camera", () => {
 	it("supports the creator's fixed viewpoint on negative AC Y while its subject turns independently", () => {
@@ -110,12 +110,12 @@ describe("object preview yaw camera", () => {
 		expect(forward.z).toBeGreaterThan(0);
 	});
 
-	it("centers the authored envelope without rotating its up axis", () => {
+	it("keeps the authored rotation axis centered for horizontally offset geometry", () => {
 		const view = resolveObjectPreviewViewTransform(fit(BOUNDS), 0.7, {
 			height: 300,
 			width: 400,
 		});
-		const center = transformPoint3(view.objectRoot, new Vec3(1, 3, 0));
+		const center = transformPoint3(view.objectRoot, new Vec3(0, 3, 0));
 		expect(center.x).toBeCloseTo(0);
 		expect(center.y).toBeCloseTo(0);
 		expect(center.z).toBeCloseTo(0);

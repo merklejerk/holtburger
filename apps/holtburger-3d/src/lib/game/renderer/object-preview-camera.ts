@@ -50,7 +50,9 @@ export function resolveObjectPreviewViewTransform(
 		throw new Error(
 			"Object preview camera requires finite yaw and a positive integer extent.",
 		);
-	const center = fit.center;
+	// Match pregame staging: frame at the envelope's height, but orbit the authored root axis.
+	// Horizontal geometry offsets (including equipment) must not move the rotation pivot.
+	const center = new Vec3(0, fit.center.y, 0);
 	const orbitDirection = new Vec3(
 		Math.sin(yawRadians) * Math.cos(OBJECT_PREVIEW_CAMERA_PITCH_RADIANS),
 		-Math.sin(OBJECT_PREVIEW_CAMERA_PITCH_RADIANS),

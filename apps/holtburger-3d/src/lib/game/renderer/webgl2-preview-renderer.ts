@@ -581,7 +581,7 @@ class WebGL2PreviewVisual {
 		particles.draw(
 			{
 				// Particle records remain in presentation coordinates. Re-anchoring by the
-				// fit center applies the same translation as objectRoot without rewriting them.
+				// framing pivot applies the same translation as objectRoot without rewriting them.
 				anchorOrigin: [
 					-camera.objectRoot.m41,
 					-camera.objectRoot.m42,

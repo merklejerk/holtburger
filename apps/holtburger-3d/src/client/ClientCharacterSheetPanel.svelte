@@ -2,6 +2,7 @@
 	import { untrack } from "svelte";
 	import ClientSpellsPanel from "./ClientSpellsPanel.svelte";
 	import UiQuantity from "../app/UiQuantity.svelte";
+	import UiDialog from "../app/UiDialog.svelte";
 	import { hudAttention } from "../app/hud-attention";
 	import UiTabs from "../app/UiTabs.svelte";
 	import UiTabPanel from "../app/UiTabPanel.svelte";
@@ -12,6 +13,7 @@
 		progressionTargetKey,
 		type CharacterSheet,
 		type ProgressionIntent,
+		type ProgressionQuote,
 		type StatTarget,
 	} from "./client-character-sheet-contract";
 	import { progressionUnavailableReason } from "./client-character-sheet-feedback";
@@ -96,6 +98,38 @@
 	// Only purchase-control hover and keyboard focus drive the shared cost readout.
 	let hoveredAction = $state<string | null>(null);
 	let focusedAction = $state<string | null>(null);
+	/** Training review retains the exact quote whose credit cost the player sees. */
+	let trainingReview = $state.raw<ProgressionQuote | null>(null);
+	$effect(() => {
+		if (
+			trainingReview !== null &&
+			(!visible ||
+				activeTab !== "progression" ||
+				!trainingQuoteCurrent(trainingReview, display))
+		)
+			trainingReview = null;
+	});
+	function trainingQuoteCurrent(
+		quote: ProgressionQuote,
+		snapshot: ReturnType<ClientCharacterSheetState["read"]>,
+	): boolean {
+		const evaluation = snapshot.evaluations.get(
+			progressionIntentKey(quote.quote.intent),
+		);
+		return (
+			snapshot.progressionUnavailable === null &&
+			evaluation !== undefined &&
+			"Ok" in evaluation.result &&
+			evaluation.result.Ok === quote
+		);
+	}
+	function confirmTraining(): void {
+		const quote = trainingReview;
+		trainingReview = null;
+		// Recheck the session owner synchronously: display polling can lag invalidation.
+		if (quote !== null && trainingQuoteCurrent(quote, owner.read()))
+			void owner.purchase(quote);
+	}
 	$effect(() => {
 		if (!visible) return;
 		const source = owner;
@@ -284,9 +318,11 @@
 						? progressionUnavailableReason(evaluation.result.Err)
 						: cost === null
 							? "Calculating cost…"
-							: `${description} immediately for ${formatQuantity(cost.quantity)} ${cost.unit}`),
+							: `${description}${"Train" in intent ? " after confirmation" : " immediately"} for ${formatQuantity(cost.quantity)} ${cost.unit}`),
 			purchase: () => {
-				if (quote !== null) void owner.purchase(quote);
+				if (quote === null) return;
+				if ("Train" in intent) trainingReview = quote;
+				else void owner.purchase(quote);
 			},
 		};
 	}
@@ -811,6 +847,31 @@
 		{/if}
 	</UiTabPanel>
 </section>
+
+{#if visible && activeTab === "progression" && trainingReview !== null && "Train" in trainingReview.quote.intent}
+	<UiDialog
+		className="client-skill-training-dialog"
+		title="Train skill"
+		initialFocus="[data-cancel-training]"
+		onCancel={() => (trainingReview = null)}
+	>
+		<p>
+			Train <strong>{name(trainingReview.quote.intent.Train.skill)}</strong> for
+			<UiQuantity value={trainingReview.quote.credits_spent} /> skill credits?
+		</p>
+		<div class="ui-dialog-actions">
+			<button
+				class="ui-button"
+				type="button"
+				data-cancel-training
+				onclick={() => (trainingReview = null)}>Cancel</button
+			>
+			<button class="ui-button" type="button" onclick={confirmTraining}
+				>Train</button
+			>
+		</div>
+	</UiDialog>
+{/if}
 
 <style>
 	@layer components {

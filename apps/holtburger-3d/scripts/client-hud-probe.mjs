@@ -2126,7 +2126,7 @@ export async function probeCharacterSheet(
 		return { ...${JSON.stringify(first)}, pendingAfterReopen: true, expanded: true };
 	})()`,
 	);
-	await evaluateExpression(
+	const skillEvaluations = await evaluateExpression(
 		client,
 		`(() => {
 		const harness = globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__;
@@ -2159,14 +2159,16 @@ export async function probeCharacterSheet(
 		const health = { Vital: 'Health' };
 		const heavy = { Skill: 'HeavyWeapons' };
 		const rankCap = (intent) => ({ intent, result: { Err: { World: 'RankCap' } } });
-		harness.replyProgression({ requestId: request.args.requestId, evaluations: [
+		const evaluations = [
 			{ intent: { Raise: { target: quickness, ranks: 1 } }, result: { Err: { World: { InsufficientXp: { required: 200, available: '100' } } } } },
 			rankCap({ Raise: { target: health, ranks: 1 } }),
 			rankCap({ Raise: { target: health, ranks: 10 } }),
 			rankCap({ RaiseMax: { target: health } }),
 			{ intent: { Train: { skill: 'MeleeDefense' } }, result: { Ok: { scope_id: 9, quote: { character: ${characterGuid}, intent: { Train: { skill: 'MeleeDefense' } }, target_state: { training: 'Untrained', ranks: 0, spent_xp: 0 }, resulting_ranks: 0, xp_spent: 0, credits_spent: 2, available_xp: '100', available_credits: 2 } } } },
 			{ intent: { RaiseMax: { target: heavy } }, result: { Ok: { scope_id: 9, quote: { character: ${characterGuid}, intent: { RaiseMax: { target: heavy } }, target_state: { training: 'Trained', ranks: 1, spent_xp: 100 }, resulting_ranks: 5, xp_spent: 100, credits_spent: 0, available_xp: '100', available_credits: 2 } } } },
-		] });
+		];
+		harness.replyProgression({ requestId: request.args.requestId, evaluations });
+		return evaluations;
 	})()`,
 	);
 	await delay(250);
@@ -2209,11 +2211,49 @@ export async function probeCharacterSheet(
 		max.dispatchEvent(new PointerEvent('pointerenter'));
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		if (row('Heavy Weapons').querySelector('.action-cost [title]')?.title !== '100') throw new Error('Hovered action did not show its quoted XP cost.');
-		train.click(); max.click();
+		const trainingDialog = () => document.querySelector('dialog.client-skill-training-dialog');
+		const submitted = () => harness.inventoryDragCommands().filter((entry) => entry.command === 'submit_client_progression');
+		const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+		const openTraining = async () => {
+			button('Melee Defense', 'Train').click();
+			await settle();
+			const dialog = trainingDialog();
+			if (!dialog?.open || !dialog.textContent.includes('Melee Defense') || !dialog.textContent.includes('skill credits?') || dialog.querySelector('[title]')?.title !== '2') throw new Error('Training confirmation lost its skill or quoted credit cost.');
+			if (document.activeElement !== dialog.querySelector('[data-cancel-training]')) throw new Error('Training confirmation did not focus Cancel.');
+			if (submitted().length !== 2) throw new Error('Training submitted before confirmation.');
+			return dialog;
+		};
+		(await openTraining()).querySelector('[data-cancel-training]').click();
+		await settle();
+		if (trainingDialog() || submitted().length !== 2) throw new Error('Cancel submitted training or retained its dialog.');
+		(await openTraining()).dispatchEvent(new Event('cancel', { cancelable: true }));
+		await settle();
+		if (trainingDialog() || submitted().length !== 2) throw new Error('Dialog cancellation did not retire training review.');
+		await openTraining();
+		document.querySelector('[aria-label="Close Character"]').click();
+		await settle();
+		document.querySelector('nav[aria-label="Game shortcuts"] button[aria-label="Character"]').click();
+		await settle();
+		if (trainingDialog() || submitted().length !== 2) throw new Error('Training review survived window closure.');
+		const request = harness.inventoryDragCommands().filter((entry) => entry.command === 'evaluate_client_progression').at(-1);
+		for (const confirmBeforePoll of [true, false]) {
+			const dialog = await openTraining();
+			harness.replyProgression({ requestId: request.args.requestId, evaluations: [] });
+			if (confirmBeforePoll) dialog.querySelector('.ui-dialog-actions button:last-child').click();
+			await new Promise((resolve) => setTimeout(resolve, 250));
+			if (trainingDialog() || submitted().length !== 2) throw new Error('Invalidated training quote was submitted or retained for confirmation.');
+			harness.replyProgression({ requestId: request.args.requestId, evaluations: ${JSON.stringify(skillEvaluations)} });
+			await new Promise((resolve) => setTimeout(resolve, 250));
+		}
+		const confirm = (await openTraining()).querySelector('.ui-dialog-actions button:last-child');
+		confirm.click(); confirm.click();
+		await settle();
+		if (trainingDialog() || submitted().length !== 3) throw new Error('Training confirmation did not submit exactly once.');
+		button('Heavy Weapons', '+4').click();
 		const submissions = harness.inventoryDragCommands().filter((entry) => entry.command === 'submit_client_progression');
 		if (submissions.length !== 4 || submissions[2].args.quote.quote.credits_spent !== 2 || submissions[3].args.quote.quote.xp_spent !== 100) throw new Error('Train or Max did not submit the displayed quote once.');
 		harness.replyProgressionFeedback({ DispatchFailed: { intent: { Train: { skill: 'MeleeDefense' } }, message: 'synthetic send failure' } });
-		return { ...${JSON.stringify(reopened)}, lowXp: true, rankCap: true, trainAndMax: true };
+		return { ...${JSON.stringify(reopened)}, lowXp: true, rankCap: true, trainAndMax: true, trainingConfirmation: true, staleTrainingQuote: true };
 	})()`,
 	);
 	await delay(250);

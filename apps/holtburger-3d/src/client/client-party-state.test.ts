@@ -155,7 +155,12 @@ describe("party presentation ownership", () => {
 				}),
 		);
 		f.owner.request({ kind: "openness", open: true });
-		f.lifecycle({ kind: "character-selection", maxSlots: 11, characters: [] });
+		f.lifecycle({
+			kind: "character-selection",
+			rejection: null,
+			maxSlots: 11,
+			characters: [],
+		});
 		f.lifecycle({ kind: "in-world" });
 		f.owner.request({ kind: "shareLoot", enabled: true });
 		if (reject === undefined) throw new Error("Missing delayed failure");
@@ -335,7 +340,12 @@ describe("party presentation ownership", () => {
 				}),
 		);
 		f.owner.request({ kind: "invite", target: 3 });
-		f.lifecycle({ kind: "character-selection", maxSlots: 11, characters: [] });
+		f.lifecycle({
+			kind: "character-selection",
+			rejection: null,
+			maxSlots: 11,
+			characters: [],
+		});
 		if (complete === undefined) throw new Error("Missing delayed invitation");
 		complete();
 		await Promise.resolve();
@@ -355,7 +365,12 @@ describe("party presentation ownership", () => {
 		f.owner.leave(2);
 		expect(f.owner.question()).toBeNull();
 		expect(f.submit).toHaveBeenCalledWith({ kind: "promote", target: 2 });
-		f.lifecycle({ kind: "character-selection", maxSlots: 11, characters: [] });
+		f.lifecycle({
+			kind: "character-selection",
+			rejection: null,
+			maxSlots: 11,
+			characters: [],
+		});
 		f.lifecycle({ kind: "in-world" });
 		if (complete === undefined) throw new Error("Missing delayed dispatch");
 		complete();

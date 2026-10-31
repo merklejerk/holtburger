@@ -41,6 +41,10 @@ pub use client::combat_feedback::combat_feedback_message;
 pub use client::combat_tuning::{
     ClientCombatTuning, ClientCombatTuningError, DEFAULT_MELEE_MAX_CHASE_DISTANCE,
 };
+pub use client::connection_failure::{
+    CharacterErrorCode, ClientExitOutcome, ConnectionFailure, ConnectionFailureCause,
+    ConnectionOperation,
+};
 pub use client::dynamic_script::{
     ClientDynamicScriptFacts, ClientDynamicScriptSource, ContentClientDynamicScriptSource,
     PreparedClientDynamicScript,

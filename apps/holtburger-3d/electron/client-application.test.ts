@@ -142,3 +142,19 @@ describe("single-window application attempt lifetime", () => {
 		expect(app.exit).toHaveBeenCalledWith(["Host still running"]);
 	});
 });
+
+it.each([true, false])(
+	"retains the server explanation after native retirement (launcher=%s)",
+	async (launcher) => {
+		const app = setup(launcher);
+		const diagnostic =
+			"Login failed: This account is banned. Remaining duration: 3600 seconds. Server explanation: test ban";
+		await app.owner.play(async () => configuration());
+		await app.owner.back(diagnostic);
+		expect(app.retire).toHaveBeenCalledOnce();
+		if (launcher) {
+			expect(app.showPicker).toHaveBeenCalledExactlyOnceWith(diagnostic);
+			expect(app.owner.canPlay).toBe(true);
+		} else expect(app.exit).toHaveBeenCalledExactlyOnceWith([diagnostic]);
+	},
+);

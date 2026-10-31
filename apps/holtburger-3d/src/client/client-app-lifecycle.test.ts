@@ -7,6 +7,7 @@ import {
 
 const roster = {
 	kind: "character-selection" as const,
+	rejection: null,
 	maxSlots: 11,
 	characters: [
 		{ guid: 7, name: "Mira", slot: 0, deleteTime: 0 },
@@ -217,7 +218,10 @@ describe("app lifecycle coordination", () => {
 	it("distinguishes shutdown in progress from completed exit even with an empty diagnostic", async () => {
 		const app = setup();
 		app.owner.acceptAuthority({ kind: "in-world" });
-		app.owner.acceptAuthority({ kind: "exiting", cause: "server-disconnect" });
+		app.owner.acceptAuthority({
+			kind: "exiting",
+			cause: "server-disconnect",
+		});
 		expect(app.state().phase.kind).toBe("closing");
 		expect(app.page()).toMatchObject({
 			content: { kind: "pending", activity: "disconnect" },
@@ -466,4 +470,46 @@ describe("app lifecycle coordination", () => {
 		expect(flush).toHaveBeenCalledOnce();
 		expect(app.session.prepareAuthorityShutdown).toHaveBeenCalledOnce();
 	});
+});
+
+it("shows a login failure using the retained phase and shared diagnostic", async () => {
+	const app = setup();
+	app.owner.acceptAuthority({ kind: "authenticating" });
+	app.owner.acceptExit({
+		cause: "server-disconnect",
+		diagnostic: "Login failed: The account does not exist on this server.",
+	});
+	await vi.waitFor(() => expect(app.state().phase.kind).toBe("closed"));
+	expect(app.page()).toMatchObject({
+		content: {
+			kind: "ended",
+			title: "Login failed",
+			message: "Login failed: The account does not exist on this server.",
+		},
+	});
+});
+
+it("restores selection with the retained rejection and allows another explicit entry", async () => {
+	const app = setup();
+	app.owner.acceptAuthority(roster);
+	app.owner.acceptScene({ kind: "ready" }, true);
+	await app.owner.enter();
+	app.owner.acceptAuthority({
+		kind: "portal-space",
+		worldGeneration: 2,
+		cause: "initial-entry",
+	});
+	app.owner.acceptAuthority({
+		...roster,
+		rejection: "World entry failed: This character is still in the world.",
+	});
+	app.owner.acceptScene({ kind: "ready" }, true);
+	expect(app.page()).toMatchObject({
+		kind: "selection",
+		selection: {
+			rejection: "World entry failed: This character is still in the world.",
+		},
+	});
+	await app.owner.enter();
+	expect(app.session.enterWorld).toHaveBeenCalledTimes(2);
 });

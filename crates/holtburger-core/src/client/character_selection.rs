@@ -1,7 +1,6 @@
 use super::types::{CharacterManagementOperation, CharacterManagementState};
 use anyhow::{Result, ensure};
 use holtburger_common::Guid;
-use holtburger_protocol::errors::CharacterError;
 use holtburger_protocol::messages::*;
 use holtburger_session::Session;
 
@@ -14,6 +13,8 @@ pub(super) struct CharacterSelectionState {
     /// Guards the server-ready follow-up so a repeated edge cannot send entry twice.
     pub(super) enter_world_sent: bool,
     pub(super) management: CharacterManagementState,
+    /// Recoverable entry refusal included in lifecycle snapshots.
+    pub(super) entry_rejection: Option<super::ConnectionFailure>,
 }
 
 impl CharacterSelectionState {
@@ -25,6 +26,7 @@ impl CharacterSelectionState {
             character_id: None,
             enter_world_sent: false,
             management: CharacterManagementState::Idle,
+            entry_rejection: None,
         }
     }
 
@@ -129,18 +131,6 @@ impl CharacterSelectionState {
 
     pub(super) fn reject(&mut self, operation: CharacterManagementOperation, message: String) {
         self.management = CharacterManagementState::Rejected { operation, message };
-    }
-
-    pub(super) fn handle_character_error(&mut self, error_code: u32) -> CharacterError {
-        let error = CharacterError::from_repr(error_code).unwrap_or(CharacterError::None);
-        log::warn!("Character Error received: 0x{:08X}", error_code);
-        error
-    }
-
-    pub(super) fn handle_boot_account(&mut self, data: BootAccountData) -> String {
-        let reason = data.reason.unwrap_or_default();
-        log::warn!("Boot Account received: {}", reason);
-        reason
     }
 
     pub(super) async fn create_character(

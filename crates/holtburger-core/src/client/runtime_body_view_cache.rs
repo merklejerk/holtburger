@@ -45,7 +45,10 @@ impl RuntimeBodyViewCache {
             ClientViewEvent::RuntimeBodyRemoved { body_id } => {
                 self.bodies.remove(body_id);
             }
-            ClientViewEvent::RuntimeBodiesReset { .. } | ClientViewEvent::Disconnected => {
+            ClientViewEvent::RuntimeBodiesReset { .. }
+            | ClientViewEvent::LifecycleChanged(super::types::ClientLifecycleState::Exiting {
+                ..
+            }) => {
                 self.clear();
             }
             _ => {}
@@ -286,5 +289,30 @@ mod tests {
             mirrored.projection_mode,
             SpatialSampleMode::SimulatingVelocity
         );
+    }
+    #[test]
+    fn terminal_lifecycle_retires_runtime_body_views() {
+        let guid = Guid(0x5000_0007);
+        let now = Instant::now();
+        let mut system = CacheHarness::new();
+        system.handle_view_event(
+            &ClientViewEvent::RuntimeBodySnapshot {
+                bodies: vec![make_runtime_body(SpatialBodyId::Entity(guid), 0.0, 0.0)].into(),
+            },
+            now,
+        );
+        assert!(system.spatial_sample(guid).is_some());
+        system.handle_view_event(
+            &ClientViewEvent::LifecycleChanged(
+                super::super::types::ClientLifecycleState::Exiting {
+                    outcome: super::super::ClientExitOutcome {
+                        cause: super::super::types::ClientExitCause::ExplicitDisconnect,
+                        failure: None,
+                    },
+                },
+            ),
+            now,
+        );
+        assert!(system.spatial_sample(guid).is_none());
     }
 }

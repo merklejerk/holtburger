@@ -595,6 +595,8 @@ pub enum ClientLifecycleWire {
         /// Advertised account capacity, including occupied pending-deletion slots.
         max_slots: u32,
         characters: Vec<ClientCharacterWire>,
+        /// Shared explanation retained after recoverable entry refusal.
+        rejection: Option<String>,
     },
     EnteringWorld {
         character_guid: Guid,
@@ -1576,7 +1578,9 @@ impl From<&ClientLifecycleState> for ClientLifecycleWire {
             ClientLifecycleState::CharacterSelection {
                 characters,
                 max_slots,
+                rejection,
             } => Self::CharacterSelection {
+                rejection: rejection.as_ref().map(ToString::to_string),
                 max_slots: *max_slots,
                 characters: characters
                     .iter()
@@ -1600,8 +1604,8 @@ impl From<&ClientLifecycleState> for ClientLifecycleWire {
             },
             ClientLifecycleState::InWorld => Self::InWorld,
             ClientLifecycleState::LoggingOut => Self::LoggingOut,
-            ClientLifecycleState::Exiting { cause } => Self::Exiting {
-                cause: (*cause).into(),
+            ClientLifecycleState::Exiting { outcome } => Self::Exiting {
+                cause: outcome.cause.into(),
             },
         }
     }

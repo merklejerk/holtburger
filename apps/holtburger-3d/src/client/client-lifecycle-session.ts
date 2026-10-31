@@ -1997,6 +1997,8 @@ export class ClientLifecycleSession {
 
 	#receiveCurrentState(payload: unknown): void {
 		const state = decodeClientCurrentState(payload);
+		// Final task completion outranks snapshots already in flight from this authority.
+		if (this.#state.exit !== null) return;
 		this.#serverClock =
 			state.serverTime === null
 				? null
@@ -2079,6 +2081,7 @@ export class ClientLifecycleSession {
 
 	#receiveLifecycle(payload: unknown): void {
 		const lifecycle = decodeClientLifecycle(payload);
+		if (this.#state.exit !== null) return;
 		if (
 			lifecycle.kind === "portal-space" &&
 			lifecycle.worldGeneration < this.#state.worldGeneration
@@ -2232,7 +2235,10 @@ export class ClientLifecycleSession {
 	#receiveExit(payload: unknown): void {
 		const exit = decodeClientExitRequested(payload);
 		this.#cameras.close();
-		const lifecycle: ClientLifecycle = { kind: "exiting", cause: exit.cause };
+		const lifecycle: ClientLifecycle = {
+			kind: "exiting",
+			cause: exit.cause,
+		};
 		this.#state = { ...this.#state, lifecycle, exit, activeConfirmation: null };
 		this.#emit({ type: "lifecycle", lifecycle });
 		this.#emit({ type: "exit-requested", exit });

@@ -737,7 +737,7 @@ impl ClientHostRuntime {
             Err(error) => {
                 let _ = self.event_sink.publish_client_event(client_exit_requested(
                     holtburger_core::ClientExitCause::StartupFailure,
-                    error.to_string(),
+                    format!("{error:#}"),
                 ));
                 return Err(error);
             }
@@ -795,7 +795,7 @@ impl ClientHostRuntime {
             Err(error) => {
                 let _ = self.event_sink.publish_client_event(client_exit_requested(
                     holtburger_core::ClientExitCause::StartupFailure,
-                    error.to_string(),
+                    format!("{error:#}"),
                 ));
                 return Err(error);
             }

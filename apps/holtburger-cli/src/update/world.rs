@@ -3,23 +3,68 @@ use crate::pages::selection::{CharacterDashboardEntry, SelectionState};
 use crate::state::AppState;
 use crate::state::EventContext;
 use crate::types::{Page, UpdateResult};
-use holtburger_core::errors::format_action_result_message;
-use holtburger_core::{ActionResultReason, ClientCommand, ClientState, ClientViewEvent};
-use holtburger_protocol::errors::CharacterError;
+use holtburger_core::{ClientCommand, ClientState, ClientViewEvent};
 use std::sync::Arc;
 
 impl AppState {
-    fn handle_setup_event(&mut self, event: &ClientViewEvent, result: &mut UpdateResult) {
-        match event {
-            ClientViewEvent::LifecycleChanged(
-                holtburger_core::ClientLifecycleState::CharacterSelection { characters, .. },
-            ) => {
-                if let Page::Selection(selection) = &mut self.page {
-                    let selected = selection
+    /// One roster projection serves initial selection, entry refusal, and snapshot recovery.
+    fn restore_selection(
+        &mut self,
+        mut characters: Vec<CharacterDashboardEntry>,
+        rejection: Option<String>,
+    ) {
+        characters.sort_by_key(|entry| entry.character.name.to_lowercase());
+        if let Page::Selection(selection) = &mut self.page {
+            let selected = selection
+                .selected_character()
+                .map(|entry| entry.character.guid);
+            selection.characters = characters;
+            selection.selected_character_index = selected
+                .and_then(|guid| {
+                    selection
                         .characters
-                        .get(selection.selected_character_index)
-                        .map(|entry| entry.character.guid);
-                    selection.characters = characters
+                        .iter()
+                        .position(|entry| entry.character.guid == guid)
+                })
+                .unwrap_or(0);
+            selection.entry_rejection = rejection;
+            return;
+        }
+        let character_preference = self
+            .character_preference
+            .take()
+            .filter(|_| rejection.is_none());
+        self.page = Page::Selection(Box::new(SelectionState {
+            characters,
+            selected_character_index: 0,
+            character_preference,
+            account_name: self.account_name.clone(),
+            screen: Default::default(),
+            creation: self
+                .character_gen_catalog
+                .as_ref()
+                .map_or_else(CharacterCreationState::default, |catalog| {
+                    CharacterCreationState::from_catalog(Arc::clone(catalog))
+                }),
+            delete_confirmation: None,
+            entry_rejection: rejection,
+        }));
+    }
+
+    fn apply_client_lifecycle(
+        &mut self,
+        lifecycle: &holtburger_core::ClientLifecycleState,
+        result: &mut UpdateResult,
+    ) {
+        match lifecycle {
+            holtburger_core::ClientLifecycleState::CharacterSelection {
+                characters,
+                rejection,
+                ..
+            } => {
+                self.client_state = ClientState::CharacterSelection;
+                self.restore_selection(
+                    characters
                         .iter()
                         .map(|character| CharacterDashboardEntry {
                             slot: character.slot,
@@ -29,20 +74,34 @@ impl AppState {
                                 delete_time: character.delete_time,
                             },
                         })
-                        .collect();
-                    selection
-                        .characters
-                        .sort_by_key(|entry| entry.character.name.to_lowercase());
-                    selection.selected_character_index = selected
-                        .and_then(|guid| {
-                            selection
-                                .characters
-                                .iter()
-                                .position(|entry| entry.character.guid == guid)
-                        })
-                        .unwrap_or(0);
-                    result.merge(UpdateResult::redraw());
+                        .collect(),
+                    rejection.as_ref().map(ToString::to_string),
+                );
+                result.merge(UpdateResult::redraw());
+            }
+            holtburger_core::ClientLifecycleState::Exiting { outcome } => {
+                self.client_state = ClientState::Disconnected;
+                self.remember_disconnect_reason(outcome.diagnostic());
+                self.request_disconnect_exit();
+                if !self.should_exit_on_disconnect() {
+                    self.log(
+                        crate::types::ChatMessageTags::error(),
+                        self.current_disconnect_chat_message(),
+                    );
                 }
+                result.merge(UpdateResult::redraw());
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_setup_event(&mut self, event: &ClientViewEvent, result: &mut UpdateResult) {
+        match event {
+            ClientViewEvent::ApplicationSnapshot(snapshot) => {
+                self.apply_client_lifecycle(&snapshot.lifecycle, result)
+            }
+            ClientViewEvent::LifecycleChanged(lifecycle) => {
+                self.apply_client_lifecycle(lifecycle, result)
             }
             ClientViewEvent::WorldNameUpdated(name) => {
                 self.world_name = name.clone();
@@ -51,106 +110,53 @@ impl AppState {
                 }
             }
             ClientViewEvent::CharacterList(chars) => {
-                let mut chars = chars
-                    .iter()
-                    .cloned()
-                    .enumerate()
-                    .map(|(slot, character)| CharacterDashboardEntry {
-                        slot: slot as u32,
-                        character,
-                    })
-                    .collect::<Vec<_>>();
-                chars.sort_by(|a, b| {
-                    a.character
-                        .name
-                        .to_lowercase()
-                        .cmp(&b.character.name.to_lowercase())
-                });
-                log::info!(
-                    "Page transition: {:?} -> Selection (character list received)",
-                    self.page_name()
+                // Lifecycle owns refusal lifetime; a broad roster notification must not erase it.
+                let rejection = match &self.page {
+                    Page::Selection(selection) => selection.entry_rejection.clone(),
+                    _ => None,
+                };
+                self.restore_selection(
+                    chars
+                        .iter()
+                        .cloned()
+                        .enumerate()
+                        .map(|(slot, character)| CharacterDashboardEntry {
+                            slot: slot as u32,
+                            character,
+                        })
+                        .collect(),
+                    rejection,
                 );
-                self.page = Page::Selection(Box::new(SelectionState {
-                    characters: chars,
-                    selected_character_index: 0,
-                    character_preference: self.character_preference.take(),
-                    account_name: self.account_name.clone(),
-                    screen: Default::default(),
-                    creation: self
-                        .character_gen_catalog
-                        .as_ref()
-                        .map_or_else(CharacterCreationState::default, |catalog| {
-                            CharacterCreationState::from_catalog(Arc::clone(catalog))
-                        }),
-                    delete_confirmation: None,
-                }));
             }
             ClientViewEvent::ServerTimeUpdated { time } => {
-                let value = Some((*time, std::time::Instant::now()));
-                self.server_time = value;
+                self.server_time = Some((*time, std::time::Instant::now()))
             }
             _ => {}
-        }
-    }
-
-    fn page_name(&self) -> &'static str {
-        match self.page {
-            Page::Selection(_) => "Selection",
-            Page::Game(_) => "Game",
         }
     }
 
     fn handle_client_status_event(&mut self, event: &ClientViewEvent) -> UpdateResult {
         let mut result = UpdateResult::new();
-        match event {
-            ClientViewEvent::StatusUpdate { state } => {
-                let was_in_world = self.client_state == ClientState::InWorld;
-                self.client_state = state.clone();
-                match self.client_state {
-                    ClientState::Disconnected => {
-                        self.request_disconnect_exit();
-                        if !self.should_exit_on_disconnect() && self.disconnect_reason.is_some() {
-                            log::error!("{}", self.current_disconnect_chat_message());
-                        }
-                    }
-                    _ => {
-                        self.clear_disconnect_reason();
-                    }
-                }
-
-                if self.client_state == ClientState::InWorld && !was_in_world {
-                    result
-                        .commands
-                        .push(ClientCommand::SetFellowshipUpdatesSubscribed { enabled: true });
-                }
-            }
-            ClientViewEvent::ActionResult { reason, .. } => {
-                if let ActionResultReason::Character(error) = &reason
-                    && matches!(
-                        error,
-                        CharacterError::Logon | CharacterError::EnterGameCharacterInWorld
-                    )
-                {
-                    let message = format_action_result_message(reason);
-                    self.remember_disconnect_reason(message.clone());
+        if let ClientViewEvent::StatusUpdate { state } = event {
+            let was_in_world = self.client_state == ClientState::InWorld;
+            self.client_state = state.clone();
+            match self.client_state {
+                ClientState::Disconnected => {
                     self.request_disconnect_exit();
+                    if !self.should_exit_on_disconnect() && self.disconnect_reason.is_some() {
+                        log::error!("{}", self.current_disconnect_chat_message());
+                    }
+                }
+                _ => {
+                    self.clear_disconnect_reason();
                 }
             }
-            ClientViewEvent::BootAccount(reason) => {
-                let message = if reason.trim().is_empty() {
-                    "Booted from server.".to_string()
-                } else {
-                    format!("Booted from server: {}", reason)
-                };
-                self.remember_disconnect_reason(message);
 
-                if matches!(self.client_state, ClientState::Disconnected)
-                    && self.should_exit_on_disconnect()
-                {
-                    self.pending_exit_message = Some(self.current_disconnect_message());
-                }
+            if self.client_state == ClientState::InWorld && !was_in_world {
+                result
+                    .commands
+                    .push(ClientCommand::SetFellowshipUpdatesSubscribed { enabled: true });
             }
-            _ => {}
         }
         result
     }
@@ -160,6 +166,7 @@ impl AppState {
         // Handle setup and chat events regardless of being locally in-game
         match &event {
             ClientViewEvent::CharacterList(_)
+            | ClientViewEvent::ApplicationSnapshot(_)
             | ClientViewEvent::LifecycleChanged(_)
             | ClientViewEvent::ServerTimeUpdated { .. }
             | ClientViewEvent::WorldNameUpdated(_) => {
@@ -191,9 +198,7 @@ impl AppState {
                 | ClientViewEvent::SoulEmote { .. }
                 | ClientViewEvent::ItemManaResponse { .. }
                 | ClientViewEvent::PingResponse
-                | ClientViewEvent::BootAccount(_)
                 | ClientViewEvent::ConnectionUpdated(_)
-                | ClientViewEvent::Disconnected
         ) && self.game_option().is_none()
         {
             return result;
@@ -218,20 +223,7 @@ impl AppState {
                         .handle_view_event(ClientViewEvent::ConnectionUpdated(sample), &ctx),
                 );
             }
-            ClientViewEvent::Disconnected => {
-                self.client_state = ClientState::Disconnected;
-                self.request_disconnect_exit();
-                log::error!("{}", self.current_disconnect_chat_message());
-                // For now, staying on the Game page lets the user see the error,
-                // but we could also transition back to selection.
-                result.merge(
-                    self.page
-                        .handle_view_event(ClientViewEvent::Disconnected, &ctx),
-                );
-            }
-            ClientViewEvent::StatusUpdate { .. }
-            | ClientViewEvent::ActionResult { .. }
-            | ClientViewEvent::BootAccount(_) => {
+            ClientViewEvent::StatusUpdate { .. } | ClientViewEvent::ActionResult { .. } => {
                 result.merge(self.handle_client_status_event(&event));
                 result.merge(self.page.handle_view_event(event, &ctx));
             }
@@ -261,6 +253,7 @@ mod tests {
     use super::*;
     use crate::state::NetStats;
     use crate::types::{AppAction, ChatMessageTags, Page};
+    use holtburger_core::ActionResultReason;
     use holtburger_scripting::ScriptHostConfig;
 
     fn build_test_app_state(client_state: ClientState) -> AppState {
@@ -314,60 +307,109 @@ mod tests {
     }
 
     #[test]
-    fn boot_account_reason_is_used_for_disconnect_exit() {
-        let mut app_state = build_test_app_state(ClientState::InWorld);
-        app_state.quit_on_disconnect = true;
-        let _ = app_state.handle_client_view_event(ClientViewEvent::StatusUpdate {
-            state: ClientState::Disconnected,
-        });
-        let _ = app_state.handle_client_view_event(ClientViewEvent::BootAccount(
-            "Server maintenance".to_string(),
-        ));
-
-        assert_eq!(
-            app_state.take_pending_exit_message().as_deref(),
-            Some("Booted from server: Server maintenance")
-        );
+    fn retained_server_failure_drives_disconnect() {
+        for quit in [false, true] {
+            let mut app_state = build_test_app_state(ClientState::InWorld);
+            app_state.quit_on_disconnect = quit;
+            app_state.page = Page::Game(Box::new(crate::pages::game::GameState::new(
+                holtburger_common::Guid(0x5000_0001),
+                "Player".into(),
+                "World".into(),
+            )));
+            let outcome = holtburger_core::ClientExitOutcome {
+                cause: holtburger_core::ClientExitCause::ServerDisconnect,
+                failure: Some(holtburger_core::ConnectionFailure {
+                    state: Some(ClientState::InWorld),
+                    cause: holtburger_core::ConnectionFailureCause::AccountBoot(Some(
+                        "Server maintenance".into(),
+                    )),
+                }),
+            };
+            app_state.handle_client_view_event(ClientViewEvent::LifecycleChanged(
+                holtburger_core::ClientLifecycleState::Exiting {
+                    outcome: outcome.clone(),
+                },
+            ));
+            assert_eq!(
+                app_state.take_pending_exit_message(),
+                quit.then(|| outcome.diagnostic())
+            );
+            assert_eq!(
+                app_state.disconnect_reason.as_deref(),
+                Some(outcome.diagnostic().as_str())
+            );
+            if !quit {
+                let game = app_state
+                    .game_option()
+                    .expect("disconnect retains game page");
+                assert_eq!(
+                    game.chat.messages.last().unwrap().text,
+                    format!("Disconnected: {}", outcome.diagnostic())
+                );
+            }
+        }
     }
 
     #[test]
-    fn post_world_logon_error_becomes_disconnect_exit_instead_of_retry() {
-        let mut app_state = build_test_app_state(ClientState::InWorld);
-        app_state.quit_on_disconnect = true;
+    fn entry_refusal_rebuilds_selection_from_the_game_page() {
+        let mut app_state = build_test_app_state(ClientState::EnteringWorld);
+        let guid = holtburger_common::Guid(0x5000_1234);
         app_state.page = Page::Game(Box::new(crate::pages::game::GameState::new(
-            holtburger_common::Guid(0x50000001),
-            "Player".to_string(),
-            "World".to_string(),
+            guid,
+            "Mira".into(),
+            "World".into(),
         )));
-
-        let result = app_state.handle_client_view_event(ClientViewEvent::ActionResult {
-            source: holtburger_core::client::types::ActionResultSource::Wire,
-            reason: ActionResultReason::Character(CharacterError::Logon),
-        });
-
-        assert!(result.commands.is_empty());
-        assert_eq!(
-            app_state.take_pending_exit_message().as_deref(),
-            Some("Character error: Logon")
-        );
+        let rejection = holtburger_core::ConnectionFailure {
+            state: Some(ClientState::EnteringWorld),
+            cause: holtburger_core::ConnectionFailureCause::Character(
+                holtburger_core::CharacterErrorCode::Known(
+                    holtburger_protocol::errors::CharacterError::EnterGameCharacterInWorld,
+                ),
+            ),
+        };
+        app_state.handle_client_view_event(ClientViewEvent::LifecycleChanged(
+            holtburger_core::ClientLifecycleState::CharacterSelection {
+                max_slots: 11,
+                characters: vec![holtburger_core::ClientCharacterSummary {
+                    guid,
+                    name: "Mira".into(),
+                    slot: 0,
+                    delete_time: 0,
+                }],
+                rejection: Some(rejection.clone()),
+            },
+        ));
+        let Page::Selection(selection) = &app_state.page else {
+            panic!("entry refusal must restore selection")
+        };
+        assert_eq!(selection.entry_rejection, Some(rejection.to_string()));
+        assert!(selection.character_preference.is_none());
+        assert_eq!(selection.selected_character().unwrap().character.guid, guid);
     }
-
     #[test]
-    fn pre_world_logon_error_exits_without_retry() {
-        let mut app_state = build_test_app_state(ClientState::Connected);
-
-        let result = app_state.handle_client_view_event(ClientViewEvent::ActionResult {
-            source: holtburger_core::client::types::ActionResultSource::Wire,
-            reason: ActionResultReason::Character(CharacterError::Logon),
-        });
-
-        assert!(result.commands.is_empty());
-        assert_eq!(
-            app_state.take_pending_exit_message().as_deref(),
-            Some("Character error: Logon")
-        );
+    fn roster_notification_preserves_the_authoritative_entry_refusal() {
+        let mut app_state = build_test_app_state(ClientState::EnteringWorld);
+        let rejection = holtburger_core::ConnectionFailure {
+            state: Some(ClientState::EnteringWorld),
+            cause: holtburger_core::ConnectionFailureCause::Character(
+                holtburger_core::CharacterErrorCode::Known(
+                    holtburger_protocol::errors::CharacterError::EnterGameCharacterInWorld,
+                ),
+            ),
+        };
+        app_state.handle_client_view_event(ClientViewEvent::LifecycleChanged(
+            holtburger_core::ClientLifecycleState::CharacterSelection {
+                max_slots: 11,
+                characters: vec![],
+                rejection: Some(rejection.clone()),
+            },
+        ));
+        app_state.handle_client_view_event(ClientViewEvent::CharacterList(vec![]));
+        let Page::Selection(selection) = &app_state.page else {
+            panic!("expected selection")
+        };
+        assert_eq!(selection.entry_rejection, Some(rejection.to_string()));
     }
-
     #[test]
     fn missing_spell_components_are_surfaced_in_chat() {
         let mut app_state = build_test_app_state(ClientState::InWorld);
@@ -394,45 +436,5 @@ mod tests {
             }
             other => panic!("expected chat log action, got {:?}", other),
         }
-    }
-
-    #[test]
-    fn post_world_disconnect_stays_open_without_quit_flag() {
-        let mut app_state = build_test_app_state(ClientState::InWorld);
-        app_state.page = Page::Game(Box::new(crate::pages::game::GameState::new(
-            holtburger_common::Guid(0x50000001),
-            "Player".to_string(),
-            "World".to_string(),
-        )));
-
-        let result = app_state.handle_client_view_event(ClientViewEvent::StatusUpdate {
-            state: ClientState::Disconnected,
-        });
-
-        assert!(result.commands.is_empty());
-
-        let result = app_state.handle_client_view_event(ClientViewEvent::BootAccount(
-            "Server maintenance".to_string(),
-        ));
-
-        assert!(result.commands.is_empty());
-        assert!(app_state.take_pending_exit_message().is_none());
-        assert_eq!(
-            app_state.disconnect_reason.as_deref(),
-            Some("Booted from server: Server maintenance")
-        );
-
-        let game = app_state
-            .game_option()
-            .expect("game page should remain active after disconnect");
-        let last_message = game
-            .chat
-            .messages
-            .last()
-            .expect("boot reason should be logged to chat");
-        assert_eq!(
-            last_message.text,
-            "Disconnected: Booted from server: Server maintenance"
-        );
     }
 }

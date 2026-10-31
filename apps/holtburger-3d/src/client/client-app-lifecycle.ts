@@ -606,7 +606,11 @@ function loadingPage(
 						"host-shutdown": disconnected,
 						"server-disconnect": {
 							failed: true,
-							title: "Connection lost",
+							title:
+								state.lastSessionPhase === "connecting" ||
+								state.lastSessionPhase === "authenticating"
+									? "Login failed"
+									: "Connection lost",
 							message:
 								exit.diagnostic.trim().length > 0
 									? exit.diagnostic
@@ -619,8 +623,12 @@ function loadingPage(
 						},
 						"runtime-failure": {
 							failed: true,
-							title: "Session ended",
-							message: "The game session ended unexpectedly.",
+							title:
+								state.lastSessionPhase === "connecting" ||
+								state.lastSessionPhase === "authenticating"
+									? "Login failed"
+									: "Session ended",
+							message: exit.diagnostic,
 						},
 					}[exit.cause];
 		return {

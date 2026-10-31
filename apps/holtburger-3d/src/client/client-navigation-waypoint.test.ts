@@ -267,7 +267,12 @@ describe("waypoint commands", () => {
 		f.command("@waypoint 0N 0E");
 		f.owner.acceptCurrentState({
 			localPlayerGuid: null,
-			lifecycle: { kind: "character-selection", maxSlots: 11, characters: [] },
+			lifecycle: {
+				kind: "character-selection",
+				rejection: null,
+				maxSlots: 11,
+				characters: [],
+			},
 		});
 		expect(f.read()).toBeNull();
 	});
@@ -284,8 +289,16 @@ describe("waypoint commands", () => {
 	it.each([
 		{ kind: "connecting" },
 		{ kind: "authenticating" },
-		{ kind: "character-selection", maxSlots: 11, characters: [] },
-		{ kind: "exiting", cause: "explicit-disconnect" },
+		{
+			kind: "character-selection",
+			rejection: null,
+			maxSlots: 11,
+			characters: [],
+		},
+		{
+			kind: "exiting",
+			cause: "explicit-disconnect",
+		},
 	] satisfies ClientLifecycle[])("clears on retirement %s", (lifecycle) => {
 		const f = fixture();
 		f.command("@waypoint 0N 0E");

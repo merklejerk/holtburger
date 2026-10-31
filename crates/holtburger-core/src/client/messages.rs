@@ -5,6 +5,7 @@ use holtburger_common::sequence::is_newer_u16;
 use holtburger_common::{ConfirmationType, Guid};
 use holtburger_protocol::errors::{CharacterError, WeenieError};
 use holtburger_protocol::messages::*;
+use holtburger_protocol::opcodes::GameOpcode;
 use holtburger_protocol::traits::ProtocolUnpack;
 use holtburger_world::entity::Entity;
 use holtburger_world::{AuthoritativePoseEffect, AuthoritativePoseResetCause, WorldEvent};
@@ -285,6 +286,9 @@ impl ClientRuntime {
     }
 
     pub(super) async fn handle_message(&mut self, data: &[u8]) -> Result<Vec<WorldEvent>> {
+        if self.state == ClientState::Disconnected {
+            return Ok(Vec::new());
+        }
         #[cfg(feature = "runtime-fixture")]
         if let Some(capture) = &mut self.runtime_fixture {
             capture.record(super::runtime_fixture::RuntimeFixtureInput::Message(
@@ -321,12 +325,29 @@ impl ClientRuntime {
         let mut offset = 0;
         let message = <GameMessage as ProtocolUnpack>::unpack(data, &mut offset);
         if message.is_none() {
-            let opcode_str = if data.len() >= 4 {
-                let opcode = u32::from_le_bytes(data[0..4].try_into().unwrap_or([0; 4]));
-                format!("0x{:08X}", opcode)
-            } else {
-                "Unknown".to_string()
-            };
+            let opcode = data.first_chunk::<4>().copied().map(u32::from_le_bytes);
+            if let Some(opcode) = opcode
+                && matches!(
+                    GameOpcode::from_repr(opcode),
+                    Some(
+                        GameOpcode::CharacterError
+                            | GameOpcode::AccountBoot
+                            | GameOpcode::AccountBanned
+                    )
+                )
+            {
+                let diagnostic = format!("Malformed server lifecycle reply 0x{opcode:08X}");
+                self.fail_connection(
+                    super::ConnectionFailureCause::Local {
+                        operation: super::ConnectionOperation::ServerTraffic,
+                        diagnostic: diagnostic.clone(),
+                    },
+                    ClientExitCause::RuntimeFailure,
+                );
+                anyhow::bail!(diagnostic);
+            }
+            let opcode_str =
+                opcode.map_or_else(|| "Unknown".to_string(), |opcode| format!("0x{opcode:08X}"));
             log::warn!(
                 "Failed to unpack GameMessage {} ({} bytes): {:02X?}",
                 opcode_str,
@@ -346,6 +367,26 @@ impl ClientRuntime {
                     | GameMessage::ServerName(_)
                     | GameMessage::CharacterError(_)
                     | GameMessage::AccountBoot(_)
+                    | GameMessage::AccountBanned(_)
+            )
+        {
+            return Ok(Vec::new());
+        }
+
+        // ACE sends no world baseline after an entry refusal. Until a new entry is
+        // explicitly requested, late character traffic must not recreate activation/state.
+        if self.state == ClientState::CharacterSelection
+            && self.character_selection.entry_rejection.is_some()
+            && !matches!(
+                message,
+                GameMessage::CharacterList(_)
+                    | GameMessage::ServerName(_)
+                    | GameMessage::CharacterError(_)
+                    | GameMessage::AccountBoot(_)
+                    | GameMessage::AccountBanned(_)
+                    | GameMessage::CharacterCreateResponse(_)
+                    | GameMessage::CharacterDeleteResponse
+                    | GameMessage::ServerMessage(_)
             )
         {
             return Ok(Vec::new());
@@ -544,7 +585,16 @@ impl ClientRuntime {
                     let account = self.character_selection.account_name.clone();
                     self.character_selection
                         .send_character_enter_world(guid, account, &mut self.session)
-                        .await?;
+                        .await
+                        .inspect_err(|error| {
+                            self.fail_connection(
+                                super::ConnectionFailureCause::Local {
+                                    operation: super::ConnectionOperation::ServerTraffic,
+                                    diagnostic: format!("{error:#}"),
+                                },
+                                ClientExitCause::RuntimeFailure,
+                            )
+                        })?;
                     self.character_selection.enter_world_sent = true;
                 }
                 let _ = self
@@ -997,50 +1047,88 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::CharacterError(data) => {
-                let error = self
-                    .character_selection
-                    .handle_character_error(data.error_id);
+                let error = super::CharacterErrorCode::from(data.error_id);
+                log::warn!("Server character error: {error}");
+                if error == super::CharacterErrorCode::Known(CharacterError::None) {
+                    return Ok(Vec::new());
+                }
+                if self.authenticating
+                    || matches!(
+                        error,
+                        super::CharacterErrorCode::Known(
+                            CharacterError::Logon
+                                | CharacterError::ServerCrash1
+                                | CharacterError::ServerCrash2
+                        )
+                    )
+                {
+                    self.fail_connection(
+                        super::ConnectionFailureCause::Character(error),
+                        ClientExitCause::ServerDisconnect,
+                    );
+                    return Ok(Vec::new());
+                }
+                let pending_initial_entry = self.state == ClientState::EnteringWorld
+                    && self.world.player.guid == Guid::NULL
+                    && self.activation.as_ref().is_some_and(|activation| {
+                        matches!(
+                            activation.phase,
+                            super::ClientWorldActivationPhase::InitialEntry
+                        )
+                    });
+                if pending_initial_entry {
+                    // ACE CharacterHandler refuses these before InitSessionForWorldLogin.
+                    if matches!(
+                        error,
+                        super::CharacterErrorCode::Known(
+                            CharacterError::LogonServerFull
+                                | CharacterError::EnterGameCharacterNotOwned
+                                | CharacterError::EnterGameCharacterInWorld
+                                | CharacterError::EnterGameGeneric
+                                | CharacterError::EnterGameCouldntPlaceCharacter
+                        )
+                    ) {
+                        self.reject_world_entry(error);
+                    } else {
+                        self.fail_connection(
+                            super::ConnectionFailureCause::Character(error),
+                            ClientExitCause::ServerDisconnect,
+                        );
+                    }
+                    return Ok(Vec::new());
+                }
                 if self.state == ClientState::CharacterSelection
                     && let Some(operation) = self.character_selection.management.pending_operation()
                 {
-                    self.character_selection.reject(
-                        operation,
-                        format!("Character operation rejected: {error:?}."),
-                    );
+                    self.character_selection
+                        .reject(operation, error.to_string());
                     self.emit_character_management();
                 }
                 self.emit_action_result(
                     ActionResultSource::Wire,
                     ActionResultReason::Character(error),
                 );
-                if error == CharacterError::Logoff
+                if error == super::CharacterErrorCode::Known(CharacterError::Logoff)
                     && self.state == ClientState::LoggingOut
                     && self.world.player.guid != Guid::NULL
                 {
                     self.state = ClientState::InWorld;
                     self.send_status_event();
                 }
-                // ACE terminates an already-logged-in account with CharacterError.Logon. Treat
-                // this authentication edge as a typed server disconnect instead of leaving the
-                // client waiting for the generic receive timeout.
-                if error == CharacterError::Logon && self.authenticating {
-                    self.authenticating = false;
-                    self.exit_diagnostic = Some("The server rejected the login request.".into());
-                    self.set_exit_cause(ClientExitCause::ServerDisconnect);
-                    self.state = ClientState::Disconnected;
-                    self.send_status_event();
-                }
                 Ok(())
             }
             GameMessage::AccountBoot(data) => {
-                let reason = self.character_selection.handle_boot_account(*data);
-                self.exit_diagnostic = Some(reason.clone());
-                self.set_exit_cause(ClientExitCause::ServerDisconnect);
-                self.state = ClientState::Disconnected;
-                self.send_status_event();
-                let _ = self
-                    .client_view_event_tx
-                    .send(ClientViewEvent::BootAccount(reason.clone()));
+                self.fail_connection(
+                    super::ConnectionFailureCause::AccountBoot(data.reason),
+                    ClientExitCause::ServerDisconnect,
+                );
+                Ok(())
+            }
+            GameMessage::AccountBanned(data) => {
+                self.fail_connection(
+                    super::ConnectionFailureCause::AccountBanned(*data),
+                    ClientExitCause::ServerDisconnect,
+                );
                 Ok(())
             }
             GameMessage::DddInterrogation => {
@@ -1049,7 +1137,15 @@ impl ClientRuntime {
                         language: 1,
                         lists: Vec::new(),
                     }));
-                self.session.send_message(&resp).await
+                self.session.send_message(&resp).await.inspect_err(|error| {
+                    self.fail_connection(
+                        super::ConnectionFailureCause::Local {
+                            operation: super::ConnectionOperation::ServerTraffic,
+                            diagnostic: format!("{error:#}"),
+                        },
+                        ClientExitCause::RuntimeFailure,
+                    )
+                })
             }
             GameMessage::ServerName(_data) => Ok(()),
             GameMessage::HearSpeech(data) => {
@@ -2756,35 +2852,180 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn logon_character_error_terminates_authentication_as_server_disconnect() {
-        let mut client = build_test_client();
-        let mut events = client.subscribe_client_view_events();
-        client.authenticating = true;
-
-        let encoded = encode_message(&GameMessage::CharacterError(Box::new(CharacterErrorData {
-            error_id: CharacterError::Logon as u32,
-        })));
-        client.handle_message(&encoded).await.unwrap();
-
-        assert_eq!(client.state, ClientState::Disconnected);
-        assert_eq!(
-            client.lifecycle(),
-            ClientLifecycleState::Exiting {
-                cause: ClientExitCause::ServerDisconnect,
-            }
-        );
-        let mut saw_exit = false;
-        while let Ok(event) = events.try_recv() {
-            if matches!(
-                event,
-                ClientViewEvent::LifecycleChanged(ClientLifecycleState::Exiting {
-                    cause: ClientExitCause::ServerDisconnect,
-                })
-            ) {
-                saw_exit = true;
-                break;
-            }
+    async fn authentication_rejections_are_retained_and_terminal() {
+        for raw in [
+            CharacterError::Logon as u32,
+            CharacterError::AccountDoesntExist as u32,
+            0xfedc_ba98,
+        ] {
+            let mut client = build_test_client();
+            client.authenticating = true;
+            let encoded =
+                encode_message(&GameMessage::CharacterError(Box::new(CharacterErrorData {
+                    error_id: raw,
+                })));
+            client.handle_message(&encoded).await.unwrap();
+            let outcome = client.exit_outcome().unwrap().clone();
+            assert_eq!(client.state, ClientState::Disconnected);
+            assert_eq!(outcome.cause, ClientExitCause::ServerDisconnect);
+            assert_eq!(
+                outcome.failure.as_ref().unwrap().cause,
+                super::super::ConnectionFailureCause::Character(raw.into())
+            );
+            assert_eq!(
+                client.application_snapshot().lifecycle,
+                ClientLifecycleState::Exiting {
+                    outcome: outcome.clone()
+                }
+            );
+            client
+                .handle_message(&encode_message(&GameMessage::CharacterList(Box::new(
+                    CharacterListData {
+                        characters: vec![],
+                        max_slots: 11,
+                        account_name: "test".into(),
+                        use_turbine_chat: false,
+                        has_tod_expansion: true,
+                    },
+                ))))
+                .await
+                .unwrap();
+            assert_eq!(client.exit_outcome(), Some(&outcome));
+            assert_eq!(client.state, ClientState::Disconnected);
         }
-        assert!(saw_exit);
+    }
+
+    #[tokio::test]
+    async fn entry_refusal_restores_roster_and_blocks_late_world_traffic() {
+        let mut client = build_test_client();
+        client.state = ClientState::CharacterSelection;
+        let guid = Guid(0x5000_1234);
+        client.character_selection.characters.push(CharacterEntry {
+            guid,
+            name: "Amy".into(),
+            delete_time: 0,
+        });
+        client.character_selection.character_id = Some(guid);
+        client.begin_world_entry_transition().await.unwrap();
+        client
+            .handle_message(&encode_message(&GameMessage::CharacterError(Box::new(
+                CharacterErrorData {
+                    error_id: CharacterError::EnterGameCharacterInWorld as u32,
+                },
+            ))))
+            .await
+            .unwrap();
+        assert_eq!(client.state, ClientState::CharacterSelection);
+        assert!(client.activation.is_none());
+        assert!(client.event_ordering.is_none());
+        assert!(client.exit_outcome().is_none());
+        assert!(client.character_selection.character_id.is_none());
+        let before = client.application_snapshot();
+        let sent = client.session.bytes_out;
+        client
+            .handle_message(&encode_message(
+                &GameMessage::CharacterEnterWorldServerReady,
+            ))
+            .await
+            .unwrap();
+        client
+            .handle_message(&encode_message(&GameMessage::PlayerCreate(Box::new(
+                PlayerCreateData { guid },
+            ))))
+            .await
+            .unwrap();
+        assert_eq!(client.session.bytes_out, sent);
+        assert_eq!(client.world.player.guid, Guid::NULL);
+        assert_eq!(client.application_snapshot().lifecycle, before.lifecycle);
+        client
+            .handle_command(ClientCommand::SelectCharacter(guid))
+            .await
+            .unwrap();
+        assert!(client.character_selection.entry_rejection.is_none());
+        assert_eq!(client.state, ClientState::EnteringWorld);
+    }
+
+    #[tokio::test]
+    async fn ban_is_terminal_even_in_the_retired_character_logout_gap() {
+        let mut client = build_test_client();
+        client.state = ClientState::LoggingOut;
+        let data = AccountBannedData {
+            duration_seconds: 3600,
+            reason: Some(" - test reason".into()),
+        };
+        client
+            .handle_message(&encode_message(&GameMessage::AccountBanned(Box::new(
+                data.clone(),
+            ))))
+            .await
+            .unwrap();
+        assert_eq!(
+            client
+                .exit_outcome()
+                .unwrap()
+                .failure
+                .as_ref()
+                .unwrap()
+                .cause,
+            super::super::ConnectionFailureCause::AccountBanned(data)
+        );
+        let diagnostic = client.exit_outcome().unwrap().diagnostic();
+        assert!(diagnostic.contains("3600 seconds"));
+        assert!(diagnostic.contains("test reason"));
+    }
+    #[tokio::test]
+    async fn boot_preserves_optional_reason_and_in_world_eviction_is_terminal() {
+        for reason in [
+            None,
+            Some(String::new()),
+            Some("custom server explanation".into()),
+        ] {
+            let mut client = build_test_client();
+            client.authenticating = true;
+            client
+                .handle_message(&encode_message(&GameMessage::AccountBoot(Box::new(
+                    BootAccountData {
+                        reason: reason.clone(),
+                    },
+                ))))
+                .await
+                .unwrap();
+            assert_eq!(
+                client
+                    .exit_outcome()
+                    .unwrap()
+                    .failure
+                    .as_ref()
+                    .unwrap()
+                    .cause,
+                super::super::ConnectionFailureCause::AccountBoot(reason)
+            );
+        }
+        for code in [CharacterError::Logon, CharacterError::ServerCrash1] {
+            let mut client = build_test_client();
+            client.state = ClientState::InWorld;
+            client
+                .handle_message(&encode_message(&GameMessage::CharacterError(Box::new(
+                    CharacterErrorData {
+                        error_id: code as u32,
+                    },
+                ))))
+                .await
+                .unwrap();
+            assert_eq!(client.state, ClientState::Disconnected);
+            assert!(client.exit_outcome().unwrap().failure.is_some());
+        }
+        let mut client = build_test_client();
+        client.authenticating = true;
+        client
+            .handle_message(&encode_message(&GameMessage::CharacterError(Box::new(
+                CharacterErrorData {
+                    error_id: CharacterError::None as u32,
+                },
+            ))))
+            .await
+            .unwrap();
+        assert_eq!(client.state, ClientState::Connected);
+        assert!(client.exit_outcome().is_none());
     }
 }

@@ -548,6 +548,7 @@ describe("shared frontend item interaction flow", () => {
 		expect(f.give).toHaveBeenCalledTimes(2);
 		f.emit("client-lifecycle-changed", {
 			kind: "character-selection",
+			rejection: null,
 			maxSlots: 11,
 			characters: [],
 		});

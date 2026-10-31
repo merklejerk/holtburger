@@ -119,7 +119,12 @@ describe("book reader", () => {
 		expect(reader.read().kind).toBe("loading");
 		emit({
 			type: "lifecycle",
-			lifecycle: { kind: "character-selection", maxSlots: 11, characters: [] },
+			lifecycle: {
+				kind: "character-selection",
+				rejection: null,
+				maxSlots: 11,
+				characters: [],
+			},
 		});
 		emit({ type: "book-updated", book: opened.book });
 		emit({ type: "book-opened", receipt: opened });

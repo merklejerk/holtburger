@@ -37,6 +37,8 @@ pub enum GameMessage {
     DddEndDdd,
     CharacterError(Box<CharacterErrorData>),
     AccountBoot(Box<BootAccountData>),
+    /// Server ban notice with duration bits and an optional explanation.
+    AccountBanned(Box<AccountBannedData>),
     CharacterLogOff, // 0xF653
     GameAction(Box<GameActionMessage>),
     GameEvent(Box<GameEventMessage>),

@@ -48,6 +48,8 @@ impl DeleteCharacterConfirmation {
 
 #[derive(Debug, Default)]
 pub struct SelectionState {
+    /// Retained entry refusal, visible until the next submission.
+    pub entry_rejection: Option<String>,
     /// List of available characters shown in the dashboard.
     pub characters: Vec<CharacterDashboardEntry>,
     /// Index of character currently selected in the dashboard list.
@@ -342,6 +344,7 @@ mod tests {
 
     fn test_state() -> SelectionState {
         SelectionState {
+            entry_rejection: None,
             characters: vec![CharacterDashboardEntry {
                 slot: 7,
                 character: CharacterEntry {

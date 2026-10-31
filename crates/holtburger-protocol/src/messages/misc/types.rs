@@ -58,6 +58,39 @@ impl ProtocolPack for BootAccountData {
     }
 }
 
+/// Account ban payload written by ACE's GameMessageAccountBanned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountBannedData {
+    /// Raw duration bits; retail treats nonpositive signed values as no supplied expiry.
+    pub duration_seconds: u32,
+    /// Optional server explanation, using the same string encoding as account boots.
+    pub reason: Option<String>,
+}
+
+impl ProtocolUnpack for AccountBannedData {
+    fn unpack(data: &[u8], offset: &mut usize) -> Option<Self> {
+        let duration_seconds = u32::unpack(data, offset)?;
+        let reason = if *offset == data.len() {
+            None
+        } else {
+            Some(read_string16(data, offset)?)
+        };
+        Some(Self {
+            duration_seconds,
+            reason,
+        })
+    }
+}
+
+impl ProtocolPack for AccountBannedData {
+    fn pack(&self, buf: &mut Vec<u8>) {
+        self.duration_seconds.pack(buf);
+        if let Some(reason) = &self.reason {
+            write_string16(buf, reason);
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MostlyConsecutiveIntSet {
     pub iterations: i32,

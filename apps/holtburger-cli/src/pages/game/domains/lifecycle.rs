@@ -23,11 +23,7 @@ pub(super) fn reduce_view_event(state: &mut GameState, event: &ClientViewEvent) 
                 clear_object_inspection(state);
             }
         }
-        ClientViewEvent::BootAccount(..) => {}
         ClientViewEvent::PingResponse | ClientViewEvent::ConnectionUpdated(_) => {}
-        ClientViewEvent::Disconnected => {
-            clear_object_inspection(state);
-        }
         _ => {}
     }
 

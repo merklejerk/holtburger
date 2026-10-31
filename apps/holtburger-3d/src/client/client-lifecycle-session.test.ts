@@ -99,6 +99,31 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("retains terminal results across late snapshots and lifecycle updates", async () => {
+		const transport = new FakeClientTransport();
+		transport.setCurrentState(currentState(9));
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const exit = {
+			cause: "server-disconnect",
+			diagnostic: "Session ended during maintenance.",
+		};
+		transport.emit("client-exit-requested", exit);
+		transport.emit("client-current-state", currentState(9));
+		transport.emit("client-lifecycle-changed", {
+			kind: "character-selection",
+			rejection: null,
+			maxSlots: 11,
+			characters: [],
+		});
+		expect(session.state().exit).toEqual(exit);
+		expect(session.state().lifecycle).toEqual({
+			kind: "exiting",
+			cause: exit.cause,
+		});
+		session.stop();
+	});
+
 	it("starts authority only after listeners are installed and requests snapshots without relaunching", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -1257,6 +1282,7 @@ describe("ClientLifecycleSession", () => {
 		const startup = currentState(9);
 		startup.lifecycle = {
 			kind: "character-selection",
+			rejection: null,
 			maxSlots: 11,
 			characters: [],
 		};
@@ -1364,16 +1390,10 @@ describe("ClientLifecycleSession", () => {
 				icon: { base: null, overlay: null, underlay: null, uiEffects: 0 },
 			});
 			// Leaving the character retains the cache until the next entry replaces it.
-			transport.emit("client-exit-requested", {
-				cause: "server-disconnect",
-				diagnostic: "Session ended",
-			});
-			transport.emit("client-lifecycle-changed", {
-				kind: "exiting",
-				cause: "server-disconnect",
-			});
+			transport.emit("client-lifecycle-changed", { kind: "logging-out" });
 			transport.emit("client-lifecycle-changed", {
 				kind: "character-selection",
+				rejection: null,
 				maxSlots: 11,
 				characters: [],
 			});
@@ -1419,7 +1439,12 @@ describe("ClientLifecycleSession", () => {
 		expect(session.state().playerGuid).toBeNull();
 		transport.emit("client-current-state", {
 			...retired,
-			lifecycle: { kind: "character-selection", maxSlots: 1, characters: [] },
+			lifecycle: {
+				kind: "character-selection",
+				rejection: null,
+				maxSlots: 1,
+				characters: [],
+			},
 		});
 		transport.emit("client-current-state", {
 			...currentState(player),
@@ -1732,6 +1757,7 @@ describe("ClientLifecycleSession", () => {
 		await session.start();
 		transport.emit("client-lifecycle-changed", {
 			kind: "character-selection",
+			rejection: null,
 			maxSlots: 10,
 			characters: [
 				{ guid: 7, name: "Mira", slot: 3, deleteTime: 0 },
@@ -1776,6 +1802,7 @@ describe("ClientLifecycleSession", () => {
 
 		const lifecycle: ClientLifecycle = {
 			kind: "character-selection",
+			rejection: null,
 			maxSlots: 11,
 			characters: [{ guid: 7, name: "Mira", slot: 3, deleteTime: 0 }],
 		};
@@ -1810,7 +1837,10 @@ describe("ClientLifecycleSession", () => {
 		});
 
 		expect(session.state()).toMatchObject({
-			lifecycle: { kind: "exiting", cause: "server-disconnect" },
+			lifecycle: {
+				kind: "exiting",
+				cause: "server-disconnect",
+			},
 			worldGeneration: 4,
 			playerGuid: 9,
 			playerName: "Mira",
@@ -2738,3 +2768,33 @@ it("delivers host-projected vendor contracts through the real session into the d
 		session.stop();
 	}
 });
+
+it.each(["incremental", "snapshot"])(
+	"releases same-character entry suppression on %s refusal",
+	async (delivery) => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		await session.enterWorld(7);
+		const lifecycle: ClientLifecycle = {
+			kind: "character-selection",
+			maxSlots: 11,
+			characters: [{ guid: 7, name: "Mira", slot: 0, deleteTime: 0 }],
+			rejection: "The character is still in the world.",
+		};
+		if (delivery === "incremental")
+			transport.emit("client-lifecycle-changed", lifecycle);
+		else {
+			transport.setCurrentState({ ...currentState(7), lifecycle });
+			await session.requestCurrentState();
+		}
+		expect(session.state().lifecycle).toEqual(lifecycle);
+		await session.enterWorld(7);
+		expect(
+			transport.calls.filter(
+				(call) => call === "invoke:select_client_character",
+			),
+		).toHaveLength(2);
+		await session.stop();
+	},
+);

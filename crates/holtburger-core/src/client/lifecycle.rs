@@ -5,9 +5,49 @@ use anyhow::Result;
 use holtburger_protocol::messages::GameMessage;
 
 impl ClientRuntime {
-    /// The host consumes this after `run` ends, including successful timeout/boot handling.
-    pub fn exit_diagnostic(&self) -> Option<&str> {
-        self.exit_diagnostic.as_deref()
+    /// Retained terminal result consumed after `run` ends, including normal rejection handling.
+    pub fn exit_outcome(&self) -> Option<&super::ClientExitOutcome> {
+        self.exit_outcome.as_ref()
+    }
+
+    /// Record a specific failure before generic teardown can erase its explanation.
+    pub(super) fn fail_connection(
+        &mut self,
+        cause: super::ConnectionFailureCause,
+        exit: super::types::ClientExitCause,
+    ) {
+        if self
+            .exit_outcome
+            .as_ref()
+            .is_none_or(|outcome| outcome.failure.is_none())
+        {
+            self.exit_outcome = Some(super::ClientExitOutcome {
+                cause: exit,
+                failure: Some(super::ConnectionFailure {
+                    state: Some(self.state.clone()),
+                    cause,
+                }),
+            });
+        }
+        self.set_exit_cause(exit);
+        self.authenticating = false;
+        self.state = ClientState::Disconnected;
+        self.send_status_event();
+    }
+
+    /// Roll back only a refused initial entry; ACE has not established a character yet.
+    pub(super) fn reject_world_entry(&mut self, error: super::CharacterErrorCode) {
+        self.character_selection.entry_rejection = Some(super::ConnectionFailure {
+            state: Some(self.state.clone()),
+            cause: super::ConnectionFailureCause::Character(error),
+        });
+        self.character_selection.character_id = None;
+        self.character_selection.enter_world_sent = false;
+        self.event_ordering = None;
+        self.activation = None;
+        self.state = ClientState::CharacterSelection;
+        self.send_status_event();
+        self.emit_current_application_snapshot();
     }
 
     pub(super) async fn logout(&mut self) -> Result<()> {
@@ -74,6 +114,7 @@ impl ClientRuntime {
         self.entity_cue_inbox.clear();
         self.trade_additions.clear();
         self.projectile_appraisal = None;
+        self.character_selection.entry_rejection = None;
         self.character_selection.character_id = None;
         self.character_selection.enter_world_sent = false;
         self.described_character = None;
@@ -104,6 +145,29 @@ mod tests {
         let mut bytes = Vec::new();
         message.pack(&mut bytes);
         client.handle_message(&bytes).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn specific_failure_supersedes_generic_exit_and_survives_teardown() {
+        use crate::{ClientExitCause, ConnectionFailureCause};
+        let mut client = build_test_client(ClientState::Connected);
+        client.set_exit_cause(ClientExitCause::ExplicitDisconnect);
+        client.set_exit_cause(ClientExitCause::RuntimeFailure);
+        assert_eq!(
+            client.exit_outcome().unwrap().cause,
+            ClientExitCause::RuntimeFailure
+        );
+        client.fail_connection(
+            ConnectionFailureCause::AccountBoot(Some(" during maintenance".into())),
+            ClientExitCause::ServerDisconnect,
+        );
+        let specific = client.exit_outcome().cloned();
+        client.set_exit_cause(ClientExitCause::ExplicitDisconnect);
+        client.fail_connection(
+            ConnectionFailureCause::Inactivity { seconds: 15 },
+            ClientExitCause::ServerDisconnect,
+        );
+        assert_eq!(client.exit_outcome(), specific.as_ref());
     }
 
     #[tokio::test]
@@ -187,7 +251,7 @@ mod tests {
         assert_eq!(client.session.server_addr, endpoint);
         assert_eq!(client.session.client_id, client_id);
         assert_eq!(client.session.bytes_out, sent);
-        assert!(client.exit_cause.is_none());
+        assert!(client.exit_outcome.is_none());
 
         deliver(
             &mut client,
@@ -247,6 +311,6 @@ mod tests {
         deliver(&mut client, GameMessage::CharacterLogOff).await;
         assert_eq!(client.state, ClientState::LoggingOut);
         assert_eq!(client.world.player.guid, Guid::NULL);
-        assert!(client.exit_cause.is_none());
+        assert!(client.exit_outcome.is_none());
     }
 }

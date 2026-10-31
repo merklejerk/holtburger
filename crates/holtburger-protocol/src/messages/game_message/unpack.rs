@@ -84,6 +84,9 @@ impl ProtocolUnpack for GameMessage {
             GameOpcode::CharacterError => Some(GameMessage::CharacterError(Box::new(
                 CharacterErrorData::unpack(data, offset)?,
             ))),
+            GameOpcode::AccountBanned => Some(GameMessage::AccountBanned(Box::new(
+                AccountBannedData::unpack(data, offset)?,
+            ))),
             GameOpcode::AccountBoot => Some(GameMessage::AccountBoot(Box::new(
                 BootAccountData::unpack(data, offset)?,
             ))),

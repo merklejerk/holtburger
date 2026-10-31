@@ -18,13 +18,21 @@
 		readonly showPortalLogo: boolean;
 		/** Ready world scenery remains visible beneath the foreground composition. */
 		readonly backdrop: boolean;
+		/** Page-owned status beside corner branding; absent pages retain the existing header layout. */
+		readonly headerAside?: Snippet;
 		/** The active page owns its controls, status, and recovery actions. */
 		readonly children: Snippet;
 		/** Page-owned peripheral actions or metadata, kept outside the foreground content. */
 		readonly footer: Snippet;
 	}
-	const { branding, showPortalLogo, backdrop, children, footer }: Props =
-		$props();
+	const {
+		branding,
+		showPortalLogo,
+		backdrop,
+		headerAside,
+		children,
+		footer,
+	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 
 	/** Measure the loaded font so every letter starts at the wordmark's center. */
@@ -73,21 +81,26 @@
 	aria-label="Holtburger client"
 	use:keyboard.nativePage
 >
-	<header class="pregame-brand">
-		{#if showPortalLogo}
-			<span class="pregame-logo" aria-hidden="true"><PortalLogo /></span>
+	<div class="pregame-header" class:with-aside={headerAside !== undefined}>
+		<header class="pregame-brand">
+			{#if showPortalLogo}
+				<span class="pregame-logo" aria-hidden="true"><PortalLogo /></span>
+			{/if}
+			{#if branding === "hero"}
+				<span role="img" aria-label="Holtburger" use:revealWordmark>
+					{#each [..."Holtburger"] as letter, index (index)}<span
+							class="hero-letter"
+							aria-hidden="true">{letter}</span
+						>{/each}
+				</span>
+			{:else}
+				<span>Holtburger</span>
+			{/if}
+		</header>
+		{#if headerAside}
+			<div class="pregame-header-aside">{@render headerAside()}</div>
 		{/if}
-		{#if branding === "hero"}
-			<span role="img" aria-label="Holtburger" use:revealWordmark>
-				{#each [..."Holtburger"] as letter, index (index)}<span
-						class="hero-letter"
-						aria-hidden="true">{letter}</span
-					>{/each}
-			</span>
-		{:else}
-			<span>Holtburger</span>
-		{/if}
-	</header>
+	</div>
 	<div class="pregame-content">{@render children()}</div>
 	<footer class="pregame-footer">
 		{@render footer()}
@@ -128,6 +141,24 @@
 		}
 		.hero-brand .pregame-content {
 			align-self: start;
+		}
+		.pregame-header {
+			/* Without page status, branding remains a direct participant in the screen grid. */
+			display: contents;
+		}
+		.pregame-header.with-aside {
+			display: flex;
+			align-items: start;
+			justify-content: space-between;
+			gap: 24px;
+		}
+		.with-aside .pregame-brand {
+			flex: none;
+		}
+		.pregame-header-aside {
+			min-width: 0;
+			max-width: 50%;
+			flex: 0 1 50ch;
 		}
 		.pregame-brand {
 			position: relative;
@@ -175,6 +206,16 @@
 			.pregame-content {
 				grid-template-rows: auto;
 				overflow: hidden auto;
+			}
+		}
+		@media (max-width: 720px) {
+			.pregame-header.with-aside {
+				flex-wrap: wrap;
+				gap: 12px;
+			}
+			.pregame-header-aside {
+				flex-basis: 100%;
+				max-width: 100%;
 			}
 		}
 	}

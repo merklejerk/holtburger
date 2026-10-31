@@ -392,7 +392,10 @@ describe("ClientCameraSession", () => {
 			transport.emit(
 				event,
 				event === "client-lifecycle-changed"
-					? { kind: "exiting", cause: "server-disconnect" }
+					? {
+							kind: "exiting",
+							cause: "server-disconnect",
+						}
 					: { cause: "server-disconnect", diagnostic: "Server maintenance" },
 			);
 			await camera.stop();

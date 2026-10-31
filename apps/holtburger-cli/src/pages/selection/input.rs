@@ -262,6 +262,7 @@ mod tests {
 
     fn test_state() -> SelectionState {
         SelectionState {
+            entry_rejection: None,
             characters: vec![CharacterDashboardEntry {
                 slot: 4,
                 character: CharacterEntry {

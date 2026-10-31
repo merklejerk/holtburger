@@ -345,6 +345,7 @@ export async function probeClientSpells(
 	);
 	emit("client-lifecycle-changed", {
 		kind: "character-selection",
+		rejection: null,
 		maxSlots: 11,
 		characters: [],
 	});

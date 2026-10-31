@@ -8,8 +8,6 @@ use std::sync::Arc;
 /// Parsed immutable game reference data assembled by content-owning callers.
 #[derive(Debug, Clone)]
 pub struct WorldBootstrap {
-    /// Client-DAT housing-storage identity used to distinguish permission-denial sounds.
-    pub housing_storage_wcid: u32,
     pub skill_table: Arc<SkillTable>,
     /// Authored formulas for the three maximum vitals.
     pub secondary_attribute_table: Arc<SecondaryAttributeTable>,
@@ -33,8 +31,6 @@ impl WorldBootstrap {
     #[cfg(any(test, feature = "test-support"))]
     pub fn synthetic() -> Self {
         Self {
-            // Fixture-owned identity; tests obtain it from the bootstrap rather than retail data.
-            housing_storage_wcid: u32::MAX,
             skill_table: Arc::new(SkillTable::default()),
             secondary_attribute_table: Arc::new(SecondaryAttributeTable::synthetic()),
             spell_table: Arc::new(SpellTable {

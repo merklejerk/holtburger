@@ -60,6 +60,12 @@ const RETAIL_MISSING_OBJECT_LIFETIME: Duration = Duration::from_secs(25);
 /// ACE Sound.OpenFailDueToLock, also broadcast for housing storage permission denial.
 const OPEN_FAIL_DUE_TO_LOCK_SOUND: u32 = 0x94;
 
+/// Standard retail housing storage: ACE/Source/ACE.Entity/Enum/WeenieClassName.cs,
+/// W_STORAGE_CLASS. Retail IsStorage compares the template ID. Keep this narrow sound heuristic
+/// independent of bootstrap assets; remapped or custom storage templates can still produce a
+/// false locked hint.
+const RETAIL_HOUSING_STORAGE_WCID: u32 = 9687;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum PendingEntityCue {
     /// Physics-script key and intensity interpreted by simulation and presentation.
@@ -129,9 +135,8 @@ impl ClientRuntime {
         let Some(entity) = self.world.entities.get(guid) else {
             return;
         };
-        // Retail IsStorage resolves this WCID from client DATs. ACE Storage.cs sends the same
-        // sound for denied access, alongside explicit server text.
-        if entity.wcid == Some(self.world.housing_storage_wcid) {
+        // ACE Storage.cs sends the same sound for denied access, alongside explicit server text.
+        if entity.wcid == Some(RETAIL_HOUSING_STORAGE_WCID) {
             return;
         }
         // Broadcasts identify the object, not the actor/request. Another player's concurrent
@@ -544,7 +549,7 @@ mod tests {
         );
 
         let entity = client.world.entities.get_mut(guid).unwrap();
-        entity.wcid = Some(client.world.housing_storage_wcid);
+        entity.wcid = Some(RETAIL_HOUSING_STORAGE_WCID);
         client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
         assert!(
             events.try_recv().is_err(),

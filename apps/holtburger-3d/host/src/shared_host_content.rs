@@ -138,10 +138,6 @@ impl SharedHostContent {
             .soul_emotes()
             .context("failed to load soul emote catalog for client bootstrap")?;
         let bootstrap = WorldBootstrap {
-            housing_storage_wcid: self
-                .repository
-                .read_housing_storage_wcid()
-                .context("failed to resolve housing-storage identity for client bootstrap")?,
             skill_table: Arc::new(skill_table),
             secondary_attribute_table: Arc::new(secondary_attribute_table),
             spell_table: Arc::new(spell_table),

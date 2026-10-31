@@ -25,6 +25,7 @@ struct ServerEndpoint {
 
 #[derive(Clone)]
 pub struct ClientRuntimeBuilder {
+    barber_source: Option<Arc<dyn super::barber::ClientBarberSource>>,
     account_name: String,
     server_endpoint: Option<ServerEndpoint>,
     world_bootstrap: Option<Arc<WorldBootstrap>>,
@@ -44,6 +45,7 @@ pub struct ClientRuntimeBuilder {
 impl ClientRuntimeBuilder {
     pub fn new(account_name: impl Into<String>) -> Self {
         Self {
+            barber_source: None,
             account_name: account_name.into(),
             server_endpoint: None,
             world_bootstrap: None,
@@ -63,6 +65,12 @@ impl ClientRuntimeBuilder {
         policy: super::inventory_storage::InventoryPlacementPolicy,
     ) -> Self {
         self.inventory_placement = policy;
+        self
+    }
+
+    /// Inject barber-only content preparation without eagerly loading its assets at startup.
+    pub fn barber_source(mut self, source: Arc<dyn super::barber::ClientBarberSource>) -> Self {
+        self.barber_source = Some(source);
         self
     }
 
@@ -264,6 +272,7 @@ impl ClientRuntimeBuilder {
                 sources.bodies.movement_policy()
             });
         Ok(ClientRuntime {
+            barber: super::barber::BarberRuntime::new(self.barber_source),
             inventory_placement: self.inventory_placement,
             #[cfg(feature = "runtime-fixture")]
             runtime_fixture: None,
@@ -339,6 +348,7 @@ pub(crate) fn build_test_client(initial_state: ClientState) -> ClientRuntime {
     let (client_view_event_tx, _) = broadcast::channel(4096);
 
     let mut client = ClientRuntime {
+        barber: super::barber::BarberRuntime::new(None),
         inventory_placement: Default::default(),
         #[cfg(feature = "runtime-fixture")]
         runtime_fixture: None,

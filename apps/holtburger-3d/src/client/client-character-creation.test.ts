@@ -1,3 +1,4 @@
+import { appearanceShadeIndex } from "./client-body-appearance";
 import { describe, expect, it, vi } from "vitest";
 import reconciliationFixture from "../../../../crates/holtburger-core/tests/fixtures/character_creation_reconciliation.json";
 import { characterCreationDraftSchema } from "./client-character-creation-contract";
@@ -10,7 +11,6 @@ import {
 	initialCreationAppearance,
 	randomizeCreationClothing,
 	randomizeCreationAppearance,
-	creationShadeIndex,
 	NO_CREATION_HEADGEAR,
 	creationAppearanceRequest,
 	creationPreviewSource,
@@ -340,10 +340,10 @@ describe("creator draft policy", () => {
 	});
 	it("maps every palette swatch midpoint and both hue endpoints to the authored bin", () => {
 		const count = catalog.heritages[0].genders[0].eyeColors.length;
-		expect(creationShadeIndex(0, count)).toBe(0);
-		expect(creationShadeIndex(1, count)).toBe(count - 1);
+		expect(appearanceShadeIndex(0, count)).toBe(0);
+		expect(appearanceShadeIndex(1, count)).toBe(count - 1);
 		for (let index = 0; index < count; index++)
-			expect(creationShadeIndex((index + 0.5) / count, count)).toBe(index);
+			expect(appearanceShadeIndex((index + 0.5) / count, count)).toBe(index);
 	});
 
 	it("hides headgear only in the face request while retaining the submitted outfit and idle pose", () => {

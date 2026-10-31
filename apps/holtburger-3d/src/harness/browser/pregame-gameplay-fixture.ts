@@ -446,6 +446,7 @@ function currentState(player: DynamicEntityView): ClientCurrentState {
 	const playerGuid = player.identity.guid;
 	return {
 		characterSheet: null,
+		barber: { interaction: null, result: null, particles: null },
 		trade: { trade: null, pending_items: [] },
 		lifecycle: { kind: "in-world" },
 		characterManagement: { kind: "idle" },

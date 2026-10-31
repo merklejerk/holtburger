@@ -584,6 +584,8 @@ pub struct ClientPlayerEnchantmentsSnapshot {
 /// lifecycle, time, and generation rather than putting the broad body representation on their wire.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ClientApplicationSnapshot {
+    /// Active barber opening and local Apply consequences, recovered atomically after event loss.
+    pub barber: super::barber::BarberSnapshot,
     /// Retained character-management progress/result, recoverable after event loss.
     pub character_management: CharacterManagementState,
     /// Latest complete capture for this character lifetime; partial updates retain it.
@@ -1028,6 +1030,10 @@ pub struct ClientDynamicScriptCue {
 
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
+    /// Complete cold barber interaction and committed local particle state.
+    BarberUpdated(super::barber::BarberSnapshot),
+    /// Resolved candidate for the exact frontend draft revision.
+    BarberPreview(super::barber::BarberPreviewResult),
     /// Requested historical locations, never a claim about remaining corpses.
     DeathLocations(super::corpse::DeathLocationResult),
     /// Replacement housing facts; this event never requests opening a window.
@@ -1370,6 +1376,8 @@ pub enum ClientViewEvent {
 
 #[derive(Debug, Clone)]
 pub enum ClientCommand {
+    /// Character-bound barber candidate, submission, or local cancellation.
+    Barber(super::barber::BarberRequest),
     /// Apply exact equipment bindings after one confirmed-peace prerequisite when needed.
     ApplyEquipmentSet(Vec<super::equipment_set::EquipmentBinding>),
     /// Explicit refresh of the active character/account effective home.

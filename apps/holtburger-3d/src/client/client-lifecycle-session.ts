@@ -96,6 +96,14 @@ import {
 	type TradeRequest,
 } from "./client-trade-contract";
 import {
+	barberSnapshotSchema,
+	barberPreviewSchema,
+	barberRequestSchema,
+	type BarberSnapshot,
+	type BarberPreview,
+	type BarberRequest,
+} from "./client-barber-contract";
+import {
 	vendorRequestSchema,
 	vendorSnapshotSchema,
 	vendorApproachedSchema,
@@ -312,6 +320,7 @@ type ClientCommandName = Extract<
 	| "preview_client_vendor"
 	| "submit_client_vendor"
 	| "submit_client_trade"
+	| "request_client_barber"
 	| "submit_client_inventory"
 	| "close_client_container"
 	| "equip_client_item"
@@ -355,6 +364,8 @@ type ClientEventName = Extract<
 	| "client-housing-management-finished"
 	| "client-housing-crystal-received"
 	| "client-trade-snapshot"
+	| "client-barber-updated"
+	| "client-barber-preview"
 	| "client-vendor-preview"
 	| "client-vendor-result"
 	| "client-vendor-phase"
@@ -511,6 +522,8 @@ export type ClientLifecycleSessionEvent =
 			readonly vendor: NonNullable<VendorSnapshot>;
 	  }
 	| { readonly type: "trade-snapshot"; readonly trade: TradeSnapshot }
+	| { readonly type: "barber-updated"; readonly barber: BarberSnapshot }
+	| { readonly type: "barber-preview"; readonly result: BarberPreview }
 	| { readonly type: "vendor-preview"; readonly result: VendorPreview }
 	| { readonly type: "vendor-result"; readonly result: VendorResult }
 	| { readonly type: "vendor-phase"; readonly phase: VendorPhase }
@@ -712,6 +725,12 @@ export class ClientLifecycleSession {
 	#vendor: VendorSnapshot = null;
 	#housing: HousingSnapshot = emptyHousing();
 	#trade: TradeSnapshot = { trade: null, pending_items: [] };
+	/** Cold barber lifetime; candidate visual resources stay with the presentation owner. */
+	#barber: BarberSnapshot = {
+		interaction: null,
+		result: null,
+		particles: null,
+	};
 	#entryRequestGuid: number | null = null;
 
 	constructor(
@@ -807,6 +826,7 @@ export class ClientLifecycleSession {
 		this.#vendor = null;
 		this.#housing = emptyHousing();
 		this.#trade = { trade: null, pending_items: [] };
+		this.#barber = { interaction: null, result: null, particles: null };
 		const attachment: SessionAttachment = {
 			events: new AbortController(),
 			startup: new AbortController(),
@@ -1055,6 +1075,17 @@ export class ClientLifecycleSession {
 	async submitTrade(request: TradeRequest): Promise<void> {
 		await this.#transport.invoke("submit_client_trade", {
 			request: tradeRequestSchema.parse(request),
+		});
+	}
+
+	/** Recoverable interaction level, independent of HUD mount lifetime. */
+	barberSnapshot(): BarberSnapshot {
+		return this.#barber;
+	}
+
+	async requestBarber(request: BarberRequest): Promise<void> {
+		await this.#transport.invoke("request_client_barber", {
+			request: barberRequestSchema.parse(request),
 		});
 	}
 
@@ -1793,6 +1824,16 @@ export class ClientLifecycleSession {
 					this.#trade = tradeSnapshotSchema.parse(payload);
 					this.#emit({ type: "trade-snapshot", trade: this.#trade });
 				}),
+				await listen("client-barber-updated", (payload) => {
+					this.#barber = barberSnapshotSchema.parse(payload);
+					this.#emit({ type: "barber-updated", barber: this.#barber });
+				}),
+				await listen("client-barber-preview", (payload) => {
+					this.#emit({
+						type: "barber-preview",
+						result: barberPreviewSchema.parse(payload),
+					});
+				}),
 				await listen("client-housing-management-finished", (payload) => {
 					this.#emit({
 						type: "housing-management-finished",
@@ -2030,6 +2071,7 @@ export class ClientLifecycleSession {
 		this.characterSheet.reset(state.characterSheet, state.lifecycle.kind);
 		this.#housing = state.housing;
 		this.#trade = state.trade;
+		this.#barber = state.barber;
 		const semantic = this.entities.prepareSnapshot(
 			state.entities,
 			state.localPlayerGuid,

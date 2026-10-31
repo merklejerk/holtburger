@@ -33,6 +33,10 @@ import type {
 } from "../../client/client-housing-contract";
 import type { TradeSnapshot } from "../../client/client-trade-contract";
 import type {
+	BarberSnapshot,
+	BarberPreview,
+} from "../../client/client-barber-contract";
+import type {
 	VendorSnapshot,
 	VendorPreview,
 	VendorResult,
@@ -193,6 +197,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"preview_client_vendor",
 	"submit_client_vendor",
 	"submit_client_trade",
+	"request_client_barber",
 	"submit_client_inventory",
 	"close_client_container",
 	"equip_client_item",
@@ -270,6 +275,8 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-housing-management-finished",
 	"client-housing-crystal-received",
 	"client-trade-snapshot",
+	"client-barber-updated",
+	"client-barber-preview",
 	"client-vendor-preview",
 	"client-vendor-result",
 	"client-vendor-phase",
@@ -385,6 +392,8 @@ export interface HostEventPayloadMap {
 	"client-housing-management-finished": HousingManagementResult;
 	"client-housing-crystal-received": HousingCrystal;
 	"client-trade-snapshot": TradeSnapshot;
+	"client-barber-updated": BarberSnapshot;
+	"client-barber-preview": BarberPreview;
 	"client-vendor-preview": VendorPreview;
 	"client-vendor-result": VendorResult;
 	"client-vendor-phase": VendorPhase;

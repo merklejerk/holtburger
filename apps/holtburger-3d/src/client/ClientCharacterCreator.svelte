@@ -1,7 +1,6 @@
 <script lang="ts">
 	import MaleIcon from "../assets/icons/pregame-male.svg?component";
 	import FemaleIcon from "../assets/icons/pregame-female.svg?component";
-	import ChevronIcon from "../assets/icons/dropdown-chevron.svg?component";
 	import UpgradeTriangle from "../assets/icons/character-upgrade-triangle.svg?component";
 	import AppearanceIcon from "../assets/icons/pregame-appearance.svg?component";
 	import BuildIcon from "../assets/icons/pregame-skills-stats.svg?component";
@@ -19,7 +18,8 @@
 	import BackIcon from "../assets/icons/hud-back.svg?component";
 	import RotateIcon from "../assets/icons/layout-rotate.svg?component";
 	import { onMount } from "svelte";
-	import UiPaletteDropdown from "../app/UiPaletteDropdown.svelte";
+	import UiOrdinalRange from "../app/UiOrdinalRange.svelte";
+	import BodyAppearanceColors from "./BodyAppearanceColors.svelte";
 	import UiTabs from "../app/UiTabs.svelte";
 	import UiTabPanel from "../app/UiTabPanel.svelte";
 	import { characterManagementPending } from "./client-character-selection";
@@ -49,7 +49,6 @@
 		initialCreationAppearance,
 		randomizeCreationClothing,
 		randomizeCreationAppearance,
-		creationShadeIndex,
 		type CharacterCreationServices,
 		type CreationAppearance,
 		type CreationPreviewResolution,
@@ -653,132 +652,27 @@
 											><span class="pregame-icon" aria-hidden="true"
 												><Icon /></span
 											>{control.label}</span
-										><span class="creation-variant creation-appearance-variant">
-											<button
-												class="ui-button ui-icon-button pregame-action pregame-round-button"
-												type="button"
-												aria-label={`Previous ${control.label}`}
-												title={`Previous ${control.label}`}
-												disabled={editor.draft.appearance[control.field] === 0}
-												onclick={() =>
-													changeAppearance(
-														control.field,
-														readEditor().draft.appearance[control.field] - 1,
-													)}
-											>
-												<span
-													class="pregame-icon creation-step-decrease"
-													aria-hidden="true"><ChevronIcon /></span
-												>
-											</button>
-											<input
-												type="range"
-												aria-labelledby={`creation-appearance-${control.field}`}
-												min="0"
-												max={gender[control.count] - 1}
-												step="1"
-												value={editor.draft.appearance[control.field]}
-												aria-valuetext={`${editor.draft.appearance[control.field] + 1} of ${gender[control.count]}`}
-												oninput={(event) =>
-													changeAppearance(
-														control.field,
-														event.currentTarget.valueAsNumber,
-													)}
-											/>
-											<button
-												class="ui-button ui-icon-button pregame-action pregame-round-button"
-												type="button"
-												aria-label={`Next ${control.label}`}
-												title={`Next ${control.label}`}
-												disabled={editor.draft.appearance[control.field] ===
-													gender[control.count] - 1}
-												onclick={() =>
-													changeAppearance(
-														control.field,
-														readEditor().draft.appearance[control.field] + 1,
-													)}
-											>
-												<span
-													class="pregame-icon creation-step-increase"
-													aria-hidden="true"><ChevronIcon /></span
-												>
-											</button>
-											<span class="ui-muted" aria-hidden="true"
-												>{editor.draft.appearance[control.field] + 1} / {gender[
-													control.count
-												]}</span
-											>
-										</span>
+										><UiOrdinalRange
+											label={control.label}
+											labelledBy={`creation-appearance-${control.field}`}
+											value={editor.draft.appearance[control.field]}
+											count={gender[control.count]}
+											disabled={busy}
+											buttonClass="pregame-action pregame-round-button"
+											onchange={(value) =>
+												changeAppearance(control.field, value)}
+										/>
 									</div>{/if}
 							{/each}
-							<div class="creation-field">
-								<span>Skin color</span><UiPaletteDropdown
-									label="Skin color"
-									colors={gender.skinColors}
-									value={creationShadeIndex(
-										editor.draft.appearance.skinHue,
-										gender.skinColors.length,
-									)}
-									visible={page === "appearance"}
-									disabled={busy}
-									onchange={(index) =>
-										changeAppearance(
-											"skinHue",
-											(index + 0.5) / gender.skinColors.length,
-										)}
-								/>
-							</div>
-							{#if gender.hairColors.length > 0}
-								{@const shades =
-									gender.hairColors[editor.draft.appearance.hairColor]}
-								<div class="creation-field">
-									<span>Hair color</span><UiPaletteDropdown
-										label="Hair color"
-										colors={gender.hairColors.map(
-											(colors) =>
-												colors[
-													creationShadeIndex(
-														draft.appearance.hairHue,
-														colors.length,
-													)
-												],
-										)}
-										value={editor.draft.appearance.hairColor}
-										visible={page === "appearance"}
-										disabled={busy}
-										onchange={(index) => changeAppearance("hairColor", index)}
-									/>
-								</div>
-								<div class="creation-field">
-									<span>Hair shade</span><UiPaletteDropdown
-										label="Hair shade"
-										colors={shades}
-										value={creationShadeIndex(
-											editor.draft.appearance.hairHue,
-											shades.length,
-										)}
-										visible={page === "appearance"}
-										disabled={busy}
-										onchange={(index) =>
-											changeAppearance(
-												"hairHue",
-												(index + 0.5) / shades.length,
-											)}
-									/>
-								</div>
-							{/if}
-							{#if gender.eyeColors.length > 0}
-								<div class="creation-field">
-									<span>Eye color</span><UiPaletteDropdown
-										label="Eye color"
-										colors={gender.eyeColors}
-										value={editor.draft.appearance.eyeColor}
-										visible={page === "appearance"}
-										disabled={busy}
-										onchange={(index) => changeAppearance("eyeColor", index)}
-									/>
-								</div>
-							{/if}
+							<BodyAppearanceColors
+								value={editor.draft.appearance}
+								skinColors={gender.skinColors}
+								hairColors={gender.hairColors}
+								eyeColors={gender.eyeColors}
+								visible={page === "appearance"}
+								disabled={busy}
+								onchange={changeAppearance}
+							/>
 							<button
 								class="pregame-action ui-button creation-randomize"
 								type="button"
@@ -1290,21 +1184,6 @@
 		.creation-gender .pregame-icon {
 			width: calc(var(--creation-gender-size) * 0.75);
 			height: calc(var(--creation-gender-size) * 0.75);
-		}
-		/* The appearance modifier must override the generic two-column variant grid. */
-		.creation-variant.creation-appearance-variant {
-			grid-template-columns: auto minmax(0, 1fr) auto auto;
-			gap: 4px;
-		}
-		.creation-appearance-variant button {
-			width: 24px;
-			height: 24px;
-		}
-		.creation-step-decrease {
-			transform: rotate(90deg);
-		}
-		.creation-step-increase {
-			transform: rotate(-90deg);
 		}
 		.creation-name {
 			position: relative;

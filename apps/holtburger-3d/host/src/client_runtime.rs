@@ -5,6 +5,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail, ensure};
 use holtburger_common::CharacterOption;
 use holtburger_core::ClientCommand;
+use holtburger_core::client::inventory_storage::{InventoryInsertion, InventoryPlacementPolicy};
 use holtburger_core::client::types::{ChatChannelDestination, ChatTellTarget};
 use serde::Deserialize;
 
@@ -752,6 +753,10 @@ impl ClientHostRuntime {
             ),
         );
         let mut builder = holtburger_core::ClientRuntimeBuilder::new(startup.account.clone())
+            .inventory_placement(InventoryPlacementPolicy {
+                automatic: InventoryInsertion::Prepend,
+                split_after_source: true,
+            })
             .server(startup.host.clone(), startup.port)
             .world_bootstrap(bootstrap)
             .require_external_world_reveal()

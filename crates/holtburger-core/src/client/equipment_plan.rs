@@ -12,7 +12,7 @@ use holtburger_world::{
 };
 
 use super::{
-    inventory_storage::{StorageAllocationError, allocate_storage},
+    inventory_storage::{InventoryInsertion, StorageAllocationError, allocate_storage},
     types::TargetSlot,
 };
 
@@ -34,8 +34,10 @@ pub struct EquipmentUnequip {
 pub struct EquipmentPlan {
     /// Incoming item identity.
     pub item: Guid,
-    /// Original ownership/location, retained for execution validation.
+    /// Original ownership/location; execution preserves the relationship while indices may shift.
     pub source: StorageLocation,
+    /// Insertion preference used to revalidate the remaining conflict removals.
+    pub insertion: InventoryInsertion,
     /// Exact wire wield location, including complete apparel coverage.
     pub target: EquipMask,
     /// Ordered removals which must succeed before wielding.
@@ -77,11 +79,12 @@ pub enum EquipmentPlanError {
     Storage(#[from] StorageAllocationError),
 }
 
-/// Allocate one equipment replacement using public conflict rules and current storage.
+/// Allocate replacement capacity with the frontend's insertion preference.
 pub fn plan_equipment_change(
     world: &WorldState,
     item: Guid,
     slot: Option<TargetSlot>,
+    insertion: InventoryInsertion,
 ) -> Result<EquipmentPlan, EquipmentPlanError> {
     let replacement = resolve_equipment_change(world, item, slot)?;
     let preferred = match replacement.source {
@@ -108,10 +111,11 @@ pub fn plan_equipment_change(
             item: guid,
             from,
             container: destination.container,
-            placement: destination.placement,
+            placement: insertion.position(destination.placement),
         })
         .collect();
     Ok(EquipmentPlan {
+        insertion,
         item,
         source: replacement.source,
         target: replacement.target,
@@ -326,6 +330,7 @@ pub(super) mod tests {
                     &world,
                     INCOMING,
                     Some(TargetSlot::PreferredSide { alternate }),
+                    Default::default(),
                 )
                 .expect("valid preference");
                 let main = locations & MAIN_HAND_LOCATIONS;
@@ -347,6 +352,7 @@ pub(super) mod tests {
                 &world,
                 INCOMING,
                 Some(TargetSlot::PreferredSide { alternate: false }),
+                Default::default(),
             )
             .expect("already worn item remains movable");
             let main = locations & MAIN_HAND_LOCATIONS;
@@ -426,6 +432,7 @@ pub(super) mod tests {
                             &world,
                             INCOMING,
                             Some(TargetSlot::PreferredSide { alternate }),
+                            Default::default(),
                         )
                         .expect("jewelry plan");
                         assert_eq!(plan.target, expected);
@@ -450,6 +457,7 @@ pub(super) mod tests {
             &world,
             INCOMING,
             Some(TargetSlot::EquipMask(EquipMask::CHEST_ARMOR)),
+            Default::default(),
         )
         .expect("root fits both displaced items");
         assert_eq!(
@@ -471,7 +479,7 @@ pub(super) mod tests {
     fn does_not_credit_the_incoming_items_future_free_slot() {
         let world = outfit(1, 1);
         assert_eq!(
-            plan_equipment_change(&world, INCOMING, None),
+            plan_equipment_change(&world, INCOMING, None, Default::default()),
             Err(EquipmentPlanError::Storage(StorageAllocationError::NoSpace))
         );
         assert_eq!(world.player_equipment().count(), 2);
@@ -480,8 +488,8 @@ pub(super) mod tests {
     #[test]
     fn uses_source_pack_first_then_falls_back_without_overallocating() {
         let world = outfit(1, 2);
-        let plan =
-            plan_equipment_change(&world, INCOMING, None).expect("one slot in each container");
+        let plan = plan_equipment_change(&world, INCOMING, None, Default::default())
+            .expect("one slot in each container");
         assert_eq!(
             plan.unequips
                 .iter()
@@ -504,6 +512,6 @@ pub(super) mod tests {
                 },
             )),
         );
-        assert!(plan_equipment_change(&world, INCOMING, None).is_ok());
+        assert!(plan_equipment_change(&world, INCOMING, None, Default::default()).is_ok());
     }
 }

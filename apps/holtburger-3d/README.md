@@ -377,16 +377,19 @@ windows.
 
 Drag contents cells onto another cell to merge compatible stacks or insert before
 that item when the target cannot accept a merge. Inventory-to-inventory movement
-and header appends require Native sorting. Sorted views allow merges and equipping;
-unequipping into sorted contents appends to the selected container. Drag onto an
+and header transfers require Native sorting. Sorted views allow merges and equipping;
+unequipping into sorted contents prepends to the selected container. Drag onto an
 equipment row to equip, or from equipment to a contents cell/header to unequip. Core preflights displaced equipment storage and
-sequences the server requests. Failures use existing action feedback.
+sequences the server requests. Automatic pickups, unequips, equipment replacements,
+and container drops prepend; explicit item drops retain their target position.
+Failures use existing action feedback.
 
 Select a stack and press Y (configurable under Settings → Input → Split stack),
 or use the selected-item Split stack action, to choose an amount with a number
-field or slider. The inventory-local dialog opens only after capacity preflight. Splits prefer the
-source pack, then main pack and remaining packs in native order; selecting the
-whole quantity is a no-op. Ctrl+Shift+I toggles Electron DevTools; game interactions
+field or slider. The inventory-local dialog opens only after capacity preflight.
+Splits prefer the source pack, then main pack and remaining packs in native order.
+New stacks go immediately after their source when stored in the same pack,
+otherwise at the front of the destination pack. Selecting the whole quantity is a no-op. Ctrl+Shift+I toggles Electron DevTools; game interactions
 own right-click globally.
 
 Real pack cells exchange native positions. Main Pack stays first, foci stay last,

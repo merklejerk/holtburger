@@ -2,7 +2,7 @@
 
 use super::{
     equipment_plan::{EquipmentPlan, EquipmentPlanError, plan_equipment_change},
-    inventory_storage::{StorageAllocationError, allocate_storage},
+    inventory_storage::{InventoryPlacementPolicy, StorageAllocationError, allocate_storage},
     types::TargetSlot,
 };
 use holtburger_common::{
@@ -39,7 +39,7 @@ pub enum InventoryTarget {
     Item { guid: Guid },
     /// Merge only; a changed stack must never turn this intent into a positional move.
     Stack { guid: Guid },
-    /// Append to the appropriate native domain in this container.
+    /// Insert into this container using the frontend's automatic placement preference.
     Container { guid: Guid },
     /// Resolve a visible equipment slot to its actual wield location.
     Equipment { mask: u32 },
@@ -164,11 +164,13 @@ pub enum InventoryPlanError {
     Equipment(#[from] EquipmentPlanError),
 }
 
-/// Evaluate an intent without mutation. The browser applies Native-sort restrictions
-/// to a resolved Move; compatible merges remain available under every sort mode.
+/// Resolve capacity, frontend insertion preferences, and targets without mutation.
+/// The browser applies Native-sort restrictions to a resolved Move; compatible merges
+/// remain available under every sort mode.
 pub fn plan_inventory_intent(
     world: &WorldState,
     intent: InventoryIntent,
+    policy: InventoryPlacementPolicy,
 ) -> Result<InventoryPlan, InventoryPlanError> {
     match intent.target {
         InventoryTarget::Pickup { .. } => {}
@@ -205,7 +207,7 @@ pub fn plan_inventory_intent(
             Ok(InventoryPlan::Move(InventoryMove {
                 item: intent.item,
                 container: destination.container,
-                placement: destination.placement,
+                placement: policy.automatic.position(destination.placement),
             }))
         }
         InventoryTarget::Pickup { container } => {
@@ -244,7 +246,7 @@ pub fn plan_inventory_intent(
             Ok(InventoryPlan::Move(InventoryMove {
                 item: intent.item,
                 container: destination.container,
-                placement: destination.placement,
+                placement: policy.automatic.position(destination.placement),
             }))
         }
         InventoryTarget::Give { guid } => {
@@ -290,19 +292,35 @@ pub fn plan_inventory_intent(
                 return Ok(InventoryPlan::Noop);
             }
             i32::try_from(amount).map_err(|_| InventoryPlanError::ProtocolRange)?;
-            let preferred = match world.storage_location(intent.item) {
-                Some(StorageLocation::Contained { parent, .. }) => parent,
-                Some(StorageLocation::Equipped { wearer, .. }) => wearer,
-                None => return Err(InventoryPlanError::NotOwned),
-            };
+            let source_location = world
+                .storage_location(intent.item)
+                .ok_or(InventoryPlanError::NotOwned)?;
+            let preferred = source_location.parent();
             let destinations =
                 allocate_storage(world, preferred, &[entity.uses_player_container_slot()])?;
             let destination = destinations[0];
+            let placement = if policy.split_after_source {
+                match source_location {
+                    StorageLocation::Contained { parent, slot }
+                        if parent == destination.container =>
+                    {
+                        let (_, index) =
+                            slot_index(slot).ok_or(InventoryPlanError::Pending(intent.item))?;
+                        index
+                            .checked_add(1)
+                            .ok_or(InventoryPlanError::ProtocolRange)?
+                    }
+                    _ => policy.automatic.position(destination.placement),
+                }
+            } else {
+                policy.automatic.position(destination.placement)
+            };
+            i32::try_from(placement).map_err(|_| InventoryPlanError::ProtocolRange)?;
             Ok(InventoryPlan::Split {
                 step: InventoryMove {
                     item: intent.item,
                     container: destination.container,
-                    placement: destination.placement,
+                    placement,
                 },
                 amount,
                 max_amount: quantity,
@@ -332,10 +350,13 @@ pub fn plan_inventory_intent(
                 world,
                 intent.item,
                 Some(TargetSlot::EquipMask(EquipMask::from_bits_retain(mask))),
+                policy.automatic,
             )?))
         }
         InventoryTarget::Container { guid } => {
-            plan_move(world, intent.item, guid, None).map(InventoryPlan::Move)
+            let mut step = plan_move(world, intent.item, guid, None)?;
+            step.placement = policy.automatic.position(step.placement);
+            Ok(InventoryPlan::Move(step))
         }
         InventoryTarget::Pack { guid } => plan_pack_swap(world, intent.item, guid),
         InventoryTarget::Item { guid } | InventoryTarget::Stack { guid } => {
@@ -659,7 +680,8 @@ impl super::ClientRuntime {
         {
             return Err("Another inventory operation is still pending".into());
         }
-        plan_inventory_intent(&self.world, intent).map_err(|error| error.to_string())
+        plan_inventory_intent(&self.world, intent, self.inventory_placement)
+            .map_err(|error| error.to_string())
     }
 
     pub(super) fn preview_inventory_intent(&self, request: InventoryPreviewRequest) {
@@ -682,9 +704,13 @@ impl super::ClientRuntime {
 pub(super) mod tests {
     use super::super::equipment_plan::tests::{event, outfit};
     use super::*;
+    use crate::client::{ClientRuntimeBuilder, ClientState};
     use holtburger_common::properties::{InventoryEntryKind, PropertyInt};
     use holtburger_protocol::messages::{GameEvent, InventoryPutObjInContainerEventData};
+    use holtburger_session::Session;
+    use holtburger_world::WorldBootstrap;
     use holtburger_world::entity::Entity;
+    use std::sync::Arc;
 
     const PLAYER: Guid = Guid(1);
     const PACK: Guid = Guid(2);
@@ -722,6 +748,170 @@ pub(super) mod tests {
         world
     }
 
+    const PREPEND: InventoryPlacementPolicy = InventoryPlacementPolicy {
+        automatic: super::super::inventory_storage::InventoryInsertion::Prepend,
+        split_after_source: true,
+    };
+
+    #[test]
+    fn runtime_builder_policy_reaches_inventory_evaluation() {
+        const QUANTITY: i32 = 20;
+        const AMOUNT: u32 = 7;
+        for (policy, placement) in [(InventoryPlacementPolicy::default(), 3), (PREPEND, 1)] {
+            let mut client = ClientRuntimeBuilder::new("test")
+                .inventory_placement(policy)
+                .world_bootstrap(Arc::new(WorldBootstrap::synthetic()))
+                .build_with_session(Session::new_test())
+                .unwrap();
+            client.state = ClientState::InWorld;
+            client.world = inventory();
+            client
+                .world
+                .entities
+                .get_mut(PACK)
+                .unwrap()
+                .properties
+                .ints
+                .insert(PropertyInt::ItemsCapacity, 4);
+            let source = client.world.entities.get_mut(SOURCE).unwrap();
+            source
+                .properties
+                .ints
+                .insert(PropertyInt::StackSize, QUANTITY);
+            source
+                .properties
+                .ints
+                .insert(PropertyInt::MaxStackSize, QUANTITY);
+            assert_eq!(
+                client.evaluate_inventory_intent(InventoryIntent {
+                    item: SOURCE,
+                    target: InventoryTarget::Split { amount: AMOUNT },
+                }),
+                Ok(InventoryPlan::Split {
+                    step: InventoryMove {
+                        item: SOURCE,
+                        container: PACK,
+                        placement
+                    },
+                    amount: AMOUNT,
+                    max_amount: QUANTITY as u32,
+                })
+            );
+        }
+    }
+
+    #[test]
+    fn prepend_applies_to_automatic_moves_but_preserves_item_drop_positions() {
+        let mut world = inventory();
+        world
+            .entities
+            .get_mut(PACK)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 4);
+        let ground = Guid(0x8000_0042);
+        let mut entity = Entity::new(ground, "Ground item".into(), Default::default());
+        entity.position.landblock_id = Guid(0x1234_0001);
+        entity.properties.ints.insert(
+            PropertyInt::ItemType,
+            holtburger_common::properties::ItemType::FOOD.bits() as i32,
+        );
+        world.add_entity(entity);
+        let equipped = world.player_equipment().next().unwrap().0;
+        for (item, target, placement) in [
+            (ground, InventoryTarget::Pickup { container: None }, 0),
+            (equipped, InventoryTarget::Unequip, 0),
+            (LAST, InventoryTarget::Container { guid: PACK }, 0),
+            (LAST, InventoryTarget::Item { guid: TARGET }, 1),
+        ] {
+            assert_eq!(
+                plan_inventory_intent(&world, InventoryIntent { item, target }, PREPEND),
+                Ok(InventoryPlan::Move(InventoryMove {
+                    item,
+                    container: PACK,
+                    placement
+                })),
+            );
+        }
+    }
+
+    #[test]
+    fn splits_follow_source_and_prepend_when_capacity_redirects_them() {
+        const QUANTITY: i32 = 20;
+        const AMOUNT: u32 = 7;
+        let mut world = inventory();
+        let source = world.entities.get_mut(SOURCE).unwrap();
+        source
+            .properties
+            .ints
+            .insert(PropertyInt::StackSize, QUANTITY);
+        source
+            .properties
+            .ints
+            .insert(PropertyInt::MaxStackSize, QUANTITY);
+        // Source is in the middle: adjacency differs from both prepend and append.
+        place(&mut world, SOURCE, PACK, 1, InventoryEntryKind::Item);
+        world
+            .entities
+            .get_mut(PACK)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 4);
+        let intent = InventoryIntent {
+            item: SOURCE,
+            target: InventoryTarget::Split { amount: AMOUNT },
+        };
+        let expected = |container, placement| {
+            Ok(InventoryPlan::Split {
+                step: InventoryMove {
+                    item: SOURCE,
+                    container,
+                    placement,
+                },
+                amount: AMOUNT,
+                max_amount: QUANTITY as u32,
+            })
+        };
+        assert_eq!(
+            plan_inventory_intent(&world, intent, PREPEND),
+            expected(PACK, 2)
+        );
+        place(&mut world, LAST, PLAYER, 0, InventoryEntryKind::Item);
+        world
+            .entities
+            .get_mut(PLAYER)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 2);
+        world
+            .entities
+            .get_mut(PACK)
+            .unwrap()
+            .properties
+            .ints
+            .insert(PropertyInt::ItemsCapacity, 2);
+        assert_eq!(
+            plan_inventory_intent(&world, intent, PREPEND),
+            expected(PLAYER, 0)
+        );
+        event(
+            &mut world,
+            GameEvent::WieldObject(Box::new(
+                holtburger_protocol::messages::WieldObjectEventData {
+                    object_guid: SOURCE,
+                    equip_mask: EquipMask::MISSILE_AMMO,
+                },
+            )),
+        );
+        assert_eq!(
+            plan_inventory_intent(&world, intent, PREPEND),
+            expected(PLAYER, 0)
+        );
+    }
+
     #[test]
     fn unequip_allocates_main_pack_then_carried_pack_and_rejects_full_storage() {
         for (root_capacity, pack_capacity, expected) in [
@@ -737,7 +927,8 @@ pub(super) mod tests {
                     InventoryIntent {
                         item,
                         target: InventoryTarget::Unequip,
-                    }
+                    },
+                    Default::default()
                 ),
                 expected
                     .map(|(container, placement)| InventoryPlan::Move(InventoryMove {
@@ -763,7 +954,8 @@ pub(super) mod tests {
                     InventoryIntent {
                         item,
                         target: InventoryTarget::Unequip,
-                    }
+                    },
+                    Default::default()
                 ),
                 Err(error)
             );
@@ -827,7 +1019,7 @@ pub(super) mod tests {
                 .properties
                 .ints
                 .insert(PropertyInt::StackSize, count);
-            let plan = plan_inventory_intent(&world, intent).unwrap();
+            let plan = plan_inventory_intent(&world, intent, Default::default()).unwrap();
             assert_eq!(
                 plan,
                 InventoryPlan::Merge {
@@ -849,7 +1041,7 @@ pub(super) mod tests {
             .ints
             .insert(PropertyInt::StackSize, 100);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::StackFull)
         );
         assert_eq!(
@@ -858,7 +1050,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: TARGET,
                     ..intent
-                }
+                },
+                Default::default()
             ),
             Ok(InventoryPlan::Noop)
         );
@@ -873,7 +1066,7 @@ pub(super) mod tests {
                 .0
                 .remove(&property);
             assert_eq!(
-                plan_inventory_intent(&incomplete, intent),
+                plan_inventory_intent(&incomplete, intent, Default::default()),
                 Err(InventoryPlanError::Pending(TARGET))
             );
         }
@@ -885,13 +1078,17 @@ pub(super) mod tests {
             .properties
             .ints
             .insert(PropertyInt::ItemsCapacity, 3);
-        let InventoryPlan::Equip(plan) = plan_inventory_intent(&world, intent).unwrap() else {
+        let InventoryPlan::Equip(plan) =
+            plan_inventory_intent(&world, intent, Default::default()).unwrap()
+        else {
             panic!("different ammo should replace")
         };
         assert_eq!(plan.unequips.len(), 1);
         assert_eq!(plan.unequips[0].item, TARGET);
         place(&mut world, TARGET, PACK, 2, InventoryEntryKind::Item);
-        let InventoryPlan::Equip(plan) = plan_inventory_intent(&world, intent).unwrap() else {
+        let InventoryPlan::Equip(plan) =
+            plan_inventory_intent(&world, intent, Default::default()).unwrap()
+        else {
             panic!("empty slot should equip")
         };
         assert!(plan.unequips.is_empty());
@@ -1020,7 +1217,7 @@ pub(super) mod tests {
             ),
         ] {
             assert_eq!(
-                plan_inventory_intent(&world, InventoryIntent { item, target }),
+                plan_inventory_intent(&world, InventoryIntent { item, target }, Default::default()),
                 Ok(InventoryPlan::Move(InventoryMove {
                     item,
                     container,
@@ -1041,7 +1238,11 @@ pub(super) mod tests {
             target: InventoryTarget::Container { guid },
         };
         assert_eq!(
-            plan_inventory_intent(&world, move_to(EXTERNAL_PACK, EXTERNAL_PACK)),
+            plan_inventory_intent(
+                &world,
+                move_to(EXTERNAL_PACK, EXTERNAL_PACK),
+                Default::default()
+            ),
             Err(InventoryPlanError::InvalidContainer)
         );
         place(
@@ -1052,16 +1253,16 @@ pub(super) mod tests {
             InventoryEntryKind::Container,
         );
         assert_eq!(
-            plan_inventory_intent(&world, move_to(PACK, EXTERNAL_PACK)),
+            plan_inventory_intent(&world, move_to(PACK, EXTERNAL_PACK), Default::default()),
             Err(InventoryPlanError::InvalidContainer)
         );
         world.close_world_container();
         assert_eq!(
-            plan_inventory_intent(&world, move_to(SOURCE, EXTERNAL)),
+            plan_inventory_intent(&world, move_to(SOURCE, EXTERNAL), Default::default()),
             Err(InventoryPlanError::InvalidContainer)
         );
         assert_eq!(
-            plan_inventory_intent(&world, move_to(LOOT, PACK)),
+            plan_inventory_intent(&world, move_to(LOOT, PACK), Default::default()),
             Err(InventoryPlanError::NotAccessible)
         );
         world.confirm_world_container(EXTERNAL);
@@ -1074,13 +1275,13 @@ pub(super) mod tests {
             .0
             .remove(&PropertyInt::ItemsCapacity);
         assert_eq!(
-            plan_inventory_intent(&world, move_to(SOURCE, EXTERNAL)),
+            plan_inventory_intent(&world, move_to(SOURCE, EXTERNAL), Default::default()),
             Err(InventoryPlanError::Pending(EXTERNAL))
         );
         let pending = Guid(0x8000_0104);
         place(&mut world, pending, EXTERNAL, 2, InventoryEntryKind::Item);
         assert_eq!(
-            plan_inventory_intent(&world, move_to(pending, PACK)),
+            plan_inventory_intent(&world, move_to(pending, PACK), Default::default()),
             Err(InventoryPlanError::Pending(pending))
         );
     }
@@ -1099,7 +1300,11 @@ pub(super) mod tests {
             InventoryTarget::Pack { guid: PACK },
         ] {
             assert_eq!(
-                plan_inventory_intent(&world, InventoryIntent { item: LOOT, target }),
+                plan_inventory_intent(
+                    &world,
+                    InventoryIntent { item: LOOT, target },
+                    Default::default()
+                ),
                 Err(InventoryPlanError::NotOwned)
             );
         }
@@ -1109,7 +1314,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: EXTERNAL,
                     target: InventoryTarget::Container { guid: PLAYER }
-                }
+                },
+                Default::default()
             ),
             Err(InventoryPlanError::NotAccessible)
         );
@@ -1134,7 +1340,8 @@ pub(super) mod tests {
                     InventoryIntent {
                         item: source,
                         target: InventoryTarget::Stack { guid: destination }
-                    }
+                    },
+                    Default::default()
                 ),
                 Ok(InventoryPlan::Merge {
                     source,
@@ -1156,7 +1363,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: SOURCE,
                     target: InventoryTarget::Stack { guid: LOOT }
-                }
+                },
+                Default::default()
             ),
             Err(InventoryPlanError::StackFull)
         );
@@ -1184,7 +1392,7 @@ pub(super) mod tests {
             target: InventoryTarget::Give { guid: recipient },
         };
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Ok(InventoryPlan::Give {
                 item: source,
                 recipient,
@@ -1199,7 +1407,7 @@ pub(super) mod tests {
             .ints
             .insert(PropertyInt::MaxStackSize, i32::MAX);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::Pending(source))
         );
         for amount in [1, 17, i32::MAX] {
@@ -1211,7 +1419,7 @@ pub(super) mod tests {
                 .ints
                 .insert(PropertyInt::StackSize, amount);
             assert_eq!(
-                plan_inventory_intent(&world, intent),
+                plan_inventory_intent(&world, intent, Default::default()),
                 Ok(InventoryPlan::Give {
                     item: source,
                     recipient,
@@ -1228,7 +1436,7 @@ pub(super) mod tests {
                 .ints
                 .insert(PropertyInt::StackSize, amount);
             assert_eq!(
-                plan_inventory_intent(&world, intent),
+                plan_inventory_intent(&world, intent, Default::default()),
                 Err(InventoryPlanError::EmptyGive)
             );
         }
@@ -1241,13 +1449,13 @@ pub(super) mod tests {
             .insert(PropertyInt::StackSize, 17);
         world.entities.get_mut(recipient).unwrap().flags = ObjectDescriptionFlag::ATTACKABLE;
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::InvalidRecipient)
         );
         world.entities.get_mut(recipient).unwrap().flags = ObjectDescriptionFlag::PLAYER;
         world.remove_entity(source);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::NotOwned)
         );
     }
@@ -1284,7 +1492,7 @@ pub(super) mod tests {
             target: InventoryTarget::Pickup { container: None },
         };
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Ok(InventoryPlan::Merge {
                 source: ground,
                 destination: TARGET,
@@ -1294,7 +1502,7 @@ pub(super) mod tests {
         // Native position, rather than GUID, chooses the first whole-stack fit.
         place(&mut world, LAST, PACK, 0, InventoryEntryKind::Item);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Ok(InventoryPlan::Merge {
                 source: ground,
                 destination: LAST,
@@ -1311,7 +1519,8 @@ pub(super) mod tests {
                         container: Some(PACK)
                     },
                     ..intent
-                }
+                },
+                Default::default()
             ),
             Ok(InventoryPlan::Merge {
                 source: ground,
@@ -1330,7 +1539,7 @@ pub(super) mod tests {
         }
         // A partial fit does not consume any source quantity; use the free pack slot.
         assert!(
-            matches!(plan_inventory_intent(&world, intent), Ok(InventoryPlan::Move(InventoryMove { item, container: PACK, .. })) if item == ground)
+            matches!(plan_inventory_intent(&world, intent, Default::default()), Ok(InventoryPlan::Move(InventoryMove { item, container: PACK, .. })) if item == ground)
         );
         world
             .entities
@@ -1340,7 +1549,7 @@ pub(super) mod tests {
             .ints
             .insert(PropertyInt::ItemsCapacity, 2);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::PickupStackFull)
         );
         world
@@ -1352,7 +1561,7 @@ pub(super) mod tests {
             .0
             .remove(&PropertyInt::StackSize);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::Pending(ground))
         );
     }
@@ -1375,7 +1584,7 @@ pub(super) mod tests {
             target: InventoryTarget::Pickup { container: None },
         };
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::NotPickable)
         );
         world.confirm_world_container(root);
@@ -1387,7 +1596,8 @@ pub(super) mod tests {
                     target: InventoryTarget::Pickup {
                         container: Some(root)
                     }
-                }
+                },
+                Default::default()
             ),
             Err(InventoryPlanError::InvalidContainer),
         );
@@ -1419,7 +1629,8 @@ pub(super) mod tests {
                     target: InventoryTarget::Pickup {
                         container: Some(preferred_pack)
                     }
-                }
+                },
+                Default::default()
             ),
             Ok(InventoryPlan::Move(InventoryMove {
                 item,
@@ -1435,7 +1646,7 @@ pub(super) mod tests {
             .ints
             .insert(PropertyInt::ItemsCapacity, 1);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Ok(InventoryPlan::Move(InventoryMove {
                 item,
                 container: PLAYER,
@@ -1450,12 +1661,12 @@ pub(super) mod tests {
             .ints
             .insert(PropertyInt::ItemsCapacity, 0);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::Storage(StorageAllocationError::NoSpace))
         );
         world.close_world_container();
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::NotPickable)
         );
     }
@@ -1491,7 +1702,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: pack,
                     target: InventoryTarget::Pickup { container: None }
-                }
+                },
+                Default::default()
             ),
             Ok(InventoryPlan::Move(InventoryMove {
                 item: pack,
@@ -1528,7 +1740,7 @@ pub(super) mod tests {
             .ints
             .insert(PropertyInt::ContainersCapacity, 2);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Ok(InventoryPlan::Move(InventoryMove {
                 item: ground,
                 container: PLAYER,
@@ -1544,7 +1756,7 @@ pub(super) mod tests {
             .0
             .remove(&PropertyInt::ItemsCapacity);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::Storage(
                 StorageAllocationError::IncompleteStorage(PLAYER)
             ))
@@ -1568,7 +1780,7 @@ pub(super) mod tests {
             target: InventoryTarget::Pickup { container: None },
         };
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Ok(InventoryPlan::Move(InventoryMove {
                 item: ground,
                 container: Guid(1),
@@ -1583,7 +1795,7 @@ pub(super) mod tests {
             .ints
             .insert(PropertyInt::ItemsCapacity, 0);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Ok(InventoryPlan::Move(InventoryMove {
                 item: ground,
                 container: Guid(2),
@@ -1598,7 +1810,7 @@ pub(super) mod tests {
             .ints
             .insert(PropertyInt::ItemsCapacity, 1);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::Storage(StorageAllocationError::NoSpace))
         );
         let equipped = world.player_equipment().next().expect("equipped armor").0;
@@ -1608,7 +1820,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: equipped,
                     target: InventoryTarget::Ground
-                }
+                },
+                Default::default()
             ),
             Ok(InventoryPlan::Drop { item: equipped })
         );
@@ -1618,7 +1831,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: ground,
                     target: InventoryTarget::Ground
-                }
+                },
+                Default::default()
             ),
             Err(InventoryPlanError::NotOwned)
         );
@@ -1632,7 +1846,7 @@ pub(super) mod tests {
             })),
         );
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::NotPickable)
         );
     }
@@ -1646,7 +1860,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: SOURCE,
                     target: InventoryTarget::Item { guid: LAST }
-                }
+                },
+                Default::default()
             ),
             Ok(InventoryPlan::Move(InventoryMove {
                 item: SOURCE,
@@ -1660,7 +1875,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: SOURCE,
                     target: InventoryTarget::Container { guid: PACK }
-                }
+                },
+                Default::default()
             ),
             Ok(InventoryPlan::Move(InventoryMove {
                 item: SOURCE,
@@ -1674,7 +1890,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: LAST,
                     target: InventoryTarget::Item { guid: SOURCE }
-                }
+                },
+                Default::default()
             ),
             Ok(InventoryPlan::Move(InventoryMove {
                 item: LAST,
@@ -1693,7 +1910,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: SOURCE,
                     target: InventoryTarget::Stack { guid: TARGET },
-                }
+                },
+                Default::default()
             ),
             Err(InventoryPlanError::IncompatibleStacks)
         );
@@ -1708,7 +1926,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: SOURCE,
                     target: InventoryTarget::Container { guid: PLAYER }
-                }
+                },
+                Default::default()
             ),
             Err(InventoryPlanError::ContainerFull)
         );
@@ -1728,7 +1947,7 @@ pub(super) mod tests {
             target: InventoryTarget::Split { amount: 7 },
         };
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Err(InventoryPlanError::Storage(StorageAllocationError::NoSpace))
         );
         assert_eq!(
@@ -1737,7 +1956,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: SOURCE,
                     target: InventoryTarget::Split { amount: 20 }
-                }
+                },
+                Default::default()
             ),
             Ok(InventoryPlan::Noop)
         );
@@ -1749,7 +1969,7 @@ pub(super) mod tests {
             .ints
             .insert(PropertyInt::ItemsCapacity, 1);
         assert!(matches!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Ok(InventoryPlan::Split {
                 step: InventoryMove {
                     container: PLAYER,
@@ -1769,7 +1989,7 @@ pub(super) mod tests {
             .ints
             .insert(PropertyInt::ItemsCapacity, 4);
         assert!(matches!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Ok(InventoryPlan::Split {
                 step: InventoryMove {
                     container: PACK,
@@ -1786,7 +2006,8 @@ pub(super) mod tests {
                     InventoryIntent {
                         item: SOURCE,
                         target: InventoryTarget::Split { amount }
-                    }
+                    },
+                    Default::default()
                 ),
                 Err(InventoryPlanError::InvalidSplit)
             );
@@ -1811,7 +2032,7 @@ pub(super) mod tests {
             target: InventoryTarget::Item { guid: TARGET },
         };
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Ok(InventoryPlan::Merge {
                 source: SOURCE,
                 destination: TARGET,
@@ -1826,7 +2047,7 @@ pub(super) mod tests {
             .ints
             .insert(PropertyInt::StackSize, MAXIMUM);
         assert_eq!(
-            plan_inventory_intent(&world, intent),
+            plan_inventory_intent(&world, intent, Default::default()),
             Ok(InventoryPlan::Move(InventoryMove {
                 item: SOURCE,
                 container: PACK,
@@ -1839,7 +2060,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: SOURCE,
                     target: InventoryTarget::Stack { guid: TARGET }
-                }
+                },
+                Default::default()
             ),
             Err(InventoryPlanError::StackFull)
         );
@@ -1857,7 +2079,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: PACK,
                     target: InventoryTarget::Pack { guid: TARGET }
-                }
+                },
+                Default::default()
             ),
             Ok(InventoryPlan::Swap {
                 first: InventoryMove {
@@ -1878,7 +2101,8 @@ pub(super) mod tests {
                 InventoryIntent {
                     item: PACK,
                     target: InventoryTarget::Pack { guid: LAST }
-                }
+                },
+                Default::default()
             ),
             Err(InventoryPlanError::InvalidPack)
         );

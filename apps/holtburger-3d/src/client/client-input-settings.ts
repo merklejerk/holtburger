@@ -24,6 +24,10 @@ const keyBindingSchema = z.union([
 	z
 		.object({ key: z.string().min(1), ...modifiers })
 		.strict()
+		// Normalize saved Space bindings to the same physical selector as new captures.
+		.transform(({ key, ...modifiers }) =>
+			key === " " ? { code: "Space", ...modifiers } : { key, ...modifiers },
+		)
 		.readonly(),
 	z
 		.object({ code: z.string().min(1), ...modifiers })

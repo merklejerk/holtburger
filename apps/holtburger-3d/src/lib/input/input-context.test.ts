@@ -4,6 +4,27 @@ import { AppInput } from "./app-input";
 import { INPUT_DEFAULTS } from "./input-defaults";
 
 describe("InputContext", () => {
+	it("separates precise and ordinary jumps even when Space has no logical key", () => {
+		const input = new AppInput(INPUT_DEFAULTS);
+		const action = vi.fn();
+		const character = input.characterContext(action);
+		for (const key of [" ", "Unidentified"]) {
+			const event = { key, code: "Space", ctrlKey: true, shiftKey: false };
+			expect(input.shortcut("preciseJump", event)).toBe(true);
+			expect(character.apply(event, true)).toBe(false);
+			const ordinary = { ...event, ctrlKey: false };
+			expect(input.shortcut("preciseJump", ordinary)).toBe(false);
+			expect(character.apply(ordinary, true)).toBe(true);
+			expect(character.apply(ordinary, false)).toBe(true);
+		}
+		expect(action.mock.calls).toEqual([
+			["jump", true],
+			["jump", false],
+			["jump", true],
+			["jump", false],
+		]);
+	});
+
 	it("maps unmodified number keys 1–5 to combat breakpoints", () => {
 		const input = new AppInput(INPUT_DEFAULTS);
 		for (const [index, digit] of ["1", "2", "3", "4", "5"].entries()) {

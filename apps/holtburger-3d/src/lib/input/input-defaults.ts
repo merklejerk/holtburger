@@ -18,8 +18,8 @@ export const INPUT_DEFAULTS = {
 		strafeRight: [{ key: "c" }],
 		/** Hold to select walking gait. */
 		walk: [{ key: "Shift" }],
-		/** Hold to charge and release to jump; activates an aimed precise jump. */
-		jump: [{ key: " ", ctrl: false }],
+		/** Physical Space survives unidentified logical keys; release activates the charged or aimed jump. */
+		jump: [{ code: "Space", ctrl: false }],
 	},
 	/** Held controls active only during precise targeting. */
 	preciseJump: {
@@ -43,7 +43,7 @@ export const INPUT_DEFAULTS = {
 		/** Move along camera-local right. */
 		strafeRight: [{ key: "c" }],
 		/** Move along camera-local up; either binding may remain held. */
-		ascend: [{ key: " " }, { key: "PageUp" }],
+		ascend: [{ code: "Space" }, { key: "PageUp" }],
 		/** Move along camera-local down. */
 		descend: [{ key: "PageDown" }],
 		/** Hold to slow camera motion and pointer gestures. */
@@ -131,8 +131,8 @@ export const INPUT_DEFAULTS = {
 		],
 		/** Toggle persistent forward movement while gameplay owns the keyboard. */
 		toggleAutoRun: [{ key: "q", ctrl: false, alt: false, meta: false }],
-		/** Enter the aimed jump interaction. */
-		preciseJump: [{ key: " ", ctrl: true }],
+		/** Physical Space keeps Ctrl+Space usable when the logical key is unidentified. */
+		preciseJump: [{ code: "Space", ctrl: true }],
 		/** Cancel the active context, then clear selection when gameplay owns Escape. */
 		cancel: [{ key: "Escape" }],
 		/** Activate chat while the game owns the keyboard. */

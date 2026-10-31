@@ -13,12 +13,10 @@ use holtburger_content::{
 };
 use std::sync::Arc;
 
-use super::{
-    placed_ball_contact, placed_ball_support, placed_cylinder_contact, placed_cylinder_support,
-};
+use super::{placed_ball_contact, placed_cylinder_contact};
 use crate::spatial::collision::CollisionScene;
 use crate::spatial::differential_fixtures::{
-    grounded_movement_body, movement_ground, movement_tick,
+    PATHWARDEN_CHEST_RADIUS, grounded_movement_body, movement_ground, movement_tick,
 };
 use crate::{
     GroundState, GroundSupport, GroundedBodyActuation, GroundedBodySpheres, GroundedConfig,
@@ -93,20 +91,21 @@ fn volume_support(
     maximum_drop: f32,
     maximum_rise: f32,
 ) -> Option<super::super::bsp_query::ShapeSupport> {
-    match &*collider.shape {
-        CollisionShape::Cylinder(cylinder) => placed_cylinder_support(
-            collider,
-            cylinder,
-            center,
-            radius,
+    let mut support = None;
+    super::visit_placed_shape_supports(
+        collider,
+        center,
+        radius,
+        super::SupportProbe::Column {
             maximum_drop,
             maximum_rise,
-        ),
-        CollisionShape::Ball(ball) => {
-            placed_ball_support(collider, ball, center, radius, maximum_drop, maximum_rise)
-        }
-        CollisionShape::Bsp(_) => unreachable!("volume fixtures never build BSP shapes"),
-    }
+        },
+        &mut |found| {
+            assert!(support.is_none(), "volume has one upper support surface");
+            support = Some(found);
+        },
+    );
+    support
 }
 
 fn cylinder_collider(low: Vector3, radius: f32, height: f32) -> PlacedCollider {
@@ -251,6 +250,39 @@ fn ball_support_rest_height_matches_retail_and_leans_radially() {
     }
 }
 
+/// Retail's cylinder gate uses relative displacement (`acclient.c:347058`). Computing
+/// the top in world coordinates first can change admission at the exact step limit.
+#[test]
+fn cylinder_step_boundary_matches_retail_at_elevated_origins() {
+    let height = 0.6;
+    for (low_z, radius) in [(10.0, 0.5), (50.0, 0.48)] {
+        let low = Vector3::new(50.0, 50.0, low_z);
+        let center = low + Vector3::new(0.5, 0.0, radius);
+        let collider = cylinder_collider(low, 0.5, height);
+        let prepared = super::PreparedStaticSupport::new(&collider);
+        for step in [height - RETAIL_EPSILON, height, height + RETAIL_EPSILON] {
+            let retail = step >= radius + height - (center.z - low.z);
+            for probe in [
+                super::SupportProbe::Stair { height: step },
+                super::SupportProbe::Standing { maximum_rise: step },
+            ] {
+                let mut direct = Vec::new();
+                super::visit_placed_shape_supports(&collider, center, radius, probe, &mut |s| {
+                    direct.push(s);
+                });
+                let mut resident = Vec::new();
+                prepared.visit(center, radius, probe, &mut |s| resident.push(s));
+                assert_eq!(
+                    direct.len(),
+                    usize::from(retail),
+                    "{low_z}, {radius}, {probe:?}"
+                );
+                assert_eq!(resident.len(), direct.len());
+            }
+        }
+    }
+}
+
 // --- Production grounded solver scenarios over volume colliders ---
 
 fn scene(colliders: Vec<PlacedCollider>) -> CollisionScene {
@@ -288,19 +320,7 @@ fn drive_body(
     ticks: usize,
     supported: bool,
 ) -> SpatialBody {
-    let pose = WorldPosition::from_outdoor_frame(Guid(LANDBLOCK), start, Quaternion::identity());
-    let ground = if supported {
-        GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0)))
-    } else {
-        GroundState::Airborne
-    };
-    let mut body = grounded_movement_body(
-        pose,
-        grounded_pair(),
-        grounded_config(),
-        Vector3::zero(),
-        ground,
-    );
+    let mut body = volume_body(start, supported, grounded_config());
     for _ in 0..ticks {
         body = movement_tick(
             scene,
@@ -311,6 +331,17 @@ fn drive_body(
         );
     }
     body
+}
+
+/// A human mover for volume scenarios, with caller-selected footing and edge policy.
+fn volume_body(start: Vector3, supported: bool, config: GroundedConfig) -> SpatialBody {
+    let pose = WorldPosition::from_outdoor_frame(Guid(LANDBLOCK), start, Quaternion::identity());
+    let ground = if supported {
+        GroundState::Supported(GroundSupport::fixture(Vector3::new(0.0, 0.0, 1.0)))
+    } else {
+        GroundState::Airborne
+    };
+    grounded_movement_body(pose, grounded_pair(), config, Vector3::zero(), ground)
 }
 
 /// An airborne body dropped over a stump lands on its top at retail's rest height — the
@@ -396,6 +427,79 @@ fn body_steps_up_onto_a_low_stump() {
         "body did not advance onto the stump: x {}",
         mounted.pose.coords.x
     );
+}
+
+/// WCID 33609 / setup 0x0200007C authors a sphere at z = r = 0.318.
+/// Retail tests clearance over its full top before searching the curved cap
+/// (`CSphere::step_sphere_up`, acclient.c:344201-344244).
+#[test]
+fn pathwarden_chest_blocks_steps_above_the_human_step_limit() {
+    let pair = grounded_pair();
+    let floor_z = pair.support.radius - pair.support.center.z;
+    let chest = Vector3::new(50.0, 50.0, PATHWARDEN_CHEST_RADIUS);
+    let collision = scene(vec![ball_collider(chest, PATHWARDEN_CHEST_RADIUS)]);
+    for protection in [crate::EdgeProtection::None, crate::EdgeProtection::Creature] {
+        let config = GroundedConfig {
+            edge_protection: protection,
+            ..grounded_config()
+        };
+        for speed in [2.0, 4.0, 6.6, 10.0] {
+            let mut body = volume_body(Vector3::new(50.8, 50.0, floor_z), true, config);
+            for tick in 0..12 {
+                body = movement_tick(
+                    &collision,
+                    body,
+                    PhysicalBodyInput::autonomous(
+                        PhysicalBodyActuation::grounded_drive(Vector3::new(-speed, 0.0, 0.0))
+                            .unwrap(),
+                    ),
+                );
+                assert!(
+                    (body.pose.coords.z - floor_z).abs() < TEST_EPSILON,
+                    "speed {speed}, protection {protection:?}, tick {tick} climbed: {:?}",
+                    body.pose.coords
+                );
+                assert!(body.pose.coords.x > chest.x);
+                assert!(movement_ground(&body).walkable_support().is_some());
+            }
+        }
+    }
+}
+
+/// Step admission must not prevent jumping/falling onto the same chest.
+#[test]
+fn airborne_body_lands_on_the_pathwarden_chest() {
+    let pair = grounded_pair();
+    let chest_radius = PATHWARDEN_CHEST_RADIUS;
+    let center = Vector3::new(50.0, 50.0, chest_radius);
+    let collision = scene(vec![ball_collider(center, chest_radius)]);
+    let expected_z = center.z + chest_radius + pair.support.radius - pair.support.center.z;
+    let landed = drive_body(
+        &collision,
+        Vector3::new(center.x, center.y, expected_z + 0.3),
+        Vector3::zero(),
+        30,
+        false,
+    );
+    assert!((landed.pose.coords.z - expected_z).abs() < TEST_EPSILON);
+    assert!(movement_ground(&landed).walkable_support().is_some());
+}
+
+#[test]
+fn body_steps_onto_a_ball_whose_full_top_is_within_reach() {
+    let radius = 0.2;
+    let center = Vector3::new(50.0, 50.0, radius);
+    let collision = scene(vec![ball_collider(center, radius)]);
+    let pair = grounded_pair();
+    let floor_z = pair.support.radius - pair.support.center.z;
+    let mounted = drive(
+        &collision,
+        Vector3::new(50.8, 50.0, floor_z),
+        Vector3::new(-6.6, 0.0, 0.0),
+        3,
+    );
+    assert!(mounted.pose.coords.z > floor_z + radius);
+    assert!(movement_ground(&mounted).walkable_support().is_some());
 }
 
 /// Walking off the stump finds terrain below through ordinary step-down — the square-edged solid

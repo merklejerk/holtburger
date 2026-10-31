@@ -70,16 +70,15 @@ impl PreparedStaticSupport {
         if !support_bounds_reach(self.bounds, center, radius) {
             return;
         }
-        let (drop, rise) = probe.column_limits();
         match &self.shape {
             StaticSupportShape::Bsp(bsp) => bsp.visit(center, radius, probe, found),
             StaticSupportShape::Cylinder(cylinder) => {
-                if let Some(support) = cylinder_support(*cylinder, center, radius, drop, rise) {
+                if let Some(support) = cylinder_support(*cylinder, center, radius, probe) {
                     found(support);
                 }
             }
             StaticSupportShape::Ball(ball) => {
-                if let Some(support) = ball_support(*ball, center, radius, drop, rise) {
+                if let Some(support) = ball_support(*ball, center, radius, probe) {
                     found(support);
                 }
             }
@@ -111,22 +110,19 @@ pub(super) fn visit_placed_shape_supports(
     if !support_bounds_reach(shape.bounds, center, radius) {
         return;
     }
-    let (maximum_drop, maximum_rise) = probe.column_limits();
     match &*shape.shape {
         CollisionShape::Bsp(solid) => {
             super::bsp_query::visit_placed_supports(shape, solid, center, radius, probe, found);
         }
         CollisionShape::Cylinder(cylinder) => {
             if let Some(support) =
-                placed_cylinder_support(shape, cylinder, center, radius, maximum_drop, maximum_rise)
+                cylinder_support(placed_cylinder(shape, cylinder), center, radius, probe)
             {
                 found(support);
             }
         }
         CollisionShape::Ball(ball) => {
-            if let Some(support) =
-                placed_ball_support(shape, ball, center, radius, maximum_drop, maximum_rise)
-            {
+            if let Some(support) = ball_support(placed_ball(shape, ball), center, radius, probe) {
                 found(support);
             }
         }
@@ -344,48 +340,11 @@ fn ball_contact(ball: PlacedBall, center: Vector3, radius: f32) -> Option<ShapeC
     })
 }
 
-/// Returns the surface reached by settling a sphere vertically onto one placed cylinder.
-pub(super) fn placed_cylinder_support(
-    collider: &PlacedCollisionShape,
-    cylinder: &CollisionCylinder,
-    center: Vector3,
-    radius: f32,
-    maximum_drop: f32,
-    maximum_rise: f32,
-) -> Option<ShapeSupport> {
-    cylinder_support(
-        placed_cylinder(collider, cylinder),
-        center,
-        radius,
-        maximum_drop,
-        maximum_rise,
-    )
-}
-
-/// Returns the surface reached by settling a sphere vertically onto one placed ball.
-pub(super) fn placed_ball_support(
-    collider: &PlacedCollisionShape,
-    ball: &CollisionBall,
-    center: Vector3,
-    radius: f32,
-    maximum_drop: f32,
-    maximum_rise: f32,
-) -> Option<ShapeSupport> {
-    ball_support(
-        placed_ball(collider, ball),
-        center,
-        radius,
-        maximum_drop,
-        maximum_rise,
-    )
-}
-
 fn cylinder_support(
     cylinder: PlacedCylinder,
     center: Vector3,
     radius: f32,
-    maximum_drop: f32,
-    maximum_rise: f32,
+    probe: SupportProbe,
 ) -> Option<ShapeSupport> {
     let epsilon = CONTACT_EPSILON;
     let displacement = center - cylinder.low;
@@ -397,10 +356,11 @@ fn cylinder_support(
     if xy_squared > radsum * radsum {
         return None;
     }
-    // Rest height: the contact plane is the authored top (`acclient.c:346646` builds it at
-    // `low.z + H`), tangent sphere center one radius above.
-    let height_delta = (cylinder.low.z + cylinder.height + radius) - center.z;
-    if height_delta < -maximum_drop - epsilon || height_delta > maximum_rise + epsilon {
+    // The contact plane is the authored top, tangent sphere center one radius above.
+    // Use retail's relative displacement arithmetic for both step admission and correction
+    // (`acclient.c:347058`, `:346685`); world-height cancellation changes exact-limit admission.
+    let height_delta = radius + cylinder.height - displacement.z;
+    if !probe.admits_volume(height_delta, height_delta) {
         return None;
     }
     Some(ShapeSupport {
@@ -414,8 +374,7 @@ fn ball_support(
     ball: PlacedBall,
     center: Vector3,
     radius: f32,
-    maximum_drop: f32,
-    maximum_rise: f32,
+    probe: SupportProbe,
 ) -> Option<ShapeSupport> {
     let epsilon = CONTACT_EPSILON;
     // Retail's step-down un-shrinks the radius sum before computing the rest height
@@ -431,7 +390,8 @@ fn ball_support(
     }
     let rest_z = ball.center.z + (rest_distance * rest_distance - xy_squared).sqrt();
     let height_delta = rest_z - center.z;
-    if height_delta < -maximum_drop - epsilon || height_delta > maximum_rise + epsilon {
+    let top_delta = rest_distance - (center.z - ball.center.z);
+    if !probe.admits_volume(height_delta, top_delta) {
         return None;
     }
     let rest_center = Vector3::new(center.x, center.y, rest_z);
@@ -490,20 +450,21 @@ mod tests {
         maximum_drop: f32,
         maximum_rise: f32,
     ) -> Option<ShapeSupport> {
-        match &*collider.shape {
-            CollisionShape::Cylinder(cylinder) => placed_cylinder_support(
-                collider,
-                cylinder,
-                center,
-                radius,
+        let mut support = None;
+        visit_placed_shape_supports(
+            collider,
+            center,
+            radius,
+            SupportProbe::Column {
                 maximum_drop,
                 maximum_rise,
-            ),
-            CollisionShape::Ball(ball) => {
-                placed_ball_support(collider, ball, center, radius, maximum_drop, maximum_rise)
-            }
-            CollisionShape::Bsp(_) => unreachable!("volume fixtures never build BSP shapes"),
-        }
+            },
+            &mut |found| {
+                assert!(support.is_none(), "volume has one upper support surface");
+                support = Some(found);
+            },
+        );
+        support
     }
 
     fn cylinder_collider(low: Vector3, radius: f32, height: f32, scale: f32) -> PlacedCollider {
@@ -614,6 +575,79 @@ mod tests {
         assert!(
             volume_support(&collider, Vector3::new(101.6, 100.0, 12.0), 0.5, 1.5, 0.6).is_none()
         );
+    }
+
+    /// Both resident scenery and entity queries must preserve stair admission through scaling.
+    #[test]
+    fn volume_step_and_recovery_require_full_top_clearance() {
+        let chest_radius = crate::spatial::differential_fixtures::PATHWARDEN_CHEST_RADIUS;
+        for scale in [0.5, 1.0, 2.0] {
+            let radius = 0.48 * scale;
+            let origin = Vector3::new(100.0, 100.0, 10.0);
+            let center = origin + Vector3::new(0.58, 0.0, 0.48) * scale;
+            let shapes = [
+                ball_collider(Vector3::new(0.0, 0.0, chest_radius), chest_radius, scale),
+                cylinder_collider(Vector3::zero(), chest_radius, 2.0 * chest_radius, scale),
+            ];
+            for collider in shapes {
+                let prepared = PreparedStaticSupport::new(&collider);
+                // The 0.636m authored top exceeds the human's 0.6m budget. The
+                // curved ball flank is reachable but must not bypass that admission.
+                for (height, admitted) in [(0.6, false), (0.7, true)] {
+                    for probe in [
+                        SupportProbe::Stair {
+                            height: height * scale,
+                        },
+                        SupportProbe::Standing {
+                            maximum_rise: height * scale,
+                        },
+                    ] {
+                        let mut direct = Vec::new();
+                        visit_placed_shape_supports(&collider, center, radius, probe, &mut |s| {
+                            direct.push(s);
+                        });
+                        let mut resident = Vec::new();
+                        prepared.visit(center, radius, probe, &mut |s| resident.push(s));
+                        assert_eq!(direct.len(), usize::from(admitted), "{probe:?}, {scale}");
+                        assert_eq!(resident.len(), direct.len());
+                        if let (Some(direct), Some(resident)) = (direct.first(), resident.first()) {
+                            assert_eq!(resident.height_delta, direct.height_delta);
+                            assert_eq!(resident.normal, direct.normal);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// A high sphere's walkable flank remains support even if its full top is out of reach.
+    #[test]
+    fn standing_on_a_ball_does_not_require_mounting_its_full_top_again() {
+        let collider = ball_collider(Vector3::zero(), 2.0, 1.0);
+        let radius = 0.48;
+        let x = 1.8;
+        let rest_z = 10.0 + ((2.0_f32 + radius).powi(2) - x * x).sqrt();
+        let prepared = PreparedStaticSupport::new(&collider);
+        for drop in [0.0, CONTACT_EPSILON, 0.25] {
+            let center = Vector3::new(100.0 + x, 100.0, rest_z + drop);
+            let mut supports = Vec::new();
+            prepared.visit(
+                center,
+                radius,
+                if drop > CONTACT_EPSILON {
+                    SupportProbe::Column {
+                        maximum_drop: drop,
+                        maximum_rise: 0.0,
+                    }
+                } else {
+                    SupportProbe::Standing { maximum_rise: 0.6 }
+                },
+                &mut |support| supports.push(support),
+            );
+            assert_eq!(supports.len(), 1);
+            assert!(supports[0].normal.z > crate::RETAIL_WALKABLE_NORMAL_Z);
+            assert!((supports[0].height_delta + drop).abs() < CONTACT_EPSILON);
+        }
     }
 }
 

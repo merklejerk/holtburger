@@ -27,6 +27,10 @@ use super::grounded_types::{
     RETAIL_AIRBORNE_STEP_DOWN_HEIGHT, RETAIL_LANDING_NORMAL_Z, RETAIL_WALKABLE_NORMAL_Z,
 };
 
+/// Authored collision-sphere radius and center Z of setup 0x0200007C (WCID 33609).
+/// Preserve the exact f32 encoding decoded from the client archive (approximately 0.318m).
+pub(crate) const PATHWARDEN_CHEST_RADIUS: f32 = f32::from_bits(0x3ea2_d0e5);
+
 /// The retail-default grounded config used by the human-pair differential scenarios.
 pub(crate) fn retail_creature_config() -> GroundedConfig {
     GroundedConfig {

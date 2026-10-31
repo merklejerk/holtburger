@@ -37,7 +37,8 @@ pub struct GroundedConfig {
     /// Step-down reach used by the lenient landing probe of a body without walkable support.
     pub airborne_step_down_height: f32,
     /// Authored step-search amount, excluding ordinary travel. Finite BSP faces apply retail's
-    /// interpolation bound, which can admit a correction greater than this amount.
+    /// interpolation bound, which can admit a correction greater than this amount. Setup volumes
+    /// require clearance over their full top before a step or upward standing recovery.
     pub step_up_height: f32,
     /// Maximum vertical distance used to retain or acquire support after movement.
     pub step_down_height: f32,

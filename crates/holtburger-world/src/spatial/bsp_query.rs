@@ -267,6 +267,12 @@ pub(super) enum SupportProbe {
         /// Maximum ascent from the queried sphere center.
         maximum_rise: f32,
     },
+    /// Standing confirmation or recovery; upward volume acquisition obeys retail step admission.
+    Standing {
+        /// Maximum recovery above the queried sphere center; tangent and descending support
+        /// do not require clearance over the volume's full top.
+        maximum_rise: f32,
+    },
     /// A stair correction measured from the attempted, uncorrected sphere center.
     Stair {
         /// Authored step height, before shape-specific polygon interpolation.
@@ -275,15 +281,33 @@ pub(super) enum SupportProbe {
 }
 
 impl SupportProbe {
-    /// Volume footing retains its bounded vertical-column admission. Polygon interpolation
-    /// is deliberately confined to the finite polygon test below.
+    /// Vertical search bounds; shape-specific admission remains separate from this envelope.
     pub(super) fn column_limits(self) -> (f32, f32) {
         match self {
             Self::Column {
                 maximum_drop,
                 maximum_rise,
             } => (maximum_drop, maximum_rise),
+            Self::Standing { maximum_rise } => (CONTACT_EPSILON, maximum_rise),
             Self::Stair { height } => (0.0, height),
+        }
+    }
+
+    /// Retail rejects volume steps that cannot clear the full top, even when a ball's
+    /// curved flank is reachable (`CSphere::step_sphere_up`, acclient.c:344201-344244;
+    /// `CCylSphere::step_sphere_up`, acclient.c:347045-347077). Standing recovery uses
+    /// the same gate only for upward acquisition, preserving existing support and landings.
+    pub(super) fn admits_volume(self, height_delta: f32, top_delta: f32) -> bool {
+        let (drop, rise) = self.column_limits();
+        if height_delta < -drop - CONTACT_EPSILON || height_delta > rise + CONTACT_EPSILON {
+            return false;
+        }
+        match self {
+            Self::Stair { height } => top_delta <= height,
+            Self::Standing { maximum_rise } if height_delta > CONTACT_EPSILON => {
+                top_delta <= maximum_rise
+            }
+            Self::Column { .. } | Self::Standing { .. } => true,
         }
     }
 
@@ -304,14 +328,14 @@ impl SupportProbe {
         // Preserve ordinary footing's operation order; the stair branch follows retail's
         // signed plane-distance arithmetic, independently checked by the reference harness.
         let height_delta = match self {
-            Self::Column { .. } => (radius - projection - plane_d) / normal.z,
+            Self::Column { .. } | Self::Standing { .. } => {
+                (radius - projection - plane_d) / normal.z
+            }
             Self::Stair { .. } => (radius - plane_distance) / normal.z,
         };
         match self {
-            Self::Column {
-                maximum_drop,
-                maximum_rise,
-            } => {
+            Self::Column { .. } | Self::Standing { .. } => {
+                let (maximum_drop, maximum_rise) = self.column_limits();
                 if height_delta < -maximum_drop - CONTACT_EPSILON
                     || height_delta > maximum_rise + CONTACT_EPSILON
                 {

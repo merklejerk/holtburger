@@ -6,6 +6,7 @@ import type { ScenePlacement } from "../scene";
 import {
 	isInteractableMapCategory,
 	type DynamicEntityMapBlipCategory,
+	type MapLandmarkCategory,
 } from "./map-blip-category";
 import {
 	mapHeadingFromSceneTransform,
@@ -63,6 +64,14 @@ export interface MapBlip {
 				readonly heightOffsetMeters: number;
 		  }
 		| {
+				/** Hand icon for the entity list's public useable category. */
+				readonly category: "useable";
+		  }
+		| {
+				/** Coffin icon for a public corpse matching the local character name. */
+				readonly category: "own-corpse";
+		  }
+		| {
 				/** Uniform app-owned marker replacing category appearance for enabled alert matches. */
 				readonly category: "alert";
 		  };
@@ -72,9 +81,9 @@ export interface MapBlip {
  * Select and place the blips for one map frame.
  *
  * Retail drew only objects whose `ShowableOnRadar` was one of the three show values, then applied
- * a fixed radius. Ordinary objects retain those visibility semantics; doors and switches
- * are explicit landmarks. Enabled local alert matches replace ordinary markers and bypass
- * radar visibility. All markers use the current map extent:
+ * a fixed radius. Ordinary objects retain those visibility semantics. Doors, switches, and
+ * mode-owned useables and local corpses are explicit landmarks. Enabled local alert matches
+ * replace ordinary markers and bypass radar visibility. All markers use the current map extent:
  *
  * RETAIL DIVERGENCE: retail limited blips to `CPlayerSystem::GetRadarRadius`, a flat 75 m outdoors
  * and 25 m indoors (acclient.c:378719-378725), tested as a horizontal distance compare
@@ -89,12 +98,14 @@ export function selectMapBlips(
 	projection: ProjectedMapView,
 	controlledEntityGuid: number | null,
 	alertGuids: ReadonlySet<number>,
+	landmarkCategory?: (guid: number) => MapLandmarkCategory | null,
 ): readonly MapBlip[] {
 	const { view, worldToClip } = projection;
 	const blips: MapBlip[] = [];
 	for (const { view: entity, placement, sidewaysSpan } of entities) {
 		const controlled = entity.identity.guid === controlledEntityGuid;
 		const alert = !controlled && alertGuids.has(entity.identity.guid);
+		const landmark = landmarkCategory?.(entity.identity.guid) ?? null;
 		const behavior = entity.presentation.radar.behavior;
 		const interactable = isInteractableMapCategory(
 			entity.presentation.radar.category,
@@ -107,12 +118,14 @@ export function selectMapBlips(
 		// 43,913-template catalog census found every defined value 0..4 in shipped content.
 		// RETAIL DIVERGENCE: InqShowableOnRadar applies authored visibility
 		// (acclient.c:417954-417970); enabled local alerts instead expose every realized match.
-		// Restoring that predicate would suppress user-requested alerts for ShowNever/unset
-		// entities. The affected population is the current local rule match set, with no authored
-		// content changes; map drawing cannot affect server content.
+		// Mode-owned useables and name-matched local corpses also bypass radar visibility.
+		// Restoring that predicate would suppress user-requested markers for ShowNever/unset
+		// entities. The affected population is the current local rule match and landmark set,
+		// with no authored content changes; map drawing cannot affect server content.
 		if (
 			!controlled &&
 			!alert &&
+			landmark === null &&
 			!interactable &&
 			behavior !== "ShowMovement" &&
 			behavior !== "ShowAttacking" &&
@@ -129,7 +142,8 @@ export function selectMapBlips(
 		if (
 			!controlled &&
 			!alert &&
-			(entity.physics.hidden || (interactable && entity.physics.noDraw))
+			(entity.physics.hidden ||
+				((interactable || landmark !== null) && entity.physics.noDraw))
 		)
 			continue;
 		const origin = createLandblockWorldOrigin(placement.landblockId);
@@ -144,6 +158,7 @@ export function selectMapBlips(
 		if (
 			!controlled &&
 			!alert &&
+			landmark === null &&
 			(category === "door" || category === "door-no-direct-use") &&
 			sidewaysSpan !== null &&
 			sidewaysSpan.maxX > sidewaysSpan.minX
@@ -186,11 +201,13 @@ export function selectMapBlips(
 					}
 				: alert
 					? { category: "alert" }
-					: {
-							category: entity.presentation.radar.category,
-							heightOffsetMeters:
-								placement.localTransform.m42 - view.anchor.worldY,
-						},
+					: landmark !== null
+						? { category: landmark }
+						: {
+								category: entity.presentation.radar.category,
+								heightOffsetMeters:
+									placement.localTransform.m42 - view.anchor.worldY,
+							},
 			clipX,
 			clipY,
 			guid: entity.identity.guid,

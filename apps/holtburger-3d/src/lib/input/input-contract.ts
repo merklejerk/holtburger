@@ -90,6 +90,7 @@ export type ClientPanelShortcut =
 /** Client commands whose bindings are resolved by their active UI owner. */
 export const CLIENT_SHORTCUT_ACTIONS = [
 	...CLIENT_PANEL_SHORTCUT_ACTIONS,
+	"toggleNearby",
 	"selectSelf",
 	"nextInteractable",
 	"previousInteractable",

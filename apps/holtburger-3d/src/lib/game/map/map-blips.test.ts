@@ -87,6 +87,41 @@ function blips(
 }
 
 describe("selectMapBlips", () => {
+	it.each(["useable", "own-corpse"] as const)(
+		"admits %s landmarks with distinct icons while respecting physics visibility",
+		(category) => {
+			const select = (
+				entities: MapEntity[],
+				controlled: number | null,
+				alerts: ReadonlySet<number>,
+			) =>
+				selectMapBlips(
+					entities,
+					projectMapView(view(), 256, 256),
+					controlled,
+					alerts,
+					() => category,
+				);
+			expect(
+				select([entity({ behavior: "ShowNever" })], null, new Set())[0],
+			).toMatchObject({ span: null, appearance: { category } });
+			expect(select([entity({ hidden: true })], null, new Set())).toEqual([]);
+			expect(select([entity({ noDraw: true })], null, new Set())).toEqual([]);
+			expect(
+				select(
+					[entity({ localX: OUTDOOR_LANDBLOCK_WORLD_SIZE * 2 })],
+					null,
+					new Set(),
+				),
+			).toEqual([]);
+			expect(select([entity()], 1, new Set([1]))[0]?.appearance.category).toBe(
+				"controlled",
+			);
+			expect(
+				select([entity()], null, new Set([1]))[0]?.appearance.category,
+			).toBe("alert");
+		},
+	);
 	it.each([
 		"mob",
 		"npc",

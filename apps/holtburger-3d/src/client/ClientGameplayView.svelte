@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { presentClientBinding } from "./client-binding-catalog";
 	import { ClientCombineCells } from "./client-combine-cells";
 	import type {
 		ClientChatSuppressionSettings,
@@ -748,6 +749,13 @@
 		height: window.innerHeight,
 	};
 	let nearbyOpen = $state(false);
+	const nearbyShortcut = $derived(
+		presentClientBinding(
+			input,
+			{ kind: "client", action: "toggleNearby" },
+			displayPlatform,
+		),
+	);
 	let activePanel = $state<ClientSystemPanel | null>(null);
 	/** Salvage entry opens inventory through the same single-open-panel owner as the dock. */
 	export function showInventory(): void {
@@ -761,6 +769,11 @@
 	export function handleSystemPanelKeydown(event: KeyboardEvent): boolean {
 		if (event.defaultPrevented || event.isComposing || hudMode !== "runtime")
 			return false;
+		if (nearby !== null && clientInput.shortcut("toggleNearby", event)) {
+			event.preventDefault();
+			if (!event.repeat) nearbyOpen = !nearbyOpen;
+			return true;
+		}
 		const action = CLIENT_PANEL_SHORTCUT_ACTIONS.find((action) =>
 			clientInput.shortcut(action, event),
 		);
@@ -1172,7 +1185,7 @@
 					class="ui-button ui-icon-button ui-minimap-button"
 					type="button"
 					aria-label="Nearby entities and alerts"
-					title="Nearby entities and alerts"
+					title={`Nearby entities and alerts (${nearbyShortcut.description})`}
 					aria-pressed={nearbyOpen}
 					disabled={nearby === null}
 					onclick={() => (nearbyOpen = !nearbyOpen)}

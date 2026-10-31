@@ -57,6 +57,7 @@ const keyboardSettingsBaseSchema = z
 					toggleWorld: INPUT_DEFAULTS.client.toggleWorld,
 					toggleJournal: INPUT_DEFAULTS.client.toggleJournal,
 					toggleSettings: INPUT_DEFAULTS.client.toggleSettings,
+					toggleNearby: INPUT_DEFAULTS.client.toggleNearby,
 
 					nextHostile: INPUT_DEFAULTS.client.nextHostile,
 					previousHostile: INPUT_DEFAULTS.client.previousHostile,

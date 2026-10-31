@@ -343,7 +343,7 @@
 
 <section class="settings-panel ui-body" aria-label="Client settings">
 	<div
-		class="settings-scroll"
+		class="ui-tabbed-panel"
 		inert={bindingDialog !== null}
 		use:keyboard.scope={{
 			nativeControls: true,
@@ -360,7 +360,6 @@
 			id="settings-section-gameplay"
 			labelledBy="settings-tab-gameplay"
 			active={selectedTab === "gameplay"}
-			scroll={false}
 		>
 			<div class="settings-section">
 				<details class="ui-disclosure ui-disclosure-section" open>
@@ -415,35 +414,34 @@
 				/>
 			</div>
 		</UiTabPanel>
-		{#if selectedTab === "graphics"}
-			<div
-				role="tabpanel"
-				id="settings-section-graphics"
-				aria-labelledby="settings-tab-graphics"
-				class="settings-section"
-			>
+		<UiTabPanel
+			id="settings-section-graphics"
+			labelledBy="settings-tab-graphics"
+			active={selectedTab === "graphics"}
+		>
+			<div class="settings-section">
 				<ClientGraphicsSettingsControls
 					{graphics}
 					{textureFilteringCapabilities}
 					{onGraphicsChange}
 				/>
 			</div>
-		{:else if selectedTab === "audio"}
-			<div
-				role="tabpanel"
-				id="settings-section-audio"
-				aria-labelledby="settings-tab-audio"
-				class="settings-section"
-			>
+		</UiTabPanel>
+		<UiTabPanel
+			id="settings-section-audio"
+			labelledBy="settings-tab-audio"
+			active={selectedTab === "audio"}
+		>
+			<div class="settings-section">
 				<ClientAudioSettingsControls {audio} {onAudioChange} />
 			</div>
-		{:else if selectedTab === "ui"}
-			<div
-				role="tabpanel"
-				id="settings-section-ui"
-				aria-labelledby="settings-tab-ui"
-				class="settings-section"
-			>
+		</UiTabPanel>
+		<UiTabPanel
+			id="settings-section-ui"
+			labelledBy="settings-tab-ui"
+			active={selectedTab === "ui"}
+		>
+			<div class="settings-section">
 				<details class="ui-disclosure ui-disclosure-section" open>
 					<summary>Display</summary>
 					<div class="settings-section ui-disclosure-body">
@@ -541,25 +539,16 @@
 							disabled={!canResetHudPlacements}
 							onclick={onResetHudPlacements}>Reset HUD placements</button
 						>
-						<p class="ui-muted">
-							Repositions windows and this character’s action bars without
-							clearing their contents.
-						</p>
 					</div>
 				</details>
 			</div>
-		{:else if selectedTab === "input"}
-			<div
-				role="tabpanel"
-				id="settings-section-input"
-				aria-labelledby="settings-tab-input"
-				class="settings-section"
-			>
-				<p class="ui-muted">
-					Use the plus icon to add a key or chord; the circular arrow restores
-					an action's defaults. Escape cancels capture. An action can have
-					multiple keys.
-				</p>
+		</UiTabPanel>
+		<UiTabPanel
+			id="settings-section-input"
+			labelledBy="settings-tab-input"
+			active={selectedTab === "input"}
+		>
+			<div class="settings-section">
 				<button
 					type="button"
 					class="ui-button"
@@ -581,10 +570,6 @@
 									})}
 							/>Only select targets in view</label
 						>
-						<p class="ui-muted">
-							Applies to Select next target and Select previous target.
-							Hostile-only cycling remains limited to targets in view.
-						</p>
 					</div>
 				</details>
 				<details class="ui-disclosure ui-disclosure-section" open>
@@ -686,11 +671,6 @@
 									>
 								</select>
 							</label>
-							<p class="ui-muted">
-								Hold this while activating an action cell to use its alternate
-								effect, such as equipping the other side or using an item on the
-								selected target.
-							</p>
 						{/if}
 						{#each group.rows as row (row.id)}
 							<div class="binding-row">
@@ -736,7 +716,7 @@
 					</details>
 				{/each}
 			</div>
-		{/if}
+		</UiTabPanel>
 	</div>
 	{#if bindingDialog !== null}
 		<ClientBindingDialog
@@ -761,11 +741,6 @@
 			position: relative;
 			height: 100%;
 			overflow: hidden;
-		}
-		.settings-scroll {
-			box-sizing: border-box;
-			height: 100%;
-			overflow: auto;
 		}
 		.binding-group {
 			display: block;

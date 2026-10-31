@@ -1,4 +1,5 @@
 import { UI_THEME_CHANGED_EVENT } from "../../app/ui-theme";
+import corpseSvg from "../../assets/icons/minimap-own-corpse.svg?raw";
 import type { RenderSceneInterestController } from "../../lib/game/runtime/render-scene-interest-controller";
 import { nearbySceneInterest } from "../../client/client-nearby.test-support";
 import { tick } from "svelte";
@@ -14,6 +15,8 @@ import type { MapWaypointTarget } from "../../lib/game/map/map-waypoint";
 
 /** Production HUD, session delivery, selection, chat and real canvas; no visual acceptance. */
 export async function probeClientNearby(dependencies: {
+	/** Hide authored radar markers and return the current fixture character name. */
+	readonly prepareMinimapLandmarks: () => string;
 	readonly owner: ClientNearby;
 	readonly scene: RenderSceneInterestController;
 	readonly baseline: () => void;
@@ -692,11 +695,85 @@ export async function probeClientNearby(dependencies: {
 	await click('[aria-label="Interact with chat history"]');
 	require(document.querySelector('.entity-chat-tag[role="button"]') ===
 		null, "ending history interaction restores click-through text");
+	const playerName = dependencies.prepareMinimapLandmarks();
+	owner.changeRules(1, []);
+	emit("client-entity-facts-changed", {
+		projectileSupply: null,
+		salvage: null,
+		worldContainer: null,
+		removed: [],
+		upserts: [
+			{
+				...nearbyFacts(7, "Lever"),
+				nearby: { ...npc.nearby, name: "Lever", category: "useable" },
+			},
+			{
+				...nearbyFacts(8, `Corpse of ${playerName}`),
+				nearby: {
+					...npc.nearby,
+					name: `Corpse of ${playerName}`,
+					category: "corpse",
+				},
+			},
+		],
+	});
+	const stroke = context.stroke;
+	const originalStroke = context.stroke.bind(context);
+	const iconPaths = new Set<Path2D>();
+	const filledIconPaths = new Set<Path2D>();
+	const detailColor = new DOMParser()
+		.parseFromString(corpseSvg, "image/svg+xml")
+		.querySelector("path[fill]")
+		?.getAttribute("fill");
+	require(detailColor != null, "coffin asset supplies an explicit cross color");
+	const detailPaths = new Set<Path2D>();
+	let iconStrokes = 0;
+	const iconStrokeCount = () => iconStrokes;
+	context.clearRect = function (x, y, width, height) {
+		iconPaths.clear();
+		filledIconPaths.clear();
+		detailPaths.clear();
+		iconStrokes = 0;
+		clear.call(this, x, y, width, height);
+	};
+	context.stroke = function (path?: Path2D) {
+		if (path !== undefined) {
+			iconPaths.add(path);
+			iconStrokes++;
+			originalStroke(path);
+		} else originalStroke();
+	};
+	context.fill = function (
+		path?: Path2D | CanvasFillRule,
+		rule?: CanvasFillRule,
+	) {
+		if (path instanceof Path2D) {
+			filledIconPaths.add(path);
+			if (String(this.fillStyle) === detailColor) detailPaths.add(path);
+			originalFill(path, rule);
+		} else originalFill(path);
+	};
+	try {
+		await settle();
+		require(iconPaths.size === 2 &&
+			filledIconPaths.size === 3 &&
+			detailPaths.size === 1 &&
+			[...iconPaths].every((path) => filledIconPaths.has(path)) &&
+			iconStrokeCount() ===
+				2, "radar-hidden useable and own corpse draw distinct filled SVG icons with dark halos");
+		require(examineRequests().length ===
+			1, "landmark admission does not request inspection");
+	} finally {
+		context.stroke = stroke;
+		context.fill = fill;
+		context.clearRect = clear;
+	}
 	return {
 		passed: true,
 		entities: facts.length,
 		tracked: owner.trackedGuids().size,
 		checks: [
+			"useable-and-own-corpse-canvas-icons",
 			"chat-entity-selection",
 			"chat-entity-drag-protection",
 			"chat-entity-unavailable-toast",

@@ -76,10 +76,6 @@
 						})}
 				/>
 			</label>
-			<p class="ui-muted">
-				Scales client text. Icon labels, map labels, nameplates, and combat text
-				keep their own sizes.
-			</p>
 			<label
 				>Icon scaling: {Math.round(ui.iconScale * 100)}%
 				<UiRange
@@ -95,10 +91,6 @@
 						})}
 				/>
 			</label>
-			<p class="ui-muted">
-				Scales UI artwork, cells, and their badges. Inline symbols follow text;
-				world markers keep their own sizes.
-			</p>
 		</div>
 	</details>
 </div>

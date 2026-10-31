@@ -15,8 +15,12 @@ export const DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES = [
 export type DynamicEntityMapBlipCategory =
 	(typeof DYNAMIC_ENTITY_MAP_BLIP_CATEGORIES)[number];
 
-/** Complete frontend marker vocabulary, including the locally controlled directional marker. */
-export type MapBlipCategory = DynamicEntityMapBlipCategory | "controlled";
+/** App-owned landmarks admitted independently of authored radar visibility. */
+export type MapLandmarkCategory = "useable" | "own-corpse";
+
+/** Frontend palette vocabulary includes local landmarks and the controlled directional marker. */
+export type MapBlipCategory =
+	DynamicEntityMapBlipCategory | MapLandmarkCategory | "controlled";
 
 /** Interactable symbols override retail radar visibility but still respect hidden physics. */
 export function isInteractableMapCategory(

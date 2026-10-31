@@ -86,6 +86,12 @@ export const CLIENT_UI_DEFAULTS = {
 		size: { width: 360, height: 420 },
 		minSize: { width: 280, height: 260 },
 	},
+	barber: {
+		anchor: "top-left",
+		offset: { x: 370, y: 170 },
+		size: { width: 380, height: 440 },
+		minSize: { width: 300, height: 260 },
+	},
 	vendor: {
 		anchor: "top-left",
 		offset: { x: 370, y: 170 },

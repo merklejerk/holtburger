@@ -39,6 +39,7 @@ async function fixture() {
 		partner_side: { guid: PARTNER, accepted: false, items: [] },
 	};
 	const baseline: ClientCurrentState = {
+		barber: { interaction: null, result: null, particles: null },
 		lifecycle: { kind: "in-world" },
 		characterManagement: { kind: "idle" },
 		playerVisualCapture: null,

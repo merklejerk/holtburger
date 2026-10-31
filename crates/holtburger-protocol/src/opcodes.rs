@@ -385,8 +385,8 @@ pub enum GameActionOpcode {
     // QueryPluginListResponse = 0x02AF,
     // /// C2S: Response to an admin plugin detail query.
     // QueryPluginResponse = 0x02B2,
-    // /// C2S: Finalize character changes in a barber session.
-    // FinishBarber = 0x0311,
+    /// C2S: Finalize character changes in a barber session.
+    FinishBarber = 0x0311,
     /// C2S: Change state (e.g. sit, stand).
     MoveToState = 0xF61C,
     /// C2S: Perform a jump.
@@ -824,9 +824,8 @@ pub enum GameEventOpcode {
     /// S2C: Updates specific contract tracker progress data.
     SendClientContractTracker = 0x0315,
     // --- Miscellaneous ---
-    // /// S2C: Opens the character barber (customization) UI.
-    // StartBarber = 0x0075,
-
+    /// S2C: Opens the character barber (customization) UI.
+    StartBarber = 0x0075,
     // --- Unused ---
     // /// This is a "ghost" opcode—defined in headers but not implemented or used in ACE.
     // ItemAppraiseDone = 0x01CB,

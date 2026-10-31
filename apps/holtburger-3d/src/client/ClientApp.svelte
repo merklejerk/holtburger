@@ -64,6 +64,7 @@
 	} from "./client-combat-bar-state";
 	import { SpellReferences } from "../app/spell-references";
 	import { ClientSpellState, type ClientSpellServices } from "./client-spells";
+	import { ClientBarberState } from "./client-barber-state";
 	import { ClientTradeState } from "./client-trade-state";
 	import { ClientItemInteractions } from "./client-item-interactions";
 	import { ClientLocksState } from "./client-locks-state";
@@ -499,6 +500,7 @@
 	let party = $state<ClientPartyState | null>(null);
 	let partyHudPresent = $state(false);
 	let housing = $state<HousingSnapshot>(emptyHousing());
+	let barber = $state<ClientBarberState | null>(null);
 	let trade = $state<ClientTradeState | null>(null);
 	let worldContainer = $state<ClientWorldContainerPanelState | null>(null);
 	let hostTransport = $state<HostTransport | null>(null);
@@ -1820,6 +1822,8 @@
 					presentation.setCombatEffectsAppearance(combatAppearance);
 				ownedGameplay = presentation;
 				gameplayPresentation = presentation;
+				// One readiness event closes recovery-before-driver races; draft events do not own the root.
+				untrack(() => barber?.refreshPresentation());
 				cameraController = presentation.camera;
 				presentation.setSelectedEntityGuid(untrack(() => selectedEntityGuid));
 				presentation.setHoveredEntityGuid(
@@ -2123,6 +2127,19 @@
 			(message) => toastCenter.publish({ message, tone: "status" }),
 		);
 		party = partyOwner;
+		const barberOwner = new ClientBarberState(
+			owner,
+			async (preview) => {
+				if (gameplayPresentation === null) {
+					if (preview !== null)
+						throw new Error("Gameplay presentation is unavailable.");
+					return;
+				}
+				await gameplayPresentation.setBarberPreview(preview);
+			},
+			appendChatError,
+		);
+		barber = barberOwner;
 		const tradeOwner = new ClientTradeState(owner, icons, appendChatError);
 		trade = tradeOwner;
 		const spellReferences = new SpellReferences(transport);
@@ -2283,6 +2300,7 @@
 			});
 			retirement.add("object-previews", () => objectPreviewService.destroy());
 			// Include synchronous controller cleanup in the same retained failure outcome.
+			retirement.add("barber-editor", () => barberOwner.destroy());
 			retirement.add("client-controllers", () => {
 				spellState.destroy();
 				retireCombatEscapeContext();
@@ -2299,6 +2317,7 @@
 				salvage = null;
 				inventoryOwner.destroy();
 				containerOwner.destroy();
+				barber = null;
 				tradeOwner.destroy();
 				trade = null;
 				vendorOwner.destroy();
@@ -2541,6 +2560,7 @@
 			{worldContainer}
 			{vendor}
 			{houseCrystal}
+			{barber}
 			{trade}
 			{itemInteractions}
 			{objectInspection}

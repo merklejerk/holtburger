@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { probeBarber } from "./client-barber-probe.mjs";
 import { extractContentArguments } from "./entry-paths.mjs";
 import { probeCombatBar } from "./client-combat-bar-probe.mjs";
 import { probeSalvage } from "./client-salvage-probe.mjs";
@@ -307,6 +308,12 @@ try {
 		report = {
 			suite: "client-binding-controls",
 			...result.clientBindingControls,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientBarber) {
+		report = {
+			suite: "client-barber",
+			...result.clientBarber,
 			consoleMessages: result.consoleMessages,
 		};
 	} else if (options.clientBindings) {
@@ -690,6 +697,7 @@ function parseArgs(args) {
 		clientFriends: false,
 		clientContracts: false,
 		clientSelectedActions: false,
+		clientBarber: false,
 		clientBindings: false,
 		clientMouseMovement: false,
 		clientBindingControls: false,
@@ -957,6 +965,10 @@ function parseArgs(args) {
 			case "--client-mouse-movement":
 				parsed.clientHud = true;
 				parsed.clientMouseMovement = true;
+				break;
+			case "--client-barber":
+				parsed.clientHud = true;
+				parsed.clientBarber = true;
 				break;
 			case "--client-bindings":
 				parsed.clientHud = true;
@@ -2223,6 +2235,7 @@ Options:
   --client-settings-tabs Exercise Settings tab selection, focus, wrapping, and native traversal.
   --client-inspection   Exercise entity inspection windows, disclosed facts, and preview lifetimes.
   --client-binding-controls Verify indexed remapping, casts, and contextual vendor Examine.
+  --client-barber     Verify barber HUD previews, Apply, Cancel, and disabled styles.
   --client-bindings   Verify Settings remapping, shortcut hints, and feature dispatch.
   --client-selected-actions Exercise selected HUD action eligibility, dispatch, and menu dismissal.
   --client-precise-jump Verify phased aim feedback, cadence, stale progress, and first-success activation.
@@ -5159,6 +5172,12 @@ async function runClientHudHarness({ viteUrl }) {
 				state: { error: null, ready: true },
 			};
 		}
+		if (options.clientBarber)
+			return {
+				clientBarber: await probeBarber(client, evaluateExpression),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
 		if (options.clientBindings) {
 			return {
 				clientBindings: await evaluate(
@@ -5793,6 +5812,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 					"Dynamic appearance replacement did not preserve placement and change rendered geometry.",
 				);
 			appearanceReplacement = {
+				barberCycles: evidence.barberCycles,
 				opacityCycle: await Promise.all(
 					evidence.opacityCycle.map(async ({ dataUrl, ...sample }, index) => {
 						const path = `${options.screenshotPath}.opacity-${index}.png`;

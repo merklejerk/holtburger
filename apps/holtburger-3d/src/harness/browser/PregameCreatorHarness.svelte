@@ -640,7 +640,7 @@
 		const previous = root.querySelector('button[aria-label="Previous Eyes"]');
 		if (!(previous instanceof HTMLButtonElement))
 			throw new Error("Missing decrement control");
-		for (const row of root.querySelectorAll(".creation-appearance-variant")) {
+		for (const row of root.querySelectorAll(".ordinal-range")) {
 			const buttons = row.querySelectorAll("button");
 			const slider = row.querySelector('input[type="range"]');
 			const [left, right] = buttons;

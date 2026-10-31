@@ -434,6 +434,33 @@ Primary way clients send commands and interactions to the server.
 - **`0x0015` Talk:** Send chat or commands.
 - **`0x0036` Use:** Interact with world objects or items.
 
+### Barbershop appearance
+
+`StartBarber` is S2C game event `0xF7B0:0x0075`. `FinishBarber` is C2S action `0xF7B1:0x0311`. After their normal event/action headers, both carry the same **64-byte payload**, sixteen little-endian `uint32` words in this order:
+
+| Word | Meaning |
+| :--- | :--- |
+| 0 | Base palette DID |
+| 1 | Head GfxObj DID |
+| 2–3 | Hair current and original texture DIDs |
+| 4–5 | Eyes current and original texture DIDs |
+| 6–7 | Nose current and original texture DIDs |
+| 8–9 | Mouth current and original texture DIDs |
+| 10–12 | Skin, hair, and eye palette DIDs |
+| 13 | Setup DID |
+| 14 | Option 1: Empyrean earthbound flag; otherwise unused by ACE |
+| 15 | Option 2: reserved; retail sends zero |
+
+The current texture is the replacement; the original identifies the texture to replace. Zero head/texture values are legitimate for some nonhuman bodies. A client must interpret them against its existing heritage and sex rather than reject every zero or substitute human assets.
+
+Undead facial rows contain paired zombie/skeleton texture substitutions for the same eye, nose, or mouth choice. ACE's `PlayerFactory.cs` initializes these properties through `ACE.DatLoader/Entity/SexCG.cs`, whose facial getters always take substitution zero, including for skeleton setups. An opening can therefore contain the authored zombie pair on a skeleton body. Identify the logical face choice from either complete authored pair, then resolve the setup-specific pair for FinishBarber. Unknown or mixed current/original pairs must still fail; do not reset the choice to zero.
+
+There are no incremental editing messages, barber Cancel action, finish acknowledgment, NPC identity, distance limit, or expiry in this payload. ACE admits a finish only while its server-owned `BarberActive` flag is set, validates the complete assets against the existing heritage/sex, then clears the flag. Cancel is local UI retirement; it does not clear the server flag. Transport failure after reliable enqueue is ambiguous and must not trigger automatic resubmission.
+
+ACE broadcasts an ordinary ObjDesc after valid edits. Its full-object refresh is disabled because of movement desynchronization, so observer setup/motion synchronization has known limits. Empyrean local motion follows the private MotionTable property update. Retail crown/flame Apply also clears local particles and optionally plays a racial script; that is separate from the finish payload and temporary editing visuals.
+
+Sources: `ACE/Source/ACE.Server/Network/GameEvent/Events/GameEventStartBarber.cs`; `ACE/Source/ACE.Server/Network/GameAction/Actions/GameActionFinishBarber.cs`; `ACE/Source/ACE.Server/WorldObjects/Player_Character.cs`, `HandleActionFinishBarber`; retail `acclient-eor-source/acclient.c:260111–260334`, `gmBarberUI::HandleApply`, and `acclient.c:664607`, `CM_Character::Event_FinishBarber`. The protocol codec lives in `crates/holtburger-protocol/src/messages/character/barber.rs`.
+
 ### Combat Game Actions
 
 The combat stance toggle and targeted attack packets are sent as `0xF7B1` game actions with a 4-byte sequence, a 4-byte action opcode, then the action payload.

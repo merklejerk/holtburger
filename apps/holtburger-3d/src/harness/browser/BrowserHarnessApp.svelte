@@ -625,6 +625,7 @@
 		>;
 		/** Replace a synthetic entity's appearance without moving it or the camera. */
 		readonly probeSyntheticAppearanceReplacement: () => Promise<{
+			readonly barberCycles: number;
 			readonly beforeDataUrl: string;
 			readonly afterDataUrl: string;
 			readonly placementUnchanged: boolean;
@@ -2703,7 +2704,53 @@
 				"Merged opacity cycle did not change pixels and restore its original image.",
 			);
 		}
+		// Exercise the same scoped body API used by the barber against the live WebGL runtime.
+		const baselineEntities =
+			activeRuntime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount;
+		for (let cycle = 0; cycle < 3; cycle += 1) {
+			await activeRuntime.setDynamicPresentationOverride({
+				guid: current.identity.guid,
+				generation: current.generation,
+				body: {
+					setupDid: current.presentation.content.setupDid,
+					appearance: { ...current.presentation.appearance, paletteDid: 2 },
+				},
+				particles: null,
+			});
+			const latest = {
+				...current,
+				presentation: {
+					...current.presentation,
+					appearance: { ...current.presentation.appearance, paletteDid: 3 },
+				},
+			};
+			await activeRuntime.upsertDynamicEntity(latest);
+			if (
+				[...activeRuntime.listPresentedSpawnedEntities()][0]?.view.presentation
+					.appearance.paletteDid !== 2
+			)
+				throw new Error(
+					"Accepted server appearance replaced the local barber draft.",
+				);
+			await activeRuntime.setDynamicPresentationOverride(null);
+			if (
+				[...activeRuntime.listPresentedSpawnedEntities()][0]?.view.presentation
+					.appearance.paletteDid !== 3
+			)
+				throw new Error(
+					"Closing barber did not restore the latest authoritative appearance.",
+				);
+			if (
+				activeRuntime.getAuthoredDynamicRuntimeDiagnostics().dynamics
+					.entityCount !== baselineEntities
+			)
+				throw new Error("Barber cycle duplicated a live entity.");
+		}
+		await activeRuntime.upsertDynamicEntity(changed);
+		spawnedEntities = [changed];
+
 		return {
+			barberCycles: 3,
 			opacityCycle,
 			beforeDataUrl,
 			afterDataUrl,

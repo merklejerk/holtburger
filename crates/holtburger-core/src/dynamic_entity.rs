@@ -964,35 +964,40 @@ pub fn material_appearance_input(appearance: &EntityAppearance) -> MaterialAppea
         && appearance.texture_changes.is_empty()
         && appearance.part_changes.is_empty();
     MaterialAppearanceInput {
-        obj_desc: (!is_empty).then(|| ObjDesc {
-            palette_id: appearance.palette_did,
-            sub_palettes: appearance
-                .sub_palettes
-                .iter()
-                .map(|range| SubPalette {
-                    sub_id: range.palette_did,
-                    offset: range.offset,
-                    num_colors: range.color_count,
-                })
-                .collect(),
-            texture_changes: appearance
-                .texture_changes
-                .iter()
-                .map(|change| TextureMapChange {
-                    part_index: change.part_index,
-                    old_texture: change.old_texture_did,
-                    new_texture: change.new_texture_did,
-                })
-                .collect(),
-            anim_part_changes: appearance
-                .part_changes
-                .iter()
-                .map(|change| AnimationPartChange {
-                    part_index: change.part_index,
-                    part_id: change.gfx_obj_did,
-                })
-                .collect(),
-        }),
+        obj_desc: (!is_empty).then(|| entity_obj_desc(appearance)),
+    }
+}
+
+/// Lossless DAT-shaped substitutions for both material resolution and barber interpretation.
+pub(crate) fn entity_obj_desc(appearance: &EntityAppearance) -> ObjDesc {
+    ObjDesc {
+        palette_id: appearance.palette_did,
+        sub_palettes: appearance
+            .sub_palettes
+            .iter()
+            .map(|range| SubPalette {
+                sub_id: range.palette_did,
+                offset: range.offset,
+                num_colors: range.color_count,
+            })
+            .collect(),
+        texture_changes: appearance
+            .texture_changes
+            .iter()
+            .map(|change| TextureMapChange {
+                part_index: change.part_index,
+                old_texture: change.old_texture_did,
+                new_texture: change.new_texture_did,
+            })
+            .collect(),
+        anim_part_changes: appearance
+            .part_changes
+            .iter()
+            .map(|change| AnimationPartChange {
+                part_index: change.part_index,
+                part_id: change.gfx_obj_did,
+            })
+            .collect(),
     }
 }
 

@@ -87,6 +87,8 @@ impl<'de> Deserialize<'de> for HostCommand {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event", content = "payload", rename_all = "kebab-case")]
 pub enum HostEvent {
+    ClientBarberUpdated(holtburger_core::client::barber::BarberSnapshot),
+    ClientBarberPreview(holtburger_core::client::barber::BarberPreviewResult),
     ClientCharacterSheetUpdated(Option<Box<crate::client_projection::ClientCharacterSheetWire>>),
     ClientProgressionEvaluated {
         #[serde(rename = "requestId")]
@@ -596,6 +598,12 @@ impl ClientEventSink for StdioEventSink {
             },
             crate::client_projection::ClientHostEvent::TradeSnapshot(snapshot) => {
                 HostEvent::ClientTradeSnapshot(snapshot)
+            }
+            crate::client_projection::ClientHostEvent::BarberUpdated(snapshot) => {
+                HostEvent::ClientBarberUpdated(snapshot)
+            }
+            crate::client_projection::ClientHostEvent::BarberPreview(result) => {
+                HostEvent::ClientBarberPreview(result)
             }
             crate::client_projection::ClientHostEvent::VendorApproached(snapshot) => {
                 HostEvent::ClientVendorApproached(snapshot)

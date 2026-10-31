@@ -71,6 +71,8 @@ export interface ClientUiDefaults {
 	readonly inventory: Omit<ClientUiPanel, "resizable">;
 	/** Independent, server-confirmed external storage window. */
 	readonly worldContainer: Omit<ClientUiPanel, "resizable">;
+	/** Server-granted appearance editor. */
+	readonly barber: Omit<ClientUiPanel, "resizable">;
 	/** Vendor catalog, currencies, and combined trade draft. */
 	readonly vendor: Omit<ClientUiPanel, "resizable">;
 	/** Target-bound lock tools and sequential key attempts. */

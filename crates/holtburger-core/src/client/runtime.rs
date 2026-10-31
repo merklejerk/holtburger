@@ -327,6 +327,7 @@ impl ClientRuntime {
         #[cfg(feature = "runtime-fixture")] fixture_content_wait: Option<&mut Duration>,
     ) -> Result<()> {
         self.advance_equipment_change(now).await?;
+        self.poll_barber();
         self.advance_equipment_set(now).await?;
         self.advance_pack_exchange(now).await?;
         let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);

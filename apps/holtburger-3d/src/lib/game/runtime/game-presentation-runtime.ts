@@ -1,3 +1,5 @@
+import type { DynamicPresentationOverride } from "./dynamic-presentation-override";
+import { resolveObjectBehavior } from "../resolution/object-resident-classifier";
 import type { DistantAnimationSamplingPolicy } from "../../frontend-tuning-contract";
 import type { RuntimeLight } from "../environment/runtime-lights";
 import { completePresentationOperations } from "./presentation-teardown";
@@ -435,6 +437,8 @@ interface DynamicEntityPresentationRecord {
 	readonly behaviorGeneration: number;
 	readonly nodeId: SceneNodeId;
 	readonly ownerId: DynamicEntityOwnerId;
+	/** Particle selection installed with this body. */
+	particleKey: string | null;
 	/** Appearance currently committed to the retained root and part targets. */
 	visualKey: string;
 	/** Last world-owned absolute scale applied to the installed visual root. */
@@ -523,8 +527,12 @@ type DynamicEntityDeferral =
 
 /** Runtime-owned desired level and every derived fact consumed by realization decisions. */
 interface DesiredDynamicEntityRecord {
-	/** Latest mirror-accepted entity level. */
+	/** Latest mirror-accepted entity, retained independently of local presentation. */
+	authoritative: DynamicEntityView;
+	/** Effective visual level; world placement and simulation remain authoritative. */
 	entity: DynamicEntityView;
+	/** Scoped local level captured for asynchronous currentness. */
+	readonly override: DynamicPresentationOverride | null;
 	/** Exact immutable visual lookup identity. */
 	readonly visualKey: string;
 	/** Placement comparison identity computed once when this desired level is accepted. */
@@ -768,6 +776,16 @@ export class GamePresentationRuntime {
 	readonly #animationAssets: AnimationAssetRepository;
 	/** Narrow CPU preparation lifetime, borrowed from composition or owned by standalone builds. */
 	readonly #presentationAssets: PresentationAssetService;
+	/** One retained local racial closure per dynamic owner, replaced instead of accumulated. */
+	readonly #dynamicOverrideEffects = new Map<
+		DynamicOwnerId,
+		DynamicCueAssets
+	>();
+	#presentationOverride: DynamicPresentationOverride | null = null;
+	/** Equipment suppression follows the installed body, including while restoration loads. */
+	#bareBodySubject: { guid: number; generation: number } | null = null;
+	/** Local equipment suppression also gates emitters; NoDraw alone intentionally does not. */
+	readonly #suppressedEquipmentRoots = new Set<SceneNodeId>();
 	/** Latest desired current views are liveness tokens and late-readiness endpoints, not authority. */
 	readonly #spawnedDesiredEntities = new Map<
 		number,
@@ -1128,6 +1146,7 @@ export class GamePresentationRuntime {
 		const nodeId = sceneNodeIdOf(target.targetId);
 		const root = nodeId === null ? null : this.#dynamics.modelRootOf(nodeId);
 		return root !== null &&
+			!this.#suppressedEquipmentRoots.has(root) &&
 			this.#dynamics.canRenderParticles(root) &&
 			this.#selectedDynamicNodeIds.has(root)
 			? root
@@ -1806,6 +1825,76 @@ export class GamePresentationRuntime {
 		return this.#isDesiredVisualInstalled(record) ? "installed" : "deferred";
 	}
 
+	/** Replace a local appearance level without changing the authority mirror or object generation. */
+	async setDynamicPresentationOverride(
+		level: DynamicPresentationOverride | null,
+	): Promise<void> {
+		if (this.#destroyed)
+			throw new Error("Cannot override presentation after runtime shutdown.");
+		if (JSON.stringify(level) === JSON.stringify(this.#presentationOverride)) {
+			const desired =
+				level === null
+					? undefined
+					: this.#spawnedDesiredEntities.get(level.guid);
+			if (desired === undefined || this.#isDesiredVisualInstalled(desired))
+				return;
+		}
+		const previous = this.#presentationOverride;
+		this.#presentationOverride = level;
+		const guids = new Set([previous?.guid, level?.guid]);
+		for (const guid of guids) {
+			if (guid === undefined) continue;
+			const desired = this.#spawnedDesiredEntities.get(guid);
+			if (desired === undefined) continue;
+			const record = this.#acceptDesiredDynamicEntity(desired.authoritative);
+			await this.#realizeAcceptedDynamicEntity(record);
+		}
+	}
+
+	/** Derive local equipment visibility from attachment ownership, never from equipment commands. */
+	#withEquipmentVisibility(entity: DynamicEntityView): DynamicEntityView {
+		const subject = this.#bareBodySubject;
+		if (subject === null || entity.placement.kind !== "attached") return entity;
+		let parentGuid = entity.placement.parent;
+		const visited = new Set<number>();
+		while (!visited.has(parentGuid)) {
+			visited.add(parentGuid);
+			const parent = this.#spawnedDesiredEntities.get(parentGuid)?.entity;
+			if (parent === undefined) return entity;
+			if (
+				parentGuid === subject.guid &&
+				parent.generation === subject.generation
+			)
+				return { ...entity, physics: { ...entity.physics, noDraw: true } };
+			if (parent.placement.kind !== "attached") return entity;
+			parentGuid = parent.placement.parent;
+		}
+		throw new Error("Dynamic equipment attachment contains a cycle.");
+	}
+
+	/** Publish body and attachment visibility in the same synchronous commit turn. */
+	#commitBareBodyVisibility(record: DesiredDynamicEntityRecord): void {
+		const subject =
+			record.override?.body === null || record.override === null
+				? null
+				: {
+						guid: record.entity.identity.guid,
+						generation: record.entity.generation,
+					};
+		if (
+			subject === null &&
+			this.#bareBodySubject?.guid !== record.entity.identity.guid
+		)
+			return;
+		this.#bareBodySubject = subject;
+		for (const [guid, desired] of this.#spawnedDesiredEntities) {
+			if (desired.entity.placement.kind !== "attached") continue;
+			const installed = this.#spawnedPresentations.get(guid);
+			if (installed !== undefined)
+				this.#applySpawnedPresentationState(installed, desired.entity);
+		}
+	}
+
 	/** Installation receipts describe the requested appearance, not merely a live incarnation. */
 	#isDesiredVisualInstalled(record: DesiredDynamicEntityRecord): boolean {
 		const guid = record.entity.identity.guid;
@@ -2044,6 +2133,13 @@ export class GamePresentationRuntime {
 			tableHandle.release();
 		}
 		if (rootId === null) return null;
+		return this.#prepareDirectDynamicScript(rootId);
+	}
+
+	/** Shared closure preparation for table cues and explicit local racial scripts. */
+	async #prepareDirectDynamicScript(
+		rootId: DatAssetId,
+	): Promise<DynamicCueAssets> {
 		const closure = await this.#physicsScripts.acquireClosure(rootId);
 		const emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[] = [];
 		try {
@@ -2326,9 +2422,37 @@ export class GamePresentationRuntime {
 	#acceptDesiredDynamicEntity(
 		entity: DynamicEntityView,
 	): DesiredDynamicEntityRecord {
+		const authoritative = entity;
 		const guid = entity.identity.guid;
+		const level = this.#presentationOverride;
+		const override =
+			level?.guid === guid && level.generation === entity.generation
+				? level
+				: null;
+		if (override?.body !== undefined && override.body !== null)
+			entity = {
+				...entity,
+				presentation: {
+					...entity.presentation,
+					content: {
+						...entity.presentation.content,
+						setupDid: override.body.setupDid,
+					},
+					appearance: override.body.appearance,
+				},
+			};
 		const previous = this.#spawnedDesiredEntities.get(guid);
-		const visualKey = dynamicVisualKey(entity);
+		// Preserve the ordinary tick path's existing key work; only the locally overridden player
+		// needs additional visual/effect identity.
+		const acceptedVisualKey = dynamicVisualKey(entity);
+		const visualKey =
+			override === null
+				? acceptedVisualKey
+				: JSON.stringify([
+						acceptedVisualKey,
+						override.particles?.key ?? null,
+						override.body !== null,
+					]);
 		const placementIdentity = dynamicPlacementIdentity(entity);
 		if (
 			previous !== undefined &&
@@ -2351,6 +2475,7 @@ export class GamePresentationRuntime {
 			previous.visualKey === visualKey &&
 			!attachmentTopologyChanged
 		) {
+			previous.authoritative = authoritative;
 			previous.entity = entity;
 			previous.placementIdentity = placementIdentity;
 			return previous;
@@ -2364,6 +2489,8 @@ export class GamePresentationRuntime {
 			);
 		}
 		const record: DesiredDynamicEntityRecord = {
+			authoritative,
+			override,
 			deferral: null,
 			entity,
 			placementIdentity,
@@ -2752,38 +2879,96 @@ export class GamePresentationRuntime {
 		const stagingPlacement = this.#spawnedStagingPlacement(entity);
 		if (stagingPlacement === null) return;
 		const ownerId = dynamicEntityOwnerId(guid);
-		const source = adaptDynamicEntityPresentation(
-			entity,
+		let source = adaptDynamicEntityPresentation(
+			this.#withEquipmentVisibility(entity),
 			resolved,
 			stagingPlacement,
 		);
+		const particleLevel = record.override?.particles ?? null;
+		const particleKey = particleLevel?.key ?? null;
+		if (particleLevel !== null)
+			source = {
+				...source,
+				source: {
+					...source.source,
+					behavior: resolveObjectBehavior({
+						...source.source.behavior,
+						physicsScriptId:
+							particleLevel.script === null
+								? null
+								: datAssetId(particleLevel.script),
+					}),
+				},
+			};
 		record.scriptTableId = source.source.behavior.physicsScriptTableId;
 		this.#drainDynamicEntityCues(guid);
 		const live = this.#spawnedPresentations.get(guid);
 		if (live?.generation === entity.generation) {
-			const replacement = await this.#dynamics.stageVisualReplacement(
-				ownerId,
-				live.nodeId,
-				source.source,
-			);
-			if (replacement.kind === "staged") {
-				try {
-					if (
-						!this.#isDynamicRealizationEligible(record) ||
-						this.#spawnedPresentations.get(guid) !== live
-					)
-						return;
-					replacement.commit();
-					live.visualKey = record.visualKey;
-					live.bodyLayout = resolveHumanoidBodyLayout(
-						resolved.presentation.parts.length,
-						resolved.partParents,
-					);
-					this.#applyDynamicEntityState(live, record);
-				} finally {
-					replacement.release();
+			const particleChanged = live.particleKey !== particleKey;
+			const rootId = source.source.behavior.physicsScriptId;
+			const effect =
+				particleChanged && rootId !== null
+					? await this.#prepareDirectDynamicScript(rootId)
+					: null;
+			let transferred = false;
+			try {
+				if (!this.#isDynamicRealizationEligible(record)) return;
+				const replacement = await this.#dynamics.stageVisualReplacement(
+					ownerId,
+					live.nodeId,
+					source.source,
+				);
+				if (replacement.kind === "staged") {
+					try {
+						if (
+							!this.#isDynamicRealizationEligible(record) ||
+							this.#spawnedPresentations.get(guid) !== live
+						)
+							return;
+						replacement.commit();
+						if (particleChanged) {
+							// Drain already-due time-zero defaults before clearing, so an unadvanced default
+							// cannot resurrect the old crown/flame on the next frame.
+							this.#worldOwnedPhysicsScriptSystem.advance(
+								this.#lastFrameTimeSeconds,
+							);
+							this.#releaseDynamicOverrideEffect(live.ownerId);
+							this.#particles.destroy(
+								{
+									targetId: behaviorTargetId(live.nodeId),
+									generation: live.behaviorGeneration,
+								},
+								0,
+							);
+							if (effect !== null) {
+								this.#physicsScriptSystem.install(
+									live.ownerId,
+									{
+										targetId: behaviorTargetId(live.nodeId),
+										generation: live.behaviorGeneration,
+									},
+									effect.closure,
+									this.#lastFrameTimeSeconds,
+								);
+								this.#dynamicOverrideEffects.set(live.ownerId, effect);
+								transferred = true;
+							}
+							live.particleKey = particleKey;
+						}
+						this.#commitBareBodyVisibility(record);
+						live.visualKey = record.visualKey;
+						live.bodyLayout = resolveHumanoidBodyLayout(
+							resolved.presentation.parts.length,
+							resolved.partParents,
+						);
+						this.#applyDynamicEntityState(live, record);
+					} finally {
+						replacement.release();
+					}
+					return;
 				}
-				return;
+			} finally {
+				if (effect !== null && !transferred) releaseCueAssets(effect);
 			}
 		}
 		const activation = await this.#prepareDynamicOwner(
@@ -2817,6 +3002,7 @@ export class GamePresentationRuntime {
 				resolved.partParents,
 			),
 			behaviorGeneration: activation.generation,
+			particleKey,
 			generation: entity.generation,
 			hiddenCue: { hidden: false, phase: "idle", revision: 0 },
 			nodeId,
@@ -2830,6 +3016,7 @@ export class GamePresentationRuntime {
 			visualKey: record.visualKey,
 		};
 		this.#spawnedPresentations.set(guid, installed);
+		this.#commitBareBodyVisibility(record);
 		this.#drainDynamicEntityCues(guid);
 		if (entity.placement.kind === "attached") {
 			const parent = this.#spawnedPresentations.get(entity.placement.parent);
@@ -2903,6 +3090,11 @@ export class GamePresentationRuntime {
 		installed: DynamicEntityPresentationRecord,
 		entity: DynamicEntityView,
 	): void {
+		const effective = this.#withEquipmentVisibility(entity);
+		if (effective !== entity)
+			this.#suppressedEquipmentRoots.add(installed.nodeId);
+		else this.#suppressedEquipmentRoots.delete(installed.nodeId);
+		entity = effective;
 		if (installed.objectScale !== entity.presentation.objectScale) {
 			this.#dynamics.updateRootScale(
 				installed.nodeId,
@@ -4917,7 +5109,10 @@ export class GamePresentationRuntime {
 				committedScriptStage.commit();
 				installation.commit();
 				this.#releaseDynamicCueAssets(ownerId);
+				if (objectStateAuthority === "world")
+					this.#releaseDynamicOverrideEffect(ownerId);
 				for (const nodeId of previousTargets ?? []) {
+					this.#suppressedEquipmentRoots.delete(nodeId);
 					const targetId = behaviorTargetId(nodeId);
 					this.#localModelNodeOwners.delete(nodeId);
 					this.#particles.destroy({ generation: 0, targetId }, 0);
@@ -5041,6 +5236,7 @@ export class GamePresentationRuntime {
 		}
 		const steps: (() => void)[] = [];
 		for (const nodeId of roots) {
+			this.#suppressedEquipmentRoots.delete(nodeId);
 			const targetId = behaviorTargetId(nodeId);
 			this.#targetSoundTables.delete(targetId);
 			steps.push(() => this.#particles.destroy({ generation: 0, targetId }, 0));
@@ -5048,11 +5244,21 @@ export class GamePresentationRuntime {
 		completePresentationOperations([
 			...steps,
 			() => this.#releaseDynamicCueAssets(ownerId),
+			() => this.#releaseDynamicOverrideEffect(ownerId),
 			() => this.#animation.removeOwner(ownerId),
 			() => this.#physicsScriptSystem.removeOwner(ownerId),
 			() => this.#worldOwnedPhysicsScriptSystem.removeOwner(ownerId),
 			() => this.#dynamics.removeOwner(ownerId),
 		]);
+	}
+
+	/** The single local racial closure and its playback retire with the behavior owner. */
+	#releaseDynamicOverrideEffect(ownerId: DynamicOwnerId): void {
+		const assets = this.#dynamicOverrideEffects.get(ownerId);
+		if (assets === undefined) return;
+		this.#physicsScriptSystem.removeOwner(ownerId);
+		this.#dynamicOverrideEffects.delete(ownerId);
+		releaseCueAssets(assets);
 	}
 
 	/** Cue asset leases belong to the retired behavior owner, not its successor's incarnation ID. */

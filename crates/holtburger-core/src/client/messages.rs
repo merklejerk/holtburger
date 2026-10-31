@@ -113,6 +113,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn begin_world_entry_transition(&mut self) -> Result<()> {
+        self.reset_barber();
         let player_guid = self.character_selection.character_id.ok_or_else(|| {
             anyhow::anyhow!("cannot enter the world without a selected character")
         })?;
@@ -359,7 +360,8 @@ impl ClientRuntime {
         ) && let GameMessage::GameEvent(event) = &message
             && matches!(
                 event.event,
-                GameEvent::SendClientContractTrackerTable(_)
+                GameEvent::StartBarber(_)
+                    | GameEvent::SendClientContractTrackerTable(_)
                     | GameEvent::SendClientContractTracker(_)
                     | GameEvent::FriendsListUpdate(_)
                     | GameEvent::SetSquelchDb(_)
@@ -484,6 +486,7 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::CharacterList(data) => {
+                self.reset_barber();
                 self.event_ordering = None;
                 self.clear_busy_operation();
                 self.reset_housing();
@@ -553,6 +556,7 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::GameEvent(ev) => match &ev.event {
+                GameEvent::StartBarber(payload) => self.start_barber(payload),
                 GameEvent::PlayerDescription(_) | GameEvent::StartGame => {
                     if self.state == ClientState::EnteringWorld {
                         self.enter_world().await?;

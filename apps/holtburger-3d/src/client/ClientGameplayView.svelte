@@ -30,6 +30,8 @@
 	import ClientSalvageWindow from "./ClientSalvageWindow.svelte";
 	import type { ClientSalvageState } from "./client-salvage-state";
 	import ClientTradeWindow from "./ClientTradeWindow.svelte";
+	import ClientBarberWindow from "./ClientBarberWindow.svelte";
+	import type { ClientBarberState } from "./client-barber-state";
 	import type { ClientTradeState } from "./client-trade-state";
 	import type { ClientHouseCrystalState } from "./client-house-crystal-state";
 	import ClientHouseCrystalWindow from "./ClientHouseCrystalWindow.svelte";
@@ -352,6 +354,8 @@
 		/** Character-owned salvage draft and local confirmation policy. */
 		readonly salvage: ClientSalvageState | null;
 		readonly locks: ClientLocksState | null;
+		/** Server-granted appearance editor; local drafts never enter world state. */
+		readonly barber: ClientBarberState | null;
 		/** Session-owned P2P gestures and confirmed offer presentation. */
 		readonly trade: ClientTradeState | null;
 		/** Presentation owner for confirmed external storage, independent of system-panel selection. */
@@ -546,6 +550,7 @@
 		logopolisLaunchRevision,
 		locks,
 		salvage,
+		barber,
 		trade,
 		itemInteractions,
 		onSelectContentsItem,
@@ -1564,6 +1569,15 @@
 					{onExamineItem}
 				/>
 			{/key}
+		{/if}
+		{#if barber !== null}
+			{#key barber}<ClientBarberWindow
+					model={barber}
+					placement={hudLayout.barber}
+					{viewport}
+					onPlacementChange={(placement) =>
+						changeHudPlacement("barber", placement)}
+				/>{/key}
 		{/if}
 		{#if trade !== null}
 			{#key trade}

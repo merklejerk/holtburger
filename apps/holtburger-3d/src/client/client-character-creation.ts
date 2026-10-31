@@ -224,11 +224,6 @@ export function randomizeCreationAppearance(
 	};
 }
 
-/** Retail palette sets divide the inclusive hue interval into equal authored bins. */
-export function creationShadeIndex(hue: number, count: number): number {
-	return Math.floor((count - 0.000001) * hue);
-}
-
 /** Assemble race-specific build defaults around the caller-owned body appearance and name. */
 export function initialCreationDraft(
 	catalog: CharacterCreationCatalog,

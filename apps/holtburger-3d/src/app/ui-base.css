@@ -150,8 +150,11 @@
 		--ui-toast-pop-easing: ease-out;
 		--ui-toast-exit-duration: 120ms;
 		--ui-hud-pulse-animation: ui-hud-pulse;
-		--ui-hud-pulse-duration: 600ms;
+		--ui-hud-pulse-duration: 300ms;
 		--ui-hud-pulse-scale: 1.5;
+		/* Multiply growth above normal size: zero is still, one is full strength. */
+		--ui-hud-pulse-intensity: 1;
+		--ui-selected-entity-pulse-intensity: 0.2;
 		--ui-hud-pulse-easing: ease-in-out;
 		--ui-hud-background-color: #00000044;
 		/* Spacing between independent icon actions in HUD strips. */
@@ -1561,7 +1564,9 @@
 		transform: scale(1);
 	}
 	50% {
-		transform: scale(var(--ui-hud-pulse-scale));
+		transform: scale(
+			calc(1 + (var(--ui-hud-pulse-scale) - 1) * var(--ui-hud-pulse-intensity))
+		);
 	}
 }
 @layer components {

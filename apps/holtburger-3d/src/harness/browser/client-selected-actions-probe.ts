@@ -2,6 +2,7 @@ import type { ClientChatLine } from "../../client/client-chat-policy";
 import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
 import { formatInputBindings } from "../../lib/input/input-presentation";
 import { mount, tick, unmount } from "svelte";
+import { fromStore, writable } from "svelte/store";
 import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
 import ClientChat from "../../client/ClientChat.svelte";
 import { ClientChatComposer } from "../../client/client-chat-composer.svelte";
@@ -27,6 +28,7 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 	let friend = false;
 	let ignore = false;
 	const calls: string[] = [];
+	const selection = fromStore(writable<number | null>(1));
 	// Match the viewport's press/release contract: releases select only after a press.
 	const viewport = document.createElement("canvas");
 	viewport.dataset.gameViewport = "";
@@ -56,7 +58,9 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 				},
 			},
 			displayPlatform: "windows",
-			selectedGuid: 1,
+			get selectedGuid() {
+				return selection.current;
+			},
 			readSelectedDisplay: () => ({
 				...EMPTY_CLIENT_SELECTED_DISPLAY,
 				name: "Selected action fixture",
@@ -122,12 +126,64 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 	};
 	try {
 		await settle();
+		const hud = target.querySelector<HTMLElement>(".selected-entity");
+		if (hud === null) throw new Error("Selected entity HUD is missing");
+		const pulse = hud.getAnimations()[0];
+		if (pulse === undefined) throw new Error("Initial selection must pulse");
+		// Hold the animation while bounded display polling changes the available actions.
+		pulse.pause();
+		pulse.currentTime = Number(pulse.effect?.getTiming().duration) / 2;
+		const style = getComputedStyle(hud);
+		const peakScale = Number(style.getPropertyValue("--ui-hud-pulse-scale"));
+		const intensity = Number(
+			style.getPropertyValue("--ui-selected-entity-pulse-intensity"),
+		);
+		require(
+			Math.abs(
+				new DOMMatrix(style.transform).a - (1 + (peakScale - 1) * intensity),
+			) < 0.00001,
+			"Selection pulse must scale its growth by the theme's intensity",
+		);
 		require(target.querySelectorAll("button").length ===
 			1, "No-action selection should retain only Examine");
 		require(button("Examine").title ===
 			"Examine (Unbound)", "Examine tooltip must describe its configured empty binding");
 		interact = true;
 		await sample();
+		require(
+			hud.getAnimations()[0] === pulse,
+			"Display updates must not restart the selection pulse",
+		);
+		selection.current = 2;
+		await settle();
+		const changedPulse = hud.getAnimations()[0];
+		require(
+			changedPulse !== undefined && changedPulse !== pulse,
+			"A changed selection must restart the pulse",
+		);
+		selection.current = 3;
+		await settle();
+		require(
+			hud.getAnimations().length === 1 &&
+				hud.getAnimations()[0] !== changedPulse,
+			"Rapid selections must replace the pulse without queuing",
+		);
+		selection.current = null;
+		await settle();
+		require(
+			hud.getAnimations().length === 0,
+			"An empty selection must not pulse",
+		);
+		selection.current = 1;
+		await settle();
+		const restoredPulse = hud.getAnimations()[0];
+		if (restoredPulse === undefined)
+			throw new Error("Restored selection must pulse");
+		restoredPulse.finish();
+		require(
+			getComputedStyle(hud).transform === "none",
+			"The selection pulse must finish at its original size",
+		);
 		require(button("Trade").title ===
 			"Trade (Ctrl + f)", "Direct interaction tooltip must use the configured shortcut");
 		button("Trade").click();

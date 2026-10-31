@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { hudAttention } from "./client-hud-attention";
+	import { hudAttention } from "../app/hud-attention";
 	import type { EnchantmentTrayPresentation } from "./client-enchantments-view";
 	import { untrack } from "svelte";
 	import { presentClientBurden } from "./client-burden-presentation";

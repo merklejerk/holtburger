@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
+	import { submitPregameOnEnter } from "./pregame-submit";
 	import ClientPregameSettingsDrawer from "./ClientPregameSettingsDrawer.svelte";
 	import SettingsIcon from "../assets/icons/hud-settings.svg?component";
 	import UiDialog from "../app/UiDialog.svelte";
@@ -77,6 +78,8 @@
 	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 	let creating = $state(false);
+	/** Primary submit control keeps keyboard entry on the validated form path. */
+	let enterButton = $state<HTMLButtonElement>();
 	let settingsOpen = $state(false);
 	// Capture identity and displayed name so selection changes cannot retarget confirmation.
 	let deletion = $state<{
@@ -161,7 +164,7 @@
 		(selected ?? first)?.focus({ preventScroll: true });
 	}
 
-	/** Arrow navigation selects a row; Enter/Space retain native button activation. */
+	/** Arrow navigation selects a row; the page owns Enter and Space retains selection. */
 	function navigateCharacters(event: KeyboardEvent): void {
 		if (!(event.target instanceof HTMLButtonElement) || blocked) return;
 		const options = event.target.form?.querySelectorAll<HTMLButtonElement>(
@@ -227,7 +230,20 @@
 		onBack={() => (creating = false)}
 	/>
 {:else}
-	<ClientPregameScreen branding="corner" showPortalLogo={true} backdrop={true}>
+	<ClientPregameScreen
+		branding="corner"
+		showPortalLogo={true}
+		backdrop={true}
+		onDefaultKeydown={(event) => {
+			if (settingsOpen || deletion !== null) return;
+			submitPregameOnEnter(
+				event,
+				enterButton,
+				event.target instanceof HTMLButtonElement &&
+					event.target.name === "character",
+			);
+		}}
+	>
 		{#snippet footer()}
 			{#if settings !== undefined}
 				<button
@@ -331,6 +347,7 @@
 				<div class="client-actions">
 					<button
 						type="submit"
+						bind:this={enterButton}
 						class="enter-world pregame-action ui-button"
 						disabled={!canEnter || blocked}
 					>

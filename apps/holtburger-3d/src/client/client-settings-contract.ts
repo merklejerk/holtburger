@@ -253,6 +253,8 @@ export const clientUserSettingsSchema = z
 		/** Stable emote identities shared across characters and servers on this local profile. */
 		recentEmotes: z.array(z.string().min(1)).readonly(),
 		chatFilters: chatFiltersSchema,
+		/** Buffer timestamp visibility shared across characters on this local profile. */
+		chatTimestamps: z.boolean(),
 		chatSuppression: clientChatSuppressionSettingsSchema,
 		lockInteractions: clientLockInteractionSettingsSchema,
 		graphics: clientGraphicsSettingsSchema,

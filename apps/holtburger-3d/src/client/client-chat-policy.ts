@@ -73,16 +73,16 @@ export const CLIENT_CHAT_FILTER_TAGS: readonly ClientChatFilterTag[] = [
 	"combat",
 ];
 
-/** Labels preserve server meaning; local chat needs no category prefix. */
+/** Labels preserve specific server meaning; generic notices and local chat need no prefix. */
 const CHAT_CATEGORY_LABELS: Readonly<
 	Record<Extract<ClientChatCategory, string>, string | null>
 > = {
-	broadcast: "Broadcast",
+	broadcast: null,
 	"all-channels": "All Channels",
 	speech: null,
 	tell: "Tell",
 	"outgoing-tell": "Tell",
-	system: "System",
+	system: null,
 	combat: "Combat",
 	magic: "Magic",
 	channel: "Channel",
@@ -185,7 +185,7 @@ export function clientChatMessageLabel(line: ClientChatLine): string | null {
 			return "Error";
 		case "system":
 		case "formatted-system":
-			return "System";
+			return null;
 	}
 }
 

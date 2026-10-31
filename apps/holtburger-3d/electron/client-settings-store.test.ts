@@ -74,6 +74,31 @@ describe("ClientSettingsStore", () => {
 		}
 	});
 
+	it("defaults chat timestamps on and retains user-wide chat choices across reloads", async () => {
+		const path = await temporarySettingsPath();
+		try {
+			const store = new ClientSettingsStore(path, initialWindow);
+			await store.load();
+			const initial = await store.loadUser(defaultUser, "persisted");
+			expect({ ...defaultUser, ...initial.sections }.chatTimestamps).toBe(true);
+			for (const chatTimestamps of [false, true]) {
+				await store.saveUserPatch({
+					sections: { chatTimestamps, chatFilters: ["combat"] },
+				});
+				const reloaded = new ClientSettingsStore(path, initialWindow);
+				await reloaded.load();
+				expect(await reloaded.loadUser(defaultUser, "persisted")).toMatchObject(
+					{
+						sections: { chatTimestamps, chatFilters: ["combat"] },
+						unavailable: [],
+					},
+				);
+			}
+		} finally {
+			await rm(dirname(path), { recursive: true, force: true });
+		}
+	});
+
 	it("defaults chat suppression on for old profiles and persists explicit opt-outs", async () => {
 		const path = await temporarySettingsPath();
 		try {

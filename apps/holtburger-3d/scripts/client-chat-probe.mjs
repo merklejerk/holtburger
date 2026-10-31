@@ -63,6 +63,49 @@ export async function probeClientChat(client, evaluateExpression) {
 	const npc = { kind: "npc", guid: 0x80000001, name: "Professor of War Magic" };
 	try {
 		await invoke("reset");
+		for (const notice of [
+			{ kind: "system", message: "Local notice probe" },
+			{ kind: "server", category: "system", message: "System notice probe" },
+			{
+				kind: "server",
+				category: "broadcast",
+				message: "Broadcast notice probe",
+			},
+		])
+			await invoke("receive", notice);
+		const notices = () =>
+			evaluate(`Array.from(document.querySelectorAll('.chat-lines p'))
+			.filter(node => node.textContent.includes('notice probe'))
+			.map(node => node.textContent.trim())`);
+		assert.equal(
+			(await notices()).every((text) =>
+				/^\[[^\]]+\] (?:Local|System|Broadcast) notice probe$/.test(text),
+			),
+			true,
+		);
+		assert.equal(
+			await evaluate(
+				`document.querySelector('.chat-filters').lastElementChild.getAttribute('aria-label')`,
+			),
+			"Show chat timestamps",
+		);
+		await click('button[aria-label="Show chat timestamps"]');
+		assert.deepEqual(await notices(), [
+			"Local notice probe",
+			"System notice probe",
+			"Broadcast notice probe",
+		]);
+		assert.equal(
+			await evaluate(
+				`document.querySelector('button[aria-label="Show chat timestamps"]').getAttribute('aria-pressed')`,
+			),
+			"false",
+		);
+		await click('button[aria-label="Show chat timestamps"]');
+		assert.equal(
+			(await notices()).every((text) => text.startsWith("[")),
+			true,
+		);
 		for (const channel of ["general", "trade", "lfg", "roleplay"])
 			await invoke("receive", {
 				kind: "channel",

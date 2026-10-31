@@ -53,6 +53,7 @@ export function createDefaultClientUserSettings(
 		minimapViewDiameters: { ...MAP_DEFAULT_VIEW_DIAMETERS },
 		recentEmotes: [],
 		chatFilters: [...CLIENT_CHAT_FILTER_TAGS],
+		chatTimestamps: true,
 		chatSuppression: clientChatSuppressionSettingsSchema.parse({}),
 		lockInteractions: clientLockInteractionSettingsSchema.parse({}),
 		graphics: { ...CLIENT_GRAPHICS_DEFAULTS },

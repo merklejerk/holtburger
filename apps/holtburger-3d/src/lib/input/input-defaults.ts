@@ -19,7 +19,7 @@ export const INPUT_DEFAULTS = {
 		/** Hold to select walking gait. */
 		walk: [{ key: "Shift" }],
 		/** Hold to charge and release to jump; activates an aimed precise jump. */
-		jump: [{ key: " " }],
+		jump: [{ key: " ", ctrl: false }],
 	},
 	/** Held controls active only during precise targeting. */
 	preciseJump: {
@@ -132,7 +132,7 @@ export const INPUT_DEFAULTS = {
 		/** Toggle persistent forward movement while gameplay owns the keyboard. */
 		toggleAutoRun: [{ key: "q", ctrl: false, alt: false, meta: false }],
 		/** Enter the aimed jump interaction. */
-		preciseJump: [{ key: "j", shift: true }],
+		preciseJump: [{ key: " ", ctrl: true }],
 		/** Cancel the active context, then clear selection when gameplay owns Escape. */
 		cancel: [{ key: "Escape" }],
 		/** Activate chat while the game owns the keyboard. */

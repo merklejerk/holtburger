@@ -3047,6 +3047,219 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		await runtime.destroy();
 	});
 
+	it("replaces committed racial particles once and retains the level across owner re-realization", async () => {
+		const scriptId = "0x33000001" as DatAssetId;
+		const emitterId = "0x32000001" as DatAssetId;
+		const meshId = "0x01000001" as DatAssetId;
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			undefined,
+			{
+				destroy() {},
+				loadPhysicsScript: async () => ({
+					id: scriptId,
+					lengthSeconds: 0,
+					records: [
+						{
+							kind: "create-particle",
+							emitterInfoId: emitterId,
+							emitterId: 1,
+							partIndex: 0,
+							offsetOrigin: acVector3([0, 0, 0]),
+							startTime: 0,
+							authoredOrder: 0,
+						},
+					],
+				}),
+			},
+			PHYSICS_SCRIPT_TABLE_SOURCE,
+			{
+				destroy() {},
+				loadParticleEmitter: async () => particleEmitterInfo(emitterId, meshId),
+			},
+			{
+				destroy() {},
+				loadParticleMeshes: async () => ({
+					presentations: new Map([
+						[
+							meshId,
+							{ orientation: "authored", presentation: spawnedVisual() },
+						],
+					]),
+					textureDependencies: [],
+				}),
+			},
+		);
+		try {
+			const entity = spawnedEntity(7, 1);
+			await runtime.upsertDynamicEntity(entity);
+			setTestCamera(runtime, SPAWN_TEST_CAMERA);
+			const level = {
+				guid: 7,
+				generation: 1,
+				body: null,
+				particles: { key: "apply:1", script: 0x33000001 },
+			};
+			await runtime.setDynamicPresentationOverride(level);
+			runtime.render(0);
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+			).toBe(1);
+			await runtime.setDynamicPresentationOverride(level);
+			runtime.render(0.01);
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+			).toBe(1);
+			await runtime.setDynamicPresentationOverride({
+				...level,
+				particles: { ...level.particles, key: "apply:2" },
+			});
+			runtime.render(0.02);
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+			).toBe(1);
+			await runtime.replaceDynamicEntitySnapshot([]);
+			await runtime.upsertDynamicEntity(entity);
+			runtime.render(0.03);
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+			).toBe(1);
+			await runtime.setDynamicPresentationOverride({
+				...level,
+				particles: { key: "apply:3", script: null },
+			});
+			runtime.render(0.04);
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+			).toBe(0);
+			await runtime.upsertDynamicEntity({ ...entity, generation: 2 });
+			runtime.render(0.05);
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().particles.emitterCount,
+			).toBe(0);
+		} finally {
+			await runtime.destroy();
+		}
+	});
+
+	it("restores the newest accepted appearance after a scoped preview and rejects late preview completion", async () => {
+		const delayed = controlledPromise<DecodedStaticPresentation>();
+		const runtime = await buildSpawnRuntime({
+			load: (_setup, appearance) =>
+				appearance.paletteDid === 2
+					? delayed.promise
+					: Promise.resolve(appearanceVisual(appearance.paletteDid ?? 0)),
+		});
+		const accepted = spawnedEntity(7, 1);
+		await runtime.upsertDynamicEntity(accepted);
+		const preview = runtime.setDynamicPresentationOverride({
+			guid: 7,
+			generation: 1,
+			body: {
+				setupDid: accepted.presentation.content.setupDid,
+				appearance: { ...accepted.presentation.appearance, paletteDid: 2 },
+			},
+			particles: null,
+		});
+		const latest = {
+			...accepted,
+			presentation: {
+				...accepted.presentation,
+				appearance: { ...accepted.presentation.appearance, paletteDid: 3 },
+			},
+		};
+		const update = runtime.upsertDynamicEntity(latest);
+		await runtime.setDynamicPresentationOverride(null);
+		delayed.resolve(appearanceVisual(2));
+		await Promise.all([preview, update]);
+		const restored = runtime.dynamicEntityPresentationState(7);
+		if (restored.kind !== "realized")
+			throw new Error("Expected restored body.");
+		expect(restored.frame.localBounds.max.x).toBe(3);
+		expect(
+			[...runtime.listPresentedSpawnedEntities()][0]?.view.presentation
+				.appearance.paletteDid,
+		).toBe(3);
+		await runtime.destroy();
+	});
+
+	it("keeps attachment visibility local to the installed bare-body lifetime", async () => {
+		const visibility = vi.spyOn(
+			DynamicEntitySystem.prototype,
+			"updatePresentationState",
+		);
+		const installations = vi.spyOn(
+			DynamicEntitySystem.prototype,
+			"replaceOwner",
+		);
+		const runtime = await buildSpawnRuntime({
+			load: async (setup) => {
+				const visual = spawnedVisual();
+				return {
+					...visual,
+					setupId: setup === 0x02000002 ? "0x02000002" : "0x02000001",
+					presentation: {
+						...visual.presentation,
+						holdingLocations: new Map([
+							[
+								"right-hand",
+								{
+									location: "right-hand" as const,
+									partIndex: 0,
+									offsetTransform: Mat4.identity(),
+								},
+							],
+						]),
+					},
+				};
+			},
+		});
+		try {
+			const body = spawnedEntity(7, 1);
+			const child: DynamicEntityView = {
+				...spawnedEntity(8, 1),
+				placement: {
+					kind: "attached",
+					parent: 7,
+					parentLocation: "right-hand",
+					placement: "default",
+				},
+			};
+			await runtime.replaceDynamicEntitySnapshot([body, child]);
+			await runtime.setDynamicPresentationOverride({
+				guid: 7,
+				generation: 1,
+				body: {
+					setupDid: 0x02000002,
+					appearance: body.presentation.appearance,
+				},
+				particles: null,
+			});
+			expect(visibility).toHaveBeenLastCalledWith(
+				expect.anything(),
+				expect.objectContaining({ noDraw: true }),
+			);
+			await runtime.upsertDynamicEntity({
+				...child,
+				physics: { ...child.physics, translucency: 0.5 },
+			});
+			await runtime.setDynamicPresentationOverride(null);
+			expect(
+				installations.mock.calls.at(-1)?.[1][0]?.initialPresentationState,
+			).toMatchObject({ noDraw: false, translucency: 0.5 });
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+			).toBe(2);
+			expect(body.physics.noDraw).toBe(false);
+			expect(child.physics.noDraw).toBe(false);
+		} finally {
+			visibility.mockRestore();
+			installations.mockRestore();
+			await runtime.destroy();
+		}
+	});
+
 	it("retains the newest committed appearance when replacement loads finish in reverse order", async () => {
 		const b = controlledPromise<DecodedStaticPresentation>();
 		const c = controlledPromise<DecodedStaticPresentation>();

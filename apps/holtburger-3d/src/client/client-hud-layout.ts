@@ -307,6 +307,7 @@ export function createClientHudLayout(
 		worldContainer: place(defaults.worldContainer),
 		locks: place(defaults.locks),
 		salvage: place(defaults.salvage),
+		barber: place(defaults.barber),
 		vendor: place(defaults.vendor),
 		houseCrystal: place(defaults.houseCrystal),
 		trade: place(defaults.trade),

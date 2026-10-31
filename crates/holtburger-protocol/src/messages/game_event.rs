@@ -1,5 +1,6 @@
 pub use crate::messages::allegiance::*;
 pub use crate::messages::book::events::*;
+pub use crate::messages::character::barber::*;
 pub use crate::messages::chat::events::*;
 pub use crate::messages::chat::turbine::*;
 pub use crate::messages::combat::events::*;
@@ -49,6 +50,8 @@ pub struct GameEventMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameEvent {
+    /// Server-granted appearance editing session and its original asset identities.
+    StartBarber(Box<BarberAppearanceData>),
     /// Optional server salvage feedback, independent of inventory updates.
     SalvageOperationsResult(Box<SalvageOperationsResultData>),
     /// Contract registry wire operation.
@@ -149,6 +152,9 @@ impl ProtocolUnpack for GameEventMessage {
 
         let event = match event_op {
             Some(op) => match op {
+                GameEventOpcode::StartBarber => {
+                    GameEvent::StartBarber(Box::new(BarberAppearanceData::unpack(data, offset)?))
+                }
                 GameEventOpcode::SendClientContractTrackerTable => {
                     GameEvent::SendClientContractTrackerTable(Box::new(
                         ContractTrackerTable::unpack(data, offset)?,
@@ -439,6 +445,10 @@ impl ProtocolPack for GameEventMessage {
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
 
         match &self.event {
+            GameEvent::StartBarber(data) => {
+                (GameEventOpcode::StartBarber as u32).pack(buf);
+                data.pack(buf);
+            }
             GameEvent::SendClientContractTrackerTable(data) => {
                 (GameEventOpcode::SendClientContractTrackerTable as u32).pack(buf);
                 data.pack(buf);

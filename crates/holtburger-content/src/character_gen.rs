@@ -10,6 +10,8 @@ use holtburger_dat::graphics::Frame;
 use std::collections::BTreeMap;
 
 pub mod appearance;
+pub mod barber;
+pub mod body;
 
 /// Authored cost at or above this value disables the corresponding creation advancement.
 pub const CHARACTER_GEN_UNAVAILABLE_SKILL_COST: i32 = 999;

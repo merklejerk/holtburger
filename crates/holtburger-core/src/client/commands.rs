@@ -157,6 +157,7 @@ impl ClientRuntime {
             return Ok(());
         }
         match cmd {
+            ClientCommand::Barber(request) => self.handle_barber_request(request).await,
             ClientCommand::ApplyEquipmentSet(bindings) => self.apply_equipment_set(bindings).await,
             ClientCommand::SubmitHousingManagement(request) => {
                 self.submit_housing_management(request).await
@@ -376,6 +377,7 @@ impl ClientRuntime {
     }
 
     pub(super) async fn disconnect_with_cause(&mut self, cause: ClientExitCause) -> Result<()> {
+        self.reset_barber();
         self.reset_camera();
         self.set_exit_cause(cause);
         self.session.send_disconnect().await?;

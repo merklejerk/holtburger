@@ -314,6 +314,10 @@ impl ClientAttackProfileRequest {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
 pub enum ClientHostCommand {
+    /// Submit a semantic barber preview, Apply, or cancellation to the shared owner.
+    RequestClientBarber {
+        request: holtburger_core::client::barber::BarberRequest,
+    },
     /// Submit reusable equipment bindings, with one peace prerequisite if required.
     ApplyClientEquipmentSet {
         bindings: Vec<super::client_projection::ClientEquipmentBindingWire>,
@@ -596,6 +600,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "preview_client_vendor",
     "submit_client_vendor",
     "submit_client_trade",
+    "request_client_barber",
     "submit_client_inventory",
     "equip_client_item",
     "apply_client_equipment_set",
@@ -759,6 +764,11 @@ impl ClientHostRuntime {
             })
             .server(startup.host.clone(), startup.port)
             .world_bootstrap(bootstrap)
+            .barber_source(Arc::new(
+                holtburger_core::client::barber::ContentClientBarberSource::new(Arc::clone(
+                    &self.content.repository,
+                )),
+            ))
             .require_external_world_reveal()
             .physical_movement_source(physical_source.clone(), physical_source.clone())
             .dynamic_script_source(Arc::new(
@@ -1278,6 +1288,11 @@ pub async fn dispatch_client(
             .map_err(application_error),
         SubmitClientTrade { request } => runtime
             .send_command(ClientCommand::Trade(request))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        RequestClientBarber { request } => runtime
+            .send_command(ClientCommand::Barber(request))
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),

@@ -462,25 +462,8 @@ fn palette_swatch(
     id: u32,
     range: std::ops::Range<usize>,
 ) -> Result<String> {
-    let palette = repository.read_palette(id)?;
-    let colors = palette
-        .colors_argb
-        .get(range)
-        .context("Creation swatch exceeds palette colors")?;
-    anyhow::ensure!(!colors.is_empty(), "Creation swatch has no colors");
-    let channel = |shift: u32| {
-        colors
-            .iter()
-            .map(|color| u64::from((color >> shift) & 255_u32))
-            .sum::<u64>()
-            / colors.len() as u64
-    };
-    Ok(format!(
-        "#{:02x}{:02x}{:02x}",
-        channel(16),
-        channel(8),
-        channel(0)
-    ))
+    let [red, green, blue] = repository.read_appearance_palette_swatch(id, range)?;
+    Ok(format!("#{red:02x}{green:02x}{blue:02x}"))
 }
 
 /// Keep palette-set ordering so the frontend can choose the corresponding wire shade.

@@ -1,3 +1,11 @@
+import barberFixture from "./fixtures/barber-wire.json";
+import { ClientBarberState } from "./client-barber-state";
+import {
+	barberSnapshotSchema,
+	barberPreviewSchema,
+	barberRequestSchema,
+	type BarberPreview,
+} from "./client-barber-contract";
 import gameplayPreferencesFixture from "../harness/browser/fixtures/gameplay-preferences.json";
 import { playerVisualCaptureSchema } from "./client-object-preview-contract";
 import previewFixture from "./fixtures/object-preview-wire.json";
@@ -99,6 +107,91 @@ class FakeClientTransport implements ClientLifecycleTransport {
 }
 
 describe("ClientLifecycleSession", () => {
+	it("recovers an editor whose preview event was lost without losing its draft", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const snapshot = barberSnapshotSchema.parse(barberFixture.snapshot);
+		const state = { ...currentState(1), barber: snapshot };
+		transport.emit("client-current-state", state);
+		const presented: (BarberPreview | null)[] = [];
+		const editor = new ClientBarberState(
+			session,
+			async (preview) => {
+				presented.push(preview);
+			},
+			() => {},
+		);
+		const original = editor.read().choices;
+		if (original === null) throw new Error("Expected editable fixture.");
+		const choices = { ...original, body: { ...original.body, eyes: 2 } };
+		editor.change(choices);
+		// The host accepted the request, but its one-shot preview event was lost in resync.
+		transport.emit("client-state-resyncing", null);
+		transport.emit("client-current-state", state);
+		const request = transport.invocations
+			.filter((call) => call.command === "request_client_barber")
+			.at(-1);
+		expect(request?.args).toMatchObject({
+			request: { kind: "preview", draft: { revision: 3, choices } },
+		});
+		transport.emit("client-barber-preview", {
+			...barberPreviewSchema.parse(barberFixture.preview),
+			revision: 0,
+		});
+		expect(editor.read().canApply).toBe(false);
+		transport.emit("client-barber-preview", {
+			...barberPreviewSchema.parse(barberFixture.preview),
+			revision: 3,
+		});
+		// Recovery can also interrupt a renderer preparation, rather than a lost reply.
+		transport.emit("client-current-state", state);
+		expect(presented.at(-1)).toBeNull();
+		transport.emit("client-barber-preview", {
+			...barberPreviewSchema.parse(barberFixture.preview),
+			revision: 4,
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(editor.read().choices).toEqual(choices);
+		expect(editor.read().canApply).toBe(true);
+		await editor.destroy();
+		session.stop();
+	});
+
+	it("recovers barber state, delivers previews, and retires canceled interactions", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.start();
+		const snapshot = barberSnapshotSchema.parse(barberFixture.snapshot);
+		const events: ClientLifecycleSessionEvent[] = [];
+		session.subscribe((event) => events.push(event));
+		transport.emit("client-current-state", {
+			...currentState(1),
+			barber: snapshot,
+		});
+		expect(session.barberSnapshot()).toEqual(snapshot);
+		const preview = barberPreviewSchema.parse(barberFixture.preview);
+		transport.emit("client-barber-preview", preview);
+		expect(events.at(-1)).toEqual({ type: "barber-preview", result: preview });
+		const request = barberRequestSchema.parse(barberFixture.request);
+		await session.requestBarber(request);
+		expect(
+			transport.invocations.find(
+				(call) => call.command === "request_client_barber",
+			),
+		).toEqual({ command: "request_client_barber", args: { request } });
+		const retired = { ...snapshot, interaction: null };
+		transport.emit("client-barber-updated", retired);
+		expect(session.barberSnapshot()).toEqual(retired);
+		transport.emit("client-current-state", {
+			...currentState(1),
+			barber: retired,
+		});
+		expect(session.barberSnapshot().interaction).toBeNull();
+		session.stop();
+	});
+
 	it("starts authority only after listeners are installed and requests snapshots without relaunching", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -2458,6 +2551,7 @@ function characterSheet(
 function currentState(playerGuid: number): ClientCurrentState {
 	return {
 		characterSheet: null,
+		barber: { interaction: null, result: null, particles: null },
 		trade: { trade: null, pending_items: [] },
 		lifecycle: { kind: "in-world" },
 		characterManagement: { kind: "idle" },

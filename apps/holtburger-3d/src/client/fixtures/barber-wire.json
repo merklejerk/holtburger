@@ -1,0 +1,97 @@
+{
+	"snapshot": {
+		"interaction": {
+			"id": 12,
+			"subject": {
+				"guid": 1342177281,
+				"instance": 9
+			},
+			"phase": {
+				"kind": "editing",
+				"revision": 0,
+				"original": {
+					"body": {
+						"eyes": 1,
+						"nose": 2,
+						"mouth": 3,
+						"hairColor": 1,
+						"eyeColor": 0,
+						"hairStyle": 4,
+						"skinHue": 0.25,
+						"hairHue": 0.75
+					},
+					"racial": {
+						"kind": "undead",
+						"flames": true
+					}
+				},
+				"catalog": {
+					"styles": {
+						"kind": "editable",
+						"hair": 5,
+						"eyes": 4,
+						"noses": 4,
+						"mouths": 4
+					},
+					"hairColors": [[[10, 20, 30]], [[40, 50, 60]]],
+					"skinColors": [[70, 80, 90]],
+					"eyeColors": [[100, 110, 120]]
+				}
+			}
+		},
+		"result": null,
+		"particles": {
+			"revision": 11,
+			"subject": {
+				"guid": 1342177281,
+				"instance": 9
+			},
+			"script": null
+		}
+	},
+	"preview": {
+		"id": 12,
+		"subject": {
+			"guid": 1342177281,
+			"instance": 9
+		},
+		"revision": 2,
+		"outcome": {
+			"kind": "ready",
+			"setup": 33561245,
+			"appearance": {
+				"paletteDid": 67108865,
+				"subPalettes": [],
+				"textureChanges": [],
+				"partChanges": []
+			},
+			"particles": {
+				"kind": "replace",
+				"script": 855642835
+			}
+		}
+	},
+	"request": {
+		"kind": "apply",
+		"id": 12,
+		"draft": {
+			"revision": 2,
+			"choices": {
+				"body": {
+					"eyes": 1,
+					"nose": 2,
+					"mouth": 3,
+					"hairColor": 1,
+					"eyeColor": 0,
+					"hairStyle": 4,
+					"skinHue": 0.25,
+					"hairHue": 0.75
+				},
+				"racial": {
+					"kind": "undead",
+					"flames": true
+				}
+			}
+		}
+	}
+}

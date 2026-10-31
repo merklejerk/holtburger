@@ -422,6 +422,7 @@ describe("ClientCameraSession", () => {
 function currentState(): ClientCurrentState {
 	return {
 		characterSheet: null,
+		barber: { interaction: null, result: null, particles: null },
 		trade: { trade: null, pending_items: [] },
 		lifecycle: { kind: "in-world" },
 		characterManagement: { kind: "idle" },

@@ -1,11 +1,12 @@
 //! Deterministic player-creation appearance interpretation, independent of wire and world types.
 
+use super::body::{BodyAppearanceChoices, BodyAppearanceLimits, body_base, resolve_face_layer};
 use super::{CharacterGenAppearanceOptions, CharacterGenGenderDefinition};
 use crate::ui_assets::{UiAssetReader, UiAssets};
 use crate::{ContentRepository, MotionClip};
 use anyhow::{Context, Result, bail};
 use holtburger_dat::file_type::char_gen::{CharacterGenGender, HeritageGroup};
-use holtburger_dat::file_type::material::{ObjDesc, SubPalette};
+use holtburger_dat::file_type::material::ObjDesc;
 use holtburger_dat::file_type::{Animation, CharGen};
 use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
 use std::io::Cursor;
@@ -14,18 +15,8 @@ use thiserror::Error;
 /// Authored style ordinals, clothing palette-template keys and shades; no account, world identity, or submission fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CharacterGenAppearanceChoices {
-    /// Selected eye strip, with its bald variant chosen from the hair style.
-    pub eyes: u32,
-    /// Selected nose strip.
-    pub nose: u32,
-    /// Selected mouth strip.
-    pub mouth: u32,
-    /// Hair palette-set ordinal.
-    pub hair_color: u32,
-    /// Eye palette ordinal.
-    pub eye_color: u32,
-    /// Hair/body style ordinal, including alternate setups.
-    pub hair_style: u32,
+    /// Body and face choices shared with in-world appearance editing.
+    pub body: BodyAppearanceChoices,
     /// Headgear ordinal; `u32::MAX` explicitly selects no headgear.
     pub headgear_style: u32,
     /// Headgear palette-template key.
@@ -42,10 +33,6 @@ pub struct CharacterGenAppearanceChoices {
     pub footwear_style: u32,
     /// Footwear palette-template key.
     pub footwear_color: u32,
-    /// Skin palette-set shade in the inclusive unit interval.
-    pub skin_hue: f64,
-    /// Hair palette-set shade in the inclusive unit interval.
-    pub hair_hue: f64,
     /// Headgear shade in the inclusive unit interval.
     pub headgear_hue: f64,
     /// Shirt shade in the inclusive unit interval.
@@ -91,14 +78,10 @@ impl CharacterGenAppearanceChoices {
         &self,
         options: &CharacterGenAppearanceOptions,
     ) -> Vec<CharacterGenAppearanceError> {
-        let mut errors = Vec::new();
+        let mut errors = self
+            .body
+            .validate_limits(&BodyAppearanceLimits::from(options));
         let mut choices = vec![
-            ("eyes", self.eyes, options.eye_strips.len()),
-            ("nose", self.nose, options.nose_strips.len()),
-            ("mouth", self.mouth, options.mouth_strips.len()),
-            ("hair_color", self.hair_color, options.hair_color_ids.len()),
-            ("eye_color", self.eye_color, options.eye_color_ids.len()),
-            ("hair_style", self.hair_style, options.hair_styles.len()),
             ("shirt_style", self.shirt_style, options.shirts.len()),
             ("pants_style", self.pants_style, options.pants.len()),
             (
@@ -159,8 +142,6 @@ impl CharacterGenAppearanceChoices {
             }
         }
         for (field, shade) in [
-            ("skin_hue", self.skin_hue),
-            ("hair_hue", self.hair_hue),
             ("headgear_hue", self.headgear_hue),
             ("shirt_hue", self.shirt_hue),
             ("pants_hue", self.pants_hue),
@@ -241,7 +222,7 @@ fn resolve_visual(
                 .join("\n")
         );
     }
-    let style = gender.hair_style_list.get(choices.hair_style as usize);
+    let style = gender.hair_style_list.get(choices.body.hair_style as usize);
     let setup_id = match style {
         Some(style) if style.alternate_setup != 0 => style.alternate_setup,
         _ => gender.setup_id,
@@ -297,15 +278,7 @@ fn compose_appearance(
     setup_id: u32,
     uses_starter_clothing: bool,
 ) -> Result<ObjDesc> {
-    let mut result = ObjDesc {
-        palette_id: Some(gender.base_palette),
-        ..ObjDesc::empty()
-    };
-    result.overlay(&gender.base_obj_desc);
-    let hair = gender.hair_style_list.get(choices.hair_style as usize);
-    if let Some(hair) = hair {
-        result.overlay(&hair.obj_desc);
-    }
+    let mut result = body_base(gender, &choices.body);
     let clothing = [
         (
             &gender.headgear_list,
@@ -342,45 +315,7 @@ fn compose_appearance(
             )?);
         }
     }
-    if let Some(eyes) = gender.eye_strip_list.get(choices.eyes as usize) {
-        result.overlay(if hair.is_some_and(|style| style.bald) {
-            &eyes.obj_desc_bald
-        } else {
-            &eyes.obj_desc
-        });
-    }
-    if let Some(nose) = gender.nose_strip_list.get(choices.nose as usize) {
-        result.overlay(&nose.obj_desc);
-    }
-    if let Some(mouth) = gender.mouth_strip_list.get(choices.mouth as usize) {
-        result.overlay(&mouth.obj_desc);
-    }
-    let palette = |id, shade| -> Result<u32> {
-        let set = repository.read_palette_set(id)?;
-        set.palette_id_for_shade(shade)
-            .with_context(|| format!("palette set 0x{id:08X} has no palette for shade {shade}"))
-    };
-    let mut face = ObjDesc::empty();
-    face.sub_palettes.push(SubPalette {
-        sub_id: palette(gender.skin_palette_set, choices.skin_hue)?,
-        offset: 0,
-        num_colors: 192,
-    });
-    if let Some(id) = gender.hair_color_list.get(choices.hair_color as usize) {
-        face.sub_palettes.push(SubPalette {
-            sub_id: palette(*id, choices.hair_hue)?,
-            offset: 192,
-            num_colors: 64,
-        });
-    }
-    if let Some(id) = gender.eye_color_list.get(choices.eye_color as usize) {
-        face.sub_palettes.push(SubPalette {
-            sub_id: *id,
-            offset: 256,
-            num_colors: 64,
-        });
-    }
-    result.overlay(&face);
+    result.overlay(&resolve_face_layer(repository, gender, &choices.body)?.appearance);
     Ok(result)
 }
 
@@ -390,7 +325,7 @@ mod tests {
     use crate::test_support::CountingSource;
     use crate::ui_assets::MASTER_DID_MAPPER;
     use holtburger_dat::file_type::char_gen::{EyeStrip, Gear, HairStyle};
-    use holtburger_dat::file_type::material::{AnimationPartChange, TextureMapChange};
+    use holtburger_dat::file_type::material::{AnimationPartChange, SubPalette, TextureMapChange};
     use std::{collections::HashMap, sync::Arc};
 
     const SETUP: u32 = 0x0200_0001;
@@ -566,12 +501,16 @@ mod tests {
 
     fn choices() -> CharacterGenAppearanceChoices {
         CharacterGenAppearanceChoices {
-            eyes: 0,
-            nose: 0,
-            mouth: 0,
-            hair_color: 0,
-            eye_color: 0,
-            hair_style: 0,
+            body: BodyAppearanceChoices {
+                eyes: 0,
+                nose: 0,
+                mouth: 0,
+                hair_color: 0,
+                eye_color: 0,
+                hair_style: 0,
+                skin_hue: 1.0,
+                hair_hue: 0.0,
+            },
             headgear_style: u32::MAX,
             headgear_color: 0,
             shirt_style: 0,
@@ -580,8 +519,6 @@ mod tests {
             pants_color: 0,
             footwear_style: 0,
             footwear_color: 0,
-            skin_hue: 1.0,
-            hair_hue: 0.0,
             headgear_hue: 0.0,
             shirt_hue: 0.0,
             pants_hue: 0.0,
@@ -694,7 +631,7 @@ mod tests {
             ]
         );
         let mut edited = choices();
-        edited.skin_hue = 0.0;
+        edited.body.skin_hue = 0.0;
         assert_eq!(
             compose_appearance(&repo, &gender, &edited, ALTERNATE, true)
                 .unwrap()
@@ -743,14 +680,14 @@ mod tests {
         let mut edited = choices();
         edited.headgear_color = u32::MAX;
         assert!(edited.validate(&options).is_empty());
-        edited.nose = 1;
+        edited.body.nose = 1;
         assert!(matches!(
             edited.validate(&options)[0],
             CharacterGenAppearanceError::ChoiceOutOfRange { field: "nose", .. }
         ));
         for shade in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.1, 1.1] {
             let mut edited = choices();
-            edited.skin_hue = shade;
+            edited.body.skin_hue = shade;
             assert_eq!(
                 edited.validate(&options),
                 vec![CharacterGenAppearanceError::InvalidShade { field: "skin_hue" }]

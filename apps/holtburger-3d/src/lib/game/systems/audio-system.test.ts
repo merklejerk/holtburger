@@ -1,5 +1,6 @@
 import { renderVector3, sceneVector3 } from "../../assets/ac-frame";
 import { describe, expect, it, vi } from "vitest";
+import { HostCommandError } from "../../host/host-command-result";
 import type { DatAssetId } from "../game-types";
 import {
 	AudioSystem,
@@ -61,6 +62,9 @@ function build(
 		options.voiceLimit ?? 8,
 		options.clock ?? (() => 0),
 		options.maximumWarmupReplaySeconds ?? 0.25,
+		(cause) => {
+			throw new Error("Unexpected audio failure", { cause });
+		},
 	);
 	return { played, prepared, stops, system };
 }
@@ -96,6 +100,63 @@ function bedTrigger(volume: () => number): AudioTrigger {
 }
 
 describe("AudioSystem", () => {
+	it("reports a cold sound failure without an unhandled rejection and can play a later sound", async () => {
+		const failure = new HostCommandError({
+			code: "application_error",
+			message: "Missing sound",
+			resource: {
+				kind: "missing",
+				namespace: "eor/portal",
+				file_id: Number(SOUND),
+			},
+		});
+		const onFailure = vi.fn();
+		let ready = false;
+		const system = new AudioSystem(
+			{
+				prepare: async (id) => {
+					if (id === SOUND) throw failure;
+					ready = true;
+				},
+				playOneShot: () =>
+					ready ? { finished: false, setPlacement() {}, stop() {} } : null,
+			},
+			() => 0,
+			8,
+			() => 0,
+			1,
+			onFailure,
+		);
+		system.trigger(trigger());
+		await vi.waitFor(() => expect(onFailure).toHaveBeenCalledWith(failure));
+		expect(system.getDiagnostics().activeVoiceCount).toBe(0);
+		system.trigger({ ...trigger(), soundId: "0x0a000208" });
+		await vi.waitFor(() =>
+			expect(system.getDiagnostics().activeVoiceCount).toBe(1),
+		);
+		system.destroy();
+	});
+
+	it("forwards unexpected decoder/device faults to the composition's operational failure owner", async () => {
+		const failure = new Error("Audio device invariant");
+		const onFailure = vi.fn();
+		const system = new AudioSystem(
+			{
+				playOneShot: () => null,
+				prepare: async () => {
+					throw failure;
+				},
+			},
+			() => 0,
+			8,
+			() => 0,
+			1,
+			onFailure,
+		);
+		system.trigger(trigger());
+		await vi.waitFor(() => expect(onFailure).toHaveBeenCalledWith(failure));
+		system.destroy();
+	});
 	/**
 	 * RETAIL DIVERGENCE, asserted rather than only commented: retail multiplies ambient gain
 	 * by `ambient_sound_volume` twice, so a half setting would land at a quarter. We apply it
@@ -211,6 +272,9 @@ describe("AudioSystem", () => {
 			8,
 			() => 0,
 			0.25,
+			(cause) => {
+				throw new Error("Unexpected audio failure", { cause });
+			},
 		);
 
 		expect(system.trigger(trigger({ probability: 1 }))).toBe("played");
@@ -579,6 +643,9 @@ describe("AudioSystem", () => {
 					0,
 					() => 0,
 					0.25,
+					(cause) => {
+						throw new Error("Unexpected audio failure", { cause });
+					},
 				),
 		).toThrow("positive integer");
 	});

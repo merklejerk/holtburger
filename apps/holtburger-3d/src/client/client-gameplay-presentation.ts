@@ -6,6 +6,7 @@ import {
 	awaitWithAbort,
 } from "../lib/async-lifetime";
 import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
+import { formatError } from "../lib/format-error";
 import type {
 	CombatEffectOutcome,
 	CombatEffectsAppearance,
@@ -330,6 +331,8 @@ export interface ClientGameplayRuntime extends MapTerrainSource {
 	/** Play a validated head-locked portal transition cue when the runtime owns audio. */
 	playPortalTransitionSound?(kind: "enter" | "exit"): void;
 	dynamicEntityOrigin(guid: number): ResolvedSceneOrigin | null;
+	/** A source-rejected local body is a specific readiness failure, not indefinite loading. */
+	dynamicEntityContentFailure(guid: number): Error | null;
 	/** Current scene placement of one realized dynamic entity. */
 	spawnedEntityPlacement(guid: number): ScenePlacement | null;
 	withSpawnedEntitySelectionGeometry<T>(
@@ -1204,6 +1207,12 @@ export class ClientGameplayPresentation {
 			this.#portalDestinationFrame = null;
 			const resolvedOrigin = resources.runtime.dynamicEntityOrigin(playerGuid);
 			if (resolvedOrigin === null) {
+				const failure =
+					resources.runtime.dynamicEntityContentFailure(playerGuid);
+				if (failure !== null) {
+					this.#setStatus("error", formatError(failure));
+					return { rendered: false, status: this.#status };
+				}
 				this.#setStatus(
 					"loading-player",
 					"The authoritative local player has no installed runtime presentation.",
@@ -1737,6 +1746,10 @@ export class ClientGameplayPresentation {
 		if (convergedActivation?.kind !== "accepted") {
 			return { kind: "waiting", status: "loading-activation" };
 		}
+		const playerFailure =
+			resources.runtime.dynamicEntityContentFailure(playerGuid);
+		if (playerFailure !== null)
+			return { kind: "failed", diagnostic: formatError(playerFailure) };
 		if (convergedActivation.realization !== "ready") {
 			return { kind: "waiting", status: "loading-player" };
 		}
@@ -2156,7 +2169,7 @@ export class ClientGameplayPresentation {
 	}
 
 	#reportError(error: unknown): void {
-		this.#setStatus("error", errorMessage(error));
+		this.#setStatus("error", formatError(error));
 		this.#onError(error);
 	}
 }
@@ -2338,8 +2351,4 @@ function audioListenerFor(camera: Camera): AudioListenerPlacement {
 			camera.placement.rotation.z,
 		),
 	};
-}
-
-function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : "Client presentation failed.";
 }

@@ -160,10 +160,11 @@ export const LOCAL_COMMANDS = {
 		details: [],
 	},
 	assets: {
-		...invocation(["assets"], ""),
+		...invocation(["assets"], "[retry]"),
 		description: "Print the active asset location.",
 		details: [
 			"Shows the location selected for this launch, including temporary command-line overrides. This command does not change asset sources.",
+			"Use /assets retry to retry failed presentation content without reconnecting. Replacing mounted archives still requires restarting with the repaired asset location.",
 		],
 	},
 	waypoint: {

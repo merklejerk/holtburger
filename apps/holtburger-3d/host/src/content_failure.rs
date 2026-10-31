@@ -4,13 +4,54 @@ use std::sync::mpsc::SyncSender;
 
 use anyhow::{Context, Result};
 use holtburger_content::{
-    CharacterTitleCatalogError, ContentResourceError, ContentSelectionError, ContractCatalogError,
-    MotionContractError,
+    CharacterTitleCatalogError, ContentResourceError, ContentResourceErrorKind,
+    ContentSelectionError, ContractCatalogError, MotionContractError,
 };
 use holtburger_dat::file_type::ClothingBuildObjDescError;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::{PROTOCOL_VERSION, ProtocolError, ProtocolFrame, application_error};
+
+/// Source facts for a rejected asset request; the consuming presentation owns recovery policy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceRequestFailure {
+    /// Distinguishes absent/pruned content from a record its decoder rejected.
+    pub kind: ResourceRequestFailureKind,
+    /// Archive namespace owning the failed dependency, including nested dependencies.
+    pub namespace: String,
+    /// Failed dependency's resource ID, not necessarily the command's root resource.
+    pub file_id: u32,
+}
+
+/// App-local wire projection of the shared content loader's availability classification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResourceRequestFailureKind {
+    Missing,
+    Pruned,
+    Invalid,
+}
+
+/// Reject one presentation request without marking the entire installation unusable.
+pub fn resource_request_error(error: anyhow::Error) -> ProtocolError {
+    let resource = error.chain().find_map(|cause| {
+        let resource = cause.downcast_ref::<ContentResourceError>()?;
+        Some(ResourceRequestFailure {
+            kind: match resource.kind {
+                ContentResourceErrorKind::Missing => ResourceRequestFailureKind::Missing,
+                ContentResourceErrorKind::Pruned => ResourceRequestFailureKind::Pruned,
+                ContentResourceErrorKind::Invalid => ResourceRequestFailureKind::Invalid,
+            },
+            namespace: resource.namespace.clone(),
+            file_id: resource.file_id,
+        })
+    });
+    ProtocolError {
+        code: "application_error".to_owned(),
+        message: format!("{error:#}"),
+        resource,
+    }
+}
 
 /// Actionable content facts; ordinary application/transport failures never enter this contract.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,6 +201,34 @@ mod tests {
     use holtburger_content::ContentRepository;
     use holtburger_dat::{EOR_PORTAL_NAMESPACE, ResourceKey};
     use std::sync::mpsc;
+
+    #[test]
+    fn request_errors_preserve_source_classification_and_leave_invariants_unclassified() {
+        for kind in [
+            ContentResourceErrorKind::Missing,
+            ContentResourceErrorKind::Pruned,
+            ContentResourceErrorKind::Invalid,
+        ] {
+            let error = anyhow::Error::new(ContentResourceError {
+                kind,
+                namespace: "eor/portal".into(),
+                file_id: 0x0300055b,
+                source_description: None,
+                source: anyhow::anyhow!("source detail"),
+            })
+            .context("motion dependency");
+            let response = resource_request_error(error);
+            let wire = serde_json::to_value(&response).unwrap();
+            assert_eq!(wire["resource"]["kind"], kind.to_string().to_lowercase());
+            assert!(response.message.contains("source detail"));
+            assert!(response.message.contains("motion dependency"));
+        }
+        assert!(
+            resource_request_error(anyhow::anyhow!("serializer invariant"))
+                .resource
+                .is_none()
+        );
+    }
 
     #[test]
     fn required_resource_failure_notifies_native_without_turning_absence_into_failure() {

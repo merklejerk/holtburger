@@ -2,6 +2,7 @@ import type {
 	HostCommandName,
 	HostTransport,
 } from "../../lib/host/host-transport";
+import { checkHostHttpResponse } from "../../lib/host/host-command-result";
 
 /** Diagnostic HTTP adapter; all scene/preview bytes still come from production content loaders. */
 export function pregameContentTransport(url: string): HostTransport {
@@ -18,6 +19,7 @@ export function pregameContentTransport(url: string): HostTransport {
 		resolve_character_creation_appearance: "/character-creation-appearance",
 		resolve_character_creation_stats: "/character-creation-stats",
 		load_animation: "/animation",
+		load_motion_table_closure: "/motion-table-closure",
 		load_physics_script: "/physics-script",
 		load_particle_emitter: "/particle-emitter",
 		load_particle_meshes: "/particle-meshes",
@@ -39,9 +41,10 @@ export function pregameContentTransport(url: string): HostTransport {
 							body: JSON.stringify(args?.request ?? {}),
 						},
 			);
-			if (!response.ok) throw new Error(await response.text());
+			await checkHostHttpResponse(response);
 			return catalog ||
 				command === "load_landblock_profile" ||
+				command === "load_motion_table_closure" ||
 				command === "resolve_character_creation_appearance" ||
 				command === "resolve_character_creation_stats"
 				? response.json()

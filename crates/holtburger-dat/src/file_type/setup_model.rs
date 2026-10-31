@@ -1,4 +1,5 @@
 use crate::graphics::Frame;
+use crate::utils::align_boundary;
 use binrw::{
     BinRead, BinResult, BinWrite,
     io::{Read, Seek, Write},
@@ -124,11 +125,11 @@ pub struct EtherealHookPayload {
     pub ethereal: bool,
 }
 
-/// Swaps one setup part's graphics object mid-animation.
+/// Authored replacement metadata; retail preloads the graphics object but has no hook Execute.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ReplaceObjectHookPayload {
-    /// Index of the setup part whose graphics object is replaced.
-    pub part_index: u16,
+    /// Authored target part; an inert hook may name an index outside the setup's part array.
+    pub part_index: u8,
     /// Full `GfxObj` file id, unpacked from the wire's known-type-relative encoding.
     pub gfx_obj_id: u32,
 }
@@ -312,6 +313,9 @@ impl AnimationHook {
             }
         };
 
+        // Retail aligns after every hook, including the byte-sized ReplaceObject part index
+        // followed by a packed DID.
+        align_boundary(reader, 4)?;
         Ok(Self {
             hook_type,
             direction,
@@ -339,6 +343,8 @@ impl AnimationHook {
         self.hook_type.write_le(writer)?;
         self.direction.write_le(writer)?;
         self.payload.write(writer)?;
+        let padding = (4 - writer.stream_position()? % 4) % 4;
+        writer.write_all(&[0; 3][..padding as usize])?;
         Ok(())
     }
 }
@@ -568,7 +574,7 @@ fn read_replace_object_payload<R: Read + Seek>(
     reader: &mut R,
 ) -> BinResult<ReplaceObjectHookPayload> {
     Ok(ReplaceObjectHookPayload {
-        part_index: u16::read_le(reader)?,
+        part_index: u8::read_le(reader)?,
         gfx_obj_id: read_known_type_data_id(reader, GFX_OBJ_KNOWN_TYPE)?,
     })
 }
@@ -1040,8 +1046,9 @@ mod tests {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&5u32.to_le_bytes());
         bytes.extend_from_slice(&0i32.to_le_bytes());
-        bytes.extend_from_slice(&7u16.to_le_bytes());
+        bytes.push(7);
         bytes.extend_from_slice(&0x1234u16.to_le_bytes());
+        bytes.push(0); // Hook alignment padding.
 
         let hook = round_trip_hook(
             bytes,
@@ -1064,9 +1071,10 @@ mod tests {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&5u32.to_le_bytes());
         bytes.extend_from_slice(&1i32.to_le_bytes());
-        bytes.extend_from_slice(&9u16.to_le_bytes());
+        bytes.push(9);
         bytes.extend_from_slice(&0x8001u16.to_le_bytes());
         bytes.extend_from_slice(&0x2345u16.to_le_bytes());
+        bytes.extend_from_slice(&[0; 3]); // Hook alignment padding.
 
         let hook = round_trip_hook(
             bytes,

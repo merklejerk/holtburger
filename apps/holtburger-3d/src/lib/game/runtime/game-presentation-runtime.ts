@@ -1,4 +1,6 @@
 import type { DynamicPresentationOverride } from "./dynamic-presentation-override";
+import { isContentFailure } from "../../host/host-command-result";
+import { formatError } from "../../format-error";
 import { resolveObjectBehavior } from "../resolution/object-resident-classifier";
 import type { DistantAnimationSamplingPolicy } from "../../frontend-tuning-contract";
 import type { RuntimeLight } from "../environment/runtime-lights";
@@ -140,7 +142,11 @@ import { ParticleMeshCache } from "../behavior/particle-mesh-cache";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { SoundTableSource } from "../../assets/sound-table-source";
 import type { DecodedSoundTable } from "../../assets/decode-sound-table-record";
-import type { PortalTransitionAssets } from "../../client/portal-transition-assets";
+import {
+	type PortalTransitionAssets,
+	withPortalTransitionAudio,
+	type PortalTransitionAudio,
+} from "../../client/portal-transition-assets";
 import {
 	type PortalTransitionPresentationPlan,
 	type PortalTransitionPresentationReceipt,
@@ -541,8 +547,11 @@ interface DesiredDynamicEntityRecord {
 	deferral: DynamicEntityDeferral | null;
 	/** Effective cue table: undefined until visual metadata resolves; null means no table. */
 	scriptTableId: DatAssetId | null | undefined;
-	/** Exact asynchronous realization owned by this desired record. */
-	realization: Promise<void> | null;
+	/** Exclusive preparation outcome; a rejected source is retried only by a new level or explicit retry. */
+	realization:
+		| { readonly kind: "idle" }
+		| { readonly kind: "preparing"; readonly completion: Promise<void> }
+		| { readonly kind: "unavailable"; readonly error: Error };
 }
 
 interface RetainedSetupVisual {
@@ -927,7 +936,36 @@ export class GamePresentationRuntime {
 			),
 		];
 		if (meshIds.length === 0) return;
-		await this.#particleMeshes.prepare(meshIds);
+		for (const id of meshIds) {
+			try {
+				await this.#particleMeshes.prepare([id]);
+			} catch (cause) {
+				if (!isContentFailure(cause)) throw cause;
+				this.reportContentFailure(
+					new Error(
+						`Particle mesh ${id} unavailable; dependent effect omitted.`,
+						{ cause },
+					),
+				);
+			}
+		}
+	}
+
+	/** A script root may run only when every drawable dependency has a renderer installation. */
+	#scriptMeshesReady(closure: PreparedPhysicsScriptClosure): boolean {
+		return [...closure.scripts.values()].every((script) =>
+			script.dependencies.emitterInfoIds.every(
+				(id) => this.#preparedEmitter(id) !== null,
+			),
+		);
+	}
+
+	#preparedEmitter(id: DatAssetId): PreparedParticleEmitter | null {
+		const emitter = this.#particleEmitters.getReady(id);
+		return emitter?.kind === "drawable" &&
+			!this.#particleMeshes.isReady(emitter.mesh.id)
+			? null
+			: emitter;
 	}
 
 	/** Current world origin of one behavior target, or `null` once it leaves the scene. */
@@ -1212,6 +1250,10 @@ export class GamePresentationRuntime {
 	readonly #realizationContinuations = new Set<Promise<void>>();
 	/** Asynchronous preparation and eviction failures surfaced by the next runtime tick. */
 	readonly #presentationFailures: unknown[] = [];
+	/** Cold source observations replay to a new frontend error surface and reset on explicit retry. */
+	readonly #contentFailures = new Map<unknown, Error>();
+	readonly #contentFailureListeners = new Set<(error: Error) => void>();
+	readonly #contentUnsubscriptions = new Set<() => void>();
 	/** Frontend listeners informed when placement facts become available or fail. */
 	readonly #sceneAvailabilityListeners = new Set<SceneAvailabilityListener>();
 	/** Current primary-view input used for visibility and rendering. */
@@ -1226,10 +1268,16 @@ export class GamePresentationRuntime {
 	#portalTransition: PortalTransitionPresentationPlan | undefined;
 	/** Atomic frontend-resolved precise-jump marker and optional trajectory. */
 	#worldIndicator: WorldIndicatorInput | null = null;
-	/** Prepared authored portal closure retained until runtime teardown. */
-	#portalTransitionAssets: PortalTransitionAssets | null = null;
+	/** Installed authored visual or an explicitly selected opaque loading surface. */
+	#portalAssets:
+		| { readonly kind: "uninitialized" }
+		| { readonly kind: "unavailable" }
+		| {
+				readonly kind: "ready";
+				readonly assets: PortalTransitionAssets;
+				readonly clip: PlayingClip;
+		  } = { kind: "uninitialized" };
 	/** Authored 40fps traversal sampled at render cadence for the portal's setup and sound hooks. */
-	#portalTransitionClip: PlayingClip | null = null;
 	#portalTransitionFramePosition = 0;
 	/** Monotonic roll clock; unlike the authored clip cursor, this never laps at frame 119. */
 	#portalTransitionAxialRollFramePosition = 0;
@@ -1460,8 +1508,7 @@ export class GamePresentationRuntime {
 			clock: () => this.#lastFrameTimeSeconds,
 			// Reads an already-staged definition; an unstaged id returns null rather than starting
 			// a load inside the frame.
-			resolveEmitter: (emitterInfoId) =>
-				this.#particleEmitters.getReady(emitterInfoId),
+			resolveEmitter: (emitterInfoId) => this.#preparedEmitter(emitterInfoId),
 			sceneOriginOf: (target) => this.#originOf(target),
 			targetLives: (target) => this.#targetLives(target),
 			sceneRotationOf: (target) => this.#rotationOf(target),
@@ -1513,6 +1560,13 @@ export class GamePresentationRuntime {
 			SHARED_FRONTEND_TUNING.audio.maximumSimultaneousVoices,
 			() => this.#lastFrameTimeSeconds,
 			SHARED_FRONTEND_TUNING.audio.maximumWarmupReplaySeconds,
+			(cause) => {
+				if (isContentFailure(cause))
+					this.reportContentFailure(
+						new Error("Sound unavailable; playback omitted.", { cause }),
+					);
+				else this.#presentationFailures.push(cause);
+			},
 		);
 		this.#ambient = new AmbientSystem({
 			// Pure wiring: the ambient system owns the buffer, what share means, and the indoor
@@ -1575,7 +1629,7 @@ export class GamePresentationRuntime {
 							throw new Error(
 								"Script activation reached an unwired scheduler.",
 							);
-						system.scheduleActivation(target, activation);
+						return system.scheduleActivation(target, activation);
 					},
 				},
 				targets: behaviorTargets,
@@ -1597,7 +1651,7 @@ export class GamePresentationRuntime {
 							throw new Error(
 								"World-owned script activation reached an unwired scheduler.",
 							);
-						system.scheduleActivation(target, activation);
+						return system.scheduleActivation(target, activation);
 					},
 				},
 				targets: behaviorTargets,
@@ -1616,12 +1670,25 @@ export class GamePresentationRuntime {
 			);
 		worldOwnedScriptWiring.system = this.#worldOwnedPhysicsScriptSystem;
 		this.#skyScripts = new SkyScriptSystem({
-			onFailure: (cause) => this.#presentationFailures.push(cause),
+			onFailure: (cause) => {
+				if (isContentFailure(cause))
+					this.reportContentFailure(
+						new Error("Sky effect unavailable; effect omitted.", { cause }),
+					);
+				else this.#presentationFailures.push(cause);
+			},
 			acquireClosure: (scriptId) =>
 				this.#physicsScripts.acquireClosure(scriptId),
 			acquireEmitter: (emitterInfoId) =>
 				this.#particleEmitters.acquire(emitterInfoId),
-			installMeshes: (emitters) => this.#stageParticleMeshes(emitters),
+			installMeshes: (emitters) =>
+				this.#particleMeshes.prepare([
+					...new Set(
+						emitters.flatMap((emitter) =>
+							emitter.kind === "drawable" ? [emitter.mesh.id] : [],
+						),
+					),
+				]),
 			installScript: (target, closure, timeSeconds) =>
 				this.#physicsScriptSystem.install(
 					SKY_OWNER_ID,
@@ -1822,7 +1889,7 @@ export class GamePresentationRuntime {
 			throw new Error("This runtime has no setup visual source capability.");
 		const record = this.#acceptDesiredDynamicEntity(entity);
 		await this.#realizeAcceptedDynamicEntity(record);
-		return this.#isDesiredVisualInstalled(record) ? "installed" : "deferred";
+		return this.#dynamicEntityDisposition(record);
 	}
 
 	/** Replace a local appearance level without changing the authority mirror or object generation. */
@@ -1904,6 +1971,23 @@ export class GamePresentationRuntime {
 			installed?.generation === record.entity.generation &&
 			installed.visualKey === record.visualKey
 		);
+	}
+
+	#dynamicEntityDisposition(
+		record: DesiredDynamicEntityRecord,
+	): DynamicEntityRealizationDisposition {
+		if (this.#isDesiredVisualInstalled(record)) return "installed";
+		return record.realization.kind === "unavailable"
+			? "unavailable"
+			: "deferred";
+	}
+
+	/** Specific source failure used to block only a local player lacking a usable presentation. */
+	dynamicEntityContentFailure(guid: number): Error | null {
+		const record = this.#spawnedDesiredEntities.get(guid);
+		return record?.realization.kind === "unavailable"
+			? record.realization.error
+			: null;
 	}
 
 	/** Retire one exact accepted generation while preserving newer desired authority. */
@@ -2041,10 +2125,11 @@ export class GamePresentationRuntime {
 		if (desired === undefined || desired.scriptTableId === undefined) return;
 		const installed = this.#spawnedPresentations.get(guid);
 		const ready =
-			desired.realization ??
-			(installed?.generation === desired.entity.generation
-				? Promise.resolve()
-				: null);
+			desired.realization.kind === "preparing"
+				? desired.realization.completion
+				: installed?.generation === desired.entity.generation
+					? Promise.resolve()
+					: null;
 		if (ready === null) return;
 		const queued = this.#pendingDynamicEntityCues.get(guid);
 		if (queued === undefined) return;
@@ -2126,7 +2211,9 @@ export class GamePresentationRuntime {
 		cue: DynamicEntityScriptCue,
 	): Promise<DynamicCueAssets | null> {
 		if (tableId === null) return null;
-		const tableHandle = await this.#physicsScriptTables.acquire(tableId);
+		const tableHandle =
+			await this.#physicsScriptTables.acquireOptional(tableId);
+		if (tableHandle === null) return null;
 		let rootId: DatAssetId | null;
 		try {
 			rootId = selectPhysicsScript(tableHandle.asset, cue.cue, cue.intensity);
@@ -2140,8 +2227,9 @@ export class GamePresentationRuntime {
 	/** Shared closure preparation for table cues and explicit local racial scripts. */
 	async #prepareDirectDynamicScript(
 		rootId: DatAssetId,
-	): Promise<DynamicCueAssets> {
-		const closure = await this.#physicsScripts.acquireClosure(rootId);
+	): Promise<DynamicCueAssets | null> {
+		const closure = await this.#physicsScripts.acquireOptionalClosure(rootId);
+		if (closure === null) return null;
 		const emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[] = [];
 		try {
 			const emitterIds = new Set(
@@ -2149,12 +2237,26 @@ export class GamePresentationRuntime {
 					(script) => script.dependencies.emitterInfoIds,
 				),
 			);
+			const available =
+				await this.#particleEmitters.acquireAvailable(emitterIds);
 			emitterHandles.push(
-				...(await this.#particleEmitters.acquireAll(emitterIds)).values(),
+				...[...available.values()].flatMap((handle) =>
+					handle === null ? [] : [handle],
+				),
 			);
+			if ([...available.values()].some((handle) => handle === null)) {
+				for (const handle of emitterHandles) handle.release();
+				closure.release();
+				return null;
+			}
 			await this.#stageParticleMeshes(
 				emitterHandles.map((handle) => handle.asset),
 			);
+			if (!this.#scriptMeshesReady(closure)) {
+				for (const handle of emitterHandles) handle.release();
+				closure.release();
+				return null;
+			}
 			return { closure, emitterHandles };
 		} catch (cause) {
 			for (const handle of emitterHandles) handle.release();
@@ -2334,7 +2436,7 @@ export class GamePresentationRuntime {
 				const entity = record.entity;
 				return [
 					entity.identity.guid,
-					this.#isDesiredVisualInstalled(record) ? "installed" : "deferred",
+					this.#dynamicEntityDisposition(record),
 				] as const;
 			}),
 		);
@@ -2348,6 +2450,7 @@ export class GamePresentationRuntime {
 			this.#spawnedDesiredEntities.get(record.entity.identity.guid) !== record
 		)
 			return;
+		if (record.realization.kind === "unavailable") return;
 		const entity = record.entity;
 		if (
 			entity.placement.kind === "world" &&
@@ -2387,23 +2490,32 @@ export class GamePresentationRuntime {
 			await this.#realizeDesiredDynamicChildren(entity.identity.guid);
 			return;
 		}
-		if (record.realization !== null) {
-			await record.realization;
+		if (record.realization.kind === "preparing") {
+			await record.realization.completion;
 			return;
 		}
 		const guid = entity.identity.guid;
-		const visual = this.#retainSpawnedVisual(guid, entity).catch((cause) => {
-			throw dynamicEntityPresentationFailure(entity, cause);
-		});
+		const visual = this.#retainSpawnedVisual(guid, entity);
 		const continuation = this.#realizeDynamicEntity(record, visual)
 			.catch((cause: unknown) => {
 				if (!this.#isDynamicRealizationEligible(record)) return;
-				throw cause;
+				if (isContentFailure(cause)) {
+					const error = dynamicEntityPresentationFailure(entity, cause);
+					this.#retireDynamicPresentationTree(guid);
+					record.realization = { kind: "unavailable", error };
+					this.reportContentFailure(error);
+					return;
+				}
+				throw dynamicEntityPresentationFailure(entity, cause);
 			})
 			.finally(() => {
-				if (record.realization === continuation) record.realization = null;
+				if (
+					record.realization.kind === "preparing" &&
+					record.realization.completion === continuation
+				)
+					record.realization = { kind: "idle" };
 			});
-		record.realization = continuation;
+		record.realization = { kind: "preparing", completion: continuation };
 		this.#trackRealizationContinuation(continuation);
 		await continuation;
 		await this.#realizeDesiredDynamicChildren(guid);
@@ -2495,7 +2607,7 @@ export class GamePresentationRuntime {
 			deferral: null,
 			entity,
 			placementIdentity,
-			realization: null,
+			realization: { kind: "idle" },
 			scriptTableId: undefined,
 			visualKey,
 		};
@@ -3279,6 +3391,53 @@ export class GamePresentationRuntime {
 		return () => this.#sceneAvailabilityListeners.delete(listener);
 	}
 
+	/** Operational failures never enter the nonfatal content channel. */
+	reportContentFailure(error: Error): void {
+		if (!isContentFailure(error)) throw error;
+		const key = error.cause === undefined ? error : error.cause;
+		if (this.#destroyed || this.#contentFailures.has(key)) return;
+		this.#contentFailures.set(key, error);
+		console.warn(formatError(error), error);
+		for (const listener of this.#contentFailureListeners) listener(error);
+	}
+
+	/** Connect existing chat/debug error surfaces without a frame-rate UI graph. */
+	subscribeContentFailures(listener: (error: Error) => void): () => void {
+		const observe = (error: Error) => listener(error);
+		this.#contentFailureListeners.add(observe);
+		for (const error of this.#contentFailures.values()) observe(error);
+		const subscriptions = [
+			this.#animationAssets,
+			this.#physicsScripts,
+			this.#particleEmitters,
+			this.#physicsScriptTables,
+			this.#soundTables,
+		].map((repository) => repository.listenContentFailures(observe));
+		const unsubscribe = () => {
+			this.#contentFailureListeners.delete(observe);
+			for (const unsubscribe of subscriptions) unsubscribe();
+			this.#contentUnsubscriptions.delete(unsubscribe);
+		};
+		this.#contentUnsubscriptions.add(unsubscribe);
+		return unsubscribe;
+	}
+
+	/** Called after borrower retirement; valid resources and source identity survive. */
+	retryContentFailures(): void {
+		this.#presentationAssets.retryFailed();
+		this.#soundTables.retryFailed();
+		this.#physicsScriptTables.retryFailed();
+		this.#particleMeshes.retryFailed();
+		this.#skyScripts.retryFailed();
+		this.#contentFailures.clear();
+		for (const record of this.#spawnedDesiredEntities.values()) {
+			if (record.realization.kind === "unavailable")
+				record.realization = { kind: "idle" };
+		}
+		if (this.#portalAssets.kind === "unavailable")
+			this.#portalAssets = { kind: "uninitialized" };
+	}
+
 	/**
 	 * Place the audio listener, in canonical scene space.
 	 *
@@ -3340,13 +3499,15 @@ export class GamePresentationRuntime {
 		this.#ambientSoundTableHandles.clear();
 		this.#ambientSoundTables.clear();
 
-		const staged = await Promise.all(
-			ambientSoundTableIds(facts).map(async (soundTableId) => {
-				const handle = await this.#soundTables.acquire(soundTableId);
-				return [soundTableId, handle] as const;
-			}),
+		const staged = await this.#soundTables.acquireAvailable(
+			ambientSoundTableIds(facts),
 		);
+		if (this.#destroyed) {
+			for (const handle of staged.values()) handle?.release();
+			return;
+		}
 		for (const [soundTableId, handle] of staged) {
+			if (handle === null) continue;
 			this.#ambientSoundTableHandles.set(soundTableId, handle);
 			this.#ambientSoundTables.set(soundTableId, handle.asset);
 		}
@@ -3566,14 +3727,28 @@ export class GamePresentationRuntime {
 
 	/** Play one of the validated head-locked sounds authored for the portal transition. */
 	playPortalTransitionSound(kind: "enter" | "exit"): void {
-		const assets = this.#portalTransitionAssets;
-		if (assets === null)
+		if (this.#portalAssets.kind === "unavailable") return;
+		if (this.#portalAssets.kind === "uninitialized")
 			throw new Error("Portal transition audio is not installed.");
+		const assets = this.#portalAssets.assets;
 		const soundId =
 			kind === "enter"
 				? assets.catalog.enterSoundId
 				: assets.catalog.exitSoundId;
-		this.#audio.triggerListenerLocked(soundId);
+		if (assets.waveIds.includes(soundId))
+			this.#audio.triggerListenerLocked(soundId);
+	}
+
+	/** Explicit retry replaces only failed audio readiness; the installed tunnel lease stays valid. */
+	updatePortalTransitionAudio(audio: PortalTransitionAudio): void {
+		if (this.#portalAssets.kind !== "ready")
+			throw new Error(
+				"Portal audio update requires an installed authored visual.",
+			);
+		this.#portalAssets = {
+			...this.#portalAssets,
+			assets: withPortalTransitionAudio(this.#portalAssets.assets, audio),
+		};
 	}
 
 	/** Advance the direct portal animation cursor and dispatch only its authored sound hooks. */
@@ -3581,7 +3756,13 @@ export class GamePresentationRuntime {
 		timeSeconds: number,
 	): PortalTransitionFrame | undefined {
 		const transition = this.#portalTransition;
-		const clip = this.#portalTransitionClip;
+		if (this.#portalAssets.kind === "unavailable") {
+			return transition?.kind === "destination-only-awaiting-handoff"
+				? transition
+				: undefined;
+		}
+		const clip =
+			this.#portalAssets.kind === "ready" ? this.#portalAssets.clip : null;
 		if (
 			transition === undefined ||
 			transition.kind === "destination-only-awaiting-handoff"
@@ -3625,14 +3806,17 @@ export class GamePresentationRuntime {
 	}
 
 	#dispatchPortalAnimationHooks(departedFrames: readonly number[]): void {
-		const animation = this.#portalTransitionClip?.animation;
-		if (!animation) return;
+		if (this.#portalAssets.kind !== "ready")
+			throw new Error("Portal hooks require an installed authored animation.");
+		const { assets, clip } = this.#portalAssets;
+		const animation = clip.animation;
 		for (const frameIndex of departedFrames) {
 			for (const hook of animation.hooks) {
 				if (
 					hook.frameIndex !== frameIndex ||
 					(hook.direction !== "both" && hook.direction !== "forward") ||
-					hook.kind !== "sound-tweaked"
+					hook.kind !== "sound-tweaked" ||
+					!assets.waveIds.includes(hook.soundId)
 				) {
 					continue;
 				}
@@ -3654,14 +3838,18 @@ export class GamePresentationRuntime {
 	 * target or scene placement.
 	 */
 	async installPortalTransitionAssets(
-		assets: PortalTransitionAssets,
+		assets: PortalTransitionAssets | null,
 	): Promise<void> {
 		if (this.#destroyed)
 			throw new Error(
 				"Cannot install portal transition assets after runtime shutdown.",
 			);
-		if (this.#portalTransitionAssets !== null)
+		if (this.#portalAssets.kind !== "uninitialized")
 			throw new Error("Portal transition assets are already installed.");
+		if (assets === null) {
+			this.#portalAssets = { kind: "unavailable" };
+			return;
+		}
 		const setupId = assets.visual.setupId;
 		if (setupId === null)
 			throw new Error("Portal transition visual has no setup identity.");
@@ -3719,14 +3907,17 @@ export class GamePresentationRuntime {
 			);
 			throw cause;
 		}
-		this.#portalTransitionAssets = assets;
-		this.#portalTransitionClip = playingClip(
-			animation,
-			assets.catalog.animationLowFrame,
-			animation.frameCount - 1,
-			assets.catalog.animationFramesPerSecond,
-			"loop",
-		);
+		this.#portalAssets = {
+			kind: "ready",
+			assets,
+			clip: playingClip(
+				animation,
+				assets.catalog.animationLowFrame,
+				animation.frameCount - 1,
+				assets.catalog.animationFramesPerSecond,
+				"loop",
+			),
+		};
 	}
 
 	/**
@@ -3962,8 +4153,10 @@ export class GamePresentationRuntime {
 
 	/** Snapshot the required portal closure without exposing mutable renderer or repository state. */
 	getPortalTransitionDiagnostics(): PortalTransitionRuntimeDiagnostics {
-		const assets = this.#portalTransitionAssets;
-		const clip = this.#portalTransitionClip;
+		const assets =
+			this.#portalAssets.kind === "ready" ? this.#portalAssets.assets : null;
+		const clip =
+			this.#portalAssets.kind === "ready" ? this.#portalAssets.clip : null;
 		const transition = this.#portalTransition;
 		const texture = this.#textures.getDiagnostics();
 		const templates = this.#objectVisualTemplates.getDiagnostics();
@@ -4331,6 +4524,8 @@ export class GamePresentationRuntime {
 		if (this.#destroyed) throw new Error("Game runtime has been destroyed.");
 		const renderer = this.#renderer;
 		if (!renderer) throw new Error("Game runtime has no renderer device.");
+		const loadingReceipt = this.#presentOpaquePortalLoading();
+		if (loadingReceipt !== null) return loadingReceipt;
 		const portalTransition = this.#advancePortalTransition(timeSeconds);
 		if (portalTransition === undefined) {
 			throw new Error("Portal-space-only frame has no active transition.");
@@ -4356,6 +4551,19 @@ export class GamePresentationRuntime {
 		const renderer = this.#renderer;
 		if (!renderer) throw new Error("Game runtime has no renderer device.");
 		renderer.clearPresentation();
+	}
+
+	/** Opaque output is a real loading proof, never a fabricated authored-tunnel receipt. */
+	#presentOpaquePortalLoading(): PortalTransitionPresentationReceipt | null {
+		const transition = this.#portalTransition;
+		if (
+			this.#portalAssets.kind !== "unavailable" ||
+			transition === undefined ||
+			transition.kind === "destination-only-awaiting-handoff"
+		)
+			return null;
+		this.clearPresentation();
+		return { kind: "opaque-loading", generation: transition.generation };
 	}
 
 	/** Draw the current runtime state after a frontend-owned tick measurement. */
@@ -4473,11 +4681,12 @@ export class GamePresentationRuntime {
 			worldIndicator: this.#worldIndicator,
 		});
 		tick?.mark("render");
+		const loadingReceipt = this.#presentOpaquePortalLoading();
 		this.#selectedDynamicNodeIds = new Set(feedback.selectedDynamicNodeIds);
 		this.#animationPresentation.completeFrame(feedback, timeSeconds);
 		tick?.mark("frameCompletion");
 		tick?.finishTick();
-		return feedback.portalTransitionReceipt;
+		return loadingReceipt ?? feedback.portalTransitionReceipt;
 	}
 
 	/** Per-phase update-tick timing; null unless a frontend injected a profiler. */
@@ -4499,6 +4708,8 @@ export class GamePresentationRuntime {
 
 	async destroy(): Promise<void> {
 		if (this.#destroyed) return;
+		for (const unsubscribe of this.#contentUnsubscriptions) unsubscribe();
+		this.#contentFailures.clear();
 		const spawned = [...this.#spawnedDesiredEntities.keys()];
 		for (const guid of spawned) this.#retireDynamicPresentationTree(guid);
 		for (const guid of spawned)
@@ -4529,8 +4740,7 @@ export class GamePresentationRuntime {
 		this.#combatEffects = null;
 		await this.#renderer?.destroy();
 		this.#renderer = null;
-		this.#portalTransitionAssets = null;
-		this.#portalTransitionClip = null;
+		this.#portalAssets = { kind: "uninitialized" };
 		this.#portalTransitionAnimationGeneration = null;
 		this.#portalTransitionFramePosition = 0;
 		this.#portalTransitionAxialRollFramePosition = 0;
@@ -5059,26 +5269,43 @@ export class GamePresentationRuntime {
 			PhysicsScriptSystem<DynamicOwnerId>["stageOwner"]
 		> | null = null;
 		try {
-			scriptStage = scriptSystem.stageOwner(
-				ownerId,
-				prepared.flatMap(({ nodeId, scriptClosure }) =>
-					scriptClosure === null
-						? []
-						: [
-								{
-									closure: scriptClosure,
-									target: {
-										generation: installation.generation,
-										targetId: behaviorTargetId(nodeId),
-									},
-									timeSeconds: this.#lastFrameTimeSeconds,
-								},
-							],
-				),
-			);
-			// Particle meshes are part of an emitter's drawable closure, not a post-publish warmup.
 			await this.#stageParticleMeshes(
 				prepared.flatMap((entity) => entity.emitters),
+			);
+			scriptStage = scriptSystem.stageOwner(
+				ownerId,
+				prepared.flatMap(
+					({ nodeId, scriptClosure, animationScriptClosures }) => {
+						const defaultRoot =
+							scriptClosure !== null && this.#scriptMeshesReady(scriptClosure)
+								? scriptClosure
+								: null;
+						const roots = [
+							defaultRoot,
+							...animationScriptClosures.filter((graph) =>
+								this.#scriptMeshesReady(graph),
+							),
+						].filter((graph) => graph !== null);
+						const [first, ...additionalClosures] = roots;
+						return first === undefined
+							? []
+							: [
+									{
+										closure: first,
+										additionalClosures,
+										activation:
+											defaultRoot === null
+												? ("on-command" as const)
+												: ("immediate" as const),
+										target: {
+											generation: installation.generation,
+											targetId: behaviorTargetId(nodeId),
+										},
+										timeSeconds: this.#lastFrameTimeSeconds,
+									},
+								];
+					},
+				),
 			);
 			installation.prepareCommit(
 				animationStage.samples,

@@ -1,5 +1,5 @@
 import type { ClientLoadingPageState } from "./client-loading-page";
-import { clientFailureDiagnostic as errorMessage } from "./client-close-contract";
+import { formatError } from "../lib/format-error";
 import {
 	abortError,
 	isAbortError,
@@ -327,7 +327,7 @@ export class ClientAppLifecycle {
 		try {
 			await request();
 		} catch (error) {
-			if (!isAbortError(error)) this.fail("startup", errorMessage(error));
+			if (!isAbortError(error)) this.fail("startup", formatError(error));
 		}
 	}
 	async enter(): Promise<void> {
@@ -409,7 +409,7 @@ export class ClientAppLifecycle {
 				throw new AggregateError(errors, "Client retirement failed.");
 		})();
 		void this.#withdrawal.catch((error) =>
-			this.#recordFailure("command", errorMessage(error)),
+			this.#recordFailure("command", formatError(error)),
 		);
 		return this.#withdrawal;
 	}
@@ -453,12 +453,12 @@ export class ClientAppLifecycle {
 				} catch (error) {
 					if (isAbortError(error)) return;
 					if (kind === "quit") {
-						this.#recordFailure("command", errorMessage(error));
+						this.#recordFailure("command", formatError(error));
 						throw error;
 					}
 					if (this.#operation !== operation) return;
-					if (kind === "return") this.#dependencies.warn(errorMessage(error));
-					else this.fail("command", errorMessage(error));
+					if (kind === "return") this.#dependencies.warn(formatError(error));
+					else this.fail("command", formatError(error));
 				} finally {
 					if (this.#operation === operation && kind !== "quit") {
 						this.#operation = null;

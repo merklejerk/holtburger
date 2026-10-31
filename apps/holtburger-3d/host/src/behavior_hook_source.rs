@@ -173,7 +173,8 @@ pub(crate) fn behavior_hook_payload(
             part_index,
             gfx_obj_id,
         }) => {
-            ensure_part_index("ReplaceObject", u32::from(*part_index), part_scope)?;
+            // Retail never executes this hook, so its authored index need not name a render part.
+            // Animation 0x0300055b has one part and two replacements naming index 1.
             BehaviorHookPayloadManifest::ReplaceObject {
                 part_index: u32::from(*part_index),
                 gfx_obj_id: dat_id(*gfx_obj_id),

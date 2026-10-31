@@ -7,6 +7,7 @@
 		"src/harness/browser/main.ts",
 		"src/harness/browser/client-precise-jump-probe.ts",
 		"src/harness/browser/client-jump-hud-probe.ts",
+		"src/harness/browser/content-failure-probe.ts",
 		"src/harness/browser/dynamic-material-table-probe.ts",
 		"src/harness/browser/portal-traversal-investigation.ts",
 		"src/harness/browser/static-cell-coverage-probe.ts",

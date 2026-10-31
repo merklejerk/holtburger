@@ -398,6 +398,40 @@ describe("wireCommand", () => {
 });
 
 describe("SidecarHostClient", () => {
+	it("retains resource rejection facts without producing a native recovery event", async () => {
+		const process = new FakeProcess();
+		const client = await connect(process);
+		const failures: unknown[] = [];
+		client.listenContentFailures((failure) => failures.push(failure));
+		const request = client.invoke("load_animation", {
+			request: { animationId: "0x0300055b" },
+		});
+		const resource = {
+			kind: "missing",
+			namespace: "eor/portal",
+			file_id: 0x0300055b,
+		};
+		const rejected = expect(request).rejects.toMatchObject({
+			code: "application_error",
+			resource,
+		});
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		process.stdout.push(
+			encodeSidecarFrame({
+				kind: "response",
+				id: 1,
+				result: {
+					Err: {
+						code: "application_error",
+						message: "Missing animation",
+						resource,
+					},
+				},
+			}),
+		);
+		await rejected;
+		expect(failures).toEqual([]);
+	});
 	it("negotiates, multiplexes responses, delivers events, and shuts down", async () => {
 		const process = new FakeProcess();
 		const client = await connect(process);

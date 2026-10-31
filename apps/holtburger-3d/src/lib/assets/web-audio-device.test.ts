@@ -96,6 +96,27 @@ function fakeSource(): AudioAssetSource & { loads: DatAssetId[] } {
 }
 
 describe("WebAudioDevice", () => {
+	it("contains a media decoder source rejection until explicit retry", async () => {
+		const { context } = fakeContext();
+		const source = fakeSource();
+		const cause = new DOMException("Invalid wave", "EncodingError");
+		const decode = vi
+			.spyOn(context, "decodeAudioData")
+			.mockRejectedValueOnce(cause);
+		const device = new WebAudioDevice(context, source, SMOOTHING, LINEAR);
+		await expect(device.prepare(SOUND)).rejects.toMatchObject({
+			cause,
+			failure: { resource: { kind: "invalid", file_id: Number(SOUND) } },
+		});
+		await expect(device.prepare(SOUND)).rejects.toThrow("Invalid wave");
+		expect(source.loads).toEqual([SOUND]);
+		expect(decode).toHaveBeenCalledTimes(1);
+		device.retryFailed();
+		await device.prepare(SOUND);
+		expect(source.loads).toEqual([SOUND, SOUND]);
+		expect(device.playOneShot(SOUND, 1, 0)).not.toBeNull();
+		device.destroy();
+	});
 	it("installs the initial mix before playback and ramps live output to exact silence", async () => {
 		const { context, gains, gainNodes } = fakeContext();
 		const device = new WebAudioDevice(context, fakeSource(), SMOOTHING, LINEAR);

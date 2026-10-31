@@ -1,6 +1,7 @@
 import type { ParticleMeshPresentations } from "../../assets/decode-particle-mesh-record";
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { DatAssetId } from "../game-types";
+import { isContentFailure } from "../../host/host-command-result";
 
 /**
  * Resolves particle mesh presentations, batching each request and never loading twice.
@@ -16,6 +17,8 @@ export class ParticleMeshCache {
 	/** Shared readiness includes texture and GPU installation, not only transfer/decode. */
 	readonly #install: (batch: ParticleMeshPresentations) => Promise<void>;
 	readonly #inFlight = new Map<DatAssetId, Promise<void>>();
+	/** Failed source loads stay cached until explicit retry; no repeated transfers at effect time. */
+	readonly #failures = new Map<DatAssetId, unknown>();
 	#destroyed = false;
 
 	constructor(
@@ -36,15 +39,15 @@ export class ParticleMeshCache {
 			throw new Error(
 				"Cannot prepare meshes on a destroyed particle mesh cache.",
 			);
-		const wanted = [
-			...new Set(hwGfxObjIds.map((id) => id.toLowerCase())),
-		].filter(
-			(id) =>
-				!this.#resident.has(id as DatAssetId) &&
-				!this.#inFlight.has(id as DatAssetId),
-		) as DatAssetId[];
-		const pending = hwGfxObjIds
-			.map((id) => this.#inFlight.get(id.toLowerCase() as DatAssetId))
+		const ids = [...new Set(hwGfxObjIds.map((id) => id.toLowerCase()))];
+		for (const id of ids) {
+			if (this.#failures.has(id)) throw this.#failures.get(id);
+		}
+		const wanted = ids.filter(
+			(id) => !this.#resident.has(id) && !this.#inFlight.has(id),
+		);
+		const pending = ids
+			.map((id) => this.#inFlight.get(id))
 			.filter((entry): entry is Promise<void> => entry !== undefined);
 		if (wanted.length === 0) {
 			await Promise.all(pending);
@@ -70,11 +73,27 @@ export class ParticleMeshCache {
 					);
 				for (const id of batch.presentations.keys()) this.#resident.add(id);
 			})
+			.catch((cause: unknown) => {
+				if (isContentFailure(cause) && !this.#destroyed) {
+					for (const id of wanted) this.#failures.set(id, cause);
+				}
+				throw cause;
+			})
 			.finally(() => {
 				for (const id of wanted) this.#inFlight.delete(id);
 			});
 		for (const id of wanted) this.#inFlight.set(id, load);
 		await Promise.all([load, ...pending]);
+	}
+
+	/** Readiness includes renderer installation, so omitted meshes cannot create live emitters. */
+	isReady(id: DatAssetId): boolean {
+		return this.#resident.has(id.toLowerCase());
+	}
+
+	/** Only an explicit presentation retry clears cached source failures. */
+	retryFailed(): void {
+		this.#failures.clear();
 	}
 
 	getDiagnostics() {
@@ -89,6 +108,7 @@ export class ParticleMeshCache {
 		this.#destroyed = true;
 		this.#resident.clear();
 		this.#inFlight.clear();
+		this.#failures.clear();
 		this.#source.destroy();
 	}
 }

@@ -61,6 +61,7 @@ export function prepareDynamicSequence(
 	staticBounds: AABB3,
 ): Extract<PreparedDynamicAnimation, { kind: "sequence" }> {
 	const localBounds = staticBounds.clone();
+	let playable = true;
 	for (const animation of new Set(clips.map((clip) => clip.animation))) {
 		const prepared = prepareDynamicAnimation(
 			animation,
@@ -68,25 +69,28 @@ export function prepareDynamicSequence(
 			scale,
 			staticBounds,
 		);
-		if (prepared.kind === "retain-static-presentation")
-			throw new Error(
-				`Resolved animation ${animation.id} contains unsupported visual hooks: ${prepared.blockingHooks.map(animationHookCommand).join(", ")}.`,
+		if (prepared.kind === "retain-static-presentation") {
+			console.warn(
+				`Resolved animation ${animation.id} contains unsupported visual hooks: ${prepared.blockingHooks.map(animationHookCommand).join(", ")}. Retaining setup pose for the sequence.`,
 			);
+			playable = false;
+		}
 		localBounds.union(prepared.localBounds);
 	}
-	const rotatesVisualRoot = clips.some((clip) =>
+	const playableClips = playable ? clips : [];
+	const rotatesVisualRoot = playableClips.some((clip) =>
 		turnsVisualRoot(clip.animation),
 	);
 	return {
 		kind: "sequence",
-		clips,
-		firstCyclicClip,
-		localBounds,
+		clips: playableClips,
+		firstCyclicClip: playable ? firstCyclicClip : null,
+		localBounds: playable ? localBounds : staticBounds,
 		fit: createModelFit(
 			template.parts,
 			setupPose,
 			scale,
-			clips,
+			playableClips,
 			rotatesVisualRoot,
 		),
 	};

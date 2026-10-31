@@ -806,8 +806,8 @@ async fn write_error(stream: &mut TcpStream, error: anyhow::Error) -> anyhow::Re
     write_response(
         stream,
         500,
-        "text/plain; charset=utf-8",
-        format!("{error:#}").as_bytes(),
+        "application/json",
+        &serde_json::to_vec(&holtburger_3d_host::content_failure::resource_request_error(error))?,
     )
     .await
 }

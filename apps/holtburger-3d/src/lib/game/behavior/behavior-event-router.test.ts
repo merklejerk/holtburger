@@ -43,7 +43,7 @@ function build(isLive = true) {
 		destroy: vi.fn(),
 		stop: vi.fn(),
 	};
-	const scheduler = { scheduleActivation: vi.fn() };
+	const scheduler = { scheduleActivation: vi.fn(() => true) };
 	const objectState = {
 		applyObjectState: vi.fn(
 			(

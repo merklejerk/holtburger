@@ -54,7 +54,7 @@ import {
 	AnimationAssetRepository,
 	type PreparedAnimation,
 	type PreparedAnimationHandle,
-	type PreparedMotionClosure,
+	type PreparedMotionAssets,
 } from "../animation/animation-asset-repository";
 import type { DatAssetId } from "../game-types";
 import { expandBounds } from "../math/geometry-utils";
@@ -106,8 +106,8 @@ interface DynamicEntityRecord {
 	articulatedPose: ArticulatedPose;
 	/** Exclusive playback policy chosen at admission, independent of setup behavior provenance. */
 	readonly playback: DynamicPlaybackPolicy;
-	/** Every directly selected clip retained for this model; motion-table closures are separate. */
-	animationHandles: ReadonlyMap<DatAssetId, PreparedAnimationHandle>;
+	/** Every directly selected clip retained for this model; motion-table assets are separate. */
+	animationHandles: ReadonlyMap<DatAssetId, PreparedAnimationHandle | null>;
 	/**
 	 * Staged script closure for a resident whose setup owns a default script.
 	 *
@@ -117,10 +117,10 @@ interface DynamicEntityRecord {
 	scriptClosure: PreparedPhysicsScriptClosure | null;
 	/** Script closures reached directly by selected animation hooks. */
 	animationScriptClosures: readonly PreparedPhysicsScriptClosure[];
-	/** Every animation this entity's motion table reaches, staged before activation. */
-	motionClosure: PreparedMotionClosure | null;
+	/** Available animations reached by this entity's motion table, staged before activation. */
+	motionAssets: PreparedMotionAssets | null;
 	/**
-	 * The playable subset of that closure and the one bound covering it.
+	 * The playable subset of those assets and the one bound covering it.
 	 *
 	 * Present exactly when the entity animates from a motion table, which is also when its played
 	 * clip can change at runtime.
@@ -260,10 +260,12 @@ export interface PreparedDynamicEntity {
 	readonly initialPartToObjectTransforms: readonly Mat4[];
 	readonly nodeId: SceneNodeId;
 	readonly source: DynamicPresentationSource;
-	/** Staged script closure, or `null` for a resident whose setup owns no default script. */
+	/** Complete default script graph, or `null` when absent or refused. */
 	readonly scriptClosure: PreparedPhysicsScriptClosure | null;
-	readonly motionClosure: PreparedMotionClosure | null;
-	/** The resident's installed sound table, or `null` when its setup installs none. */
+	/** Complete animation-triggered graphs borrowed by the script clock without starting them. */
+	readonly animationScriptClosures: readonly PreparedPhysicsScriptClosure[];
+	readonly motionAssets: PreparedMotionAssets | null;
+	/** The resident's installed sound table, or `null` when absent or refused. */
 	readonly soundTable: DecodedSoundTable | null;
 }
 
@@ -389,7 +391,7 @@ export class DynamicEntitySystem<
 			| "committed"
 			| "released" = "preparing";
 		const animationPreparations = entities.map((entity) =>
-			this.#animations.acquireAll(
+			this.#animations.acquireAvailable(
 				animationIdsFor(entity.source, entity.playback),
 			),
 		);
@@ -397,7 +399,7 @@ export class DynamicEntitySystem<
 			entity.playback.kind === "resolved" ||
 			entity.source.behavior.motionTableId === null
 				? Promise.resolve(null)
-				: this.#animations.acquireMotionClosure(
+				: this.#animations.acquireMotionAssets(
 						entity.source.behavior.motionTableId,
 					),
 		);
@@ -407,7 +409,9 @@ export class DynamicEntitySystem<
 				motionPreparations[index],
 			]).then(([animation, motion]) =>
 				this.#stageBehaviorAssets(entity, [
-					...[...animation.values()].map((handle) => handle.asset),
+					...[...animation.values()].flatMap((handle) =>
+						handle === null ? [] : [handle.asset],
+					),
 					...(motion?.animations.values() ?? []),
 				]),
 			),
@@ -490,7 +494,8 @@ export class DynamicEntitySystem<
 							entity.articulatedPose.partToObjectTransforms,
 						nodeId: entity.rootNodeId,
 						scriptClosure: entity.scriptClosure,
-						motionClosure: entity.motionClosure,
+						animationScriptClosures: entity.animationScriptClosures,
+						motionAssets: entity.motionAssets,
 						soundTable: entity.soundTableHandle?.asset ?? null,
 						source: entity.source,
 					};
@@ -531,7 +536,7 @@ export class DynamicEntitySystem<
 			animationHandles: new Map(),
 			animationScriptClosures: [],
 			emitterHandles: [],
-			motionClosure: null,
+			motionAssets: null,
 			motionPlayback: null,
 			scriptClosure: null,
 			soundTableHandle: null,
@@ -633,7 +638,7 @@ export class DynamicEntitySystem<
 				template,
 				entity.animationHandles,
 				entity.playback,
-				entity.motionClosure,
+				entity.motionAssets,
 			);
 		} catch (cause) {
 			release();
@@ -666,7 +671,7 @@ export class DynamicEntitySystem<
 								template,
 								entity.animationHandles,
 								entity.playback,
-								entity.motionClosure,
+								entity.motionAssets,
 							);
 				// Placement changes update unanimated parts without restarting scripts or playback.
 				const replacementPose =
@@ -1306,10 +1311,10 @@ export class DynamicEntitySystem<
 	}
 
 	/**
-	 * Resolve one animation from a motion-driven entity's staged closure.
+	 * Resolve one animation from a motion-driven entity's staged assets.
 	 *
-	 * `null` means the closure reached this animation and refused it as unplayable, which
-	 * `prepareMotionPlayback` already complained about; the caller keeps the current pose. Throws
+	 * `null` means presentation could not prepare or play this table animation. Preparation has
+	 * already reported the refusal; the caller keeps the current pose. Throws
 	 * for an entity with no motion playback at all, because the host names a clip only for a body
 	 * whose motion table this entity staged, so a mismatch there is a contract defect rather than
 	 * a content one.
@@ -1480,8 +1485,10 @@ export class DynamicEntitySystem<
 		animations: readonly PreparedAnimation[],
 	): Promise<StagedBehaviorAssets> {
 		const scriptId = entity.source.behavior.physicsScriptId;
-		const closure =
-			scriptId === null ? null : await this.#scripts.acquireClosure(scriptId);
+		let closure =
+			scriptId === null
+				? null
+				: await this.#scripts.acquireOptionalClosure(scriptId);
 		const emitterHandles: PreparedAssetHandle<PreparedParticleEmitter>[] = [];
 		const animationScriptClosures: PreparedPhysicsScriptClosure[] = [];
 		let soundTableHandle: PreparedAssetHandle<DecodedSoundTable> | null = null;
@@ -1494,8 +1501,10 @@ export class DynamicEntitySystem<
 				),
 			);
 			if (scriptId !== null) scriptRoots.delete(scriptId);
-			for (const root of scriptRoots)
-				animationScriptClosures.push(await this.#scripts.acquireClosure(root));
+			for (const root of scriptRoots) {
+				const staged = await this.#scripts.acquireOptionalClosure(root);
+				if (staged !== null) animationScriptClosures.push(staged);
+			}
 			const scripts = [closure, ...animationScriptClosures].flatMap((item) =>
 				item === null ? [] : [...item.scripts.values()],
 			);
@@ -1503,15 +1512,61 @@ export class DynamicEntitySystem<
 				...animations.flatMap((animation) => animation.emitterInfoIds),
 				...scripts.flatMap((script) => script.dependencies.emitterInfoIds),
 			]);
+			const available = await this.#emitters.acquireAvailable(emitterIds);
 			emitterHandles.push(
-				...(await this.#emitters.acquireAll(emitterIds)).values(),
+				...[...available.values()].flatMap((handle) =>
+					handle === null ? [] : [handle],
+				),
 			);
+			// An effect graph is indivisible even when other independent roots on the body survive.
+			const complete = (graph: PreparedPhysicsScriptClosure) =>
+				[...graph.scripts.values()].every((script) =>
+					script.dependencies.emitterInfoIds.every((id) => {
+						const handle = available.get(id);
+						if (handle === undefined)
+							throw new Error(`Script emitter ${id} was not staged.`);
+						return handle !== null;
+					}),
+				);
+			if (closure !== null && !complete(closure)) {
+				closure.release();
+				closure = null;
+			}
+			for (
+				let index = animationScriptClosures.length - 1;
+				index >= 0;
+				index--
+			) {
+				const graph = animationScriptClosures[index];
+				if (graph !== undefined && !complete(graph)) {
+					graph.release();
+					animationScriptClosures.splice(index, 1);
+				}
+			}
+			const needed = new Set([
+				...animations.flatMap((animation) => animation.emitterInfoIds),
+				...[closure, ...animationScriptClosures].flatMap((graph) =>
+					graph === null
+						? []
+						: [...graph.scripts.values()].flatMap(
+								(script) => script.dependencies.emitterInfoIds,
+							),
+				),
+			]);
+			for (let index = emitterHandles.length - 1; index >= 0; index--) {
+				const handle = emitterHandles[index];
+				if (handle !== undefined && !needed.has(handle.asset.id)) {
+					emitterHandles.splice(index, 1);
+					handle.release();
+				}
+			}
 			// The table is the *object's*, installed from its setup, so it is staged per resident
 			// rather than per script: two residents running one script may resolve a key to
 			// different sounds.
 			const soundTableId = entity.source.behavior.soundTableId;
 			if (soundTableId !== null) {
-				soundTableHandle = await this.#soundTables.acquire(soundTableId);
+				soundTableHandle =
+					await this.#soundTables.acquireOptional(soundTableId);
 			}
 		} catch (cause) {
 			soundTableHandle?.release();
@@ -1535,10 +1590,10 @@ export class DynamicEntitySystem<
 		preparation: StagedObjectVisualTemplateOwner<TTemplateOwnerId>,
 		templateOwnerId: TTemplateOwnerId,
 		animationPreparations: readonly Promise<
-			ReadonlyMap<DatAssetId, PreparedAnimationHandle>
+			ReadonlyMap<DatAssetId, PreparedAnimationHandle | null>
 		>[],
 		behaviorPreparations: readonly Promise<StagedBehaviorAssets>[],
-		motionPreparations: readonly Promise<PreparedMotionClosure | null>[],
+		motionPreparations: readonly Promise<PreparedMotionAssets | null>[],
 	): Promise<"ready" | "superseded"> {
 		// Settled separately rather than in one array so each lane keeps its own result type; a
 		// single `allSettled` would widen them into a union the release paths cannot discriminate.
@@ -1560,12 +1615,16 @@ export class DynamicEntitySystem<
 		// Everything acquired must be releasable on any failure path, including a closure whose
 		// sibling animation rejected.
 		const acquiredHandles = animationResults.flatMap((result) =>
-			result.status === "fulfilled" ? [...result.value.values()] : [],
+			result.status === "fulfilled"
+				? [...result.value.values()].flatMap((handle) =>
+						handle === null ? [] : [handle],
+					)
+				: [],
 		);
 		const acquiredBehaviorAssets = behaviorResults.flatMap((result) =>
 			result.status === "fulfilled" ? [result.value] : [],
 		);
-		const acquiredMotionClosures = motionResults.flatMap((result) =>
+		const acquiredMotionAssets = motionResults.flatMap((result) =>
 			result.status === "fulfilled" && result.value !== null
 				? [result.value]
 				: [],
@@ -1577,7 +1636,7 @@ export class DynamicEntitySystem<
 				staged.soundTableHandle?.release();
 				for (const handle of staged.emitterHandles) handle.release();
 			}
-			for (const closure of acquiredMotionClosures) closure.release();
+			for (const closure of acquiredMotionAssets) closure.release();
 		};
 		const current =
 			!this.#destroyed && this.#ownerGenerations.get(ownerId) === generation;
@@ -1650,7 +1709,7 @@ export class DynamicEntitySystem<
 					soundTableHandle: behaviorResult.value.soundTableHandle,
 					scriptClosure: behaviorResult.value.closure,
 					animationScriptClosures: behaviorResult.value.animationScriptClosures,
-					motionClosure: motionResult.value,
+					motionAssets: motionResult.value,
 				};
 			});
 			preparation.commit(templateOwnerId);
@@ -1676,7 +1735,7 @@ export class DynamicEntitySystem<
 				entity.animationHandles = result.handles;
 				entity.animationScriptClosures = result.animationScriptClosures;
 				entity.scriptClosure = result.scriptClosure;
-				entity.motionClosure = result.motionClosure;
+				entity.motionAssets = result.motionAssets;
 				entity.motionPlayback = result.motionPlayback;
 				entity.emitterHandles = result.emitterHandles;
 				entity.soundTableHandle = result.soundTableHandle;
@@ -1945,7 +2004,7 @@ export class DynamicEntitySystem<
 			this.#modelRoots.delete(frame.nodeId);
 		const steps: (() => void)[] = [
 			...[...entity.animationHandles.values()].map(
-				(handle) => () => handle.release(),
+				(handle) => () => handle?.release(),
 			),
 			...entity.animationScriptClosures.map(
 				(closure) => () => closure.release(),
@@ -1956,8 +2015,8 @@ export class DynamicEntitySystem<
 			const closure = entity.scriptClosure;
 			steps.push(() => closure.release());
 		}
-		if (entity.motionClosure !== null) {
-			const closure = entity.motionClosure;
+		if (entity.motionAssets !== null) {
+			const closure = entity.motionAssets;
 			steps.push(() => closure.release());
 		}
 		if (entity.soundTableHandle !== null) {
@@ -1967,7 +2026,7 @@ export class DynamicEntitySystem<
 		entity.animationHandles = new Map();
 		entity.animationScriptClosures = [];
 		entity.scriptClosure = null;
-		entity.motionClosure = null;
+		entity.motionAssets = null;
 		entity.motionPlayback = null;
 		entity.emitterHandles = [];
 		entity.soundTableHandle = null;
@@ -2033,9 +2092,9 @@ function prepareEntityVisualState(
 	source: DynamicPresentationSource,
 	scale: Vec3,
 	template: ObjectVisualTemplate,
-	animationAssets: ReadonlyMap<DatAssetId, PreparedAnimationHandle>,
+	animationAssets: ReadonlyMap<DatAssetId, PreparedAnimationHandle | null>,
 	playback: DynamicPlaybackPolicy,
-	motionClosure: PreparedMotionClosure | null,
+	motionAssets: PreparedMotionAssets | null,
 ): {
 	readonly animation: PreparedDynamicAnimation;
 	readonly motionPlayback: PreparedMotionPlayback | null;
@@ -2045,14 +2104,15 @@ function prepareEntityVisualState(
 	const staticBounds = presentationBoundsForPose(posedSource, setupPose);
 	if (playback.kind === "resolved") {
 		const pose = playback.pose;
-		const clips =
+		const stagedClips =
 			pose.kind === "setup-pose"
 				? []
 				: pose.clips.map((clip, index) => {
 						const id = datAssetId(clip.animationId);
 						const handle = animationAssets.get(id);
-						if (!handle)
+						if (handle === undefined)
 							throw new Error(`Resolved animation ${id} was not retained.`);
+						if (handle === null) return null;
 						return playingClip(
 							handle.asset,
 							clip.lowFrame,
@@ -2061,10 +2121,16 @@ function prepareEntityVisualState(
 							index < pose.firstCyclicClip ? "hold" : "loop",
 						);
 					});
+		// A resolved sequence is coherent as a whole; dropping one transition would change its meaning.
+		const clips = stagedClips.some((clip) => clip === null)
+			? []
+			: stagedClips.filter((clip) => clip !== null);
 		return {
 			animation: prepareDynamicSequence(
 				clips,
-				pose.kind === "setup-pose" ? null : pose.firstCyclicClip,
+				pose.kind === "setup-pose" || clips.length === 0
+					? null
+					: pose.firstCyclicClip,
 				template,
 				setupPose.partToObjectTransforms,
 				scale,
@@ -2074,14 +2140,16 @@ function prepareEntityVisualState(
 		};
 	}
 	const animationId = source.behavior.animationId;
-	const animationAsset =
-		animationId === null ? null : animationAssets.get(animationId)?.asset;
-	if (animationAsset === undefined)
+	const animationHandle =
+		animationId === null ? null : animationAssets.get(animationId);
+	if (animationHandle === undefined)
 		throw new Error(`Default animation ${animationId} was not retained.`);
+	const animationAsset =
+		animationHandle === null ? null : animationHandle.asset;
 	const motionPlayback =
-		motionClosure === null
+		motionAssets === null
 			? null
-			: prepareMotionPlayback(motionClosure, template, scale, staticBounds);
+			: prepareMotionPlayback(motionAssets, template, scale, staticBounds);
 	const animation: PreparedDynamicAnimation =
 		motionPlayback !== null
 			? { kind: "none", localBounds: motionPlayback.localBounds }

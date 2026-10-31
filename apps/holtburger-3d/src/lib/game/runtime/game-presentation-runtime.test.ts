@@ -2,6 +2,7 @@ import { HUMANOID_TEST_PARENTS } from "../animation/humanoid-body-test-fixture";
 import { PARTICLE_RECORD_STRIDE_FLOATS } from "../behavior/particle-record-slots";
 import { acVector3, sceneVec3, sceneVector3 } from "../../assets/ac-frame";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import { HostCommandError } from "../../host/host-command-result";
 import { onTestFinished, describe, expect, it, vi } from "vitest";
 import { PresentationAssetService } from "./presentation-asset-service";
 import { DynamicEntitySystem } from "../systems/dynamic-entity-system";
@@ -195,6 +196,84 @@ function testRenderer(overrides: Partial<Renderer> = {}): Renderer {
 }
 
 describe("GamePresentationRuntime view and interest control", () => {
+	it("contains an unavailable entity body while keeping siblings installed and retries explicitly", async () => {
+		let broken = true;
+		let failedLoads = 0;
+		const runtime = await buildSpawnRuntime({
+			load: async (setupDid) => {
+				if (setupDid === 0x02000002 && broken) {
+					failedLoads++;
+					throw new HostCommandError({
+						code: "application_error",
+						message: "Missing body setup",
+						resource: {
+							kind: "missing",
+							namespace: "eor/portal",
+							file_id: setupDid,
+						},
+					});
+				}
+				const visual = spawnedVisual();
+				const id = `0x${setupDid.toString(16).padStart(8, "0")}`;
+				return {
+					...visual,
+					setupId: id,
+					presentation: {
+						...visual.presentation,
+						appearanceKey: id,
+						sourceAssetId: id,
+					},
+				};
+			},
+		});
+		const missing = spawnedEntity(8, 1);
+		const entities = [
+			spawnedEntity(7, 1),
+			{
+				...missing,
+				presentation: {
+					...missing.presentation,
+					content: { ...missing.presentation.content, setupDid: 0x02000002 },
+				},
+			},
+		];
+		const result = await runtime.replaceDynamicEntitySnapshot(entities);
+		expect(result.get(7)).toBe("installed");
+		expect(result.get(8)).toBe("unavailable");
+		expect(runtime.dynamicEntityContentFailure(8)?.message).toContain(
+			"Missing body setup",
+		);
+		expect(runtime.dynamicEntityOrigin(7)).not.toBeNull();
+		expect(runtime.dynamicEntityOrigin(8)).toBeNull();
+		await runtime.reevaluateDynamicEntityEligibility();
+		expect(failedLoads).toBe(1);
+		expect(() => runtime.tick()).not.toThrow();
+		broken = false;
+		runtime.retryContentFailures();
+		expect((await runtime.reevaluateDynamicEntityEligibility()).get(8)).toBe(
+			"installed",
+		);
+		expect(runtime.dynamicEntityContentFailure(8)).toBeNull();
+		await runtime.destroy();
+	});
+
+	it("presents a real opaque loading receipt when authored portal assets are unavailable", async () => {
+		const clear = vi.fn();
+		const runtime = await buildSpawnRuntime(
+			{ load: async () => spawnedVisual() },
+			ANIMATION_SOURCE,
+			testRenderer({ clearPresentation: clear }),
+		);
+		await runtime.installPortalTransitionAssets(null);
+		runtime.setPortalTransition({ kind: "tunnel-only", generation: 4 });
+		expect(
+			runtime.renderPortalTransition(0, { width: 800, height: 600 }),
+		).toEqual({ kind: "opaque-loading", generation: 4 });
+		expect(clear).toHaveBeenCalledOnce();
+		expect(runtime.getPortalTransitionDiagnostics().installed).toBe(false);
+		runtime.setPortalTransition(undefined);
+		await runtime.destroy();
+	});
 	it.each([false, true])(
 		"keeps borrowed assets alive after runtime retirement (failed build: %s)",
 		async (failBuild) => {
@@ -822,6 +901,52 @@ describe("GamePresentationRuntime view and interest control", () => {
 		expect(diagnostics.effects.appliedCommandCount).toBe(1);
 		expect(diagnostics.physicsScripts.activeOwnerCount).toBe(1);
 		expect(diagnostics.worldOwnedPhysicsScripts.activeOwnerCount).toBe(0);
+		await runtime.destroy();
+	});
+
+	it("publishes the authored companion body when its optional script source is refused", async () => {
+		const scriptId: DatAssetId = "0x33000002";
+		const pipeline = new DeferredCommitPipeline();
+		const runtime = await buildGamePresentationRuntimeForTest(
+			{ buildRenderer: async () => testRenderer(), resources: TEST_RESOURCES },
+			pipeline,
+			{} as TexturePixelSource,
+			ANIMATION_SOURCE,
+			{
+				destroy() {},
+				async loadPhysicsScript() {
+					throw new HostCommandError({
+						code: "application_error",
+						message: "Missing companion script",
+						resource: {
+							kind: "missing",
+							namespace: "eor/portal",
+							file_id: Number(scriptId),
+						},
+					});
+				},
+			},
+			{ playOneShot: () => null, prepare: async () => {} },
+			PARTICLE_EMITTER_SOURCE,
+			SOUND_TABLE_SOURCE,
+			PARTICLE_MESH_SOURCE,
+			null,
+		);
+		runtime.updateSceneInterest(buildingSceneInterest("0xda55ffff"));
+		pipeline.resolveNext([promotedBuildingArtifact("0xda55ffff", scriptId)]);
+		await vi.waitFor(() => {
+			runtime.tick();
+			expect(runtime.getAuthoredDynamicResidentDiagnostics()).toHaveLength(1);
+		});
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+		).toBe(1);
+		expect(
+			runtime.getAuthoredDynamicRuntimeDiagnostics().physicsScripts
+				.activeOwnerCount,
+		).toBe(0);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		expect(() => runtime.frame(0)).not.toThrow();
 		await runtime.destroy();
 	});
 
@@ -1602,6 +1727,112 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 		).toEqual({ "owned-by-world": 1 });
 		await runtime.destroy();
 	});
+
+	it.each(["emitter", "mesh"] as const)(
+		"contains a refused cue %s and allows a valid cue after explicit retry",
+		async (failedSource) => {
+			const tableId: DatAssetId = "0x34000001";
+			const scriptId: DatAssetId = "0x33000001";
+			const emitterId: DatAssetId = "0x32000001";
+			const meshId: DatAssetId = "0x01000001";
+			let broken = true;
+			const refusal = new HostCommandError({
+				code: "application_error",
+				message: `Missing cue ${failedSource}`,
+				resource: {
+					kind: "missing",
+					namespace: "eor/portal",
+					file_id: Number(failedSource === "mesh" ? meshId : emitterId),
+				},
+			});
+			const runtime = await buildSpawnRuntime(
+				{ load: async () => spawnedVisual() },
+				ANIMATION_SOURCE,
+				undefined,
+				{
+					destroy() {},
+					loadPhysicsScript: async () => ({
+						id: scriptId,
+						lengthSeconds: 0,
+						records: [
+							{
+								kind: "create-particle",
+								emitterInfoId: emitterId,
+								emitterId: 1,
+								partIndex: 0,
+								offsetOrigin: acVector3([0, 0, 0]),
+								startTime: 0,
+								authoredOrder: 0,
+							},
+						],
+					}),
+				},
+				{
+					destroy() {},
+					loadPhysicsScriptTable: async () => ({
+						id: tableId,
+						cues: new Map([[7, [{ maximumIntensity: 1, scriptId }]]]),
+					}),
+				},
+				{
+					destroy() {},
+					async loadParticleEmitter() {
+						if (broken && failedSource === "emitter") throw refusal;
+						return particleEmitterInfo(emitterId, meshId);
+					},
+				},
+				{
+					destroy() {},
+					async loadParticleMeshes() {
+						if (broken && failedSource === "mesh") throw refusal;
+						return {
+							presentations: new Map([
+								[
+									meshId,
+									{ orientation: "authored", presentation: spawnedVisual() },
+								],
+							]),
+							textureDependencies: [],
+						};
+					},
+				},
+			);
+			onTestFinished(() => runtime.destroy());
+			await runtime.upsertDynamicEntity(
+				withPhysicsEffectTable(spawnedEntity(7, 3), tableId),
+			);
+			runtime.playDynamicEntityScriptCue({
+				guid: 7,
+				generation: 3,
+				cue: 7,
+				intensity: 1,
+			});
+			await settleSoundCues();
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().worldOwnedPhysicsScripts
+					.activeOwnerCount,
+			).toBe(0);
+			setTestCamera(runtime, SPAWN_TEST_CAMERA);
+			expect(() => runtime.frame(0)).not.toThrow();
+			expect(
+				runtime.getAuthoredDynamicRuntimeDiagnostics().dynamics.entityCount,
+			).toBe(1);
+			broken = false;
+			runtime.retryContentFailures();
+			runtime.playDynamicEntityScriptCue({
+				guid: 7,
+				generation: 3,
+				cue: 7,
+				intensity: 1,
+			});
+			await vi.waitFor(() =>
+				expect(
+					runtime.getAuthoredDynamicRuntimeDiagnostics()
+						.worldOwnedPhysicsScripts.activeOwnerCount,
+				).toBe(1),
+			);
+		},
+	);
 
 	it("submits explosion particles while NoDraw hides their projectile mesh", async () => {
 		const tableId = "0x34000001" as DatAssetId;

@@ -75,6 +75,42 @@ import type { PrimaryCameraView } from "../lib/game/runtime/types";
 import { projectClientTargetIndicator } from "./client-target-indicator";
 
 describe("ClientGameplayPresentation", () => {
+	it("blocks a refused local-player body with its cause and never acknowledges portal reveal", async () => {
+		const playerGuid = 0x01010001;
+		const transport = new FakeClientTransport({
+			...currentState(playerGuid),
+			lifecycle: portalLifecycle(4),
+			worldGeneration: 4,
+		});
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		runtime.realizationDisposition = "unavailable";
+		vi.spyOn(runtime, "dynamicEntityContentFailure").mockReturnValue(
+			new Error("Player body refused", {
+				cause: new Error("Missing setup dependency"),
+			}),
+		);
+		vi.spyOn(runtime, "dynamicEntityOrigin").mockReturnValue(null);
+		const presentation = new ClientGameplayPresentation({
+			canvas: fakeCanvas(),
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+		});
+		try {
+			await presentation.start();
+			await vi.waitFor(() => {
+				const frame = presentation.frame(1000);
+				expect(frame.status.kind).toBe("error");
+				expect(frame.status.diagnostic).toContain("Missing setup dependency");
+				expect(frame.rendered).toBe(false);
+			});
+			expect(transport.acknowledgedWorldReveals).toEqual([]);
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+		}
+	});
 	it("keeps barber previews scoped and applies committed particles independently of editor closure", async () => {
 		const guid = 0x01010001;
 		const state = currentState(guid);
@@ -1990,6 +2026,10 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 
 	clearPresentation(): void {
 		this.clearPresentationCount += 1;
+	}
+
+	dynamicEntityContentFailure(): Error | null {
+		return null;
 	}
 
 	dynamicEntityOrigin(): ReturnType<

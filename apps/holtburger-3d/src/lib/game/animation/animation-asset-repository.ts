@@ -54,13 +54,12 @@ export interface PreparedAnimation {
 export type PreparedAnimationHandle = PreparedAssetHandle<PreparedAnimation>;
 
 /**
- * Every animation one motion table can reach, held together and released as one unit.
+ * Available animations from one motion table, held together and released as one unit.
  *
- * Activation needs the whole closure staged before the first clip plays, because a transition
- * reached mid-playback must not trigger a load at frame time — the same rule physics-script
- * closures already hold to.
+ * Attempt the complete table before activation; an unavailable clip retains the current pose.
+ * Transitions never load at frame time.
  */
-export interface PreparedMotionClosure {
+export interface PreparedMotionAssets {
 	readonly motionTableId: DatAssetId;
 	readonly animations: ReadonlyMap<DatAssetId, PreparedAnimation>;
 	release(): void;
@@ -85,44 +84,26 @@ export class AnimationAssetRepository extends PreparedAssetRepository<
 	}
 
 	/**
-	 * Acquire every animation one motion table can reach.
-	 *
-	 * The host resolves the set from the projected contract rather than the frontend walking a
-	 * table it does not have. Acquisition is all-or-nothing: a failure anywhere releases every
-	 * handle taken so far, so a partially staged closure can never reach activation.
+	 * Stage the available animations one motion table can reach. Source failures omit individual
+	 * clips; an operational failure releases all acquired siblings and rejects the operation.
 	 *
 	 * The whole table is staged rather than the set reachable from the current stance, because a
 	 * stance change would otherwise stage at command time — the same defect in a different costume.
 	 */
-	async acquireMotionClosure(
+	async acquireMotionAssets(
 		motionTableId: DatAssetId,
-	): Promise<PreparedMotionClosure> {
+	): Promise<PreparedMotionAssets> {
 		const animationIds =
 			await this.#source.loadMotionTableClosure(motionTableId);
-		const handles = new Map<DatAssetId, PreparedAnimationHandle>();
+		const handles = await this.acquireAvailable(animationIds);
 		const releaseAll = () => {
-			for (const handle of handles.values()) handle.release();
-			handles.clear();
+			for (const handle of handles.values()) handle?.release();
 		};
-		try {
-			for (const animationId of animationIds) {
-				if (handles.has(animationId)) continue;
-				try {
-					handles.set(animationId, await this.acquire(animationId));
-				} catch (cause) {
-					throw new Error(
-						`Motion closure for ${motionTableId} could not stage ${animationId}.`,
-						{ cause },
-					);
-				}
-			}
-		} catch (cause) {
-			releaseAll();
-			throw cause;
-		}
 
 		const animations = new Map<DatAssetId, PreparedAnimation>(
-			[...handles].map(([animationId, handle]) => [animationId, handle.asset]),
+			[...handles].flatMap(([animationId, handle]) =>
+				handle === null ? [] : [[animationId, handle.asset] as const],
+			),
 		);
 		let released = false;
 		return {
@@ -130,9 +111,7 @@ export class AnimationAssetRepository extends PreparedAssetRepository<
 			motionTableId,
 			release: () => {
 				if (released)
-					throw new Error(
-						`Motion closure for ${motionTableId} released twice.`,
-					);
+					throw new Error(`Motion assets for ${motionTableId} released twice.`);
 				released = true;
 				releaseAll();
 			},

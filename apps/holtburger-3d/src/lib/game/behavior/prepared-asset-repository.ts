@@ -1,4 +1,6 @@
 import type { DatAssetId } from "../game-types";
+import { isContentFailure } from "../../host/host-command-result";
+import { formatError } from "../../format-error";
 
 /** One deterministic reference to a shared prepared asset. */
 export interface PreparedAssetHandle<TPrepared> {
@@ -50,6 +52,9 @@ export interface PreparedAssetRepositoryOptions<TSource, TPrepared> {
 export class PreparedAssetRepository<TSource, TPrepared> {
 	readonly #options: PreparedAssetRepositoryOptions<TSource, TPrepared>;
 	readonly #entries = new Map<DatAssetId, Entry<TPrepared>>();
+	/** Cold observations replayed to a newly attached error surface and deduplicated per operation. */
+	readonly #contentDiagnostics = new Map<string, Error>();
+	readonly #contentListeners = new Set<(error: Error) => void>();
 	#destroyed = false;
 
 	constructor(options: PreparedAssetRepositoryOptions<TSource, TPrepared>) {
@@ -89,10 +94,67 @@ export class PreparedAssetRepository<TSource, TPrepared> {
 	async acquireAll(
 		ids: Iterable<DatAssetId>,
 	): Promise<ReadonlyMap<DatAssetId, PreparedAssetHandle<TPrepared>>> {
+		return this.#acquireMany(ids, (id) => this.acquire(id));
+	}
+
+	/** Optional presentation consumers may omit a source rejection; invariants still reject. */
+	async acquireOptional(
+		id: DatAssetId,
+	): Promise<PreparedAssetHandle<TPrepared> | null> {
+		try {
+			return await this.acquire(id);
+		} catch (cause) {
+			if (!isContentFailure(cause)) throw cause;
+			this.reportContentFailure(
+				id,
+				new Error(
+					`${this.#options.label} ${id} unavailable; presentation omitted.`,
+					{ cause },
+				),
+			);
+			return null;
+		}
+	}
+
+	/** Subscribe to cold degraded-content diagnostics without making frame work reactive. */
+	listenContentFailures(listener: (error: Error) => void): () => void {
+		this.#contentListeners.add(listener);
+		for (const error of this.#contentDiagnostics.values()) listener(error);
+		return () => this.#contentListeners.delete(listener);
+	}
+
+	/** Composite asset families report a complete rejected root, including failed nested dependencies. */
+	protected reportContentFailure(key: string, error: Error): void {
+		if (this.#destroyed || this.#contentDiagnostics.has(key)) return;
+		this.#contentDiagnostics.set(key, error);
+		console.warn(formatError(error), error);
+		for (const listener of this.#contentListeners) listener(error);
+	}
+
+	/** An explicit owner retry evicts source failures while retaining valid shared definitions. */
+	retryFailed(): void {
+		for (const [id, entry] of this.#entries) {
+			if (entry.state.kind === "failed" && isContentFailure(entry.state.cause))
+				this.evictFailed(id);
+		}
+		this.#contentDiagnostics.clear();
+	}
+
+	/** Stage independent available assets without turning an internal failure into a partial success. */
+	async acquireAvailable(
+		ids: Iterable<DatAssetId>,
+	): Promise<ReadonlyMap<DatAssetId, PreparedAssetHandle<TPrepared> | null>> {
+		return this.#acquireMany(ids, (id) => this.acquireOptional(id));
+	}
+
+	async #acquireMany<THandle extends PreparedAssetHandle<TPrepared> | null>(
+		ids: Iterable<DatAssetId>,
+		acquire: (id: DatAssetId) => Promise<THandle>,
+	): Promise<ReadonlyMap<DatAssetId, THandle>> {
 		const results = await Promise.allSettled(
 			[...new Set(ids)].map(async (id) => {
 				try {
-					return [id, await this.acquire(id)] as const;
+					return [id, await acquire(id)] as const;
 				} catch (cause) {
 					throw new Error(`${this.#options.label} ${id} acquisition failed.`, {
 						cause,
@@ -100,14 +162,16 @@ export class PreparedAssetRepository<TSource, TPrepared> {
 				}
 			}),
 		);
-		const handles = new Map<DatAssetId, PreparedAssetHandle<TPrepared>>();
+		const handles = new Map<DatAssetId, THandle>();
 		const failures: unknown[] = [];
 		for (const result of results) {
-			if (result.status === "fulfilled") handles.set(...result.value);
-			else failures.push(result.reason);
+			if (result.status === "fulfilled") {
+				const [id, handle] = result.value;
+				handles.set(id, handle);
+			} else failures.push(result.reason);
 		}
 		if (failures.length > 0) {
-			for (const handle of handles.values()) handle.release();
+			for (const handle of handles.values()) handle?.release();
 			throw new AggregateError(
 				failures,
 				`${this.#options.label} batch acquisition failed.`,
@@ -160,6 +224,7 @@ export class PreparedAssetRepository<TSource, TPrepared> {
 			);
 		}
 		this.#entries.delete(id);
+		this.#contentDiagnostics.delete(id);
 	}
 
 	destroy(): void {
@@ -174,6 +239,8 @@ export class PreparedAssetRepository<TSource, TPrepared> {
 		}
 		this.#destroyed = true;
 		this.#entries.clear();
+		this.#contentDiagnostics.clear();
+		this.#contentListeners.clear();
 		this.#options.destroySource();
 	}
 

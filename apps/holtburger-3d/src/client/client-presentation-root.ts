@@ -1,4 +1,5 @@
 import type { ClientPregameLocation } from "./client-pregame-tuning";
+import { formatError } from "../lib/format-error";
 import { ClientPregameCharacterService } from "./client-pregame-character";
 import {
 	abortError,
@@ -26,6 +27,8 @@ export type ClientPresentationRootOwner = ClientPregameSceneResources & {
 		"setFrameSettings" | "setAudioSettings"
 	>;
 	setOutputVolume(volume: number): void;
+	/** Retry failed presentation sources while retaining valid device resources and the network session. */
+	retryPresentationContent(): Promise<void>;
 	/** Release renderer, workers and audio after both kinds of borrower have retired. */
 	destroy(): Promise<void>;
 };
@@ -121,7 +124,7 @@ export class ClientPresentationRoot<
 			return Promise.resolve();
 		if (this.#requested === mode) return this.#transition;
 		this.#requested = mode;
-		return this.#switch(mode);
+		return this.#switch(mode, "reuse");
 	}
 
 	/** Failed static demand needs fresh dispatches, not another identical activation receipt. */
@@ -132,10 +135,13 @@ export class ClientPresentationRoot<
 			this.#requested === null
 		)
 			return Promise.resolve();
-		return this.#switch(this.#requested);
+		return this.#switch(this.#requested, "retry-content");
 	}
 
-	#switch(mode: ClientPresentationMode): Promise<void> {
+	#switch(
+		mode: ClientPresentationMode,
+		preparation: "reuse" | "retry-content",
+	): Promise<void> {
 		this.#modeWait.abort(abortError("Presentation mode superseded."));
 		this.#modeWait = new AbortController();
 		const modeSignal = this.#modeWait.signal;
@@ -169,6 +175,9 @@ export class ClientPresentationRoot<
 						this.#report(error, false);
 					return;
 				}
+				if (this.#closed || revision !== this.#revision) return;
+				if (preparation === "retry-content")
+					await owner.retryPresentationContent();
 				if (this.#closed || revision !== this.#revision) return;
 				const active: ActiveDriver =
 					mode === "pregame"
@@ -228,8 +237,24 @@ export class ClientPresentationRoot<
 				this.#owner?.runtime.pollPortalTransitionLoading();
 				return { kind: "loading" };
 			}
-			if (this.#active.kind === "gameplay")
-				return { kind: "gameplay", frame: this.#active.driver.frame(timeMs) };
+			if (this.#active.kind === "gameplay") {
+				const frame = this.#active.driver.frame(timeMs);
+				if (frame.status.kind === "error") {
+					return {
+						kind: "failed",
+						message: this.#report(
+							new Error(
+								frame.status.diagnostic === null
+									? "World presentation failed."
+									: frame.status.diagnostic,
+							),
+							true,
+						),
+						canRetry: true,
+					};
+				}
+				return { kind: "gameplay", frame };
+			}
 			const rendered = this.#active.driver.frame(
 				timeMs,
 				this.#dependencies.canvas.clientWidth,
@@ -250,7 +275,7 @@ export class ClientPresentationRoot<
 	}
 
 	#report(error: unknown, canRetry: boolean): string {
-		const message = error instanceof Error ? error.message : String(error);
+		const message = formatError(error);
 		this.#failure = { message, canRetry };
 		this.#dependencies.onError(error);
 		return message;

@@ -9,6 +9,7 @@ use holtburger_dat::file_type::{SecondaryAttributeTable, SkillTable, SpellTable,
 use holtburger_world::WorldBootstrap;
 use serde::Deserialize;
 
+use crate::content_failure::resource_request_error;
 use crate::protocol::{HostResponse, ProtocolError, application_error, encode_json};
 use crate::{
     LoadAnimationRequest, LoadAudioRequest, LoadLandblockProfileRequest,
@@ -310,7 +311,7 @@ pub async fn dispatch_shared_content(
         LoadAnimation { request } => Ok(HostResponse::Binary(
             crate::load_animation_bytes(&runtime.content().runtime, &request.animation_id)
                 .await
-                .map_err(required_error)?,
+                .map_err(resource_request_error)?,
         )),
         LoadSetupVisual { request } => Ok(HostResponse::Binary(
             crate::setup_visual_source::load_setup_visual_source_bytes(
@@ -319,17 +320,17 @@ pub async fn dispatch_shared_content(
                 request.appearance,
             )
             .await
-            .map_err(required_error)?,
+            .map_err(resource_request_error)?,
         )),
         LoadAudio { request } => Ok(HostResponse::Binary(
             crate::load_audio_bytes(&runtime.content().runtime, &request.sound_id)
                 .await
-                .map_err(application_error)?,
+                .map_err(resource_request_error)?,
         )),
         LoadSoundTable { request } => Ok(HostResponse::Binary(
             crate::load_sound_table_bytes(&runtime.content().runtime, &request.sound_table_id)
                 .await
-                .map_err(application_error)?,
+                .map_err(resource_request_error)?,
         )),
         LoadParticleEmitter { request } => Ok(HostResponse::Binary(
             crate::load_particle_emitter_bytes(
@@ -337,17 +338,17 @@ pub async fn dispatch_shared_content(
                 &request.emitter_info_id,
             )
             .await
-            .map_err(application_error)?,
+            .map_err(resource_request_error)?,
         )),
         LoadParticleMeshes { request } => Ok(HostResponse::Binary(
             crate::load_particle_meshes_bytes(&runtime.content().runtime, &request.hw_gfx_obj_ids)
                 .await
-                .map_err(application_error)?,
+                .map_err(resource_request_error)?,
         )),
         LoadPhysicsScript { request } => Ok(HostResponse::Binary(
             crate::load_physics_script_bytes(&runtime.content().runtime, &request.script_id)
                 .await
-                .map_err(application_error)?,
+                .map_err(resource_request_error)?,
         )),
         LoadPhysicsScriptTable { request } => Ok(HostResponse::Binary(
             crate::load_physics_script_table_bytes(
@@ -355,7 +356,7 @@ pub async fn dispatch_shared_content(
                 &request.physics_script_table_id,
             )
             .await
-            .map_err(application_error)?,
+            .map_err(resource_request_error)?,
         )),
         LoadLandblockSourceBatch { request } => Ok(HostResponse::Binary(
             crate::load_landblock_source_batch_bytes(
@@ -377,7 +378,7 @@ pub async fn dispatch_shared_content(
         LoadSkySource => Ok(HostResponse::Binary(
             crate::load_sky_source_bytes(&runtime.content().runtime)
                 .await
-                .map_err(required_error)?,
+                .map_err(resource_request_error)?,
         )),
         LoadSoulEmotes => {
             let content = runtime.content().clone();
@@ -421,7 +422,7 @@ pub async fn dispatch_shared_content(
         LoadTexturePixels { request } => Ok(HostResponse::Binary(
             crate::load_texture_pixels_bytes(&runtime.content().runtime, request)
                 .await
-                .map_err(required_error)?,
+                .map_err(resource_request_error)?,
         )),
         LoadMotionTableClosure { request } => encode_json(
             crate::load_motion_table_closure_ids(
@@ -452,6 +453,53 @@ mod tests {
         fn publish_client_event(&self, event: ClientHostEvent) -> Result<()> {
             self.0.send(event).map_err(anyhow::Error::from)
         }
+    }
+
+    #[tokio::test]
+    async fn presentation_rejection_preserves_resource_facts_without_native_escalation() {
+        let mut content = SharedHostContent::from_repository(Arc::new(
+            ContentRepository::from_mounts(Vec::new()),
+        ))
+        .unwrap();
+        let (reporter, native) = std::sync::mpsc::sync_channel(8);
+        content.failures = crate::content_failure::ContentFailureReporter::Stdio(reporter);
+        let (events, _receiver) = mpsc::unbounded_channel();
+        let runtime = HostRuntime::Client(ClientHostRuntime::from_content(
+            content,
+            Arc::new(EventSink(events)),
+        ));
+        let error = dispatch_shared_content(
+            &runtime,
+            SharedContentCommand::LoadAnimation {
+                request: LoadAnimationRequest {
+                    animation_id: "0x0300055b".into(),
+                },
+            },
+        )
+        .await
+        .unwrap_err();
+        let resource = error
+            .resource
+            .expect("source identity must survive the worker boundary");
+        assert_eq!(resource.file_id, 0x0300055b);
+        assert!(matches!(
+            resource.kind,
+            crate::content_failure::ResourceRequestFailureKind::Missing
+        ));
+        assert!(
+            native.try_recv().is_err(),
+            "optional presentation must not poison installation health"
+        );
+
+        assert!(
+            dispatch_shared_content(&runtime, SharedContentCommand::LoadActiveRegionData)
+                .await
+                .is_err()
+        );
+        assert!(matches!(
+            native.try_recv().unwrap(),
+            crate::protocol::ProtocolFrame::ContentFailed { .. }
+        ));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]

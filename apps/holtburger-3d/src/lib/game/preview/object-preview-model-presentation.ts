@@ -153,7 +153,7 @@ export class ObjectPreviewModelPresentation {
 						throw new Error(
 							"Preview scripts received a command before wiring.",
 						);
-					scripts.scheduleActivation(target, activation);
+					return scripts.scheduleActivation(target, activation);
 				},
 			},
 			targets: { isLive: (target) => this.#targetLives(target) },

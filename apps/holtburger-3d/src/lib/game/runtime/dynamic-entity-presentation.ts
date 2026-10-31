@@ -24,7 +24,8 @@ import type {
 } from "../scene";
 
 /** Runtime realization state of one accepted entity level. */
-export type DynamicEntityRealizationDisposition = "installed" | "deferred";
+export type DynamicEntityRealizationDisposition =
+	"installed" | "deferred" | "unavailable";
 
 /** Per-entity realization result produced at an explicit population/readiness boundary. */
 export type DynamicEntityRealizationResults = ReadonlyMap<

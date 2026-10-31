@@ -22,6 +22,8 @@ export type PortalTransitionPresentationPlan =
 /** Renderer proof that one generation-specific transition barrier reached the visible surface. */
 export type PortalTransitionPresentationReceipt =
 	| { readonly kind: "tunnel-only"; readonly generation: number }
+	/** Runtime cleared an opaque loading surface because authored tunnel content was unavailable. */
+	| { readonly kind: "opaque-loading"; readonly generation: number }
 	| {
 			readonly kind: "destination-only-awaiting-handoff";
 			readonly generation: number;

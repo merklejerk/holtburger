@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { HostCommandError } from "../../host/host-command-result";
 import type { DecodedPhysicsScript } from "../../assets/decode-physics-script-record";
 import type { PhysicsScriptSource } from "../../assets/physics-script-source";
 import type { DatAssetId } from "../game-types";
@@ -26,6 +27,41 @@ class FixtureScriptSource implements PhysicsScriptSource {
 }
 
 describe("PhysicsScriptRepository", () => {
+	it("omits a complete effect when a nested source fails and keeps strict graph acquisition", async () => {
+		const source = new FixtureScriptSource();
+		const repository = new PhysicsScriptRepository({
+			destroy() {},
+			loadPhysicsScript: (id) =>
+				id === "0x330003cc"
+					? Promise.reject(
+							new HostCommandError({
+								code: "application_error",
+								message: "Missing nested script",
+								resource: {
+									kind: "missing",
+									namespace: "eor/portal",
+									file_id: Number(id),
+								},
+							}),
+						)
+					: source.loadPhysicsScript(id),
+		});
+		await expect(
+			repository.acquireOptionalClosure("0x330003d8"),
+		).resolves.toBeNull();
+		expect(repository.getDiagnostics().referenceCount).toBe(0);
+		await expect(repository.acquireClosure("0x330003d8")).rejects.toThrow(
+			"could not stage",
+		);
+		await expect(
+			repository.acquireOptionalClosure("0x3300ffff"),
+		).rejects.toThrow("could not stage");
+		const sibling = await repository.acquireOptionalClosure("0x33000711");
+		expect(sibling).not.toBeNull();
+		sibling?.release();
+		expect(repository.getDiagnostics().referenceCount).toBe(0);
+		repository.destroy();
+	});
 	it("derives each script's direct dependencies from its own records", async () => {
 		const repository = new PhysicsScriptRepository(new FixtureScriptSource());
 

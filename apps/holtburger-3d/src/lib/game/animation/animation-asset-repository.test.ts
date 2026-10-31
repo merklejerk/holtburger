@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { HostCommandError } from "../../host/host-command-result";
 import type { AnimationAssetSource } from "../../assets/animation-asset-source";
 import type { DecodedAnimationAsset } from "../../assets/decode-animation-record";
 import type { DatAssetId } from "../game-types";
@@ -70,7 +71,7 @@ class DeferredAnimationSource implements AnimationAssetSource {
 	readonly loads: string[] = [];
 
 	async loadMotionTableClosure(): Promise<DatAssetId[]> {
-		throw new Error("The deferred fixture serves no motion closure.");
+		throw new Error("The deferred fixture serves no motion assets.");
 	}
 
 	readonly #pending: Array<{
@@ -100,51 +101,62 @@ class DeferredAnimationSource implements AnimationAssetSource {
 	destroy(): void {}
 }
 
-describe("motion closures", () => {
-	class ClosureSource {
+describe("motion assets", () => {
+	class MotionSource {
 		readonly loads: string[] = [];
-		closure: string[] = ["0x03000001", "0x03000002", "0x03000003"];
+		animationIds: string[] = ["0x03000001", "0x03000002", "0x03000003"];
 		failOn: string | null = null;
+		contentFailure = false;
 
 		async loadAnimation(animationId: DatAssetId) {
 			this.loads.push(animationId);
+			if (animationId === this.failOn && this.contentFailure)
+				throw new HostCommandError({
+					code: "application_error",
+					message: `Missing animation ${animationId}`,
+					resource: {
+						kind: "missing",
+						namespace: "eor/portal",
+						file_id: Number(animationId),
+					},
+				});
 			if (animationId === this.failOn)
 				throw new Error(`refusing ${animationId}`);
 			return { ...animation(), id: animationId };
 		}
 
 		async loadMotionTableClosure(): Promise<DatAssetId[]> {
-			return this.closure as DatAssetId[];
+			return this.animationIds as DatAssetId[];
 		}
 
 		destroy(): void {}
 	}
 
-	it("stages every animation the table reaches before handing the closure back", async () => {
-		const source = new ClosureSource();
+	it("stages every animation the table reaches before returning the staged assets", async () => {
+		const source = new MotionSource();
 		const repository = new AnimationAssetRepository(source);
 
-		const closure = await repository.acquireMotionClosure(
+		const assets = await repository.acquireMotionAssets(
 			"0x09000001" as DatAssetId,
 		);
 
-		expect([...closure.animations.keys()]).toEqual(source.closure);
-		expect(source.loads).toEqual(source.closure);
-		closure.release();
+		expect([...assets.animations.keys()]).toEqual(source.animationIds);
+		expect(source.loads).toEqual(source.animationIds);
+		assets.release();
 	});
 
 	it("shares one preparation across two entities on the same table", async () => {
-		const source = new ClosureSource();
+		const source = new MotionSource();
 		const repository = new AnimationAssetRepository(source);
 
-		const first = await repository.acquireMotionClosure(
+		const first = await repository.acquireMotionAssets(
 			"0x09000001" as DatAssetId,
 		);
-		const second = await repository.acquireMotionClosure(
+		const second = await repository.acquireMotionAssets(
 			"0x09000001" as DatAssetId,
 		);
 
-		expect(source.loads).toEqual(source.closure);
+		expect(source.loads).toEqual(source.animationIds);
 		expect(second.animations.get("0x03000002" as DatAssetId)).toBe(
 			first.animations.get("0x03000002" as DatAssetId),
 		);
@@ -152,31 +164,52 @@ describe("motion closures", () => {
 		second.release();
 	});
 
-	it("releases everything staged so far when one animation fails, so nothing activates half-staged", async () => {
-		const source = new ClosureSource();
+	it("releases every acquired sibling when an operational failure rejects staging", async () => {
+		const source = new MotionSource();
 		source.failOn = "0x03000002";
 		const repository = new AnimationAssetRepository(source);
 
 		await expect(
-			repository.acquireMotionClosure("0x09000001" as DatAssetId),
-		).rejects.toThrow("could not stage 0x03000002");
+			repository.acquireMotionAssets("0x09000001" as DatAssetId),
+		).rejects.toThrow("Animation batch acquisition failed");
 
-		// The animation staged before the failure holds no handle, so the partial closure retained
+		// The animation staged before the failure holds no handle, so the partial assets retained
 		// nothing. The failed one keeps its explicit failed state, which is the repository's own
 		// contract and needs an eviction to retry.
 		expect(repository.getState("0x03000001" as DatAssetId)).toBeNull();
 		expect(repository.getState("0x03000002" as DatAssetId)).toBe("failed");
-		expect(source.loads).not.toContain("0x03000003");
+		expect(repository.getState("0x03000003")).toBeNull();
+		expect(repository.getDiagnostics().referenceCount).toBe(0);
+	});
+
+	it("retains available clips and retries a refused source only after explicit eviction", async () => {
+		const source = new MotionSource();
+		source.failOn = "0x03000002";
+		source.contentFailure = true;
+		const repository = new AnimationAssetRepository(source);
+		const staged = await repository.acquireMotionAssets("0x09000001");
+		expect([...staged.animations.keys()]).toEqual(["0x03000001", "0x03000003"]);
+		staged.release();
+		const second = await repository.acquireMotionAssets("0x09000001");
+		expect(source.loads.filter((id) => id === source.failOn)).toHaveLength(1);
+		second.release();
+		repository.evictFailed("0x03000002");
+		source.failOn = null;
+		const retry = await repository.acquireMotionAssets("0x09000001");
+		expect([...retry.animations.keys()]).toEqual(source.animationIds);
+		retry.release();
+		expect(repository.getDiagnostics().referenceCount).toBe(0);
+		repository.destroy();
 	});
 
 	it("refuses a double release rather than dropping a shared refcount twice", async () => {
-		const source = new ClosureSource();
+		const source = new MotionSource();
 		const repository = new AnimationAssetRepository(source);
-		const closure = await repository.acquireMotionClosure(
+		const assets = await repository.acquireMotionAssets(
 			"0x09000001" as DatAssetId,
 		);
 
-		closure.release();
-		expect(() => closure.release()).toThrow("released twice");
+		assets.release();
+		expect(() => assets.release()).toThrow("released twice");
 	});
 });

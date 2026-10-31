@@ -1,4 +1,5 @@
 import type { HostPresentationResources } from "./host-presentation-assets";
+import { optionalPresentationContent } from "../../assets/optional-presentation-content";
 import { PresentationTeardownStack } from "./presentation-teardown";
 import { ActiveRegionHostSource } from "../../assets/active-region-host-source";
 import { AudioHostSource } from "../../assets/audio-host-source";
@@ -23,7 +24,7 @@ import type { LandblockSourceBatchSource } from "../../assets/landblock-source-b
 import type { AmbientRegionFacts } from "../systems/ambient-region";
 import {
 	loadPortalTransitionAssets,
-	type PortalTransitionAssets,
+	preparePortalTransitionAudio,
 } from "../../client/portal-transition-assets";
 
 /** Explicit browser dependencies for one imperative presentation composition. */
@@ -63,12 +64,13 @@ export class GamePresentationOwner {
 	readonly profileSource: CachedLandblockProfileSource;
 	readonly device: WebGL2Device;
 	readonly runtime: GamePresentationRuntime;
-	/** Required authored portal closure retained for every client/Explorer transition. */
-	readonly portalTransitionAssets: PortalTransitionAssets;
 	readonly textureFilteringCapabilities: TextureFilteringCapabilities;
 	readonly #teardown: PresentationTeardownStack;
 	/** Browser output control retained alongside the teardown-owned audio device. */
 	readonly #audioDevice: WebAudioDevice;
+	/** Refresh only failed optional content while the frontend has retired its borrower. */
+	readonly #retryOptionalContent: () => Promise<void>;
+	#retrying: Promise<void> | null = null;
 	#retirement: Promise<void> | null = null;
 
 	private constructor(resources: {
@@ -81,18 +83,18 @@ export class GamePresentationOwner {
 		readonly audioContext: AudioContext;
 		readonly profileHostSource: LandblockProfileHostSource;
 		readonly profileSource: CachedLandblockProfileSource;
-		readonly portalTransitionAssets: PortalTransitionAssets;
 		readonly runtime: GamePresentationRuntime;
 		readonly skySource: SkyHostSource;
 		readonly staticDetailOwner: ActiveRegionStaticDetailOwner;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities;
+		readonly retryOptionalContent: () => Promise<void>;
 	}) {
 		this.#audioDevice = resources.audioDevice;
+		this.#retryOptionalContent = resources.retryOptionalContent;
 		this.activeRegion = resources.activeRegion;
 		this.device = resources.device;
 		this.profileSource = resources.profileSource;
 		this.runtime = resources.runtime;
-		this.portalTransitionAssets = resources.portalTransitionAssets;
 		this.textureFilteringCapabilities = resources.textureFilteringCapabilities;
 		this.#teardown = createPresentationTeardown(resources);
 	}
@@ -128,7 +130,6 @@ export class GamePresentationOwner {
 		let soundTableSource: SoundTableHostSource | undefined;
 		let audioDevice: WebAudioDevice | undefined;
 		let audioContext: AudioContext | undefined;
-		let portalTransitionAssets: PortalTransitionAssets | undefined;
 		try {
 			signal?.throwIfAborted();
 			activeRegionSource = ActiveRegionHostSource.build(hostTransport);
@@ -156,13 +157,6 @@ export class GamePresentationOwner {
 				audioTuning.placementSmoothingSeconds,
 				audioTuning.loudnessCurveExponent,
 			);
-			portalTransitionAssets = await loadPortalTransitionAssets({
-				audio: audioDevice,
-				animation: presentationResources.animationSource,
-				setupVisual: presentationResources.setupVisualSource,
-				soundTable: soundTableSource,
-			});
-			signal?.throwIfAborted();
 			runtime = await GamePresentationRuntime.build(
 				device,
 				commitPipeline,
@@ -176,10 +170,27 @@ export class GamePresentationOwner {
 				tickProfiler,
 			);
 			signal?.throwIfAborted();
-			if (portalTransitionAssets === undefined) {
-				throw new Error("Portal transition assets were not prepared.");
-			}
-			await runtime.installPortalTransitionAssets(portalTransitionAssets);
+			const liveRuntime = runtime;
+			const liveAudio = audioDevice;
+			const liveSoundTables = soundTableSource;
+			const report = (error: Error) => liveRuntime.reportContentFailure(error);
+			const preparePortal = async () => {
+				const assets = await loadPortalTransitionAssets({
+					audio: liveAudio,
+					animation: presentationResources.animationSource,
+					setupVisual: presentationResources.setupVisualSource,
+					soundTable: liveSoundTables,
+					reportContentFailure: report,
+				});
+				const installed = await optionalPresentationContent(
+					liveRuntime.installPortalTransitionAssets(assets).then(() => true),
+					"Portal renderer assets",
+					report,
+				);
+				if (installed === null)
+					await liveRuntime.installPortalTransitionAssets(null);
+			};
+			await preparePortal();
 			signal?.throwIfAborted();
 			runtime.installActiveRegionStaticDetails(staticDetailBinding);
 			const ambient = ambientRegionFacts(activeRegion);
@@ -189,9 +200,23 @@ export class GamePresentationOwner {
 			}
 			skySource = new SkyHostSource(hostTransport);
 			signal?.throwIfAborted();
-			const sky = await skySource.loadSkySource();
-			signal?.throwIfAborted();
-			await runtime.installSky(sky);
+			const liveSkySource = skySource;
+			const prepareSky = async () => {
+				const sky = await optionalPresentationContent(
+					liveSkySource.loadSkySource(),
+					"Sky source",
+					report,
+				);
+				if (sky === null) return false;
+				return (
+					(await optionalPresentationContent(
+						liveRuntime.installSky(sky).then(() => true),
+						"Sky renderer assets",
+						report,
+					)) !== null
+				);
+			};
+			let skyReady = await prepareSky();
 			signal?.throwIfAborted();
 			return new GamePresentationOwner({
 				activeRegion,
@@ -200,7 +225,6 @@ export class GamePresentationOwner {
 				device,
 				profileHostSource,
 				profileSource,
-				portalTransitionAssets,
 				soundTableSource,
 				audioDevice,
 				audioContext,
@@ -208,6 +232,22 @@ export class GamePresentationOwner {
 				skySource,
 				staticDetailOwner,
 				textureFilteringCapabilities,
+				retryOptionalContent: async () => {
+					liveRuntime.retryContentFailures();
+					liveAudio.retryFailed();
+					if (!liveRuntime.getPortalTransitionDiagnostics().installed)
+						await preparePortal();
+					else
+						liveRuntime.updatePortalTransitionAudio(
+							await preparePortalTransitionAudio(
+								liveAudio,
+								liveSoundTables,
+								report,
+							),
+						);
+					if (!skyReady) skyReady = await prepareSky();
+					if (ambient !== null) await liveRuntime.installAmbientRegion(ambient);
+				},
 			});
 		} catch (error) {
 			try {
@@ -237,7 +277,25 @@ export class GamePresentationOwner {
 
 	/** Tear down in dependency order; repeated calls are harmless for unmount/error races. */
 	destroy(): Promise<void> {
-		return (this.#retirement ??= this.#teardown.close());
+		return (this.#retirement ??= this.#close());
+	}
+
+	/** Source caches are cleared only on an explicit request, after the scene borrower retires. */
+	retryPresentationContent(): Promise<void> {
+		if (this.#retirement !== null)
+			return Promise.reject(
+				new Error("Cannot retry content after presentation retirement."),
+			);
+		this.#retrying ??= this.#retryOptionalContent().finally(() => {
+			this.#retrying = null;
+		});
+		return this.#retrying;
+	}
+
+	async #close(): Promise<void> {
+		// A retiring root joins its retry lane before releasing the sources and device it uses.
+		if (this.#retrying !== null) await Promise.allSettled([this.#retrying]);
+		await this.#teardown.close();
 	}
 }
 

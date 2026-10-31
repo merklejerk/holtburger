@@ -7,6 +7,8 @@
 	import type { ClientClosePreparation } from "../../client/client-close-contract";
 	import ClientApp from "../../client/ClientApp.svelte";
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
+	import { HostCommandError } from "../../lib/host/host-command-result";
+	import type { HostTransport } from "../../lib/host/host-transport";
 	import { registerElectronStartupClose } from "../../lib/host/electron-host-transport";
 	import { StartupGameLifecycle } from "../../app/startup-game-lifecycle";
 	import { createClientShortcuts } from "../../client/ClientShortcutDock.svelte";
@@ -91,6 +93,12 @@
 		let sceneResponses = 0;
 		let failScene = false;
 		let failConnection = false;
+		let refuseAudio =
+			new URL(location.href).searchParams.get(
+				"presentation-content-failure",
+			) === "1";
+		let refusedAudioRequests = 0;
+		let audioRequests = 0;
 		const connection = loadingGate(controlledLoading);
 		const scene = loadingGate(controlledLoading);
 		const retirement = loadingGate(false);
@@ -163,6 +171,8 @@
 					logoutRequests: number;
 					/** Actual GPU draws prove the scene progresses behind the opaque loading page. */
 					worldDraws: number;
+					refusedAudioRequests: number;
+					audioRequests: number;
 					/** Authority delivery and host barriers establish independent readiness ordering. */
 					rosterDelivered: boolean;
 					sceneResponses: number;
@@ -181,6 +191,7 @@
 				refuseNextEntry(): void;
 				releaseConnection(): void;
 				releaseScene(): void;
+				releasePresentationSources(): void;
 				holdRetirement(): void;
 				holdCaptureStaging(): void;
 				releaseCaptureStaging(): void;
@@ -293,60 +304,82 @@
 			);
 			let disconnected = false;
 			let disconnectRequests = 0;
+			const invokeHost: HostTransport["invoke"] = async (command, args) => {
+				if (command === "load_audio") audioRequests++;
+				if (refuseAudio && command === "load_audio") {
+					const request = z
+						.object({ soundId: z.string() })
+						.parse(args?.request);
+					refusedAudioRequests++;
+					throw new HostCommandError({
+						code: "application_error",
+						message: `Refused fixture wave ${request.soundId}`,
+						resource: {
+							kind: "missing",
+							namespace: "eor/portal",
+							file_id: Number(request.soundId),
+						},
+					});
+				}
+				if (closeResult !== null)
+					throw new Error(`Host request after close preparation: ${command}`);
+				if (
+					disconnected &&
+					(command === "stop_client_camera" ||
+						command === "set_client_camera_intent" ||
+						command === "set_client_camera_clearance")
+				)
+					throw new Error("Presentation fixture: client host is shutting down");
+				if (command === "request_client_current_state") {
+					const result = await authority.invoke(command, args);
+					rosterDelivered = true;
+					return result;
+				}
+				if (command === "load_landblock_profile") {
+					await scene.wait();
+					if (failScene) {
+						failScene = false;
+						throw new Error("Presentation fixture: scene failed");
+					}
+					const result = await content.invoke(command, args);
+					sceneResponses++;
+					return result;
+				}
+				if (command === "stop_client_camera") await retirement.wait();
+				if (command === "disconnect_client") {
+					disconnectRequests++;
+					disconnected = true;
+					authority.exit("explicit-disconnect", "Fixture disconnected");
+					return;
+				}
+				if (command === "load_soul_emotes")
+					return soulEmoteFixture().references;
+				if (command === "prepare_ui_icons") {
+					const request = z
+						.object({ icons: z.array(z.object({ key: z.string() })) })
+						.parse(args?.request);
+					return encode(
+						request.icons.map(({ key }) => ({ kind: "ready", key, image })),
+					);
+				}
+				if (command === "create_client_character")
+					throw new Error("Preview only: no server character creation");
+				if (
+					command.startsWith("load_") ||
+					command === "resolve_character_creation_appearance" ||
+					command === "resolve_character_creation_stats"
+				)
+					return content.invoke(command, args);
+				return authority.invoke(command, args);
+			};
 			window.holtburgerHost = {
 				invoke: async (command, args) => {
-					if (closeResult !== null)
-						throw new Error(`Host request after close preparation: ${command}`);
-					if (
-						disconnected &&
-						(command === "stop_client_camera" ||
-							command === "set_client_camera_intent" ||
-							command === "set_client_camera_clearance")
-					)
-						throw new Error(
-							"Presentation fixture: client host is shutting down",
-						);
-					if (command === "request_client_current_state") {
-						const result = await authority.invoke(command, args);
-						rosterDelivered = true;
-						return result;
+					try {
+						return { kind: "ok", value: await invokeHost(command, args) };
+					} catch (error) {
+						if (!(error instanceof HostCommandError)) throw error;
+						return { kind: "failed", error: error.failure };
 					}
-					if (command === "load_landblock_profile") {
-						await scene.wait();
-						if (failScene) {
-							failScene = false;
-							throw new Error("Presentation fixture: scene failed");
-						}
-						const result = await content.invoke(command, args);
-						sceneResponses++;
-						return result;
-					}
-					if (command === "stop_client_camera") await retirement.wait();
-					if (command === "disconnect_client") {
-						disconnectRequests++;
-						disconnected = true;
-						authority.exit("explicit-disconnect", "Fixture disconnected");
-						return;
-					}
-					if (command === "load_soul_emotes")
-						return soulEmoteFixture().references;
-					if (command === "prepare_ui_icons") {
-						const request = z
-							.object({ icons: z.array(z.object({ key: z.string() })) })
-							.parse(args?.request);
-						return encode(
-							request.icons.map(({ key }) => ({ kind: "ready", key, image })),
-						);
-					}
-					if (command === "create_client_character")
-						throw new Error("Preview only: no server character creation");
-					if (
-						command.startsWith("load_") ||
-						command === "resolve_character_creation_appearance" ||
-						command === "resolve_character_creation_stats"
-					)
-						return content.invoke(command, args);
-					return authority.invoke(command, args);
 				},
 				listen: async (event, handler) => {
 					const id = ++token;
@@ -369,6 +402,8 @@
 					disconnectRequests,
 					launcherReturns: [...launcherReturns],
 					worldDraws,
+					refusedAudioRequests,
+					audioRequests,
 					rosterDelivered,
 					sceneResponses,
 					gates: {
@@ -391,6 +426,9 @@
 					),
 				releaseConnection: connection.release,
 				releaseScene: scene.release,
+				releasePresentationSources: () => {
+					refuseAudio = false;
+				},
 				holdRetirement: retirement.hold,
 				holdCaptureStaging: captureStaging.hold,
 				releaseCaptureStaging: captureStaging.release,

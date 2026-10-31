@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkHostHttpResponse } from "../host/host-command-result";
 
 import type { LandblockOwnerId } from "../game/game-types";
 import type { DatAssetId } from "../game/game-types";
@@ -188,11 +189,7 @@ export class HttpLandblockContentSource
 				method: "POST",
 			},
 		);
-		if (!response.ok) {
-			throw new Error(
-				`Landblock content host motion-table-closure failed (${response.status}): ${await response.text()}`,
-			);
-		}
+		await checkHostHttpResponse(response);
 		return motionTableClosureSchema.parse(
 			await response.json(),
 		) as DatAssetId[];
@@ -255,11 +252,7 @@ export class HttpLandblockContentSource
 			headers: { "content-type": "application/json" },
 			method: "POST",
 		});
-		if (!response.ok) {
-			throw new Error(
-				`Landblock content host ${path} failed (${response.status}): ${await response.text()}`,
-			);
-		}
+		await checkHostHttpResponse(response);
 		return response.json();
 	}
 
@@ -291,11 +284,7 @@ async function postBinaryResponse(
 		headers: { "content-type": "application/json" },
 		method: "POST",
 	});
-	if (!response.ok) {
-		throw new Error(
-			`Landblock content host ${path} failed (${response.status}): ${await response.text()}`,
-		);
-	}
+	await checkHostHttpResponse(response);
 	return {
 		bytes: new Uint8Array(await response.arrayBuffer()),
 		headers: response.headers,

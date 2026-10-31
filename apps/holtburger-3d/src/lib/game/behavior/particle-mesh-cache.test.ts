@@ -3,6 +3,7 @@ import type { DecodedParticleMesh } from "../../assets/decode-particle-mesh-reco
 import type { ParticleMeshSource } from "../../assets/particle-mesh-source";
 import type { DatAssetId } from "../game-types";
 import { ParticleMeshCache } from "./particle-mesh-cache";
+import { HostCommandError } from "../../host/host-command-result";
 
 const MESH_A = "0x01000ff4" as DatAssetId;
 const MESH_B = "0x0100162f" as DatAssetId;
@@ -38,6 +39,43 @@ function fakeSource(): ParticleMeshSource & {
 }
 
 describe("ParticleMeshCache", () => {
+	it("caches rejected source meshes until explicit retry and preserves installed siblings", async () => {
+		const failure = new HostCommandError({
+			code: "application_error",
+			message: "Missing particle mesh",
+			resource: {
+				kind: "missing",
+				namespace: "eor/portal",
+				file_id: Number(MESH_A),
+			},
+		});
+		const loadParticleMeshes = vi.fn(async (ids: readonly DatAssetId[]) => ({
+			presentations: new Map(
+				ids.map((id) => [
+					id,
+					{ orientation: "viewer-facing" } as DecodedParticleMesh,
+				]),
+			),
+			textureDependencies: [],
+		}));
+		loadParticleMeshes.mockRejectedValueOnce(failure);
+		const cache = new ParticleMeshCache(
+			{ loadParticleMeshes, destroy() {} },
+			async () => {},
+		);
+		await expect(cache.prepare([MESH_A])).rejects.toBe(failure);
+		await expect(cache.prepare([MESH_A.toUpperCase()])).rejects.toBe(failure);
+		expect(loadParticleMeshes).toHaveBeenCalledTimes(1);
+		await cache.prepare([MESH_B]);
+		expect(cache.isReady(MESH_B)).toBe(true);
+		expect(cache.isReady(MESH_B.toUpperCase())).toBe(true);
+		expect(cache.isReady(MESH_A)).toBe(false);
+		cache.retryFailed();
+		await cache.prepare([MESH_A]);
+		expect(cache.isReady(MESH_A)).toBe(true);
+		expect(cache.isReady(MESH_B)).toBe(true);
+		cache.destroy();
+	});
 	it("loads a batch once and serves it from memory afterwards", async () => {
 		const source = fakeSource();
 		const cache = new ParticleMeshCache(source, async () => {});
@@ -73,7 +111,7 @@ describe("ParticleMeshCache", () => {
 		const cache = new ParticleMeshCache(source, async () => {});
 
 		const first = cache.prepare([MESH_A]);
-		const second = cache.prepare([MESH_A]);
+		const second = cache.prepare([MESH_A.toUpperCase()]);
 		source.release();
 		await Promise.all([first, second]);
 

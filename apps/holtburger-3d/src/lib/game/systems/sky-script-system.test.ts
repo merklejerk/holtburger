@@ -5,6 +5,7 @@ import {
 } from "./sky-script-system";
 import { clientEnvironmentFixture } from "../../../client/client-environment.test-support";
 import { resolveSceneEnvironment } from "../environment/scene-environment";
+import { HostCommandError } from "../../host/host-command-result";
 
 function fixture() {
 	const environment = resolveSceneEnvironment(clientEnvironmentFixture(), {
@@ -45,6 +46,39 @@ function fixture() {
 }
 
 describe("SkyScriptSystem retirement", () => {
+	it("holds a refused source until explicit retry, then activates without a frame-driven request storm", async () => {
+		const { sky, release, dependencies } = fixture();
+		const acquireClosure = vi
+			.fn(dependencies.acquireClosure)
+			.mockRejectedValueOnce(
+				new HostCommandError({
+					code: "application_error",
+					message: "Missing sky script",
+					resource: {
+						kind: "missing",
+						namespace: "eor/portal",
+						file_id: 0x33000001,
+					},
+				}),
+			);
+		const onFailure = vi.fn();
+		const system = new SkyScriptSystem({
+			...dependencies,
+			acquireClosure,
+			onFailure,
+		});
+		system.sync(sky, true);
+		await vi.waitFor(() => expect(onFailure).toHaveBeenCalled());
+		for (let i = 0; i < 10; i++) system.sync(sky, true);
+		expect(acquireClosure).toHaveBeenCalledTimes(1);
+		expect(system.activeCount).toBe(0);
+		system.retryFailed();
+		system.sync(sky, true);
+		await vi.waitFor(() => expect(system.activeCount).toBeGreaterThan(0));
+		expect(acquireClosure).toHaveBeenCalledTimes(2);
+		await system.destroy();
+		expect(release).toHaveBeenCalledOnce();
+	});
 	it("drains borrowed mesh installation before releasing assets without activating stale targets", async () => {
 		const { sky, release, dependencies } = fixture();
 		let finish: (() => void) | undefined;

@@ -8,6 +8,10 @@ import type { ClientLaunchConfiguration } from "./client-launch.js";
 import { MAX_PENDING_REQUESTS } from "../src/lib/host/host-limits.js";
 export { MAX_PENDING_REQUESTS } from "../src/lib/host/host-limits.js";
 import { HOST_EVENT_NAMES } from "../src/lib/host/host-transport.js";
+import {
+	hostCommandErrorSchema,
+	type HostCommandFailure,
+} from "../src/lib/host/host-command-result.js";
 import type {
 	HostCommandArguments,
 	HostCommandName,
@@ -19,7 +23,7 @@ import type {
 /** Must match the Rust sidecar's encoded payload ceiling. */
 export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 /** Version negotiated before any command is accepted. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 /** Grace period before a sidecar that ignored shutdown is terminated. */
 const SHUTDOWN_GRACE_MS = 2_000;
 /** Startup bound for a child that spawned but never produced a handshake. */
@@ -53,7 +57,7 @@ const wireIdSchema = z
 	.int()
 	.nonnegative()
 	.max(Number.MAX_SAFE_INTEGER);
-const wireErrorSchema = z.object({ code: z.string(), message: z.string() });
+const wireErrorSchema = hostCommandErrorSchema;
 const wireResponseSchema = z.discriminatedUnion("kind", [
 	z.object({ kind: z.literal("unit") }),
 	z.object({ kind: z.literal("json"), value: z.unknown() }),
@@ -101,11 +105,18 @@ type WireFrame = z.infer<typeof wireFrameSchema>;
 /** Error reported when the sidecar violates the framing or negotiated protocol contract. */
 export class SidecarProtocolError extends Error {
 	readonly code: string;
+	/** Present only for an individually rejected source resource. */
+	readonly resource: HostCommandFailure["resource"];
 
-	constructor(code: string, message: string) {
+	constructor(
+		code: string,
+		message: string,
+		resource?: HostCommandFailure["resource"],
+	) {
 		super(message);
 		this.name = "SidecarProtocolError";
 		this.code = code;
+		this.resource = resource;
 	}
 }
 
@@ -609,6 +620,7 @@ export class SidecarHostClient {
 							new SidecarProtocolError(
 								frame.result.Err.code,
 								frame.result.Err.message,
+								frame.result.Err.resource,
 							),
 						);
 						continue;

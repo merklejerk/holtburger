@@ -1,6 +1,6 @@
+import { formatError } from "../src/lib/format-error.js";
 import {
 	clientClosePreparationSchema,
-	clientFailureDiagnostic,
 	type ClientClosePreparation,
 } from "../src/client/client-close-contract.js";
 
@@ -97,7 +97,7 @@ export class ClientRetirement {
 			} catch (error) {
 				complete({
 					kind: "failed",
-					diagnostic: clientFailureDiagnostic(error),
+					diagnostic: formatError(error),
 				});
 			}
 		});

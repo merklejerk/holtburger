@@ -134,6 +134,39 @@ mod tests {
     use holtburger_dat::graphics::Frame;
 
     #[test]
+    fn serializes_retail_replacement_hooks_outside_the_animation_part_range() {
+        // Original portal DAT animation 0x0300055b, reached by motion table 0x09000021.
+        // Keep the bytes here so regression coverage does not depend on installed content.
+        let bytes = hex::decode(concat!(
+            "5b050003020000000100000002000000",
+            "00000000000000000ad7233d0000803f000000000000000000000000",
+            "02000000",
+            "050000000000000001b40b00",
+            "05000000ffffffff01b50b00",
+            "00000000000000000ad7233d0000803f000000000000000000000000",
+            "00000000",
+        ))
+        .unwrap();
+        let mut reader = std::io::Cursor::new(&bytes);
+        let animation = Animation::read(&mut reader).expect("retail animation should decode");
+        assert_eq!(reader.position(), bytes.len() as u64);
+        let response = serialize_animation_record_binary(&animation)
+            .expect("inert replacement hooks must not reject the animation");
+        let manifest_length = u32::from_le_bytes(response[4..8].try_into().unwrap()) as usize;
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &response[BINARY_HEADER_LENGTH..BINARY_HEADER_LENGTH + manifest_length],
+        )
+        .unwrap();
+        assert_eq!(manifest["partCount"], 1);
+        let hooks = manifest["hooks"].as_array().unwrap();
+        assert_eq!(hooks.len(), 2);
+        for (hook, gfx_id) in hooks.iter().zip(["0x01000bb4", "0x01000bb5"]) {
+            assert_eq!(hook["payload"]["partIndex"], 1);
+            assert_eq!(hook["payload"]["gfxObjId"], gfx_id);
+        }
+    }
+
+    #[test]
     fn serializes_flat_frames_and_typed_hook_provenance() {
         let animation = Animation {
             id: 0x0300_0001,

@@ -531,8 +531,13 @@ export class ObjectVisualTemplateRepository<
 			);
 			const atlasCompletion = await atlasClaim.completion;
 			if (atlasCompletion !== "ready") {
+				if (atlasCompletion === "withdrawn")
+					throw new Error(
+						`Visual template ${entry.key} atlas claim was withdrawn.`,
+					);
 				throw new Error(
-					`Visual template ${entry.key} atlas claim ${atlasCompletion === "withdrawn" ? "was withdrawn" : `failed: ${String(atlasCompletion.cause)}`}.`,
+					`Visual template ${entry.key} atlas preparation failed.`,
+					{ cause: atlasCompletion.cause },
 				);
 			}
 			if (!this.#entryIsRetained(entry)) {

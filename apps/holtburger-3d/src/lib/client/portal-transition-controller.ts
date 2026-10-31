@@ -60,7 +60,7 @@ export class PortalTransitionController {
 	#state: PortalTransitionState | null = null;
 	#phaseStartedAtMs: number | null = null;
 	#destinationReady = false;
-	#tunnelPresented = false;
+	#loadingPresented = false;
 	#revealEmitted = false;
 
 	constructor(policy: PortalTransitionPolicy) {
@@ -94,7 +94,7 @@ export class PortalTransitionController {
 				: { kind: "waiting", generation };
 		this.#phaseStartedAtMs = null;
 		this.#destinationReady = false;
-		this.#tunnelPresented = false;
+		this.#loadingPresented = false;
 		this.#revealEmitted = false;
 	}
 
@@ -103,7 +103,7 @@ export class PortalTransitionController {
 		this.#state = null;
 		this.#phaseStartedAtMs = null;
 		this.#destinationReady = false;
-		this.#tunnelPresented = false;
+		this.#loadingPresented = false;
 		this.#revealEmitted = false;
 	}
 
@@ -135,7 +135,7 @@ export class PortalTransitionController {
 				return { plan: this.#presentationPlan() };
 			}
 			case "waiting":
-				if (this.#destinationReady && this.#tunnelPresented) {
+				if (this.#destinationReady && this.#loadingPresented) {
 					this.#phaseStartedAtMs = input.nowMs;
 					this.#state = {
 						kind: "exiting",
@@ -170,8 +170,8 @@ export class PortalTransitionController {
 	): PortalRevealReceipt | null {
 		const state = this.#state;
 		if (state === null || receipt.generation !== state.generation) return null;
-		if (receipt.kind === "tunnel-only") {
-			if (state.kind === "waiting") this.#tunnelPresented = true;
+		if (receipt.kind === "tunnel-only" || receipt.kind === "opaque-loading") {
+			if (state.kind === "waiting") this.#loadingPresented = true;
 			return null;
 		}
 		if (state.kind !== "revealed-awaiting-handoff" || this.#revealEmitted) {

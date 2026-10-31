@@ -38,16 +38,14 @@ const SCALE_PAYLOAD_BYTES: u64 = 8;
 /// `SetOmegaHookPayload`: one `Vector3`.
 const SET_OMEGA_PAYLOAD_BYTES: u64 = 12;
 
-/// Bytes a replace-object payload occupies, matching the encoding the decoder accepts: a bare
-/// 15-bit id offset, or a 30-bit offset split across two words.
+/// Byte-sized part index plus a packed DID, padded to the hook's four-byte boundary.
 fn replace_object_payload_bytes(payload: &ReplaceObjectHookPayload) -> u64 {
     const GFX_OBJ_KNOWN_TYPE: u32 = 0x0100_0000;
     let relative = payload.gfx_obj_id.wrapping_sub(GFX_OBJ_KNOWN_TYPE);
-    2 + if relative < 0x8000 { 0 } else { 2 }
+    if relative < 0x8000 { 4 } else { 8 }
 }
 
-/// Wire size of one retained hook. Raw and replace-object payloads keep their exact source bytes,
-/// so their length is authoritative; the two structured simulation payloads are fixed width.
+/// Wire size of one retained hook, including replacement payload alignment.
 fn simulation_hook_bytes(hook: &AnimationHook) -> u64 {
     let payload = match &hook.payload {
         AnimationHookPayload::NoPayload => 0,

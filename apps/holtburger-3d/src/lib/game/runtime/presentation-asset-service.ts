@@ -198,6 +198,13 @@ export class PresentationAssetService {
 		this.texturePreparer = dependencies.texturePreparer;
 	}
 
+	/** Clear rejected source preparation while retaining valid shared definitions and handles. */
+	retryFailed(): void {
+		this.animations.retryFailed();
+		this.physicsScripts.retryFailed();
+		this.particleEmitters.retryFailed();
+	}
+
 	/** Construct the one CPU preparation service owned by a browser presentation composition. */
 	static async build(dependencies: {
 		readonly setupVisualSource: SetupVisualSource;

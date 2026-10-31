@@ -138,52 +138,40 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 		const intensity = Number(
 			style.getPropertyValue("--ui-selected-entity-pulse-intensity"),
 		);
-		require(
-			Math.abs(
-				new DOMMatrix(style.transform).a - (1 + (peakScale - 1) * intensity),
-			) < 0.00001,
-			"Selection pulse must scale its growth by the theme's intensity",
-		);
+		require(Math.abs(
+			new DOMMatrix(style.transform).a - (1 + (peakScale - 1) * intensity),
+		) <
+			0.00001, "Selection pulse must scale its growth by the theme's intensity");
 		require(target.querySelectorAll("button").length ===
 			1, "No-action selection should retain only Examine");
 		require(button("Examine").title ===
 			"Examine (Unbound)", "Examine tooltip must describe its configured empty binding");
 		interact = true;
 		await sample();
-		require(
-			hud.getAnimations()[0] === pulse,
-			"Display updates must not restart the selection pulse",
-		);
+		require(hud.getAnimations()[0] ===
+			pulse, "Display updates must not restart the selection pulse");
 		selection.current = 2;
 		await settle();
 		const changedPulse = hud.getAnimations()[0];
-		require(
-			changedPulse !== undefined && changedPulse !== pulse,
-			"A changed selection must restart the pulse",
-		);
+		require(changedPulse !== undefined &&
+			changedPulse !== pulse, "A changed selection must restart the pulse");
 		selection.current = 3;
 		await settle();
-		require(
-			hud.getAnimations().length === 1 &&
-				hud.getAnimations()[0] !== changedPulse,
-			"Rapid selections must replace the pulse without queuing",
-		);
+		require(hud.getAnimations().length === 1 &&
+			hud.getAnimations()[0] !==
+				changedPulse, "Rapid selections must replace the pulse without queuing");
 		selection.current = null;
 		await settle();
-		require(
-			hud.getAnimations().length === 0,
-			"An empty selection must not pulse",
-		);
+		require(hud.getAnimations().length ===
+			0, "An empty selection must not pulse");
 		selection.current = 1;
 		await settle();
 		const restoredPulse = hud.getAnimations()[0];
 		if (restoredPulse === undefined)
 			throw new Error("Restored selection must pulse");
 		restoredPulse.finish();
-		require(
-			getComputedStyle(hud).transform === "none",
-			"The selection pulse must finish at its original size",
-		);
+		require(getComputedStyle(hud).transform ===
+			"none", "The selection pulse must finish at its original size");
 		require(button("Trade").title ===
 			"Trade (Ctrl + f)", "Direct interaction tooltip must use the configured shortcut");
 		button("Trade").click();

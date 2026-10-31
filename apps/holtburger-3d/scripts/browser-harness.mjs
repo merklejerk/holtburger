@@ -269,6 +269,12 @@ try {
 			trade: result.clientTrade,
 			consoleMessages: result.consoleMessages,
 		};
+	} else if (process.env.HOLTBURGER_PROBE_CONTENT_FAILURES === "1") {
+		report = {
+			contentFailures: result.contentFailures,
+			state: result.state,
+			browserErrors,
+		};
 	} else if (options.clientAudio) {
 		report = { clientAudio: result.clientAudio, browserErrors };
 	} else if (options.clientSelectPicker) {
@@ -5446,7 +5452,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const terrainGlTrace = options.traceTerrainGl ? "&traceTerrainGl=true" : "";
 	const worldMarker =
 		options.worldMarker === null ? "" : `&worldMarker=${options.worldMarker}`;
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&pregame-location=${options.pregameLocation}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}${options.worldMap ? "&world-map=1" : ""}${options.pregamePreview ? "&pregame-preview=1" : ""}${options.clientPresentation ? "&client-presentation=1&presentation-gates=1" : ""}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&pregame-location=${options.pregameLocation}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}${options.worldMap ? "&world-map=1" : ""}${options.pregamePreview ? "&pregame-preview=1" : ""}${options.clientPresentation ? "&client-presentation=1&presentation-gates=1" : ""}${process.env.HOLTBURGER_PROBE_CLIENT_CONTENT === "1" ? "&presentation-content-failure=1" : ""}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -6822,7 +6828,28 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 				despawnedEntityState = state;
 			}
 		}
+		const contentFailures =
+			process.env.HOLTBURGER_PROBE_CONTENT_FAILURES === "1"
+				? await evaluateExpression(
+						client,
+						`import('/src/harness/browser/content-failure-probe.ts').then(module => module.probeContentFailures(${JSON.stringify(contentHostUrl)}))`,
+					)
+				: null;
+		if (contentFailures !== null) {
+			await delay(150);
+			const continued = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
+				[],
+			);
+			if (continued.error !== null || continued.timing.sampleCount === 0)
+				throw new Error(
+					`Presentation stopped after contained failures: ${JSON.stringify(continued.error)}`,
+				);
+			contentFailures.continuedFrameSamples = continued.timing.sampleCount;
+		}
 		return {
+			contentFailures,
 			bakedDrawMergeCensus,
 			cpuProfile,
 			ambientOcclusionCycleStates,

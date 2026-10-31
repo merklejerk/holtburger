@@ -4384,6 +4384,7 @@
 				) {
 					await runtime.installPortalTransitionAssets(
 						await loadPortalTransitionAssets({
+							reportContentFailure: runtime.reportContentFailure.bind(runtime),
 							audio: {
 								playOneShot: () => null,
 								prepare: async () => {},

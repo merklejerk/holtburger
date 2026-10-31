@@ -1,4 +1,4 @@
-import type { PreparedMotionClosure } from "./animation-asset-repository";
+import type { PreparedMotionAssets } from "./animation-asset-repository";
 import type { PreparedAnimation } from "./animation-asset-repository";
 import { animationHookBlocksActivation } from "../../assets/decode-animation-record";
 import type { DatAssetId } from "../game-types";
@@ -16,7 +16,7 @@ import type {
  * conservative rather than tight, which is the correct direction for a culling bound.
  *
  * Building it costs no more than building per-clip bounds would. The sweep is a union of per-part,
- * per-frame boxes and `AABB3.union` is associative, so the whole closure is one pass with the
+ * per-frame boxes and `AABB3.union` is associative, so the available motion set is one pass with the
  * accumulator never reset — and each part's radius is hoisted out of the clip loop instead of being
  * recomputed for every clip.
  */
@@ -27,7 +27,7 @@ export interface PreparedMotionPlayback {
 	readonly clips: ReadonlyMap<DatAssetId, PreparedAnimation>;
 }
 
-/** Why one clip in a closure cannot be played. */
+/** Why one available motion clip cannot be played. */
 type ClipRefusal = "blocking-hooks" | "unbounded-root-rotation";
 
 const reported = new Set<string>();
@@ -53,7 +53,7 @@ function complain(
 }
 
 /**
- * Prepares every playable clip in a closure and the one bound that covers them.
+ * Prepares every playable available motion clip and the one bound that covers them.
  *
  * An unplayable clip is skipped rather than failing the entity: it is a content defect, and an
  * entity that animates from the rest of its table is more useful than one that refuses to spawn.
@@ -66,13 +66,13 @@ function complain(
  * authored prefix and retains the remaining setup-part transforms.
  */
 export function prepareMotionPlayback(
-	closure: PreparedMotionClosure,
+	assets: PreparedMotionAssets,
 	template: ObjectVisualTemplate,
 	sourceScale: Vec3,
 	staticBounds: AABB3,
 ): PreparedMotionPlayback {
 	// Each part's radius depends only on template geometry and scale, never on a clip, so it is
-	// computed once for the whole closure instead of once per clip.
+	// computed once for the available motion set instead of once per clip.
 	const radii = template.parts.map((part) => ({
 		part,
 		radius:
@@ -84,15 +84,10 @@ export function prepareMotionPlayback(
 	const clips = new Map<DatAssetId, PreparedAnimation>();
 	const bounds = staticBounds.clone();
 
-	for (const [animationId, animation] of closure.animations) {
+	for (const [animationId, animation] of assets.animations) {
 		const refusal = refuseClip(animation);
 		if (refusal !== null) {
-			complain(
-				closure.motionTableId,
-				animationId,
-				refusal.kind,
-				refusal.detail,
-			);
+			complain(assets.motionTableId, animationId, refusal.kind, refusal.detail);
 			continue;
 		}
 		sweepInto(bounds, animation, radii, sourceScale);

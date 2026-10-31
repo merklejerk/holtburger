@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { HostCommandError } from "../host/host-command-result";
 
 import type {
 	DecodedAnimationAsset,
@@ -13,7 +14,12 @@ import type { AudioDevice } from "../game/systems/audio-system";
 import type { DatAssetId } from "../game/game-types";
 import { Mat4 } from "../game/math/types";
 import { resolveObjectBehavior } from "../game/resolution/object-resident-classifier";
-import { loadPortalTransitionAssets } from "./portal-transition-assets";
+import {
+	loadPortalTransitionAssets,
+	preparePortalTransitionAudio,
+	withPortalTransitionAudio,
+	type PortalTransitionAssetSources,
+} from "./portal-transition-assets";
 
 const SETUP = "0x02000306" as DatAssetId;
 const ANIMATION = "0x030005ac" as DatAssetId;
@@ -23,7 +29,77 @@ const EXIT_SOUND = "0x0a000245" as DatAssetId;
 const HOOK_SOUND = "0x0a000316" as DatAssetId;
 
 describe("loadPortalTransitionAssets", () => {
-	it("loads the fixed closure once and reports complete source bytes", async () => {
+	it("uses an explicit absent visual result for source failures while preserving schema faults", async () => {
+		const sources = portalSources();
+		sources.animation.loadAnimation = async () => {
+			throw sourceFailure(ANIMATION);
+		};
+		await expect(loadPortalTransitionAssets(sources)).resolves.toBeNull();
+		expect(sources.reportContentFailure).toHaveBeenCalledOnce();
+		sources.animation.loadAnimation = async () => {
+			throw new Error("Unexpected animation magic");
+		};
+		await expect(loadPortalTransitionAssets(sources)).rejects.toThrow(
+			"Unexpected animation magic",
+		);
+	});
+
+	it("retains portal artwork and retries only missing audio buffers", async () => {
+		const sources = portalSources();
+		const ready = new Set<DatAssetId>();
+		let broken = true;
+		const loads: DatAssetId[] = [];
+		sources.audio.prepare = async (id) => {
+			if (ready.has(id)) return;
+			loads.push(id);
+			if (id === ENTER_SOUND && broken) throw sourceFailure(id);
+			ready.add(id);
+		};
+		const assets = await loadPortalTransitionAssets(sources);
+		if (assets === null)
+			throw new Error("Valid portal art must survive an absent sound");
+		expect(assets.waveIds).toEqual([EXIT_SOUND, HOOK_SOUND]);
+		broken = false;
+		const retried = withPortalTransitionAudio(
+			assets,
+			await preparePortalTransitionAudio(
+				sources.audio,
+				sources.soundTable,
+				sources.reportContentFailure,
+			),
+		);
+		expect(retried.waveIds).toEqual([ENTER_SOUND, EXIT_SOUND, HOOK_SOUND]);
+		expect(retried.visual).toBe(assets.visual);
+		expect(retried.animation).toBe(assets.animation);
+		expect(loads.filter((id) => id === EXIT_SOUND)).toHaveLength(1);
+		expect(loads.filter((id) => id === ENTER_SOUND)).toHaveLength(2);
+	});
+
+	it("keeps portal art usable without its optional sound table and recovers the table on audio retry", async () => {
+		const sources = portalSources();
+		const loadTable = sources.soundTable.loadSoundTable;
+		sources.soundTable.loadSoundTable = async () => {
+			throw sourceFailure(SOUND_TABLE);
+		};
+		const assets = await loadPortalTransitionAssets(sources);
+		expect(assets?.soundTable).toBeNull();
+		expect(assets?.waveIds).toHaveLength(3);
+		if (assets === null)
+			throw new Error("Valid portal artwork must survive table refusal");
+		sources.soundTable.loadSoundTable = loadTable;
+		const retried = withPortalTransitionAudio(
+			assets,
+			await preparePortalTransitionAudio(
+				sources.audio,
+				sources.soundTable,
+				sources.reportContentFailure,
+			),
+		);
+		expect(retried.soundTable?.id).toBe(SOUND_TABLE);
+		expect(retried.visual).toBe(assets.visual);
+		expect(retried.animation).toBe(assets.animation);
+	});
+	it("loads the fixed authored assets once and reports complete source bytes", async () => {
 		const calls = { animation: 0, setup: 0, soundTable: 0 };
 		const waveBytes = new Map<DatAssetId, number>([
 			[ENTER_SOUND, 11],
@@ -36,6 +112,9 @@ describe("loadPortalTransitionAssets", () => {
 			prepare: async () => {},
 		};
 		const assets = await loadPortalTransitionAssets({
+			reportContentFailure: () => {
+				throw new Error("Valid portal must not degrade");
+			},
 			animation: {
 				destroy: () => {},
 				loadAnimation: async () => {
@@ -59,6 +138,7 @@ describe("loadPortalTransitionAssets", () => {
 				},
 			} satisfies SoundTableSource,
 		});
+		if (assets === null) throw new Error("Valid portal fixture must load");
 
 		expect(calls).toEqual({ animation: 1, setup: 1, soundTable: 1 });
 		expect(assets.catalog.animationLowFrame).toBe(1);
@@ -76,6 +156,9 @@ describe("loadPortalTransitionAssets", () => {
 		let prepared = 0;
 		await expect(
 			loadPortalTransitionAssets({
+				reportContentFailure: () => {
+					throw new Error("Valid portal must not degrade");
+				},
 				animation: {
 					destroy: () => {},
 					loadAnimation: async () => animation(),
@@ -100,6 +183,29 @@ describe("loadPortalTransitionAssets", () => {
 		expect(prepared).toBe(0);
 	});
 });
+
+/** Real source classifications with no dependency on an installed archive. */
+function sourceFailure(id: DatAssetId): HostCommandError {
+	return new HostCommandError({
+		code: "application_error",
+		message: `Missing ${id}`,
+		resource: { kind: "missing", namespace: "eor/portal", file_id: Number(id) },
+	});
+}
+
+function portalSources(): PortalTransitionAssetSources {
+	return {
+		reportContentFailure: vi.fn(),
+		animation: {
+			destroy() {},
+			loadAnimation: async () => animation(),
+			loadMotionTableClosure: async () => [],
+		},
+		setupVisual: { load: async () => visual() },
+		soundTable: { destroy() {}, loadSoundTable: async () => soundTable() },
+		audio: { playOneShot: () => null, prepare: async () => {} },
+	};
+}
 
 function visual(): DecodedStaticPresentation {
 	return {

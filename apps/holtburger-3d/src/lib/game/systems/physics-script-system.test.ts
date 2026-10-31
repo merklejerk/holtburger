@@ -48,7 +48,7 @@ function build(options: { roll?: () => number; liveTargets?: boolean } = {}) {
 				scheduleActivation: (target, activation) => {
 					const system = wiring.system;
 					if (!system) throw new Error("Script system is not wired yet.");
-					system.scheduleActivation(target, activation);
+					return system.scheduleActivation(target, activation);
 				},
 			},
 			audio: {
@@ -242,7 +242,13 @@ describe("PhysicsScriptSystem", () => {
 			targetId: behaviorTargetId("node-2"),
 		};
 		const stage = harness.system.stageOwner("owner", [
-			{ closure, target: successor, timeSeconds: 10 },
+			{
+				closure,
+				target: successor,
+				timeSeconds: 10,
+				activation: "immediate",
+				additionalClosures: [],
+			},
 		]);
 		expect(harness.system.holds(TARGET)).toBe(true);
 		expect(harness.system.holds(successor)).toBe(false);
@@ -253,6 +259,37 @@ describe("PhysicsScriptSystem", () => {
 		expect(() => stage.commit()).toThrow("state committed");
 	});
 
+	it("keeps an animation library idle until its command arrives and refuses unavailable roots", async () => {
+		const closure = await harness.repository.acquireClosure("0x33000711");
+		const stage = harness.system.stageOwner("owner", [
+			{
+				closure,
+				target: TARGET,
+				timeSeconds: 0,
+				activation: "on-command",
+				additionalClosures: [],
+			},
+		]);
+		stage.commit();
+		expect(harness.system.getDiagnostics().activeScriptCount).toBe(0);
+		expect(
+			harness.system.scheduleActivation(TARGET, {
+				scriptId: "0x3300ffff",
+				pauseSeconds: 0,
+			}),
+		).toBe(false);
+		expect(
+			harness.system.scheduleActivation(TARGET, {
+				scriptId: closure.rootId,
+				pauseSeconds: 0,
+			}),
+		).toBe(true);
+		harness.system.advance(0);
+		expect(harness.system.getDiagnostics().activeScriptCount).toBeGreaterThan(
+			0,
+		);
+	});
+
 	it("releases an uncommitted stage without disturbing the active owner", async () => {
 		const closure = await harness.repository.acquireClosure("0x33000711");
 		harness.system.install("owner", TARGET, closure, 0);
@@ -261,6 +298,8 @@ describe("PhysicsScriptSystem", () => {
 				closure,
 				target: { generation: 2, targetId: behaviorTargetId("node-2") },
 				timeSeconds: 10,
+				activation: "immediate",
+				additionalClosures: [],
 			},
 		]);
 		stage.release();

@@ -7,7 +7,7 @@ import {
 	decryptCredentials,
 	encryptCredentials,
 } from "./launcher-credentials.js";
-import { clientFailureDiagnostic } from "../src/client/client-close-contract.js";
+import { formatError } from "../src/lib/format-error.js";
 import {
 	launcherSettingsSchema,
 	decodeLauncherSettings,
@@ -72,7 +72,7 @@ export class LauncherStore {
 		} catch (error) {
 			if (error instanceof Error && "code" in error && error.code === "ENOENT")
 				return;
-			this.#failure = `Launcher settings could not be loaded: ${clientFailureDiagnostic(error)}`;
+			this.#failure = `Launcher settings could not be loaded: ${formatError(error)}`;
 			this.#recoveryRequired = true;
 		}
 	}
@@ -117,7 +117,7 @@ export class LauncherStore {
 					JSON.stringify(next, null, 2) + "\n",
 				);
 			} catch (error) {
-				this.#failure = `Launcher settings could not be saved: ${clientFailureDiagnostic(error)}`;
+				this.#failure = `Launcher settings could not be saved: ${formatError(error)}`;
 				throw error;
 			}
 			this.#document = next;
@@ -145,7 +145,7 @@ export class LauncherStore {
 			this.#recoveryRequired = false;
 		});
 		this.#tail = operation.catch((error: unknown) => {
-			this.#failure = `Launcher settings recovery failed: ${clientFailureDiagnostic(error)}`;
+			this.#failure = `Launcher settings recovery failed: ${formatError(error)}`;
 		});
 		return operation;
 	}

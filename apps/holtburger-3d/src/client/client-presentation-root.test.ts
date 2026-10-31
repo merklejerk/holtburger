@@ -62,6 +62,7 @@ function fixture() {
 			}),
 		},
 		setOutputVolume: vi.fn(),
+		retryPresentationContent: vi.fn(async () => {}),
 		destroy: vi.fn(async () => {}),
 	};
 	const gameplay = {
@@ -88,6 +89,38 @@ function fixture() {
 }
 
 describe("ClientPresentationRoot", () => {
+	it("joins an in-flight content retry on close without starting another gameplay borrower", async () => {
+		const { dependencies, owner, gameplay } = fixture();
+		const root = new ClientPresentationRoot(dependencies);
+		await root.setMode("gameplay");
+		const gate = deferred<void>();
+		owner.retryPresentationContent.mockImplementationOnce(() => gate.promise);
+		const retry = root.retry();
+		await vi.waitFor(() =>
+			expect(owner.retryPresentationContent).toHaveBeenCalledOnce(),
+		);
+		const retirement = root.destroy();
+		expect(owner.destroy).not.toHaveBeenCalled();
+		gate.resolve();
+		await Promise.all([retry, retirement]);
+		expect(gameplay.start).toHaveBeenCalledOnce();
+		expect(dependencies.build).toHaveBeenCalledOnce();
+		expect(owner.destroy).toHaveBeenCalledOnce();
+	});
+	it("retries failed content after borrower retirement without rebuilding the renderer owner", async () => {
+		const { dependencies, owner, gameplay } = fixture();
+		const root = new ClientPresentationRoot(dependencies);
+		await root.setMode("gameplay");
+		owner.retryPresentationContent.mockImplementationOnce(async () => {
+			expect(gameplay.destroy).toHaveBeenCalledOnce();
+		});
+		await root.retry();
+		expect(owner.retryPresentationContent).toHaveBeenCalledOnce();
+		expect(dependencies.build).toHaveBeenCalledOnce();
+		expect(owner.destroy).not.toHaveBeenCalled();
+		expect(gameplay.start).toHaveBeenCalledTimes(2);
+		await root.destroy();
+	});
 	it("retires shared resources after a surface reports a model withdrawal failure", async () => {
 		const { dependencies, owner, model } = fixture();
 		const root = new ClientPresentationRoot(dependencies);

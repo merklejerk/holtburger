@@ -51,8 +51,91 @@ import {
 } from "./object-visual-template-repository";
 import { RUNTIME_LIGHT_RANGE_SCALE } from "../environment/runtime-lights";
 import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import { HostCommandError } from "../../host/host-command-result";
 
 describe("DynamicEntitySystem authored ownership", () => {
+	it.each(["source-owned", "resolved"] as const)(
+		"retains a coherent setup pose when every %s clip is unavailable",
+		async (kind) => {
+			const { system, animations, effects } = createSystem(
+				new InlineObjectVisualTemplatePreparer(),
+				{
+					destroy() {},
+					loadMotionTableClosure: async () => [],
+					async loadAnimation() {
+						throw new HostCommandError({
+							code: "application_error",
+							message: "Invalid animation",
+							resource: {
+								kind: "invalid",
+								namespace: "eor/portal",
+								file_id: 0x03000001,
+							},
+						});
+					},
+				},
+			);
+			const placed = source("refused-animation");
+			const installation = system.replaceOwner("local", [
+				{
+					...placed,
+					playback:
+						kind === "source-owned"
+							? { kind }
+							: {
+									kind,
+									pose: {
+										kind: "default-idle",
+										firstCyclicClip: 0,
+										clips: [
+											{
+												animationId: 0x03000001,
+												lowFrame: 0,
+												highFrame: 0,
+												framerate: 30,
+											},
+										],
+									},
+								},
+				},
+			]);
+			expect(await installation.ready).toBe("ready");
+			const prepared = requiredAt(installation.getPreparedEntities(), 0);
+			expect(prepared.animation).toMatchObject(
+				kind === "resolved"
+					? { kind: "sequence", clips: [], firstCyclicClip: null }
+					: { kind: "none" },
+			);
+			const { router } = buildEffectRouter(effects);
+			const playback = new AnimationSystem<string>(effects, router);
+			const staged = playback.stageOwner(
+				"local",
+				prepared.animation.kind === "sequence"
+					? [
+							{
+								kind: "sequence",
+								clips: prepared.animation.clips,
+								firstCyclicClip: prepared.animation.firstCyclicClip,
+								initialPartToObjectTransforms:
+									prepared.initialPartToObjectTransforms,
+								target: {
+									targetId: behaviorTargetId(prepared.nodeId),
+									generation: installation.generation,
+								},
+							},
+						]
+					: [],
+			);
+			installation.prepareCommit(staged.samples, []);
+			staged.commit();
+			installation.commit();
+			expect(system.getVisiblePresentation(prepared.nodeId)).not.toBeNull();
+			playback.destroy();
+			system.removeOwner("local");
+			expect(animations.getDiagnostics().referenceCount).toBe(0);
+			await system.destroy();
+		},
+	);
 	it("retains model ownership for staged roots and requested parts through publication, then forgets retired nodes", async () => {
 		const { system } = createSystem(new InlineObjectVisualTemplatePreparer());
 		const installation = system.replaceOwner(
@@ -419,7 +502,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 			expect(prepared.source.behavior.animationId).toBe(
 				base.source.behavior.animationId,
 			);
-			expect(prepared.motionClosure).toBeNull();
+			expect(prepared.motionAssets).toBeNull();
 			expect(fixture.loads).toEqual(
 				kind === "setup-pose"
 					? []
@@ -458,7 +541,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		},
 	);
 
-	it("rejects unsupported explicit hooks while preserving the current owner and its leases", async () => {
+	it("retains a setup pose for unsupported explicit hooks without retiring the current owner before commit", async () => {
 		const { system, animations } = createSystem(
 			new InlineObjectVisualTemplatePreparer(),
 			new BlockedAnimationSource(),
@@ -489,8 +572,17 @@ describe("DynamicEntitySystem authored ownership", () => {
 				},
 			},
 		]);
-		await expect(replacement.ready).rejects.toThrow("unsupported visual hooks");
+		await expect(replacement.ready).resolves.toBe("ready");
+		const prepared = replacement.getPreparedEntities()[0];
+		expect(prepared?.animation.kind).toBe("sequence");
+		if (prepared?.animation.kind !== "sequence")
+			throw new Error("Expected resolved setup pose");
+		expect(prepared.animation.clips).toEqual([]);
 		expect(system.getVisiblePresentation(nodeId)).not.toBeNull();
+		expect(animations.getDiagnostics().referenceCount).toBeGreaterThan(
+			references,
+		);
+		replacement.release();
 		expect(animations.getDiagnostics().referenceCount).toBe(references);
 		system.removeOwner("owner");
 		expect(animations.getDiagnostics().referenceCount).toBe(0);
@@ -1308,7 +1400,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(await installation.ready).toBe("ready");
 		const prepared = installation.getPreparedEntities();
 		commit(installation);
-		expect([...prepared[0]!.motionClosure!.animations.keys()]).toEqual([
+		expect([...prepared[0]!.motionAssets!.animations.keys()]).toEqual([
 			"0x03000001",
 			"0x03000002",
 		]);
@@ -1379,7 +1471,7 @@ describe("DynamicEntitySystem authored ownership", () => {
 		expect(await installation.ready).toBe("ready");
 		const prepared = installation.getPreparedEntities();
 		commit(installation);
-		expect(prepared[0]!.motionClosure).toBeNull();
+		expect(prepared[0]!.motionAssets).toBeNull();
 		expect(animations.loads).not.toContain("0x03000002");
 	});
 

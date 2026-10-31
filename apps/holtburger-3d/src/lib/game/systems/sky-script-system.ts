@@ -11,6 +11,7 @@ import type {
 } from "../behavior/behavior-event-router";
 import type { PreparedPhysicsScriptClosure } from "../behavior/physics-script-repository";
 import type { DatAssetId } from "../game-types";
+import { isContentFailure } from "../../host/host-command-result";
 import type { ResolvedSkyState } from "../environment/sky-state";
 import type { SkyBehaviorTarget } from "../environment/sky-behavior-targets";
 
@@ -93,6 +94,8 @@ export class SkyScriptSystem {
 	readonly #retained = new Map<DatAssetId, StagedSkyAssets>();
 	/** Stagings in flight per script id, so two targets sharing a script stage it once. */
 	readonly #staging = new Map<DatAssetId, Promise<StagedSkyAssets>>();
+	/** Source failures suppress repeated frame-driven activation until explicit retry. */
+	readonly #failed = new Set<DatAssetId>();
 	/**
 	 * Monotonic activation counter, minted per activation rather than per target.
 	 *
@@ -145,9 +148,19 @@ export class SkyScriptSystem {
 		}
 
 		for (const [targetId, wanted] of desired) {
-			if (this.#active.has(targetId) || this.#pending.has(targetId)) continue;
+			if (
+				this.#active.has(targetId) ||
+				this.#pending.has(targetId) ||
+				this.#failed.has(wanted.scriptId)
+			)
+				continue;
 			void this.#activate(targetId, wanted).catch(this.#dependencies.onFailure);
 		}
+	}
+
+	/** The composition clears source caches before reopening these failed activation attempts. */
+	retryFailed(): void {
+		this.#failed.clear();
 	}
 
 	/** Tear down every running sky script and release the region's staged sky assets. */
@@ -159,6 +172,7 @@ export class SkyScriptSystem {
 		await Promise.allSettled([...this.#staging.values()]);
 		for (const staged of this.#retained.values()) releaseStaged(staged);
 		this.#retained.clear();
+		this.#failed.clear();
 	}
 
 	async #activate(
@@ -171,7 +185,8 @@ export class SkyScriptSystem {
 		try {
 			staged = await this.#stage(wanted.scriptId);
 		} catch (cause) {
-			this.#pending.delete(targetId);
+			if (this.#pending.get(targetId) === generation)
+				this.#pending.delete(targetId);
 			throw cause;
 		}
 
@@ -180,7 +195,8 @@ export class SkyScriptSystem {
 		// only this activation is abandoned.
 		const superseded =
 			this.#destroyed || this.#pending.get(targetId) !== generation;
-		this.#pending.delete(targetId);
+		if (this.#pending.get(targetId) === generation)
+			this.#pending.delete(targetId);
 		if (superseded) return;
 
 		const target: BehaviorTarget = { generation, targetId };
@@ -214,10 +230,16 @@ export class SkyScriptSystem {
 		if (retained) return retained;
 		const inflight =
 			this.#staging.get(scriptId) ??
-			this.#stageFresh(scriptId).finally(() => {
-				// Closure acquisition can fail before emitter staging begins; every outcome retires this job.
-				this.#staging.delete(scriptId);
-			});
+			this.#stageFresh(scriptId)
+				.catch((cause: unknown) => {
+					if (!this.#destroyed && isContentFailure(cause))
+						this.#failed.add(scriptId);
+					throw cause;
+				})
+				.finally(() => {
+					// Closure acquisition can fail before emitter staging begins; every outcome retires this job.
+					this.#staging.delete(scriptId);
+				});
 		this.#staging.set(scriptId, inflight);
 		return inflight;
 	}

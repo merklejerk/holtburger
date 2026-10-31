@@ -1,4 +1,5 @@
 import { collectEmitterInfoIds } from "./behavior-dependencies";
+import { isContentFailure } from "../../host/host-command-result";
 import type {
 	DecodedPhysicsScript,
 	DecodedPhysicsScriptRecord,
@@ -58,6 +59,24 @@ export class PhysicsScriptRepository extends PreparedAssetRepository<
 			load: (scriptId) => source.loadPhysicsScript(scriptId),
 			prepare: preparePhysicsScript,
 		});
+	}
+
+	/** Omit a complete unavailable effect graph; never execute an arbitrary partial script graph. */
+	async acquireOptionalClosure(
+		rootId: DatAssetId,
+	): Promise<PreparedPhysicsScriptClosure | null> {
+		try {
+			return await this.acquireClosure(rootId);
+		} catch (cause) {
+			if (!isContentFailure(cause)) throw cause;
+			this.reportContentFailure(
+				`closure:${rootId}`,
+				new Error(`Physics script ${rootId} unavailable; effect omitted.`, {
+					cause,
+				}),
+			);
+			return null;
+		}
 	}
 
 	/**

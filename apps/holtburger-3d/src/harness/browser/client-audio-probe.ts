@@ -35,6 +35,9 @@ export async function probeClientAudio() {
 		tuning.maximumSimultaneousVoices,
 		() => performance.now() / 1_000,
 		tuning.maximumWarmupReplaySeconds,
+		(cause) => {
+			throw new Error("Audio probe preparation failed", { cause });
+		},
 	);
 	try {
 		await context.resume();
@@ -80,7 +83,11 @@ export async function probeClientAudio() {
 					destroy() {},
 					stop() {},
 				},
-				scheduler: { scheduleActivation() {} },
+				scheduler: {
+					scheduleActivation() {
+						return false;
+					},
+				},
 			},
 			4,
 		);

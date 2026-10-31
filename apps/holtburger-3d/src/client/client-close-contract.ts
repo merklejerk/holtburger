@@ -10,10 +10,3 @@ export const clientClosePreparationSchema = z.discriminatedUnion("kind", [
 export type ClientClosePreparation = z.infer<
 	typeof clientClosePreparationSchema
 >;
-
-/** Preserve individual aggregate causes when crossing the renderer/native diagnostic boundary. */
-export function clientFailureDiagnostic(error: unknown): string {
-	if (error instanceof AggregateError)
-		return `${error.message}\n${error.errors.map(clientFailureDiagnostic).join("\n")}`;
-	return error instanceof Error ? error.message : String(error);
-}

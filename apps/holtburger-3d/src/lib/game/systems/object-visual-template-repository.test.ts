@@ -376,10 +376,11 @@ describe("ObjectVisualTemplateRepository", () => {
 		expect(repository.getState(objectVisualTemplateKey(visual))).toBeNull();
 	});
 
-	it("rolls geometry back when atlas preparation fails", async () => {
+	it("releases geometry and preserves the cause when atlas preparation fails", async () => {
 		const geometry = new FixtureGeometry();
+		const cause = new Error("pixels unavailable");
 		const atlas = new FixtureAtlas({
-			cause: new Error("pixels unavailable"),
+			cause,
 			kind: "failed",
 		});
 		const repository = createRepository(
@@ -391,7 +392,10 @@ describe("ObjectVisualTemplateRepository", () => {
 			source("atlas-failure", "appearance:atlas-failure"),
 		]);
 
-		await expect(staged.completion).rejects.toThrow("pixels unavailable");
+		await expect(staged.completion).rejects.toMatchObject({
+			message: expect.stringContaining("atlas preparation failed"),
+			cause,
+		});
 		expect(geometry.resources.size).toBe(0);
 		expect(atlas.activeOwnerCount).toBe(0);
 		expect(atlas.withdrawalCount).toBe(1);

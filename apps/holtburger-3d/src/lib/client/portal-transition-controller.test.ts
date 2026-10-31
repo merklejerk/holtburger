@@ -8,6 +8,36 @@ const POLICY = {
 } as const;
 
 describe("PortalTransitionController", () => {
+	it("accepts actual opaque loading proof but still requires destination readiness and a destination frame", () => {
+		const controller = new PortalTransitionController(POLICY);
+		controller.begin(4, { kind: "absent" });
+		expect(advance(controller, 0, false).plan.kind).toBe("tunnel-only");
+		expect(
+			controller.acknowledgePresented({
+				kind: "opaque-loading",
+				generation: 4,
+			}),
+		).toBeNull();
+		expect(advance(controller, 10_000, false).plan.kind).toBe("tunnel-only");
+		expect(advance(controller, 10_001, true).plan.kind).toBe(
+			"tunnel-to-destination",
+		);
+		expect(
+			controller.acknowledgePresented({
+				kind: "opaque-loading",
+				generation: 4,
+			}),
+		).toBeNull();
+		expect(advance(controller, 10_101, true).plan.kind).toBe(
+			"destination-only-awaiting-handoff",
+		);
+		expect(
+			controller.acknowledgePresented({
+				kind: "destination-only-awaiting-handoff",
+				generation: 4,
+			}),
+		).toEqual({ generation: 4 });
+	});
 	it("produces one complete plan per advance and reveals only from presentation proof", () => {
 		const controller = new PortalTransitionController(POLICY);
 		controller.begin(4, { kind: "capture-last-world" });

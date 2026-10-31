@@ -207,6 +207,8 @@ export interface AudioDiagnostics {
  * a cleanup.
  */
 export class AudioSystem {
+	/** The composition contains source failures and escalates operational failures explicitly. */
+	readonly #onFailure: (cause: unknown) => void;
 	readonly #device: AudioDevice;
 	readonly #roll: () => number;
 	readonly #voiceLimit: number;
@@ -240,6 +242,7 @@ export class AudioSystem {
 		voiceLimit: number,
 		clock: () => number,
 		maximumWarmupReplaySeconds: number,
+		onFailure: (cause: unknown) => void,
 	) {
 		if (!Number.isInteger(voiceLimit) || voiceLimit <= 0)
 			throw new Error("Audio voice limit must be a positive integer.");
@@ -250,6 +253,7 @@ export class AudioSystem {
 		this.#voiceLimit = voiceLimit;
 		this.#clock = clock;
 		this.#maximumWarmupReplaySeconds = maximumWarmupReplaySeconds;
+		this.#onFailure = onFailure;
 	}
 
 	setListener(listener: AudioListener): void {
@@ -410,32 +414,37 @@ export class AudioSystem {
 	 * started — the same gate the trigger applies, at the moment that now matters.
 	 */
 	#warmAndReplay(trigger: AudioTrigger, triggeredAt: number): void {
-		void this.#device.prepare(trigger.soundId).then(() => {
-			if (this.#destroyed || trigger.canReplay?.() === false) return;
-			if (this.#clock() - triggeredAt > this.#maximumWarmupReplaySeconds) {
-				this.#warmupExpiredCount += 1;
-				return;
-			}
-			const placement = this.#place(trigger.source, trigger.category);
-			if (placement === null) {
-				this.#inaudibleCount += 1;
-				return;
-			}
-			this.#claimVoiceSlot();
-			const voice = this.#device.playOneShot(
-				trigger.soundId,
-				placement.gain,
-				placement.pan,
-			);
-			if (voice === null) {
-				// `prepare` resolving is the device's promise that `playOneShot` will accept, so
-				// reaching here means the device broke that contract rather than being late.
-				this.#warmupRefusedCount += 1;
-				return;
-			}
-			this.#retain(voice, trigger);
-			this.#warmedPlayedCount += 1;
-		});
+		void this.#device
+			.prepare(trigger.soundId)
+			.then(() => {
+				if (this.#destroyed || trigger.canReplay?.() === false) return;
+				if (this.#clock() - triggeredAt > this.#maximumWarmupReplaySeconds) {
+					this.#warmupExpiredCount += 1;
+					return;
+				}
+				const placement = this.#place(trigger.source, trigger.category);
+				if (placement === null) {
+					this.#inaudibleCount += 1;
+					return;
+				}
+				this.#claimVoiceSlot();
+				const voice = this.#device.playOneShot(
+					trigger.soundId,
+					placement.gain,
+					placement.pan,
+				);
+				if (voice === null) {
+					// `prepare` resolving is the device's promise that `playOneShot` will accept, so
+					// reaching here means the device broke that contract rather than being late.
+					this.#warmupRefusedCount += 1;
+					return;
+				}
+				this.#retain(voice, trigger);
+				this.#warmedPlayedCount += 1;
+			})
+			.catch((cause: unknown) => {
+				if (!this.#destroyed) this.#onFailure(cause);
+			});
 	}
 
 	/**

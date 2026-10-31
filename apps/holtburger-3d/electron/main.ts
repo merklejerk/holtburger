@@ -15,7 +15,7 @@ import {
 } from "./pointer-lock-hover.js";
 import { LauncherStore } from "./launcher-store.js";
 import { ServerDirectoryCatalog } from "./server-directory.js";
-import { clientFailureDiagnostic } from "../src/client/client-close-contract.js";
+import { formatError } from "../src/lib/format-error.js";
 import { z } from "zod";
 import { decodeClientExitRequested } from "../src/client/client-exit-contract.js";
 import { spawn } from "node:child_process";
@@ -37,7 +37,8 @@ import {
 	parseClientLaunchArguments,
 	type ClientLaunchConfiguration,
 } from "./client-launch.js";
-import { SidecarHostClient } from "./host-protocol.js";
+import { SidecarHostClient, SidecarProtocolError } from "./host-protocol.js";
+import type { HostCommandResult } from "../src/lib/host/host-command-result.js";
 import {
 	ContentStartup,
 	type HostContentSelection,
@@ -482,7 +483,22 @@ function installIpcBridge(window: BrowserWindow, mode: HostMode): void {
 		// retirement acknowledgement, not the cancellation signal, is the native admission cutoff.
 
 		const client = requireActiveHost();
-		return client.invoke(request.command, args);
+		try {
+			return {
+				kind: "ok",
+				value: await client.invoke(request.command, args),
+			} satisfies HostCommandResult;
+		} catch (error) {
+			if (!(error instanceof SidecarProtocolError)) throw error;
+			return {
+				kind: "failed",
+				error: {
+					code: error.code,
+					message: error.message,
+					resource: error.resource,
+				},
+			} satisfies HostCommandResult;
+		}
 	});
 }
 
@@ -526,7 +542,7 @@ function installSettingsIpcBridge(
 		} catch (error) {
 			// User settings load before the renderer mounts, so no toast can report
 			// a failed backup or repair write. Use the existing startup error surface.
-			attempt.content.fail(clientFailureDiagnostic(error));
+			attempt.content.fail(formatError(error));
 			throw error;
 		}
 	});
@@ -730,11 +746,11 @@ function reportWindowSettingsFailure(
 	if (!window.isDestroyed())
 		dialog.showErrorBox(
 			"Holtburger window settings could not be saved",
-			clientFailureDiagnostic(error),
+			formatError(error),
 		);
 }
 function reportTransitionFailure(window: BrowserWindow, error: unknown): void {
-	pickerFailure = clientFailureDiagnostic(error);
+	pickerFailure = formatError(error);
 	console.error(error);
 	if (!window.isDestroyed())
 		dialog.showErrorBox("Holtburger session could not finish", pickerFailure);
@@ -845,7 +861,7 @@ void (async () => {
 			window,
 			(value) => launcher.updateWindow(value),
 			(error) => {
-				pickerFailure = clientFailureDiagnostic(error);
+				pickerFailure = formatError(error);
 				reportWindowSettingsFailure(window, error);
 			},
 		);

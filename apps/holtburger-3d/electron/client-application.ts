@@ -1,5 +1,5 @@
 import type { ClientLaunchConfiguration } from "./client-launch.js";
-import { clientFailureDiagnostic } from "../src/client/client-close-contract.js";
+import { formatError } from "../src/lib/format-error.js";
 
 /** One attempt owns resources that cannot be reused after retirement. */
 export interface ApplicationAttempt {
@@ -76,7 +76,7 @@ export class ClientApplication<T extends ApplicationAttempt> {
 				})
 				.catch((error: unknown) => {
 					if (!attempt.cancellation.signal.aborted) {
-						void this.back(clientFailureDiagnostic(error)).catch(() => {
+						void this.back(formatError(error)).catch(() => {
 							/* back has already reported the retirement failure. */
 						});
 					}
@@ -104,7 +104,7 @@ export class ClientApplication<T extends ApplicationAttempt> {
 				await this.#dependencies.showPicker(diagnostic);
 			})
 			.catch((error: unknown) => {
-				this.#dependencies.report(clientFailureDiagnostic(error));
+				this.#dependencies.report(formatError(error));
 				if (this.#state.kind !== "quitting" && this.#retirement === retirement)
 					this.#state = { kind: "retiring", attempt: this.attempt };
 				throw error;
@@ -137,7 +137,7 @@ export class ClientApplication<T extends ApplicationAttempt> {
 			]);
 			for (const result of results)
 				if (result.status === "rejected")
-					failures.push(clientFailureDiagnostic(result.reason));
+					failures.push(formatError(result.reason));
 			this.#dependencies.exit(failures);
 		});
 		return this.#quit;

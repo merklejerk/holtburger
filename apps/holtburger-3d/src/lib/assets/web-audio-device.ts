@@ -1,4 +1,8 @@
 import type { DatAssetId } from "../game/game-types";
+import {
+	HostCommandError,
+	isContentFailure,
+} from "../host/host-command-result";
 import type { AudioDevice, AudioVoice } from "../game/systems/audio-system";
 
 /** Gain change below which a re-target is dropped; far under the smoothing ramp's own resolution. */
@@ -59,6 +63,8 @@ export class WebAudioDevice implements AudioDevice {
 	readonly #bufferSourceBytes = new Map<DatAssetId, number>();
 	/** Concurrent callers share decoder completion, not just an in-flight marker. */
 	readonly #pending = new Map<DatAssetId, Promise<void>>();
+	/** Failed buffers stay rejected until explicit retry; repeated hooks never start decoder storms. */
+	readonly #failures = new Map<DatAssetId, unknown>();
 	#destroyed = false;
 	/** Initial mix is installed synchronously before any voice can produce output. */
 	#hasStartedPlayback = false;
@@ -206,13 +212,24 @@ export class WebAudioDevice implements AudioDevice {
 	/** Decode one sound, resolving exactly when `playOneShot` will accept it. */
 	prepare(soundId: DatAssetId): Promise<void> {
 		if (this.#destroyed || this.#buffers.has(soundId)) return Promise.resolve();
+		if (this.#failures.has(soundId))
+			return Promise.reject(this.#failures.get(soundId));
 		const pending = this.#pending.get(soundId);
 		if (pending !== undefined) return pending;
-		const preparation = this.#decode(soundId).finally(() =>
-			this.#pending.delete(soundId),
-		);
+		const preparation = this.#decode(soundId)
+			.catch((cause: unknown) => {
+				if (!this.#destroyed && isContentFailure(cause))
+					this.#failures.set(soundId, cause);
+				throw cause;
+			})
+			.finally(() => this.#pending.delete(soundId));
 		this.#pending.set(soundId, preparation);
 		return preparation;
+	}
+
+	/** The presentation retry owner may retry source failures without replacing live voices. */
+	retryFailed(): void {
+		this.#failures.clear();
 	}
 
 	getPreparedSourceBytes(soundId: DatAssetId): number | null {
@@ -226,6 +243,7 @@ export class WebAudioDevice implements AudioDevice {
 		this.#buffers.clear();
 		this.#bufferSourceBytes.clear();
 		this.#pending.clear();
+		this.#failures.clear();
 		this.#source.destroy();
 	}
 
@@ -233,7 +251,26 @@ export class WebAudioDevice implements AudioDevice {
 		const bytes = await this.#source.loadAudio(soundId);
 		// decodeAudioData transfers its input buffer, so measure before it is detached.
 		const sourceByteLength = bytes.byteLength;
-		const buffer = await this.#context.decodeAudioData(bytes);
+		let buffer: AudioBuffer;
+		try {
+			buffer = await this.#context.decodeAudioData(bytes);
+		} catch (cause) {
+			// EncodingError is the browser decoder's source rejection; unexpected device errors stay operational.
+			if (!(cause instanceof DOMException) || cause.name !== "EncodingError")
+				throw cause;
+			throw new HostCommandError(
+				{
+					code: "audio_decode_failed",
+					message: `Audio ${soundId} could not decode: ${cause.message}`,
+					resource: {
+						kind: "invalid",
+						namespace: "eor/portal",
+						file_id: Number(soundId),
+					},
+				},
+				{ cause },
+			);
+		}
 		if (!this.#destroyed) {
 			this.#buffers.set(soundId, buffer);
 			this.#bufferSourceBytes.set(soundId, sourceByteLength);

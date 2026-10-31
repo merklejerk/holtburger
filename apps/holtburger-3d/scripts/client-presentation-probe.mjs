@@ -163,6 +163,45 @@ export async function probeClientPresentation(
 	await wait(
 		`${api}?.read().gates.connection.waiting > 0 && ${api}.read().gates.scene.waiting > 0`,
 	);
+	if (process.env.HOLTBURGER_PROBE_CLIENT_CONTENT === "1") {
+		await read(
+			`${api}.authenticate(); ${api}.releaseConnection(); ${api}.releaseScene()`,
+		);
+		await wait("document.querySelector('.enter-world')?.disabled === false");
+		await click("Enter World");
+		await wait(
+			`${api}.read().portalReveals === 1 && ${api}.read().worldDraws > 0`,
+		);
+		const entered = await read(`${api}.read()`);
+		assert.ok(
+			entered.refusedAudioRequests > 0,
+			"Probe must refuse actual owner audio requests",
+		);
+		await read(`${api}.releasePresentationSources()`);
+		await read(`(() => {
+			const editor = document.querySelector('[aria-label="Chat message"]');
+			editor.value = '/assets retry';
+			editor.dispatchEvent(new Event('input', { bubbles: true }));
+			editor.closest('form').requestSubmit();
+		})()`);
+		await wait(
+			"document.body.innerText.includes('Retried failed presentation content')",
+		);
+		await wait(`${api}.read().worldDraws > ${entered.worldDraws}`);
+		const retried = await read(`${api}.read()`);
+		assert.ok(
+			retried.audioRequests > entered.audioRequests,
+			"Retry must request refused audio again",
+		);
+		assert.equal(retried.refusedAudioRequests, entered.refusedAudioRequests);
+		assert.equal(retried.worldContextRequests, 1);
+		assert.equal(retried.portalReveals, 1);
+		await read(`${api}.beginClose()`);
+		await wait(`${api}.read().closeResult !== null`);
+		const closed = await read(`${api}.read()`);
+		assert.equal(closed.closeResult.kind, "prepared");
+		return { contentFailure: { entered, retried, closed }, passed: true };
+	}
 	await covered();
 	// Intercept only the configured loading timers so tuning changes never make this probe wait longer.
 	await read(`(async () => {

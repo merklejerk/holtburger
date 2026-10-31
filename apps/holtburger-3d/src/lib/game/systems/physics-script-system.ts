@@ -42,7 +42,7 @@ interface ScriptRecord {
 	/** Immutable scripts retained by generation-owned closure handles outside this clock. */
 	readonly scripts: Map<DatAssetId, PreparedPhysicsScript>;
 	/** First installed root used by the bounded runaway resynchronization policy. */
-	readonly primaryRoot: PreparedPhysicsScript;
+	primaryRoot: PreparedPhysicsScript | null;
 	readonly target: BehaviorTarget;
 	activations: ScriptActivation[];
 	pending: PendingActivation[];
@@ -152,16 +152,7 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 				`Script target ${target.targetId} is not owned by ${ownerId}.`,
 			);
 		}
-		for (const [scriptId, script] of closure.scripts) {
-			const retained = existing.scripts.get(scriptId);
-			if (retained !== undefined && retained !== script) {
-				throw new Error(
-					`Script ${scriptId} was prepared twice with different immutable values.`,
-				);
-			}
-		}
-		for (const [scriptId, script] of closure.scripts)
-			existing.scripts.set(scriptId, script);
+		mergeScriptLibrary(existing, closure);
 		const root = existing.scripts.get(closure.rootId);
 		if (!root)
 			throw new Error(
@@ -181,6 +172,9 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			readonly target: BehaviorTarget;
 			readonly closure: PreparedPhysicsScriptClosure;
 			readonly timeSeconds: number;
+			/** Animation libraries are staged without activating an unsolicited default effect. */
+			readonly activation: "immediate" | "on-command";
+			readonly additionalClosures: readonly PreparedPhysicsScriptClosure[];
 		}[],
 	): StagedPhysicsScriptOwner {
 		if (this.#destroyed)
@@ -195,14 +189,18 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 					`Script state for ${installation.target.targetId} already exists.`,
 				);
 			}
-			records.set(
-				installation.target.targetId,
-				createScriptRecord(
-					installation.target,
-					installation.closure,
-					installation.timeSeconds,
-				),
+			const record = createScriptRecord(
+				installation.target,
+				installation.closure,
+				installation.timeSeconds,
 			);
+			if (installation.activation === "on-command") {
+				record.activations = [];
+				record.primaryRoot = null;
+			}
+			for (const closure of installation.additionalClosures)
+				mergeScriptLibrary(record, closure);
+			records.set(installation.target.targetId, record);
 		}
 		let state: "staged" | "committed" | "released" = "staged";
 		return {
@@ -398,6 +396,7 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			throw new Error(
 				`Script ${pending.scriptId} is not staged for ${record.target.targetId}.`,
 			);
+		if (record.primaryRoot === null) record.primaryRoot = script;
 		record.activations.push({
 			nextRecordIndex: 0,
 			script,
@@ -423,13 +422,16 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 	#resynchronize(record: ScriptRecord, timeSeconds: number): void {
 		record.runawayCount += 1;
 		this.#resynchronizedCount += 1;
-		record.activations = [
-			{
-				nextRecordIndex: 0,
-				script: record.primaryRoot,
-				startTime: timeSeconds,
-			},
-		];
+		record.activations =
+			record.primaryRoot === null
+				? []
+				: [
+						{
+							nextRecordIndex: 0,
+							script: record.primaryRoot,
+							startTime: timeSeconds,
+						},
+					];
 		record.pending = [];
 	}
 
@@ -446,15 +448,21 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 			readonly scriptId: DatAssetId;
 			readonly pauseSeconds: number;
 		},
-	): void {
+	): boolean {
 		const record = this.#records.get(target.targetId);
-		if (!record || record.target.generation !== target.generation) return;
+		if (
+			!record ||
+			record.target.generation !== target.generation ||
+			!record.scripts.has(activation.scriptId)
+		)
+			return false;
 		const startTime =
 			activation.pauseSeconds < INSTANT_PAUSE_SECONDS
 				? this.#chainedStartTime(record)
 				: (record.lastTimeSeconds ?? 0) +
 					this.#roll() * activation.pauseSeconds;
 		record.pending.push({ scriptId: activation.scriptId, startTime });
+		return true;
 	}
 
 	/**
@@ -481,6 +489,22 @@ export class PhysicsScriptSystem<TOwnerId extends string> {
 		}
 		return latest ?? record.lastTimeSeconds ?? 0;
 	}
+}
+
+/** Borrow complete retained graphs; two prepared values for one script identity violate staging. */
+function mergeScriptLibrary(
+	record: ScriptRecord,
+	closure: PreparedPhysicsScriptClosure,
+): void {
+	for (const [scriptId, script] of closure.scripts) {
+		const retained = record.scripts.get(scriptId);
+		if (retained !== undefined && retained !== script)
+			throw new Error(
+				`Script ${scriptId} was prepared twice with different immutable values.`,
+			);
+	}
+	for (const [scriptId, script] of closure.scripts)
+		record.scripts.set(scriptId, script);
 }
 
 function createScriptRecord(

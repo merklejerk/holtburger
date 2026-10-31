@@ -22,7 +22,7 @@ use crate::shared_host_content::{
 };
 
 /// Current sidecar protocol version.
-pub const PROTOCOL_VERSION: u16 = 2;
+pub const PROTOCOL_VERSION: u16 = 3;
 /// Maximum encoded MessagePack payload, excluding the four-byte length prefix.
 pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 /// Bounded writer queue. Producers block at capacity; no event is silently discarded.
@@ -280,6 +280,9 @@ pub enum HostResponse {
 pub struct ProtocolError {
     pub code: String,
     pub message: String,
+    /// Typed source rejection; absent for transport, projection, and programming failures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<crate::content_failure::ResourceRequestFailure>,
 }
 
 /// One framed wire message.
@@ -433,6 +436,7 @@ pub(crate) fn application_error(error: impl std::fmt::Display) -> ProtocolError 
     ProtocolError {
         code: "application_error".to_string(),
         message: error.to_string(),
+        resource: None,
     }
 }
 
@@ -472,6 +476,7 @@ fn mode_command_error(actual: HostMode, required: HostMode) -> ProtocolError {
             actual.as_str(),
             required.as_str(),
         ),
+        resource: None,
     }
 }
 
@@ -877,6 +882,7 @@ pub async fn run_stdio(launch: crate::host_mode::HostLaunch) -> anyhow::Result<(
                         message: format!(
                             "host protocol {PROTOCOL_VERSION} cannot communicate with {protocol_version}"
                         ),
+                        resource: None,
                     },
                 })
                 .ok();
@@ -893,6 +899,7 @@ pub async fn run_stdio(launch: crate::host_mode::HostLaunch) -> anyhow::Result<(
                     error: ProtocolError {
                         code: "handshake_required".to_string(),
                         message: "the first frame must acknowledge the host handshake".to_string(),
+                        resource: None,
                     },
                 })
                 .ok();
@@ -930,6 +937,7 @@ pub async fn run_stdio(launch: crate::host_mode::HostLaunch) -> anyhow::Result<(
                         error: ProtocolError {
                             code: "unexpected_frame".to_string(),
                             message: format!("frame {other:?} is not valid after handshake"),
+                            resource: None,
                         },
                     })
                     .context("sidecar writer stopped while rejecting frame")?;

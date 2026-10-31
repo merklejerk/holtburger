@@ -7,7 +7,7 @@ import type { ObjectVisualTemplate } from "../systems/object-visual-template-rep
 import {
 	prepareAnimation,
 	type PreparedAnimation,
-	type PreparedMotionClosure,
+	type PreparedMotionAssets,
 } from "./animation-asset-repository";
 import { prepareMotionPlayback } from "./prepared-motion-playback";
 
@@ -48,9 +48,9 @@ function animation(
 	);
 }
 
-function closure(
+function motionAssets(
 	animations: readonly PreparedAnimation[],
-): PreparedMotionClosure {
+): PreparedMotionAssets {
 	return {
 		animations: new Map(
 			animations.map((value) => [value.id as DatAssetId, value]),
@@ -70,7 +70,7 @@ beforeEach(() => {
 describe("prepareMotionPlayback", () => {
 	it("covers every clip with one bound rather than one bound per clip", () => {
 		const playback = prepareMotionPlayback(
-			closure([
+			motionAssets([
 				animation("0x03000001", [0, 1]),
 				animation("0x03000002", [0, -4]),
 				animation("0x03000003", [0, 7]),
@@ -87,7 +87,7 @@ describe("prepareMotionPlayback", () => {
 
 	it("scales the sweep by the entity's own scale", () => {
 		const playback = prepareMotionPlayback(
-			closure([animation("0x03000001", [0, 2])]),
+			motionAssets([animation("0x03000001", [0, 2])]),
 			template(),
 			new Vec3(3, 1, 1),
 			staticBounds,
@@ -105,7 +105,7 @@ describe("prepareMotionPlayback", () => {
 		} as unknown as DecodedAnimationHook;
 
 		const playback = prepareMotionPlayback(
-			closure([
+			motionAssets([
 				animation("0x03000001", [0, 1]),
 				animation("0x03000abc", [0, 50], [blocking]),
 			]),
@@ -125,7 +125,7 @@ describe("prepareMotionPlayback", () => {
 		const omega = { kind: "set-omega" } as unknown as DecodedAnimationHook;
 
 		const playback = prepareMotionPlayback(
-			closure([
+			motionAssets([
 				animation("0x03000001", [0, 1]),
 				animation("0x03000def", [0, 1], [omega]),
 			]),
@@ -150,7 +150,7 @@ describe("prepareMotionPlayback", () => {
 			})),
 		};
 		const playback = prepareMotionPlayback(
-			closure([animation("0x03000001", [0, 50], [], 1)]),
+			motionAssets([animation("0x03000001", [0, 50], [], 1)]),
 			partialTemplate,
 			new Vec3(1, 1, 1),
 			new AABB3(new Vec3(-20, 0, 0), new Vec3(20, 0, 0)),
@@ -176,7 +176,7 @@ describe("prepareMotionPlayback", () => {
 			payload: { kind: "ethereal", ethereal: true },
 		};
 		const playback = prepareMotionPlayback(
-			closure([animation("0x03000559", [0, 1], [ethereal])]),
+			motionAssets([animation("0x03000559", [0, 1], [ethereal])]),
 			template(),
 			new Vec3(1, 1, 1),
 			staticBounds,
@@ -192,7 +192,7 @@ describe("prepareMotionPlayback", () => {
 		const omega = { kind: "set-omega" } as unknown as DecodedAnimationHook;
 
 		const playback = prepareMotionPlayback(
-			closure([animation("0x03000fff", [0, 1], [omega])]),
+			motionAssets([animation("0x03000fff", [0, 1], [omega])]),
 			template(),
 			new Vec3(1, 1, 1),
 			staticBounds,
@@ -207,7 +207,7 @@ describe("prepareMotionPlayback", () => {
 		const omega = { kind: "set-omega" } as unknown as DecodedAnimationHook;
 		const build = () =>
 			prepareMotionPlayback(
-				closure([animation("0x03000eee", [0, 1], [omega])]),
+				motionAssets([animation("0x03000eee", [0, 1], [omega])]),
 				template(),
 				new Vec3(1, 1, 1),
 				staticBounds,

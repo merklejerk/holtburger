@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formatError } from "../lib/format-error";
 	import { clientMinimapLandmark } from "./client-minimap-policy";
 	import { launcherTransport } from "../launcher/launcher-transport";
 	import type {
@@ -98,7 +99,6 @@
 		clientInputSettingsSchema,
 		clientKeyboardSettingsEqual,
 	} from "./client-input-settings";
-	import { clientFailureDiagnostic } from "./client-close-contract";
 	import { onMount, untrack } from "svelte";
 	import {
 		createFrameRateSampler,
@@ -508,7 +508,7 @@
 		hostTransport === null ? null : hostWorldMapSource(hostTransport),
 	);
 	function reportCommandFailure(error: unknown): void {
-		appLifecycle.fail("command", diagnostic(error));
+		appLifecycle.fail("command", formatError(error));
 	}
 	async function setGameplayOption(
 		option: ClientGameplayOption,
@@ -528,7 +528,7 @@
 		try {
 			await owner.setAppearanceOption(option, enabled);
 		} catch (error) {
-			toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+			toastCenter.publish({ message: formatError(error), tone: "warning" });
 		}
 	}
 	let playerName = $state<string | null>(null);
@@ -603,7 +603,7 @@
 		onError: (error) => {
 			console.error(error);
 			if (presentationAssets !== null)
-				appLifecycle.fail("command", diagnostic(error));
+				appLifecycle.fail("command", formatError(error));
 		},
 	});
 
@@ -680,7 +680,7 @@
 			}),
 			report: (error) =>
 				toastCenter.publish({
-					message: `Settings could not be saved: ${diagnostic(error)}`,
+					message: `Settings could not be saved: ${formatError(error)}`,
 					tone: "warning",
 				}),
 		});
@@ -694,7 +694,7 @@
 		loadFailed: (error) =>
 			appLifecycle.fail(
 				"command",
-				`Character settings could not be loaded: ${diagnostic(error)}`,
+				`Character settings could not be loaded: ${formatError(error)}`,
 			),
 		unavailable: (reasons) =>
 			toastCenter.publish({
@@ -703,7 +703,7 @@
 			}),
 		saveFailed: (error) =>
 			toastCenter.publish({
-				message: `Character settings could not be saved: ${diagnostic(error)}`,
+				message: `Character settings could not be saved: ${formatError(error)}`,
 				tone: "warning",
 			}),
 		saveDelayMs: 250,
@@ -846,7 +846,7 @@
 				await appLifecycle.prepareClose(prepareResources);
 				return { kind: "prepared" };
 			} catch (error) {
-				return { kind: "failed", diagnostic: clientFailureDiagnostic(error) };
+				return { kind: "failed", diagnostic: formatError(error) };
 			}
 		});
 		return () => {
@@ -1027,7 +1027,7 @@
 		inputDispatch = inputDispatch
 			.then(() => currentSession.queueCharacterMotionEvent(request))
 			.catch((error: unknown) => {
-				if (active()) appLifecycle.fail("command", diagnostic(error));
+				if (active()) appLifecycle.fail("command", formatError(error));
 			});
 	}
 
@@ -1078,7 +1078,7 @@
 		inputDispatch = inputDispatch
 			.then(() => currentSession.replaceDrive(request))
 			.catch((error: unknown) => {
-				if (active()) appLifecycle.fail("command", diagnostic(error));
+				if (active()) appLifecycle.fail("command", formatError(error));
 			});
 	}
 
@@ -1309,7 +1309,7 @@
 	}
 
 	function appendChatError(error: unknown): void {
-		appendChatLine({ kind: "error", message: diagnostic(error) });
+		appendChatLine({ kind: "error", message: formatError(error) });
 	}
 
 	function chooseCharacter(guid: number): void {
@@ -1349,7 +1349,7 @@
 				resolveClientSpellCastAim(details, selection),
 			);
 		} catch (error) {
-			toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+			toastCenter.publish({ message: formatError(error), tone: "warning" });
 		}
 	}
 
@@ -1358,7 +1358,7 @@
 		try {
 			await session.toggleCombatMode();
 		} catch (error) {
-			toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+			toastCenter.publish({ message: formatError(error), tone: "warning" });
 		}
 	}
 
@@ -1403,7 +1403,18 @@
 		}
 		if (runClientHelpCommand(message, appendChatLine)) return;
 		if (runClientVersionCommand(message, appendChatLine)) return;
-		if (runClientAssetsCommand(message, contentLocation, appendChatLine))
+		if (
+			runClientAssetsCommand(
+				message,
+				contentLocation,
+				appendChatLine,
+				async () => {
+					if (presentationRoot === null)
+						throw new Error("World presentation is unavailable.");
+					await presentationRoot.retry();
+				},
+			)
+		)
 			return;
 		const currentSession = session;
 		if (currentSession === null)
@@ -1449,7 +1460,7 @@
 			if (session === null) throw new Error("Client session unavailable.");
 			await session.recall(destination);
 		} catch (error) {
-			toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+			toastCenter.publish({ message: formatError(error), tone: "warning" });
 		}
 	}
 
@@ -1460,7 +1471,7 @@
 			if (session === null) throw new Error("Client session unavailable.");
 			await session.teleportToMapPosition(position);
 		} catch (error) {
-			toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+			toastCenter.publish({ message: formatError(error), tone: "warning" });
 		}
 	}
 
@@ -1602,12 +1613,6 @@
 		if (!arbiter.enterPrecise()) preciseEscapeContext?.promote();
 	}
 
-	function diagnostic(error: unknown): string {
-		if (error instanceof Error) return error.message;
-		if (typeof error === "string" && error.trim().length > 0) return error;
-		return "The client command failed.";
-	}
-
 	function presentationStatusText(
 		status: ClientGameplayPresentationStatus,
 	): string {
@@ -1728,10 +1733,11 @@
 		let cancelled = false;
 		let lastStatus: ClientGameplayPresentationStatus | null = null;
 		let lastErrorMessage: string | null = null;
+		let unsubscribeContentFailures: (() => void) | null = null;
 		const reportPresentationError = (error: unknown): void => {
 			if (cancelled) return;
 			console.error(error);
-			const message = diagnostic(error);
+			const message = formatError(error);
 			if (message === lastErrorMessage) return;
 			lastErrorMessage = message;
 			appendChatError(error);
@@ -1838,6 +1844,13 @@
 			onGameplayRetired: clearGameplay,
 			onReady: (owner) => {
 				if (cancelled) return;
+				unsubscribeContentFailures?.();
+				unsubscribeContentFailures = owner.runtime.subscribeContentFailures(
+					(error) => {
+						// The content owner already logged the original warning and deduplicated it.
+						if (!cancelled) appendChatError(error);
+					},
+				);
 				textureFilteringCapabilities = owner.textureFilteringCapabilities;
 				root.setAudioSettings(userSettings.audio);
 				applyFrameGraphics(userSettings.graphics);
@@ -1902,6 +1915,7 @@
 		return () => {
 			cancelled = true;
 			stopFrameLoop();
+			unsubscribeContentFailures?.();
 			appLifecycle.acceptScene({ kind: "stopped" }, false);
 			const retirement = root.destroy();
 			presentationRootRetirements.add(retirement);
@@ -1947,7 +1961,7 @@
 						});
 				})
 				.catch((error: unknown) => {
-					if (isActive()) appLifecycle.fail("command", diagnostic(error));
+					if (isActive()) appLifecycle.fail("command", formatError(error));
 				});
 			return inputDispatch;
 		});
@@ -2044,7 +2058,7 @@
 				if (!disposed)
 					appLifecycle.fail(
 						"command",
-						`Soul-emote catalog could not be loaded: ${diagnostic(error)}`,
+						`Soul-emote catalog could not be loaded: ${formatError(error)}`,
 					);
 			});
 		const owner = new ClientLifecycleSession(
@@ -2158,7 +2172,7 @@
 		);
 		const unsubscribe = owner.subscribe(receive);
 		const precise = new ClientPreciseJumpSession(owner, (error) => {
-			appLifecycle.fail("command", diagnostic(error));
+			appLifecycle.fail("command", formatError(error));
 		});
 		preciseJumpSession = precise;
 		const selection = new ClientEntitySelection({
@@ -2533,7 +2547,7 @@
 				try {
 					await session.searchHousing(houseType);
 				} catch (error) {
-					toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+					toastCenter.publish({ message: formatError(error), tone: "warning" });
 				}
 			}}
 			onRefreshHousing={async () => {
@@ -2541,7 +2555,7 @@
 				try {
 					await session.refreshHousing();
 				} catch (error) {
-					toastCenter.publish({ message: diagnostic(error), tone: "warning" });
+					toastCenter.publish({ message: formatError(error), tone: "warning" });
 				}
 			}}
 			{canTeleportFromMap}
@@ -2626,7 +2640,7 @@
 					.setCorpsePermission(name, granted)
 					.catch((error: unknown) =>
 						toastCenter.publish({
-							message: diagnostic(error),
+							message: formatError(error),
 							tone: "warning",
 						}),
 					);

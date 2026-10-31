@@ -35,6 +35,16 @@ import type { TexturePreparer } from "../textures/texture-preparer";
 import type { WebGL2SkyProgram } from "./webgl2-sky-program";
 import type { WebGL2TextureSamplerCatalog } from "./webgl2-texture-sampler-catalog";
 
+/** Device operations needed to allocate, draw, and release sky resources. */
+type SkyResources = Pick<
+	WebGL2ResourceManager,
+	| "createGeometry"
+	| "createTexture2D"
+	| "releaseResource"
+	| "getGeometry"
+	| "getTexture2D"
+>;
+
 /** Per-frame device and view state the sky pass draws against. */
 export interface SkyDrawContext {
 	readonly gl: WebGL2RenderingContext;
@@ -115,12 +125,12 @@ interface SkyObjectResources {
  * `tex_velocity` layers need real `GL_REPEAT` rather than shader-emulated wrapping.
  */
 export class WebGL2SkyPass {
-	readonly #resources: WebGL2ResourceManager;
+	readonly #resources: SkyResources;
 	readonly #objects = new Map<string, SkyObjectResources>();
 	readonly #textures = new Map<AssetTextureKey, Texture2DResourceKey>();
 	readonly #geometries: GeometryResourceKey[] = [];
 
-	private constructor(resources: WebGL2ResourceManager) {
+	private constructor(resources: SkyResources) {
 		this.#resources = resources;
 	}
 
@@ -132,38 +142,56 @@ export class WebGL2SkyPass {
 	 * on-demand machinery to own.
 	 */
 	static async prepare(
-		resources: WebGL2ResourceManager,
+		resources: SkyResources,
 		preparer: TexturePreparer,
 		source: SkySourcePresentations,
 	): Promise<WebGL2SkyPass> {
 		const pass = new WebGL2SkyPass(resources);
-		const facts = new Map<AssetTextureKey, AssetTextureFact>();
-		for (const [gfxObjectId, decoded] of source.presentations) {
-			pass.#objects.set(
-				gfxObjectId,
-				pass.#prepareObject(gfxObjectId, decoded, facts),
-			);
-		}
-		await Promise.all(
-			[...facts.values()].map(async (fact) => {
-				const prepared = await preparer.prepare(fact);
-				if (!("pixels" in prepared)) {
-					throw new Error(
-						`Sky texture ${fact.key} prepared as an array source; sky surfaces are standalone.`,
-					);
-				}
-				if (prepared.key !== fact.key) {
-					throw new Error(
-						`Sky texture preparation returned ${prepared.key} for ${fact.key}.`,
-					);
-				}
-				pass.#textures.set(
-					fact.key,
-					resources.createTexture2D(createTexture2DUpload(prepared)),
+		try {
+			const facts = new Map<AssetTextureKey, AssetTextureFact>();
+			for (const [gfxObjectId, decoded] of source.presentations) {
+				pass.#objects.set(
+					gfxObjectId,
+					pass.#prepareObject(gfxObjectId, decoded, facts),
 				);
-			}),
-		);
-		return pass;
+			}
+			const settled = await Promise.allSettled(
+				[...facts.values()].map(async (fact) => {
+					const prepared = await preparer.prepare(fact);
+					if (!("pixels" in prepared)) {
+						throw new Error(
+							`Sky texture ${fact.key} prepared as an array source; sky surfaces are standalone.`,
+						);
+					}
+					if (prepared.key !== fact.key) {
+						throw new Error(
+							`Sky texture preparation returned ${prepared.key} for ${fact.key}.`,
+						);
+					}
+					pass.#textures.set(
+						fact.key,
+						resources.createTexture2D(createTexture2DUpload(prepared)),
+					);
+				}),
+			);
+			const failures = settled.flatMap((result) =>
+				result.status === "rejected" ? [result.reason] : [],
+			);
+			if (failures.length > 0)
+				throw new AggregateError(failures, "Sky texture preparation failed.");
+			return pass;
+		} catch (cause) {
+			try {
+				pass.destroy();
+			} catch (releaseCause) {
+				throw new AggregateError(
+					[cause, releaseCause],
+					"Sky preparation and cleanup failed.",
+					{ cause: releaseCause },
+				);
+			}
+			throw cause;
+		}
 	}
 
 	#prepareObject(

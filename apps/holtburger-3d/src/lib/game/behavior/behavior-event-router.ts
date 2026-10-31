@@ -139,7 +139,7 @@ interface ScriptActivationPort {
 			/** Upper bound of a uniform random delay; below the instant threshold it chains directly. */
 			readonly pauseSeconds: number;
 		},
-	): void;
+	): boolean;
 }
 
 /**
@@ -278,8 +278,9 @@ export class BehaviorEventRouter {
 			case "call-pes":
 				// Never executed inline: a self-calling script would recurse forever. The script
 				// clock owns activation timing, including the random pause roll.
-				this.#consumers.scheduler.scheduleActivation(target, command);
-				return "scheduled";
+				return this.#consumers.scheduler.scheduleActivation(target, command)
+					? "scheduled"
+					: "no-consumer";
 
 			case "sound-tweaked": {
 				// Ephemeral by nature. Replaying elapsed audio would emit a burst of sounds for time

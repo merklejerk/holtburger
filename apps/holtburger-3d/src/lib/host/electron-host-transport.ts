@@ -1,5 +1,6 @@
 import type { ClientClosePreparation } from "../../client/client-close-contract";
 import type { StartupGameLifecycle } from "../../app/startup-game-lifecycle";
+import { unwrapHostCommandResult } from "./host-command-result";
 import type {
 	HostCommandArguments,
 	HostCommandName,
@@ -46,7 +47,7 @@ export function createElectronHostTransport(): HostTransport {
 	if (!bridge) throw new Error("Electron host bridge is unavailable");
 	return {
 		invoke(command, args) {
-			return bridge.invoke(command, args);
+			return bridge.invoke(command, args).then(unwrapHostCommandResult);
 		},
 		listen<K extends HostEventName>(
 			event: K,

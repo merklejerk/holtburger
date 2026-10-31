@@ -26,6 +26,7 @@ const { values } = parseArgs({
 		package: { type: "string" },
 		flatpak: { type: "boolean" },
 		"theme-check": { type: "string", default: "assets" },
+		"presentation-content": { type: "string" },
 	},
 });
 if (!["assets", "full"].includes(values["theme-check"]))
@@ -122,7 +123,7 @@ async function requireFixtureLocation(location, fixture) {
 		);
 }
 
-async function launch(mode, args) {
+async function launch(mode, args, surface = "pregame") {
 	const switches = [
 		// Native packages honor Electron's profile override on every OS, including macOS.
 		...(launchTarget.kind === "development"
@@ -219,7 +220,9 @@ async function launch(mode, args) {
 			() =>
 				evaluate(
 					client,
-					"Boolean(window.holtburgerContent && document.querySelector('#app.ui-theme .client-pregame-screen'))",
+					surface === "ready"
+						? "Boolean(window.holtburgerContent && window.holtburgerHost)"
+						: "Boolean(window.holtburgerContent && document.querySelector('#app.ui-theme .client-pregame-screen'))",
 				),
 			"pregame startup surface",
 		);
@@ -317,6 +320,63 @@ try {
 			}
 		}, "Vite");
 	const results = [];
+	if (values["presentation-content"] !== undefined) {
+		if (launchTarget.kind !== "development")
+			throw new Error(
+				"Presentation source probe requires the development module adapter",
+			);
+		await writeFile(
+			preference,
+			JSON.stringify({
+				version: 1,
+				selection: {
+					kind: "selected",
+					location: resolve(values["presentation-content"]),
+					health: { kind: "ready" },
+				},
+			}),
+		);
+		const app = await launch("explorer", [], "ready");
+		try {
+			await waitFor(
+				async () => (await app.snapshot()).phase.kind === "ready",
+				"healthy presentation content",
+			);
+			const evidence = await evaluate(
+				app.client,
+				`(async () => {
+				const { createElectronHostTransport } = await import('/src/lib/host/electron-host-transport.ts');
+				const { HostCommandError, isContentFailure } = await import('/src/lib/host/host-command-result.ts');
+				const transport = createElectronHostTransport();
+				let failure;
+				try { await transport.invoke('load_animation', { request: { animationId: '0x03ffffff' } }); }
+				catch (error) {
+					if (!(error instanceof HostCommandError) || !isContentFailure(error)) throw error;
+					failure = error.failure;
+				}
+				if (!failure) throw new Error('Absent animation unexpectedly loaded');
+				await transport.invoke('load_animation', { request: { animationId: '0x0300055b' } });
+				return { failure, subsequentAnimation: '0x0300055b' };
+			})()`,
+			);
+			const state = await app.snapshot();
+			const saved = JSON.parse(await readFile(preference, "utf8"));
+			if (
+				state.phase.kind !== "ready" ||
+				saved.selection.health.kind !== "ready"
+			)
+				throw new Error(
+					"Optional animation rejection escalated native installation health",
+				);
+			results.push({
+				mode: "explorer",
+				presentation: evidence,
+				health: saved.selection.health,
+			});
+		} finally {
+			await app.close(0);
+		}
+	}
 	for (const mode of ["explorer", "client"]) {
 		await writeFile(
 			preference,

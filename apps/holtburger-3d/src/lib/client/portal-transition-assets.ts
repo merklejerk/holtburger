@@ -6,12 +6,13 @@ import type { SetupVisualSource } from "../assets/setup-visual-source";
 import type { SoundTableSource } from "../assets/sound-table-source";
 import type { DatAssetId } from "../game/game-types";
 import type { AudioDevice } from "../game/systems/audio-system";
+import { optionalPresentationContent } from "../assets/optional-presentation-content";
 
 /**
  * The fixed UIASSET identities proved by the retail mapper and DAT census.
  *
  * Keeping this catalog app-local prevents renderer, audio, tests, and lifecycle code from
- * independently spelling the same closure. The setup request uses the host's numeric DID shape;
+ * independently spelling the same asset set. The setup request uses the host's numeric DID shape;
  * the other source adapters use their normal canonical hexadecimal strings.
  */
 const PORTAL_TRANSITION_CATALOG = Object.freeze({
@@ -37,22 +38,24 @@ const PORTAL_TRANSITION_APPEARANCE = Object.freeze({
 	partChanges: Object.freeze([]),
 });
 
-/** Sources needed to prepare the one mandatory portal closure. */
+/** Sources for optional authored portal visuals and sounds. */
 export interface PortalTransitionAssetSources {
+	/** Cold error surface for degraded portal presentation; never native installation recovery. */
+	readonly reportContentFailure: (error: Error) => void;
 	readonly setupVisual: SetupVisualSource;
 	readonly animation: AnimationAssetSource;
 	readonly soundTable: SoundTableSource;
 	readonly audio: AudioDevice;
 }
 
-/** Immutable decoded closure retained by the presentation owner for its whole lifetime. */
+/** Immutable authored assets retained by the presentation owner for its whole lifetime. */
 export interface PortalTransitionAssets {
 	readonly catalog: typeof PORTAL_TRANSITION_CATALOG;
 	readonly visual: DecodedStaticPresentation;
 	readonly animation: DecodedAnimationAsset;
-	readonly soundTable: DecodedSoundTable;
+	readonly soundTable: DecodedSoundTable | null;
 	readonly waveIds: readonly DatAssetId[];
-	/** Exact source bytes retained by the closure; wave values are decoder-ready payload bytes. */
+	/** Exact source bytes retained by the asset set; wave values are decoder-ready payload bytes. */
 	readonly sourceBytes: {
 		readonly setupVisual: number | null;
 		readonly animation: number | null;
@@ -63,8 +66,49 @@ export interface PortalTransitionAssets {
 	};
 }
 
+/** Ready head-locked sounds and their retained decoder-ready byte census. */
+export interface PortalTransitionAudio {
+	/** Optional authored sound mapping, refreshed together with failed wave readiness. */
+	readonly soundTable: DecodedSoundTable | null;
+	readonly waveIds: readonly DatAssetId[];
+	readonly sourceByteLength: number | null;
+}
+
+/** Prewarm failed portal sounds on explicit retry; the audio device retains successful buffers. */
+export async function preparePortalTransitionAudio(
+	audio: AudioDevice,
+	soundTables: SoundTableSource,
+	report: (error: Error) => void,
+): Promise<PortalTransitionAudio> {
+	const requested = [
+		PORTAL_TRANSITION_CATALOG.enterSoundId,
+		PORTAL_TRANSITION_CATALOG.exitSoundId,
+		PORTAL_TRANSITION_CATALOG.animationHookSoundId,
+	];
+	const soundTable = await optionalPresentationContent(
+		soundTables.loadSoundTable(PORTAL_TRANSITION_CATALOG.soundTableId),
+		"Portal sound table",
+		report,
+	);
+	if (soundTable !== null) validatePortalSoundTable(soundTable);
+	const prepared = await Promise.all(
+		requested.map((soundId) =>
+			optionalPresentationContent(
+				audio.prepare(soundId).then(() => soundId),
+				`Portal sound ${soundId}`,
+				report,
+			),
+		),
+	);
+	const waveIds = Object.freeze(prepared.filter((id) => id !== null));
+	const bytes = waveIds.map((id) =>
+		audio.getPreparedSourceBytes ? audio.getPreparedSourceBytes(id) : null,
+	);
+	return { soundTable, waveIds, sourceByteLength: sumKnownBytes(bytes) };
+}
+
 /**
- * Load and validate the complete authored portal closure before a 3D mode can start.
+ * Prepare authored portal assets; unavailable artwork selects opaque loading presentation.
  *
  * Audio preparation is deliberately part of construction: the loading presentation cannot first
  * discover the sound it exists to cover. The WebAudio device retains decoded buffers until owner
@@ -72,50 +116,62 @@ export interface PortalTransitionAssets {
  */
 export async function loadPortalTransitionAssets(
 	sources: PortalTransitionAssetSources,
-): Promise<PortalTransitionAssets> {
-	const [visual, animation, soundTable] = await Promise.all([
-		sources.setupVisual.load(
-			PORTAL_TRANSITION_CATALOG.setupDid,
-			PORTAL_TRANSITION_APPEARANCE,
+): Promise<PortalTransitionAssets | null> {
+	const [visual, animation] = await Promise.all([
+		optionalPresentationContent(
+			sources.setupVisual.load(
+				PORTAL_TRANSITION_CATALOG.setupDid,
+				PORTAL_TRANSITION_APPEARANCE,
+			),
+			"Portal visual",
+			sources.reportContentFailure,
 		),
-		sources.animation.loadAnimation(PORTAL_TRANSITION_CATALOG.animationId),
-		sources.soundTable.loadSoundTable(PORTAL_TRANSITION_CATALOG.soundTableId),
+		optionalPresentationContent(
+			sources.animation.loadAnimation(PORTAL_TRANSITION_CATALOG.animationId),
+			"Portal animation",
+			sources.reportContentFailure,
+		),
 	]);
+	if (visual === null || animation === null) return null;
 	validatePortalVisual(visual);
 	validatePortalAnimation(animation);
-	validatePortalSoundTable(soundTable);
-	const waveIds = Object.freeze([
-		PORTAL_TRANSITION_CATALOG.enterSoundId,
-		PORTAL_TRANSITION_CATALOG.exitSoundId,
-		PORTAL_TRANSITION_CATALOG.animationHookSoundId,
-	]);
-	await Promise.all(waveIds.map((soundId) => sources.audio.prepare(soundId)));
-	const getPreparedSourceBytes = sources.audio.getPreparedSourceBytes;
-	const waveSourceBytes = getPreparedSourceBytes
-		? waveIds.map((soundId) =>
-				getPreparedSourceBytes.call(sources.audio, soundId),
-			)
-		: waveIds.map(() => null);
-	const waveBytes = sumKnownBytes(waveSourceBytes);
+	return withPortalTransitionAudio(
+		{ visual, animation, catalog: PORTAL_TRANSITION_CATALOG },
+		await preparePortalTransitionAudio(
+			sources.audio,
+			sources.soundTable,
+			sources.reportContentFailure,
+		),
+	);
+}
+
+/** Replace audio readiness atomically while preserving the valid authored visual and animation. */
+export function withPortalTransitionAudio(
+	assets: Pick<PortalTransitionAssets, "visual" | "animation" | "catalog">,
+	audio: PortalTransitionAudio,
+): PortalTransitionAssets {
+	const { visual, animation, catalog } = assets;
+	const { soundTable } = audio;
+	const waveBytes = audio.sourceByteLength;
 	const sourceBytes = Object.freeze({
 		animation: animation.sourceByteLength ?? null,
 		setupVisual: visual.sourceByteLength ?? null,
-		soundTable: soundTable.sourceByteLength ?? null,
+		soundTable: soundTable?.sourceByteLength ?? null,
 		total: sumKnownBytes([
 			visual.sourceByteLength ?? null,
 			animation.sourceByteLength ?? null,
-			soundTable.sourceByteLength ?? null,
+			soundTable?.sourceByteLength ?? null,
 			waveBytes,
 		]),
 		waves: waveBytes,
 	});
 	return Object.freeze({
 		animation,
-		catalog: PORTAL_TRANSITION_CATALOG,
+		catalog,
 		soundTable,
 		sourceBytes,
 		visual,
-		waveIds,
+		waveIds: audio.waveIds,
 	});
 }
 

@@ -554,6 +554,27 @@ impl PlacedMotionPoint {
     pub fn recovery(&self) -> Option<&PlacementRecovery> {
         self.recovery.as_ref()
     }
+
+    /// Sample a placement-stable interval; recovery belongs only to its exact endpoints.
+    pub(super) fn interpolate(&self, end: &Self, fraction: f32) -> Self {
+        if fraction == 0.0 {
+            return self.clone();
+        }
+        if fraction == 1.0 {
+            return end.clone();
+        }
+        Self {
+            center: self.center + (end.center - self.center) * fraction,
+            placement: self.placement.clone(),
+            recovery: None,
+        }
+    }
+
+    /// Add another sphere's reached domains without changing primary geometry or cell ownership.
+    pub(super) fn merge_reached(mut self, other: &SpatialMembership) -> Self {
+        self.placement = self.placement.merge_reached(other.clone());
+        self
+    }
 }
 
 /// One placement-stable path leg ending at an authoritative point.
@@ -601,19 +622,10 @@ impl PlacedMotionPath {
             path.primary().anchor()
         });
         let start = previous.pose.reanchor_to_landblock_owner(anchor)?.coords;
-        let initial = match first {
-            Some(path) => PlacedMotionPoint {
-                center: start,
-                ..path.primary().initial().clone()
-            },
-            None => PlacedMotionPoint {
-                center: start,
-                placement: match physical.response.cell() {
-                    Some(cell) => SpatialMembership::interior(cell),
-                    None => SpatialMembership::outdoor(),
-                },
-                recovery: None,
-            },
+        let initial = PlacedMotionPoint {
+            center: start,
+            placement: previous.spatial_membership(),
+            recovery: None,
         };
         let mut result = Self {
             anchor,
@@ -639,21 +651,28 @@ impl PlacedMotionPath {
                 .clone();
             let previous_fraction = result.legs.last().map_or(0.0, |leg| leg.end_fraction);
             if start_fraction > previous_fraction {
-                append_motion_leg(&mut result, start_fraction, previous_point);
+                append_motion_leg(&mut result, start_fraction, previous_point.clone());
+            }
+            let mut segment_initial = path.publication_initial();
+            segment_initial.center = root;
+            if start_fraction == 0.0 && result.legs.is_empty() {
+                result.initial = segment_initial;
+            } else if segment_initial.placement != previous_point.placement
+                || segment_initial.recovery.is_some()
+            {
+                append_motion_leg(&mut result, start_fraction, segment_initial);
             }
             let offset = rotation.rotate_vector(physical.definition.spheres().primary().center);
             let rotating = matches!(segment, ContactMotionSegment::Rotation { .. });
-            for leg in path.primary().legs() {
+            for (fraction, mut point) in path.publication_points() {
                 if !rotating {
-                    root = leg.end.center - offset;
+                    root = point.center - offset;
                 }
+                point.center = root;
                 append_motion_leg(
                     &mut result,
-                    start_fraction + (end_fraction - start_fraction) * leg.end_fraction,
-                    PlacedMotionPoint {
-                        center: root,
-                        ..leg.end.clone()
-                    },
+                    start_fraction + (end_fraction - start_fraction) * fraction,
+                    point,
                 );
             }
             if let ContactMotionSegment::Rotation {
@@ -669,6 +688,7 @@ impl PlacedMotionPath {
             .map_or(&result.initial, |leg| &leg.end)
             .clone();
         final_point.center = current.pose.reanchor_to_landblock_owner(anchor)?.coords;
+        final_point.placement = current.spatial_membership();
         append_motion_leg(&mut result, 1.0, final_point);
         Ok(result)
     }
@@ -741,11 +761,7 @@ impl PlacedMotionPath {
                 if fraction < leg.end_fraction {
                     let local =
                         (fraction - previous_fraction) / (leg.end_fraction - previous_fraction);
-                    return PlacedMotionPoint {
-                        center: previous.center + (leg.end.center - previous.center) * local,
-                        placement: previous.placement.clone(),
-                        recovery: None,
-                    };
+                    return previous.interpolate(&leg.end, local);
                 }
                 previous = &leg.end;
                 previous_fraction = leg.end_fraction;

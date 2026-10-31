@@ -158,6 +158,115 @@ fn published_root_path_does_not_turn_offset_sphere_rotation_into_translation() {
 }
 
 #[test]
+fn stationary_root_publication_preserves_complete_membership_and_refreshes() {
+    let collision = thin_cell_collision_scene();
+    let mut scene = SpatialScene::new();
+    let id = SpatialBodyId::LocalPlayer(Guid(1));
+    scene.register_body(SpatialBody::new(
+        id,
+        pose(Vector3::new(99.75, 96.0, 1.0)),
+        Instant::now(),
+    ));
+    scene
+        .set_dynamic_physical_body(
+            id,
+            Some(dynamic_definition(
+                free_definition(Vector3::zero(), 0.48),
+                false,
+            )),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    let before_refresh = scene.body(id).unwrap().clone();
+    scene
+        .refresh_dynamic_body_placement(id, &collision)
+        .unwrap();
+    let current = scene.body(id).unwrap();
+    let membership = current.spatial_membership();
+    assert!(membership.reaches_outdoors());
+    assert!(membership.reached_env_cells().contains(&Guid(0xda55_0100)));
+    for previous in [&before_refresh, current] {
+        let path = PlacedMotionPath::from_contact_motion(previous, current, &[]).unwrap();
+        assert_eq!(path.initial().placement(), &previous.spatial_membership());
+        assert_eq!(path.final_point().placement(), &membership);
+        assert_eq!(path.initial().center(), current.pose.coords);
+        assert_eq!(path.final_point().center(), current.pose.coords);
+    }
+}
+
+#[test]
+fn root_publication_retains_upper_only_transit_between_outdoor_endpoints() {
+    let collision = thin_cell_collision_scene();
+    let mut scene = SpatialScene::new();
+    let id = SpatialBodyId::LocalPlayer(Guid(1));
+    let spheres = PhysicalSphereSet::new(
+        Sphere {
+            center: Vector3::zero(),
+            radius: 0.05,
+        },
+        Some(Sphere {
+            center: Vector3::new(0.6, 0.0, 1.0),
+            radius: 0.05,
+        }),
+    )
+    .unwrap();
+    scene.register_body(SpatialBody::new(
+        id,
+        pose(Vector3::new(99.3, 96.0, 1.0)),
+        Instant::now(),
+    ));
+    scene
+        .set_dynamic_physical_body(
+            id,
+            Some(dynamic_definition(
+                PhysicalBodyDefinition::grounded(spheres, GROUNDED_CONFIG).unwrap(),
+                false,
+            )),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    scene
+        .refresh_dynamic_body_placement(id, &collision)
+        .unwrap();
+    scene.body_mut(id).unwrap().retained.velocity =
+        Vector3::new(1.0 / MOBILE_CONTACT_TICK_SECONDS, 0.0, 0.0);
+    let previous = scene.body(id).unwrap().clone();
+    let updates = advance_body_contacts(
+        &collision,
+        std::slice::from_ref(&previous),
+        Guid(0xda55_ffff),
+        MOBILE_CONTACT_TICK_SECONDS,
+        |_, _| ContactStepActuation::ballistic(Vector3::zero()),
+    )
+    .unwrap();
+    let update = &updates[0];
+    assert!(update.unavailable_owner.is_none());
+    let mut current = previous.clone();
+    update.apply_physical_state(&mut current).unwrap();
+    let path = PlacedMotionPath::from_contact_motion(&previous, &current, &update.motion).unwrap();
+    let cell = Guid(0xda55_0100);
+    assert_eq!(path.initial().placement(), &SpatialMembership::outdoor());
+    assert_eq!(
+        path.final_point().placement(),
+        &SpatialMembership::outdoor()
+    );
+    assert!(path.legs().iter().any(|leg| {
+        leg.end().center().x < 100.0
+            && leg.end().placement().committed_cell().is_none()
+            && leg.end().placement().reached_env_cells().contains(&cell)
+    }));
+    for leg in path.legs() {
+        assert!(
+            (leg.end().center().x - (previous.pose.coords.x + leg.end_fraction())).abs() < 0.0001
+        );
+        assert_eq!(leg.end().center().y, previous.pose.coords.y);
+        assert_eq!(leg.end().center().z, previous.pose.coords.z);
+    }
+}
+
+#[test]
 fn contact_advance_steps_without_launching_and_respects_upper_clearance() {
     for ceiling in [false, true] {
         let now = Instant::now();
@@ -1362,6 +1471,23 @@ fn clipped_body_paths_retain_only_accepted_upper_sphere_domains() {
                 upper_inside
             );
         }
+        let previous = &bodies[0];
+        let mut current = previous.clone();
+        update.apply_physical_state(&mut current).unwrap();
+        let published =
+            PlacedMotionPath::from_contact_motion(previous, &current, &update.motion).unwrap();
+        assert_eq!(published.final_point().placement(), &update.membership);
+        assert_eq!(
+            published
+                .initial()
+                .placement()
+                .reached_env_cells()
+                .contains(&cell),
+            upper_inside
+        );
+        assert!(published.legs().iter().all(|leg| {
+            leg.end().placement().reached_env_cells().contains(&cell) == upper_inside
+        }));
     }
 }
 
@@ -2431,6 +2557,19 @@ fn angular_paths_preserve_upper_only_cell_membership() {
             .reached_env_cells()
             .contains(&cell)
     );
+    let previous = scene.body(player).unwrap();
+    let mut current = previous.clone();
+    update.apply_physical_state(&mut current).unwrap();
+    let published =
+        PlacedMotionPath::from_contact_motion(previous, &current, &update.motion).unwrap();
+    assert_eq!(published.final_point().placement(), &update.membership);
+    assert_eq!(
+        published.initial().placement(),
+        &SpatialMembership::outdoor()
+    );
+    for leg in published.legs() {
+        assert_eq!(leg.end().center(), previous.pose.coords);
+    }
 }
 
 #[test]

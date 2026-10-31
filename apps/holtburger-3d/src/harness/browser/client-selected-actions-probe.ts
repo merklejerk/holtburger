@@ -325,6 +325,8 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			props: {
 				messages,
 				clockFormat: CLIENT_CLOCK_FORMAT_DEFAULT,
+				showTimestamps: true,
+				onShowTimestampsChange: () => {},
 				composer: new ClientChatComposer({
 					recentEmotes: [],
 					onRecentEmotesChange: () => {},

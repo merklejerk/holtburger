@@ -230,6 +230,9 @@
 			value: MinimapState["viewDiameters"],
 		) => void;
 		readonly chatFilters: readonly ClientChatFilterTag[];
+		/** User-wide chat timestamp visibility and its settings edit operation. */
+		readonly chatTimestamps: boolean;
+		readonly onChatTimestampsChange: (value: boolean) => void;
 		readonly onChatFiltersChange: (
 			value: readonly ClientChatFilterTag[],
 		) => void;
@@ -480,6 +483,8 @@
 		minimapViewDiameters,
 		onMinimapViewDiametersChange,
 		chatFilters,
+		chatTimestamps,
+		onChatTimestampsChange,
 		onChatFiltersChange,
 		inspectionPreviewHeight,
 		onInspectionPreviewHeightChange,
@@ -1405,6 +1410,8 @@
 					onSelectEntity={onSelectKnownEntity}
 					onNotice={onChatNotice}
 					enabledTags={chatFilters}
+					showTimestamps={chatTimestamps}
+					onShowTimestampsChange={onChatTimestampsChange}
 					onEnabledTagsChange={onChatFiltersChange}
 				/>
 			{/key}

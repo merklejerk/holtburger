@@ -6137,6 +6137,9 @@
 					onMinimapViewDiametersChange={(minimapViewDiameters) =>
 						(userSettings = { ...userSettings, minimapViewDiameters })}
 					chatFilters={userSettings.chatFilters}
+					chatTimestamps={userSettings.chatTimestamps}
+					onChatTimestampsChange={(chatTimestamps) =>
+						(userSettings = { ...userSettings, chatTimestamps })}
 					onChatFiltersChange={(chatFilters) =>
 						(userSettings = { ...userSettings, chatFilters })}
 					actionBars={characterSettings?.actionBars ?? null}

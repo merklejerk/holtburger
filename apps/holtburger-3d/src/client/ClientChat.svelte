@@ -8,6 +8,7 @@
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { useClientInput } from "./client-input-context";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
+	import ClockIcon from "../assets/icons/duration.svg?component";
 	import { onDestroy, tick } from "svelte";
 	import PopupMenu from "../app/PopupMenu.svelte";
 	import type { ClientChatComposer } from "./client-chat-composer.svelte";
@@ -43,6 +44,10 @@
 		readonly onNotice: (message: string) => void;
 		/** User-selected clock format for all buffered message timestamps. */
 		readonly clockFormat: ClientClockFormat;
+		/** User-wide timestamp visibility, owned and persisted by app settings. */
+		readonly showTimestamps: boolean;
+		/** Save an explicit visibility choice without changing retained messages. */
+		readonly onShowTimestampsChange: (value: boolean) => void;
 		/** App-owned locally queued input, oldest first. */
 		readonly sentHistory: readonly string[];
 		readonly onSend: (
@@ -65,6 +70,8 @@
 		onSelectEntity,
 		onNotice,
 		clockFormat,
+		showTimestamps,
+		onShowTimestampsChange,
 		sentHistory,
 		onSend,
 		composer,
@@ -217,6 +224,7 @@
 		// A user can reach the bottom before the browser dispatches its queued scroll event.
 		// Capture the old DOM geometry before messages/filtering change its height.
 		void visibleMessages;
+		void showTimestamps;
 		if (bufferReady && bufferElement !== null) {
 			following = !historyInteractive || atBottom(bufferElement);
 			// Its queued scroll notification must not recompute intent against the grown DOM.
@@ -562,19 +570,23 @@
 								line.kind === "soul-emote"}
 						>
 							<strong
-								><span class="chat-meta">{lineTimestamp(line)}</span
-								>{#if label !== null}<span
+								>{#if showTimestamps}<span class="chat-meta"
+										>{lineTimestamp(line)}</span
+									>{/if}{#if label !== null}<span
 										class="chat-channel-prefix"
 										data-channel={line.kind === "channel"
 											? line.channel
 											: undefined}
 									>
-										{` [${label}]`}</span
+										{`${showTimestamps ? " " : ""}[${label}]`}</span
 									>{/if}<span class="chat-meta"
-									>{"sender" in line ? ` ${line.sender}` : ""}{line.kind ===
-										"emote" || line.kind === "soul-emote"
+									>{"sender" in line
+										? `${showTimestamps || label !== null ? " " : ""}${line.sender}`
+										: ""}{line.kind === "emote" || line.kind === "soul-emote"
 										? ""
-										: ":"}</span
+										: label !== null || "sender" in line
+											? ":"
+											: ""}</span
 								></strong
 							>
 							<span class="chat-message"
@@ -621,6 +633,16 @@
 					{clientChatFilterLabel(tag)}
 				</button>
 			{/each}
+			<button
+				type="button"
+				class="chat-timestamps ui-filter-pill"
+				aria-label="Show chat timestamps"
+				aria-pressed={showTimestamps}
+				title={showTimestamps ? "Hide chat timestamps" : "Show chat timestamps"}
+				onclick={() => onShowTimestampsChange(!showTimestamps)}
+			>
+				<ClockIcon />
+			</button>
 		</div>
 		<form
 			style="position: relative"
@@ -811,14 +833,28 @@
 			outline: 1px solid var(--ui-color-accent);
 			outline-offset: -1px;
 		}
+		.chat-buffer,
+		.chat-filters,
+		form {
+			/* All adjoining chat surfaces share the stronger theme tint to avoid seams. */
+			--chat-background-color: rgb(
+				from var(--_ui-hud-background-color) r g b / calc(alpha * 2)
+			);
+		}
 		.chat-filters {
 			display: flex;
+			align-items: center;
 			flex-wrap: wrap;
 			gap: var(--ui-filter-gap);
 			padding: 0 3px 3px;
-			background: var(--_ui-hud-background-color);
+			background: var(--chat-background-color);
 			pointer-events: auto;
 			user-select: auto;
+		}
+		.chat-timestamps {
+			display: grid;
+			place-items: center;
+			align-self: stretch;
 		}
 		.chat-history {
 			position: relative;
@@ -845,16 +881,16 @@
 			padding: 8px;
 			background-image: linear-gradient(
 				to top,
-				var(--_ui-hud-background-color),
+				var(--chat-background-color),
 				color-mix(
 						in srgb,
-						var(--_ui-hud-background-color) var(--chat-buffer-middle-opacity),
+						var(--chat-background-color) var(--chat-buffer-middle-opacity),
 						transparent
 					)
 					55%,
 				color-mix(
 					in srgb,
-					var(--_ui-hud-background-color) var(--chat-buffer-focus),
+					var(--chat-background-color) var(--chat-buffer-focus),
 					transparent
 				)
 			);
@@ -974,7 +1010,7 @@
 			align-items: center;
 			gap: 3px;
 			padding: 3px;
-			background: var(--_ui-hud-background-color);
+			background: var(--chat-background-color);
 			pointer-events: auto;
 			user-select: auto;
 		}

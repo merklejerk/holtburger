@@ -2,6 +2,7 @@
 	import { untrack } from "svelte";
 	import ClientSpellsPanel from "./ClientSpellsPanel.svelte";
 	import UiQuantity from "../app/UiQuantity.svelte";
+	import { hudAttention } from "../app/hud-attention";
 	import UiTabs from "../app/UiTabs.svelte";
 	import UiTabPanel from "../app/UiTabPanel.svelte";
 	import UpgradeTriangle from "../assets/icons/character-upgrade-triangle.svg?component";
@@ -325,8 +326,12 @@
 			const numerator =
 				formula.second === null
 					? name(formula.first.attribute)
-					: `(${name(formula.first.attribute)} + ${name(formula.second.attribute)})`;
-			lines.push(`Formula: ${numerator} ÷ ${formula.divisor}`);
+					: `${name(formula.first.attribute)} + ${name(formula.second.attribute)}`;
+			const expression =
+				formula.divisor === 1
+					? numerator
+					: `${formula.second === null ? numerator : `(${numerator})`} ÷ ${formula.divisor}`;
+			lines.push(`Formula: ${expression}`);
 		}
 		const startingValue = "start" in stat ? stat.start : stat.init;
 		if (startingValue !== 0) lines.push(`Starting value: ${startingValue}`);
@@ -483,6 +488,9 @@
 				{@render statValue(stat.base, stat.current)}
 			</summary>
 			{@render actionButtons(name(stat.skill_type), actions)}
+			{#if row.description !== null && row.description.length > 0}
+				<p class="skill-description">{row.description}</p>
+			{/if}
 			{#if details.length > 0}
 				<ul>
 					{#each details as line}<li>{line}</li>{/each}
@@ -608,35 +616,6 @@
 					{#if spellLoadError !== null}<p role="status" class="feedback">
 							{spellLoadError}
 						</p>{/if}
-					<h2 class="ui-section-heading">Attributes</h2>
-					{#each sheet.attributes as stat (stat.attr_type)}
-						{@const target = { Attribute: stat.attr_type } as const}
-						{@const actions = raiseActions(target)}
-						{@const details = detailLines(stat)}
-						<details
-							class="stat-row"
-							name="character-stat"
-							ontoggle={(event) => {
-								if (event.currentTarget.open) void resolveSpells(stat);
-							}}
-						>
-							<summary>
-								<span
-									>{name(stat.attr_type)}{@render progressionHint(
-										stat,
-										actions,
-									)}</span
-								>
-								{@render statValue(stat.base, stat.current)}
-							</summary>
-							{@render actionButtons(name(stat.attr_type), actions)}
-							{#if details.length > 0}
-								<ul>
-									{#each details as line}<li>{line}</li>{/each}
-								</ul>
-							{/if}
-						</details>
-					{/each}
 					<h2 class="ui-section-heading">Vitals</h2>
 					{#each sheet.vitals as stat (stat.vital_type)}
 						{@const target = { Vital: stat.vital_type } as const}
@@ -659,6 +638,35 @@
 								{@render statValue(stat.base, stat.buffed_max)}
 							</summary>
 							{@render actionButtons(`Max ${name(stat.vital_type)}`, actions)}
+							{#if details.length > 0}
+								<ul>
+									{#each details as line}<li>{line}</li>{/each}
+								</ul>
+							{/if}
+						</details>
+					{/each}
+					<h2 class="ui-section-heading">Attributes</h2>
+					{#each sheet.attributes as stat (stat.attr_type)}
+						{@const target = { Attribute: stat.attr_type } as const}
+						{@const actions = raiseActions(target)}
+						{@const details = detailLines(stat)}
+						<details
+							class="stat-row"
+							name="character-stat"
+							ontoggle={(event) => {
+								if (event.currentTarget.open) void resolveSpells(stat);
+							}}
+						>
+							<summary>
+								<span
+									>{name(stat.attr_type)}{@render progressionHint(
+										stat,
+										actions,
+									)}</span
+								>
+								{@render statValue(stat.base, stat.current)}
+							</summary>
+							{@render actionButtons(name(stat.attr_type), actions)}
 							{#if details.length > 0}
 								<ul>
 									{#each details as line}<li>{line}</li>{/each}
@@ -690,11 +698,13 @@
 				<footer class="progression-balances">
 					<div>
 						<small>Available XP</small><strong
+							use:hudAttention={sheet.level.unspentXp}
 							><UiQuantity value={BigInt(sheet.level.unspentXp)} /></strong
 						>
 					</div>
 					<div>
 						<small>Skill credits</small><strong
+							use:hudAttention={sheet.level.unspentSkillPoints}
 							>{sheet.level.unspentSkillPoints}</strong
 						>
 					</div>
@@ -914,6 +924,8 @@
 			opacity: 0.75;
 		}
 		.progression-balances strong {
+			/* Keep the shared pulse centered on the count rather than its grid column. */
+			justify-self: start;
 			font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
 			font-variant-numeric: tabular-nums;
 			overflow-wrap: anywhere;
@@ -1024,6 +1036,11 @@
 			margin: 0.2rem 0 0.7rem;
 			padding-left: 1.4rem;
 			font-size: calc(var(--ui-font-size-body) * var(--ui-text-scale));
+		}
+		.skill-description {
+			margin: 0.2rem 0.35rem 0.7rem;
+			font-style: italic;
+			white-space: pre-line;
 		}
 		li {
 			margin: 0.2rem 0;

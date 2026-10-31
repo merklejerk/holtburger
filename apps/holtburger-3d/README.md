@@ -455,12 +455,18 @@ Toast entrances use `--ui-toast-pop-animation`, `--ui-toast-pop-duration`,
 `--ui-toast-pop-scale` (starting scale), `--ui-toast-pop-peak-scale` (overshoot),
 and `--ui-toast-pop-easing`.
 `--ui-toast-exit-duration` controls fade-out. Persistent guidance and layout previews do not pop.
-Status icons pulse on appearance or a category change using `--ui-hud-pulse-animation`,
+Status icons pulse on appearance or a category change; the selected-entity HUD pulses
+when a selection appears or changes. Progression's available XP and skill-credit counts
+pulse on appearance and balance changes. All use `--ui-hud-pulse-animation`,
 `--ui-hud-pulse-duration`, `--ui-hud-pulse-scale` (peak scale), and `--ui-hud-pulse-easing`.
+`--ui-hud-pulse-intensity` multiplies growth above normal size (default `1`).
+The selected-entity HUD uses `--ui-selected-entity-pulse-intensity` (default `0.2`),
+reducing the default peak from `1.5` to `1.1` without changing pulse timing.
 Defaults live in `src/app/ui-base.css`. Animation-name tokens accept a custom global
 CSS keyframe name or `none` to disable the effect; set the exit duration to `0s` to
 remove the toast fade. Reduced-motion preferences disable both animations and the fade.
 Enchantment countdown ticks do not pulse; burden pulses only on severity changes.
+Selected-entity display updates and empty layout previews do not pulse.
 
 The jump HUD uses `--ui-jump-bar-width`, `--ui-jump-readout-font-size`,
 `--ui-jump-gap` and `--ui-jump-fill-color` for density

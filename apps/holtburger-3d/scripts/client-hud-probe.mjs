@@ -2045,7 +2045,8 @@ export async function probeCharacterSheet(
 		}
 		if (!progression.hidden || defenses.hidden || !balances.closest('[hidden]') || !effectRow('Heavy Weapons').open) throw new Error('Defenses did not retain the hidden progression tab and its balances.');
 		if (!effectRow('Strength').textContent.includes(': +2') || effectRow('Strength').textContent.includes('Overridden:') || effectRow('Strength').textContent.includes('1:30')) throw new Error('Stat row did not show only its applied enchantment and bonus.');
-		if (!effectRow('Heavy Weapons').textContent.includes('Formula: (Strength + Endurance) ÷ 3') || !effectRow('Heavy Weapons').textContent.includes('(via Strength): +2') || !effectRow('Heavy Weapons').textContent.includes('Vitae penalty: ×0.9') || effectRow('Heavy Weapons').textContent.includes('Starting value: 0') || effectRow('Heavy Weapons').querySelector('summary').textContent.includes('Specialized') || effectRow('Heavy Weapons').textContent.includes('A specialized skill')) throw new Error('Specialized skill row repeated its section label or showed excess detail.');
+		if (!effectRow('Heavy Weapons').textContent.includes('Formula: (Strength + Endurance) ÷ 3') || !effectRow('Heavy Weapons').textContent.includes('(via Strength): +2') || !effectRow('Heavy Weapons').textContent.includes('Vitae penalty: ×0.9') || effectRow('Heavy Weapons').textContent.includes('Starting value: 0') || effectRow('Heavy Weapons').querySelector('summary').textContent.includes('Specialized')) throw new Error('Specialized skill row repeated its section label or showed excess detail.');
+		if (effectRow('Heavy Weapons').querySelector('.skill-description')?.textContent !== 'A specialized skill') throw new Error('Expanded skill description is missing.');
 		if (!effectRow('Health').textContent.includes('+2') || !effectRow('Heavy Weapons').textContent.includes('+4')) throw new Error('Vital or skill effect values are missing from their rows.');
 		if (!effectRow('Armor').textContent.includes('+0.9') || !effectRow('Slash resistance').textContent.includes('×0.9')) throw new Error('Applied effect values are missing from defense rows.');
 		const plainDefense = effectRow('Pierce resistance');
@@ -2117,7 +2118,7 @@ export async function probeCharacterSheet(
 		client,
 		`(() => {
 		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
-		const row = panel?.querySelector('details.stat-row');
+		const row = [...panel.querySelectorAll('details.stat-row')].find((candidate) => candidate.querySelector('summary')?.textContent.includes('Strength'));
 		if (row?.querySelector('.upgrade-indicator')) throw new Error('Pending stat still advertises an available upgrade.');
 		if (!row?.querySelector('.actions button')?.disabled || row.querySelector('.action-cost [title]')?.title !== '200') throw new Error('Pending stat did not retain a disabled action and its quoted cost.');
 		row.open = true;

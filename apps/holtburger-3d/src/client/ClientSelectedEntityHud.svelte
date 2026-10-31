@@ -2,6 +2,7 @@
 	import { presentClientBinding } from "./client-binding-catalog";
 	import { onMount, untrack } from "svelte";
 	import { formatQuantity } from "../app/quantity-format";
+	import { hudAttention } from "../app/hud-attention";
 	import { itemStructureDisplay } from "../app/item-structure";
 
 	import {
@@ -264,7 +265,11 @@
 	});
 </script>
 
-<section class="selected-entity" aria-label={`Selected entity: ${displayName}`}>
+<section
+	class="selected-entity"
+	aria-label={`Selected entity: ${displayName}`}
+	use:hudAttention={selectedGuid}
+>
 	<div class="selected-entity__heading ui-hud-group">
 		{#if actions.length > 1}
 			<button
@@ -348,6 +353,8 @@
 <style>
 	@layer components {
 		.selected-entity {
+			/* Scale the shared pulse's growth down for this wider surface. */
+			--ui-hud-pulse-intensity: var(--ui-selected-entity-pulse-intensity);
 			/* Header priority stays local to this HUD. */
 			isolation: isolate;
 			/* One dimension keeps header controls and their reserved grid column aligned. */

@@ -3142,6 +3142,14 @@ mod tests {
                 "warning",
             ),
             (
+                ActionResultReason::Weenie(
+                    WeenieError::AiRefuseItemDuringEmote,
+                    Some("Town Crier".into()),
+                ),
+                "Town Crier is too busy to accept gifts right now.",
+                "warning",
+            ),
+            (
                 ActionResultReason::Weenie(WeenieError::ITeleported, None),
                 "I teleported.",
                 "status",

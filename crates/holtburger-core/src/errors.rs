@@ -21,7 +21,9 @@ pub fn format_weenie_error(error: WeenieError, parameter: Option<&str>) -> Strin
         }
 
         // WeenieErrorWithString (Parameterized)
-        WeenieError::IsTooBusyToAcceptGifts => Some("{} is too busy to accept gifts right now."),
+        WeenieError::IsTooBusyToAcceptGifts | WeenieError::AiRefuseItemDuringEmote => {
+            Some("{} is too busy to accept gifts right now.")
+        }
         WeenieError::CannotCarryAnymore => Some("{} cannot carry anymore."),
         WeenieError::YouFailToAffectYouCannotAffectAnyone => {
             Some("You fail to affect {} because you cannot affect anyone!")

@@ -26,8 +26,8 @@ use crate::spatial::collision::PreparedHardSphereSweep;
 use crate::spatial::contact_profile::ContactPhaseProfile;
 use crate::spatial::{
     CollisionQueryError, CollisionScene, GroundState, GroundedLaunch, GroundedSphere,
-    HardEntityShape, HardSphereSweepHit, PlacedMotionPath, StaticSphereSweepRequest,
-    dynamic_index::placed_target_shapes, physical_body::impact_velocity,
+    HardEntityShape, HardSphereSweepHit, PlacedMotionPath, PlacedMotionPoint,
+    StaticSphereSweepRequest, dynamic_index::placed_target_shapes, physical_body::impact_velocity,
 };
 
 /// Maximum stop/slide continuations for ordinary travel in one physical tick.
@@ -332,6 +332,55 @@ impl ContactBodyPath {
     /// Primary-sphere geometry supplies root motion and committed-cell ownership.
     pub fn primary(&self) -> &PlacedMotionPath {
         &self.primary
+    }
+
+    /// Whole-body membership at the accepted start, retaining the primary's placement proof.
+    pub(in crate::spatial) fn publication_initial(&self) -> PlacedMotionPoint {
+        let primary = self.primary.initial().clone();
+        match &self.upper {
+            Some(upper) => primary.merge_reached(upper.initial().placement()),
+            None => primary,
+        }
+    }
+
+    /// Merge both spheres' ordered boundaries in linear time, without a temporary boundary list.
+    /// Primary geometry and committed-cell ownership survive upper-only membership transitions.
+    pub(in crate::spatial) fn publication_points(
+        &self,
+    ) -> impl Iterator<Item = (f32, PlacedMotionPoint)> {
+        let mut primary = self.primary.legs().iter().peekable();
+        let mut upper = self.upper.iter().flat_map(|path| path.legs()).peekable();
+        let mut primary_point = self.primary.initial();
+        let mut primary_fraction = 0.0;
+        let mut upper_point = self.upper.as_ref().map(|path| path.initial());
+        std::iter::from_fn(move || {
+            let fraction = match (primary.peek(), upper.peek()) {
+                (Some(first), Some(second)) => first.end_fraction().min(second.end_fraction()),
+                (Some(leg), None) | (None, Some(leg)) => leg.end_fraction(),
+                (None, None) => return None,
+            };
+            if let Some(leg) = primary.next_if(|leg| leg.end_fraction() == fraction) {
+                primary_point = leg.end();
+                primary_fraction = fraction;
+            }
+            if let Some(leg) = upper.next_if(|leg| leg.end_fraction() == fraction) {
+                upper_point = Some(leg.end());
+            }
+            let point = match primary.peek() {
+                Some(next) => primary_point.interpolate(
+                    next.end(),
+                    (fraction - primary_fraction) / (next.end_fraction() - primary_fraction),
+                ),
+                None => primary_point.clone(),
+            };
+            Some((
+                fraction,
+                match upper_point {
+                    Some(upper) => point.merge_reached(upper.placement()),
+                    None => point,
+                },
+            ))
+        })
     }
 
     /// Final collision domains, including upper-only reaches.

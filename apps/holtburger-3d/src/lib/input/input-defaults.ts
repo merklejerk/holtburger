@@ -123,7 +123,7 @@ export const INPUT_DEFAULTS = {
 			{ key: "`", ctrl: false, alt: false, meta: false },
 			{ key: "~", ctrl: false, alt: false, meta: false },
 		],
-		/** Give the selected inventory item to the previous selected recipient. */
+		/** Give the selected inventory item to the last selected eligible recipient. */
 		give: [{ key: "g", ctrl: false, alt: false, meta: false }],
 		/** Open the quantity dialog for the selected owned stack. */
 		splitStack: [

@@ -688,7 +688,9 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		throw new Error(
 			"Give release did not submit once and reselect its recipient",
 		);
-	await read(`document.querySelector(${JSON.stringify(source)}).click()`);
+	// Select, deselect, and reselect the item without losing the remembered recipient.
+	for (let click = 0; click < 3; click++)
+		await read(`document.querySelector(${JSON.stringify(source)}).click()`);
 	const binding = await read(`${api}.giveProbe.binding`);
 	const giveKey = {
 		key: binding.key ?? "Unidentified",
@@ -722,7 +724,7 @@ export async function probeInventoryDrag(client, evaluateExpression) {
 		given.at(-1).args.intent.item !== 91
 	)
 		throw new Error(
-			"Configured give key did not use selection history exactly once",
+			"Configured give key did not use the remembered eligible recipient exactly once",
 		);
 	const suppressedPoint = await begin(source, viewport);
 	await release(suppressedPoint);

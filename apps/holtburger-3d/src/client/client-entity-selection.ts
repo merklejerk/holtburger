@@ -24,12 +24,10 @@ export class ClientEntitySelection {
 	readonly #listeners = new Set<(guid: number | null) => void>();
 	readonly #externalListeners = new Set<() => void>();
 	readonly #unsubscribe: () => void;
-	/** One selection history pair; repeated publication never rotates it. */
-	#pair: { readonly current: number | null; readonly previous: number | null } =
-		{
-			current: null,
-			previous: null,
-		};
+	/** Current selected identity, independent of remembered give intent. */
+	#selected: number | null = null;
+	/** Latest selected identity admitted by world-owned give eligibility. */
+	#lastGiveRecipient: number | null = null;
 	#intent = Symbol("initial selection");
 	#destroyed = false;
 
@@ -46,8 +44,10 @@ export class ClientEntitySelection {
 					: event.type === "lifecycle"
 						? event.lifecycle
 						: null;
-			if (lifecycle !== null && lifecycle.kind !== "in-world")
+			if (lifecycle !== null && lifecycle.kind !== "in-world") {
+				this.#lastGiveRecipient = null;
 				this.select(null);
+			}
 			if (event.type === "resyncing" || event.type === "current-state")
 				this.beginAcquisition("external");
 			if (event.type === "entities" || event.type === "current-state")
@@ -56,12 +56,12 @@ export class ClientEntitySelection {
 	}
 
 	selectedGuid(): number | null {
-		return this.#pair.current;
+		return this.#selected;
 	}
 
-	/** Previous distinct selection, retired with authoritative identity loss. */
-	previousGuid(): number | null {
-		return this.#pair.previous;
+	/** Latest selected eligible give target, retained through ordinary deselection. */
+	lastGiveRecipientGuid(): number | null {
+		return this.#lastGiveRecipient;
 	}
 
 	subscribe(listener: (guid: number | null) => void): () => void {
@@ -138,9 +138,7 @@ export class ClientEntitySelection {
 				(read.level.worldContainer.kind === "open" &&
 					guid === read.level.worldContainer.root))
 		)
-			this.#publish(
-				mode === "toggle" && this.#pair.current === guid ? null : guid,
-			);
+			this.#publish(mode === "toggle" && this.#selected === guid ? null : guid);
 	}
 
 	/** Maintain identity from semantic facts; presentation contributes measured distance only. */
@@ -149,11 +147,11 @@ export class ClientEntitySelection {
 		const read = this.#lifecycle.entities.read();
 		if (read.kind === "pending") return;
 		if (
-			this.#pair.previous !== null &&
-			!read.level.entities.has(this.#pair.previous)
+			this.#lastGiveRecipient !== null &&
+			!read.level.entities.get(this.#lastGiveRecipient)?.canReceiveGive
 		)
-			this.#pair = { ...this.#pair, previous: null };
-		const guid = this.#pair.current;
+			this.#lastGiveRecipient = null;
+		const guid = this.#selected;
 		if (guid === null) return;
 		const entity = read.level.entities.get(guid);
 		if (entity?.ownedByPlayer) return;
@@ -185,11 +183,16 @@ export class ClientEntitySelection {
 	}
 
 	#publish(guid: number | null): void {
-		if (guid === this.#pair.current) return;
-		this.#pair = {
-			current: guid,
-			previous: guid === null ? null : this.#pair.current,
-		};
+		// Refresh even on reselection: current facts may now admit a previously ineligible target.
+		const read = this.#lifecycle.entities.read();
+		if (
+			guid !== null &&
+			read.kind === "current" &&
+			read.level.entities.get(guid)?.canReceiveGive
+		)
+			this.#lastGiveRecipient = guid;
+		if (guid === this.#selected) return;
+		this.#selected = guid;
 		for (const listener of this.#listeners) listener(guid);
 	}
 }

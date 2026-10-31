@@ -456,6 +456,8 @@ describe("shared frontend item interaction flow", () => {
 	it("confirms keyboard gives and restores the recipient for consecutive hand-ins", async () => {
 		const f = await giveFixture();
 		f.select(4);
+		f.select(3);
+		f.select(null);
 		f.select(2);
 		f.interactions.use(2, false);
 		f.interactions.giveSelected();
@@ -479,6 +481,21 @@ describe("shared frontend item interaction flow", () => {
 			target: { kind: "give", guid: 4 },
 		});
 		expect(f.selection.selectedGuid()).toBe(4);
+		f.destroy();
+	});
+
+	it("captures the remembered keyboard recipient while confirmation is open", async () => {
+		const f = await giveFixture();
+		f.select(4);
+		f.select(2);
+		f.interactions.giveSelected();
+		const question = f.question();
+		f.select(5);
+		f.interactions.respond(question.requestId, true);
+		expect(f.give).toHaveBeenCalledExactlyOnceWith({
+			item: 2,
+			target: { kind: "give", guid: 4 },
+		});
 		f.destroy();
 	});
 

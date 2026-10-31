@@ -89,28 +89,77 @@ describe("ClientEntitySelection", () => {
 		expect(selection.selectedGuid()).toBe(7);
 	});
 
-	it("retains exactly one distinct selection and retires history on removal or clear", () => {
+	it("remembers the latest eligible recipient through intervening selections and clear", () => {
+		const lifecycle = new FakeLifecycle();
+		const selection = new ClientEntitySelection({
+			lifecycle,
+			presentation: () => null,
+		});
+		lifecycle.update(
+			[
+				entityFacts(7, { canReceiveGive: true }),
+				entityFacts(8, { canReceiveGive: true }),
+				entityFacts(9, { targeting: "creature" }),
+			],
+			[],
+		);
+		expect(selection.lastGiveRecipientGuid()).toBeNull();
+		selection.select(7);
+		for (const guid of [12, 4, 9, null]) {
+			selection.select(guid);
+			expect(selection.lastGiveRecipientGuid()).toBe(7);
+		}
+		selection.select(8);
+		selection.select(8);
+		expect(selection.lastGiveRecipientGuid()).toBe(8);
+		selection.destroy();
+	});
+
+	it.each(["removed", "ineligible", "leaving-world"] as const)(
+		"retires the remembered recipient on %s without reverting to an older target",
+		(reason) => {
+			const lifecycle = new FakeLifecycle();
+			const selection = new ClientEntitySelection({
+				lifecycle,
+				presentation: () => null,
+			});
+			lifecycle.update(
+				[
+					entityFacts(7, { canReceiveGive: true }),
+					entityFacts(8, { canReceiveGive: true }),
+				],
+				[],
+			);
+			selection.select(7);
+			selection.select(8);
+			selection.select(12);
+			if (reason === "removed") lifecycle.update([], [8]);
+			else if (reason === "ineligible") lifecycle.update([entityFacts(8)], []);
+			else
+				lifecycle.emit({
+					type: "lifecycle",
+					lifecycle: {
+						kind: "portal-space",
+						worldGeneration: 2,
+						cause: "teleport",
+					},
+				});
+			expect(selection.lastGiveRecipientGuid()).toBeNull();
+			selection.destroy();
+		},
+	);
+
+	it("refreshes recipient memory on explicit reselection after eligibility changes", () => {
 		const lifecycle = new FakeLifecycle();
 		const selection = new ClientEntitySelection({
 			lifecycle,
 			presentation: () => null,
 		});
 		selection.select(7);
-		selection.select(12);
-		selection.select(12);
-		expect(selection.previousGuid()).toBe(7);
-		lifecycle.update([], [7]);
-		expect(selection.previousGuid()).toBeNull();
-		expect(selection.selectedGuid()).toBe(12);
-		selection.select(8);
-		expect(selection.previousGuid()).toBe(12);
-		selection.select(null);
-		expect(selection.previousGuid()).toBeNull();
-		selection.select(8);
-		selection.select(12);
-		lifecycle.update([], [12]);
-		expect(selection.selectedGuid()).toBeNull();
-		expect(selection.previousGuid()).toBeNull();
+		lifecycle.update([entityFacts(7, { canReceiveGive: true })], []);
+		expect(selection.lastGiveRecipientGuid()).toBeNull();
+		selection.select(7);
+		expect(selection.lastGiveRecipientGuid()).toBe(7);
 		selection.destroy();
 	});
 

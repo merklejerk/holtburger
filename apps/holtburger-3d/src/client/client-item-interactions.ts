@@ -91,7 +91,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 	readonly #session: Session;
 	readonly #selection: Pick<
 		ClientEntitySelection,
-		"selectedGuid" | "previousGuid" | "select"
+		"selectedGuid" | "lastGiveRecipientGuid" | "select"
 	>;
 	readonly #failure: (message: string) => void;
 	readonly #notice: (message: string) => void;
@@ -110,7 +110,7 @@ export class ClientItemInteractions implements LocalDialogSource {
 		readonly session: Session;
 		readonly selection: Pick<
 			ClientEntitySelection,
-			"selectedGuid" | "previousGuid" | "select"
+			"selectedGuid" | "lastGiveRecipientGuid" | "select"
 		>;
 		readonly reportFailure: (message: string) => void;
 		/** Ordinary local gameplay refusal, without warning severity. */
@@ -188,11 +188,15 @@ export class ClientItemInteractions implements LocalDialogSource {
 		} else this.use(source, unrestricted);
 	}
 
-	/** Retail uses the previous selection, then restores it after attempting the give. */
+	/** Give to the latest selected eligible recipient, independent of intervening selections. */
 	giveSelected(): void {
 		if (this.#destroyed) return;
 		const source = this.#selection.selectedGuid();
-		const recipient = this.#selection.previousGuid();
+		// RETAIL DIVERGENCE: acclient.c:382576 reads the immediately previous entity.
+		// Remembering an eligible recipient survives item browsing; this changes local
+		// target choice only, with the same explicit give request and server validation.
+		// Consumer census: Give was the sole production reader of the replaced history slot.
+		const recipient = this.#selection.lastGiveRecipientGuid();
 		if (source === null || recipient === null) {
 			this.cancel();
 			this.#notice("Select a recipient, then select the item to give.");
@@ -250,7 +254,6 @@ export class ClientItemInteractions implements LocalDialogSource {
 			})
 			.catch((error: unknown) => this.#failure(String(error)));
 		// Retail restores the recipient after attempting Give (acclient.c:382576).
-		// The next inventory selection can then use it as the previous selection.
 		this.#selection.select(recipient);
 	}
 

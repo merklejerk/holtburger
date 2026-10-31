@@ -243,6 +243,7 @@ export async function probeClientInventory(options: {
 			canTeleportFromMap: false,
 			recallDestinations: [],
 			housing: emptyHousing(),
+			barber: { interaction: null, result: null, particles: null },
 			localPlayerGuid: 1,
 			serverTime: 10,
 			worldGeneration: 1,

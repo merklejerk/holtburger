@@ -134,7 +134,7 @@
 	import type { ClientCombatTargetFrame } from "./client-target-indicator";
 	import ClientTargetIndicator from "./ClientTargetIndicator.svelte";
 	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
-	import type { ClientObjectInspectionState } from "./client-object-inspection";
+	import type { ClientInspectionState } from "./client-inspection";
 	import type {
 		RecallDestination,
 		ClientAttackProfile,
@@ -370,7 +370,7 @@
 		/** Use the currently selected entity through the session-owned interaction controller. */
 		readonly onInteractEntity: () => void;
 		/** Latest captured examination request, independent of current selection. */
-		readonly objectInspection: ClientObjectInspectionState;
+		readonly inspection: ClientInspectionState;
 		readonly bookReader: ClientBookReaderState;
 		readonly onCloseBook: () => void;
 		readonly onRetryBook: () => void;
@@ -378,6 +378,8 @@
 		readonly onExamineEntity: () => void;
 		/** Inspect the explicit identity without changing gameplay selection. */
 		readonly onExamineItem: (guid: number) => void;
+		/** Open a local spell subject without submitting an appraisal. */
+		readonly onExamineSpell: (spellId: number) => void;
 		readonly onCloseInspection: () => void;
 		readonly readCombatTargetFrame: () => ClientCombatTargetFrame | null;
 		readonly readTargetIndicatorFrame: () => ClientTargetIndicatorFrame | null;
@@ -561,13 +563,14 @@
 		onSocialNotice,
 		onCoordinatesCopied,
 		onInteractEntity,
-		objectInspection,
+		inspection,
 		bookReader,
 		onCloseBook,
 		onRetryBook,
 		objectPreviewService,
 		onExamineEntity,
 		onExamineItem,
+		onExamineSpell,
 		onCloseInspection,
 		readTargetIndicatorFrame,
 		readCombatTargetFrame,
@@ -1255,6 +1258,7 @@
 				onSelectTab={onSelectSpellTab}
 				onActivateCell={onActivateSpellCell}
 				onActivateCaster={onActivateCasterSpell}
+				{onExamineSpell}
 			/>
 		{/if}
 		{#if combatMode === "melee" || combatMode === "missile"}
@@ -1476,8 +1480,8 @@
 					}}
 					onInteract={onInteractEntity}
 					onExamine={onExamineEntity}
-					examinePending={objectInspection.kind === "pending" &&
-						objectInspection.guid === selectedEntityGuid}
+					examinePending={inspection.kind === "pending" &&
+						inspection.guid === selectedEntityGuid}
 					onSplit={splitSelectedEntity}
 				/>
 			</ClientHudPanel>
@@ -1621,13 +1625,11 @@
 				/>
 			{/key}
 		{/if}
-		{#if objectInspection.kind === "ready"}
-			{#key objectInspection.guid}
+		{#if inspection.kind === "ready" || inspection.kind === "spell"}
+			{#key inspection.kind === "spell" ? `spell:${inspection.spellId}` : `object:${inspection.guid}`}
 				<ClientInspectionWindow
 					{onSetWaypoint}
-					inspection={objectInspection.inspection}
-					nameColor={objectInspection.nameColor}
-					preview={objectInspection.preview}
+					subject={inspection}
 					{objectPreviewService}
 					{spells}
 					icons={spells?.icons ?? inventory?.icons ?? null}

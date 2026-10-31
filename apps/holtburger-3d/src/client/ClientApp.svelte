@@ -253,9 +253,9 @@
 	} from "./client-toast-center";
 	import type { ClientTargetIndicatorFrame } from "./client-target-indicator";
 	import {
-		ClientObjectInspection,
-		type ClientObjectInspectionState,
-	} from "./client-object-inspection";
+		ClientInspection,
+		type ClientInspectionState,
+	} from "./client-inspection";
 
 	interface Props {
 		/** Canonical startup selection; injected diagnostic hosts can lack filesystem provenance. */
@@ -981,8 +981,8 @@
 	let itemInteractions = $state<ClientItemInteractions | null>(null);
 	let selectedEntityTracking: ClientSelectedEntityTracking | null = null;
 	let selectedEntityGuid = $state<number | null>(null);
-	let objectInspectionOwner: ClientObjectInspection | null = null;
-	let objectInspection = $state<ClientObjectInspectionState>({ kind: "idle" });
+	let inspectionOwner: ClientInspection | null = null;
+	let inspection = $state<ClientInspectionState>({ kind: "idle" });
 	let bookReaderOwner: ClientBookReader | null = null;
 	let bookReader = $state<ClientBookReaderState>({ kind: "idle" });
 	/** Session-local diagnostic policy; each use captures the current value. */
@@ -1468,12 +1468,12 @@
 	function examineSelectedEntity(): void {
 		const guid = entitySelection?.selectedGuid() ?? null;
 		if (guid === null) return;
-		void objectInspectionOwner?.examine(guid);
+		void inspectionOwner?.examine(guid);
 	}
 
 	/** Inspect the explicit HUD identity without changing the gameplay selection. */
 	function examineItem(guid: number): void {
-		void objectInspectionOwner?.examine(guid);
+		void inspectionOwner?.examine(guid);
 	}
 
 	const jumpPowerKeys: readonly [string, string] = $derived.by(() => {
@@ -2055,17 +2055,17 @@
 		chatCharacterGuid = null;
 		partyHudPresent = owner.partyHudPresent();
 		chatComposer.inParty = owner.partySnapshot() !== null;
-		const inspectionOwner = new ClientObjectInspection(owner, (message) =>
+		const sessionInspection = new ClientInspection(owner, (message) =>
 			toastCenter.publish({ message, tone: "warning" }),
 		);
-		objectInspectionOwner = inspectionOwner;
+		inspectionOwner = sessionInspection;
 		const readerOwner = new ClientBookReader(owner);
 		bookReaderOwner = readerOwner;
 		const unsubscribeReader = readerOwner.subscribe(
 			(value) => (bookReader = value),
 		);
-		const unsubscribeInspection = inspectionOwner.subscribe(
-			(value) => (objectInspection = value),
+		const unsubscribeInspection = sessionInspection.subscribe(
+			(value) => (inspection = value),
 		);
 		const icons = browserUiIconRepository((requests) =>
 			prepareUiIcons(transport, requests),
@@ -2349,10 +2349,9 @@
 				readerOwner.destroy();
 				if (bookReaderOwner === readerOwner) bookReaderOwner = null;
 				bookReader = { kind: "idle" };
-				inspectionOwner.destroy();
-				if (objectInspectionOwner === inspectionOwner)
-					objectInspectionOwner = null;
-				objectInspection = { kind: "idle" };
+				sessionInspection.destroy();
+				if (inspectionOwner === sessionInspection) inspectionOwner = null;
+				inspection = { kind: "idle" };
 				contractNotifications.reset();
 				toastCenter.destroy();
 				unsubscribePrecise();
@@ -2563,7 +2562,7 @@
 			{barber}
 			{trade}
 			{itemInteractions}
-			{objectInspection}
+			{inspection}
 			{bookReader}
 			onCloseBook={() => bookReaderOwner?.close()}
 			onRetryBook={() => bookReaderOwner?.retry()}
@@ -2574,7 +2573,8 @@
 				itemInteractions?.interactSelected(unrestrictedUse)}
 			onExamineEntity={examineSelectedEntity}
 			onExamineItem={examineItem}
-			onCloseInspection={() => objectInspectionOwner?.close()}
+			onExamineSpell={(spellId) => inspectionOwner?.examineSpell(spellId)}
+			onCloseInspection={() => inspectionOwner?.close()}
 			{selectedEntityGuid}
 			{hoveredEntityGuid}
 			showRetailHiddenGeometry={frameSettings.showRetailHiddenGeometry}
@@ -2683,7 +2683,7 @@
 					isCurrent: () => pointerSelection === pointer,
 					commit: (result) => {
 						if (result.kind === "entity")
-							void objectInspectionOwner?.examine(result.guid);
+							void inspectionOwner?.examine(result.guid);
 						else if (result.kind === "unavailable")
 							toastCenter.publish({ message: result.reason, tone: "warning" });
 					},

@@ -279,9 +279,9 @@ query it. The snapshot describes one server database and is not authoritative fo
 live entities. It is never included in world bootstrap or opened by the live client.
 Environment variables remain host inputs; Explorer fuzzy search remains app-local.
 Live classification, usability, and inventory ordering use received state.
-The standard housing-storage identity is resolved separately from the client DAT's
-WCLASSID mapper during bootstrap. Core uses it to suppress inferred locked notices
-for housing storage, whose permission-denial sound is shared with locked objects.
+Core suppresses inferred locked notices for the standard retail housing-storage
+template using a named constant local to sound interpretation. Its permission-denial
+sound is shared with locked objects; this heuristic requires no bootstrap asset lookup.
 
 ### Contract catalog ([src/contracts.rs](src/contracts.rs))
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { EnvCellId, LandblockOwnerId } from "../game-types";
-import { Mat4 } from "../math/types";
+import { AABB3, Mat4, Vec3 } from "../math/types";
 import type {
 	ResolvedBuildingLayerSource,
 	ResolvedObjectResident,
@@ -125,6 +125,72 @@ describe("MapGeometryStore", () => {
 		expect(resident?.floors).toHaveLength(1);
 		expect(resident?.floors[0]?.envCellId).toBe(0x101);
 		expect(resident?.crossings).toHaveLength(1);
+	});
+
+	it("keeps unregistered exits indoors and marks registered outdoor entrances", () => {
+		const envCellId = "0xda550100" as EnvCellId;
+		const exit: ResolvedPortalCrossing = {
+			id: "portal-crossing:exit",
+			source: { kind: "env-cell", landblockId: LANDBLOCK, envCellId },
+			target: { kind: "outdoor" },
+			sourceApertureIndex: 0,
+			visibilityApertureIndex: 0,
+			visibilityProvenance: { kind: "authored-source" },
+			acceptedSide: "positive",
+			exactMatch: true,
+			maskDepthPolicy: "reject-equal-depth",
+			reciprocalCrossingIndex: null,
+			sourcePortal: {
+				kind: "env-cell",
+				envCellId,
+				portalIndex: 0,
+				polygonId: 0,
+				flags: 5,
+			},
+			spatialRelationship: {
+				kind: "exterior-transition",
+				exteriorLandblockId: LANDBLOCK,
+			},
+		};
+		const entrance: ResolvedPortalCrossing = {
+			...exit,
+			id: "portal-crossing:entrance",
+			source: exit.target,
+			target: exit.source,
+			reciprocalCrossingIndex: 0,
+			sourcePortal: {
+				kind: "building-transition",
+				buildingIndex: 0,
+				buildingSourceDid: BUILDING,
+				portalIndex: 0,
+				flags: 5,
+			},
+		};
+		for (const registered of [false, true]) {
+			const store = new MapGeometryStore();
+			store.installInterior({
+				landblockId: LANDBLOCK,
+				shells: [],
+				crossings: registered
+					? [{ ...exit, reciprocalCrossingIndex: 1 }, entrance]
+					: [exit],
+				apertures: [
+					{
+						id: "portal-aperture:exit",
+						kind: "env-cell",
+						positions: new Float32Array(),
+						triangleIndices: new Uint32Array(),
+						plane: { normal: new Vec3(1, 0, 0), d: 0 },
+						landblockBounds: new AABB3(new Vec3(0, 0, 0), new Vec3(0, 2, 2)),
+						polygonIds: [0],
+					},
+				],
+			});
+			const transitions = store.interiorFor(LANDBLOCK)?.transitions;
+			expect(transitions).toHaveLength(1);
+			expect(transitions?.[0]?.envCellId).toBe(envCellId);
+			expect(transitions?.[0]?.outdoorEntrance).toBe(registered);
+		}
 	});
 
 	it("releases only the evicted layer and reports a new revision", () => {

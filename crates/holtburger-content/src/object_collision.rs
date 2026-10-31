@@ -626,14 +626,14 @@ pub struct CellCollisionPortal {
     pub positive_side: bool,
     /// Cell domain reached through the portal.
     pub target: CellCollisionPortalTarget,
-    /// Building registration that lets an outdoor static enter through this portal.
+    /// Building registration that permits outdoor queries to enter through this portal.
     ///
     /// Present only for outside portals claimed by one `LandblockInfo` building portal. Retail
-    /// first requires a static's part box to shadow the outdoor land cell containing this origin.
+    /// first requires the query to reach the outdoor land cell containing this origin.
     pub outdoor_building: Option<OutdoorBuildingTransit>,
 }
 
-/// Source building facts needed by retail's outdoor-to-interior static shadow traversal.
+/// Source building facts needed by retail's outdoor-to-interior query traversal.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OutdoorBuildingTransit {
     /// Stable ordinal in `LandblockInfo.buildings`.
@@ -683,8 +683,6 @@ pub struct LandblockColliders {
     cell_volumes: Vec<CellVolume>,
     /// First assembly-order volume for each selector, owned with the immutable cell collection.
     cell_volume_indices: HashMap<u16, usize>,
-    /// Assembly-order volumes with outdoor portals, consumed by outdoor collision traversal.
-    outdoor_entry_indices: Vec<usize>,
 }
 
 /// One atomically assembled static collision product for an outdoor landblock and its interiors.
@@ -702,39 +700,22 @@ impl LandblockColliders {
     /// Builds static geometry and its selector lookup without changing assembly order.
     pub fn new(colliders: Vec<PlacedCollider>, cell_volumes: Vec<CellVolume>) -> Self {
         let mut cell_volume_indices = HashMap::with_capacity(cell_volumes.len());
-        let mut outdoor_entry_indices = Vec::new();
         for (index, volume) in cell_volumes.iter().enumerate() {
             // Preserve the first-match semantics of authored-cell queries, including duplicates.
             cell_volume_indices
                 .entry(volume.cell_selector)
                 .or_insert(index);
-            if volume
-                .portals
-                .iter()
-                .any(|portal| portal.target == CellCollisionPortalTarget::Outdoor)
-            {
-                outdoor_entry_indices.push(index);
-            }
         }
         Self {
             colliders,
             cell_volumes,
             cell_volume_indices,
-            outdoor_entry_indices,
         }
     }
 
     /// Interior volumes in assembly order, for geometric searches rather than identity lookup.
     pub fn cell_volumes(&self) -> &[CellVolume] {
         &self.cell_volumes
-    }
-
-    /// Outdoor entry candidates in assembly order, including duplicate authored selectors.
-    /// Indoor-only volumes cannot participate in an outdoor-to-interior transition.
-    pub fn outdoor_entry_volumes(&self) -> impl Iterator<Item = &CellVolume> {
-        self.outdoor_entry_indices
-            .iter()
-            .map(|&index| &self.cell_volumes[index])
     }
 
     /// Resolves an authored cell selector without scanning unrelated interior volumes.
@@ -754,12 +735,6 @@ impl LandblockColliders {
     fn absorb(&mut self, other: LandblockColliders) {
         self.colliders.extend(other.colliders);
         let offset = self.cell_volumes.len();
-        self.outdoor_entry_indices.extend(
-            other
-                .outdoor_entry_indices
-                .into_iter()
-                .map(|index| offset + index),
-        );
         for (selector, index) in other.cell_volume_indices {
             self.cell_volume_indices
                 .entry(selector)
@@ -1411,53 +1386,6 @@ mod tests {
             planes: vec![plane(Vector3::new(1.0, 0.0, 0.0), 0.0)],
             portals: Vec::new(),
         }
-    }
-
-    #[test]
-    fn outdoor_entries_preserve_assembly_order_and_duplicates_across_absorption() {
-        let entry = |selector| {
-            let mut volume = synthetic_cell_volume();
-            volume.cell_selector = selector;
-            volume.portals.push(CellCollisionPortal {
-                plane: plane(Vector3::new(1.0, 0.0, 0.0), 0.0),
-                aperture_vertices: Vec::new(),
-                reciprocal_visibility_vertices: None,
-                positive_side: true,
-                target: CellCollisionPortalTarget::Outdoor,
-                outdoor_building: None,
-            });
-            volume
-        };
-        let mut geometry = LandblockColliders::new(
-            Vec::new(),
-            vec![synthetic_cell_volume(), entry(0x0200), entry(0x0200)],
-        );
-        geometry.absorb(LandblockColliders::new(
-            Vec::new(),
-            vec![synthetic_cell_volume(), entry(0x0300)],
-        ));
-        let expected = geometry
-            .cell_volumes()
-            .iter()
-            .filter(|volume| {
-                volume
-                    .portals
-                    .iter()
-                    .any(|portal| portal.target == CellCollisionPortalTarget::Outdoor)
-            })
-            .collect::<Vec<_>>();
-        let actual = geometry.outdoor_entry_volumes().collect::<Vec<_>>();
-        assert_eq!(actual.len(), expected.len());
-        assert!(!actual.is_empty());
-        for (actual, expected) in actual.into_iter().zip(expected) {
-            assert!(std::ptr::eq(actual, expected));
-        }
-        assert_eq!(
-            LandblockColliders::default()
-                .outdoor_entry_volumes()
-                .count(),
-            0
-        );
     }
 
     /// Only the positive spine contributes, matching retail's walk down `pos_node` alone.

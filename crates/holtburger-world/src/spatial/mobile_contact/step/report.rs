@@ -305,7 +305,12 @@ mod tests {
                                 reciprocal_visibility_vertices: None,
                                 positive_side: true,
                                 target: CellCollisionPortalTarget::Outdoor,
-                                outdoor_building: None,
+                                outdoor_building: Some(
+                                    holtburger_content::OutdoorBuildingTransit {
+                                        building_index: 0,
+                                        building_origin: Vector3::new(100.0, 96.0, 0.0),
+                                    },
+                                ),
                             })
                             .collect(),
                     }],

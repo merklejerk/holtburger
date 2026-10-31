@@ -338,7 +338,10 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
             reciprocal_visibility_vertices: None,
             positive_side: true,
             target: CellCollisionPortalTarget::Outdoor,
-            outdoor_building: None,
+            outdoor_building: Some(holtburger_content::OutdoorBuildingTransit {
+                building_index: 0,
+                building_origin: Vector3::new(15.0, 20.0, 0.0),
+            }),
         }],
     };
     let mut scene = scene(Vec::new());

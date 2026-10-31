@@ -5063,7 +5063,12 @@ mod physical_body_tests {
                                 reciprocal_visibility_vertices: None,
                                 positive_side: true,
                                 target: CellCollisionPortalTarget::Outdoor,
-                                outdoor_building: None,
+                                outdoor_building: Some(
+                                    holtburger_content::OutdoorBuildingTransit {
+                                        building_index: 0,
+                                        building_origin: Vector3::new(100.0, 96.0, 0.0),
+                                    },
+                                ),
                             },
                             CellCollisionPortal {
                                 plane: Plane {
@@ -5074,7 +5079,12 @@ mod physical_body_tests {
                                 reciprocal_visibility_vertices: None,
                                 positive_side: true,
                                 target: CellCollisionPortalTarget::Outdoor,
-                                outdoor_building: None,
+                                outdoor_building: Some(
+                                    holtburger_content::OutdoorBuildingTransit {
+                                        building_index: 0,
+                                        building_origin: Vector3::new(100.0, 96.0, 0.0),
+                                    },
+                                ),
                             },
                         ],
                     }],
@@ -6034,7 +6044,7 @@ mod physical_body_tests {
         let collision = thin_cell_collision_scene();
         let now = Instant::now();
         let mut scene = SpatialScene::new();
-        let id = scene.register_ephemeral_body(pose(Vector3::new(99.8, 10.0, 20.0)), now);
+        let id = scene.register_ephemeral_body(pose(Vector3::new(99.8, 96.0, 20.0)), now);
         scene
             .install_physical_body(
                 id,

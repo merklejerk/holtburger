@@ -1,4 +1,4 @@
-use holtburger_common::{Guid, Vector3};
+use holtburger_common::{Guid, Vector3, position::MAX_OUTDOOR_LANDBLOCK_AXIS};
 
 /// Side length of one outdoor land cell in meters.
 pub(crate) const OUTDOOR_CELL_METERS: f32 = 24.0;
@@ -46,6 +46,27 @@ impl GlobalCellRange {
     pub(crate) fn cells(self) -> impl Iterator<Item = (i32, i32)> {
         (self.minimum.0..=self.maximum.0)
             .flat_map(move |x| (self.minimum.1..=self.maximum.1).map(move |y| (x, y)))
+    }
+
+    /// Distinct geographic owners needed to cover the entire cell rectangle, in coordinate order.
+    pub(crate) fn owners(self) -> impl Iterator<Item = Guid> {
+        const CELLS_PER_LANDBLOCK: i32 = 8;
+        let maximum_axis = i32::from(MAX_OUTDOOR_LANDBLOCK_AXIS);
+        let first_x = self.minimum.0.div_euclid(CELLS_PER_LANDBLOCK).max(0);
+        let first_y = self.minimum.1.div_euclid(CELLS_PER_LANDBLOCK).max(0);
+        let last_x = self
+            .maximum
+            .0
+            .div_euclid(CELLS_PER_LANDBLOCK)
+            .min(maximum_axis);
+        let last_y = self
+            .maximum
+            .1
+            .div_euclid(CELLS_PER_LANDBLOCK)
+            .min(maximum_axis);
+        (first_x..=last_x).flat_map(move |x| {
+            (first_y..=last_y).map(move |y| Guid(((x as u32) << 24) | ((y as u32) << 16) | 0xffff))
+        })
     }
 
     pub(crate) fn contains(self, cell: (i32, i32)) -> bool {

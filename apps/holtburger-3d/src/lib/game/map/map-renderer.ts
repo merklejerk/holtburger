@@ -390,7 +390,10 @@ export class MapRenderer {
 				MAP_IDENTITY_TRANSFORM,
 			);
 			for (const accent of interior.transitions) {
-				if (component && !component.has(accent.envCellId)) continue;
+				if (
+					component ? !component.has(accent.envCellId) : !accent.outdoorEntrance
+				)
+					continue;
 				const buffers = this.#surfaceBuffers(accent.surface);
 				if (!buffers) continue;
 				gl.bindVertexArray(buffers.vertexArray);

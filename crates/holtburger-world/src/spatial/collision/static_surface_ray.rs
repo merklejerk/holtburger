@@ -1167,7 +1167,10 @@ mod tests {
                 reciprocal_visibility_vertices: None,
                 positive_side: true,
                 target: CellCollisionPortalTarget::Outdoor,
-                outdoor_building: None,
+                outdoor_building: Some(holtburger_content::OutdoorBuildingTransit {
+                    building_index: 0,
+                    building_origin: Vector3::new(10.0, 10.0, 0.0),
+                }),
             }],
         );
         room.planes.push(Plane {

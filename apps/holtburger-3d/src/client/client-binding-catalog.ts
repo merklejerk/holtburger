@@ -279,7 +279,7 @@ export const CLIENT_BINDING_GROUPS: readonly {
 export const CLIENT_BINDING_ROWS: readonly ClientBindingRow[] =
 	CLIENT_BINDING_GROUPS.flatMap((group) => group.rows);
 
-/** Capture digit keys by position, keeping the top row and numpad distinct. */
+/** Capture Space and digits by position; retain a usable code when the logical key is unidentified. */
 export function captureClientBinding(event: InputKeyEvent): KeyBinding {
 	const modifiers = {
 		shift: event.shiftKey,
@@ -287,7 +287,12 @@ export function captureClientBinding(event: InputKeyEvent): KeyBinding {
 		alt: Boolean(event.altKey),
 		meta: Boolean(event.metaKey),
 	};
-	return event.code !== undefined && /^(?:Digit|Numpad)[0-9]$/.test(event.code)
+	return event.code !== undefined &&
+		event.code !== "" &&
+		event.code !== "Unidentified" &&
+		(event.code === "Space" ||
+			/^(?:Digit|Numpad)[0-9]$/.test(event.code) ||
+			event.key === "Unidentified")
 		? { code: event.code, ...modifiers }
 		: { key: event.key, ...modifiers };
 }

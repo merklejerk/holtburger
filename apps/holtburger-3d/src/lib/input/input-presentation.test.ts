@@ -9,6 +9,17 @@ import {
 } from "./input-presentation";
 
 describe("input presentation", () => {
+	it("labels physical Space consistently with logical Space", () => {
+		for (const selector of [{ key: " " }, { code: "Space" }]) {
+			expect(formatInputBinding({ ...selector, ctrl: true }, "linux")).toBe(
+				"Ctrl + Space",
+			);
+			expect(compactInputHint([{ ...selector, ctrl: true }], "linux")).toBe(
+				"CSpc",
+			);
+		}
+	});
+
 	it("uses OS names without changing modifier identities", () => {
 		const chord = { code: "Digit1", ctrl: true, shift: true, meta: true };
 		expect(formatInputBinding(chord, "mac")).toBe(

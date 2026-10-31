@@ -76,6 +76,7 @@ const CLIENT_LABELS: Readonly<Record<ClientShortcut, string>> = {
 	toggleWorld: "Toggle world",
 	toggleJournal: "Toggle journal",
 	toggleSettings: "Toggle settings",
+	toggleNearby: "Toggle entity list",
 
 	selectSelf: "Select self",
 	nextInteractable: "Select next target",
@@ -126,20 +127,20 @@ function characterRow(action: CharacterAction): BindingDefinition {
 
 function clientRow(action: ClientShortcut): BindingDefinition {
 	const chatOnly = action === "chatPreviousPage" || action === "chatNextPage";
-	const group: ClientBindingGroup = CLIENT_PANEL_SHORTCUT_ACTIONS.some(
-		(panelAction) => panelAction === action,
-	)
-		? "System panels"
-		: action === "toggleAutoRun" || action === "preciseJump"
-			? "Movement"
-			: action === "toggleCombat"
-				? "Combat"
-				: chatOnly ||
-					  action === "chat" ||
-					  action === "toggleChatHistory" ||
-					  action === "holdChatHistory"
-					? "Chat"
-					: "Targeting & interaction";
+	const group: ClientBindingGroup =
+		action === "toggleNearby" ||
+		CLIENT_PANEL_SHORTCUT_ACTIONS.some((panelAction) => panelAction === action)
+			? "System panels"
+			: action === "toggleAutoRun" || action === "preciseJump"
+				? "Movement"
+				: action === "toggleCombat"
+					? "Combat"
+					: chatOnly ||
+						  action === "chat" ||
+						  action === "toggleChatHistory" ||
+						  action === "holdChatHistory"
+						? "Chat"
+						: "Targeting & interaction";
 	// Panels remain available during precise aiming and unhandled focused-bar input.
 	const contexts: readonly BindingContext[] =
 		group === "System panels"

@@ -133,7 +133,20 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		onAutoRunChanged() {},
 	});
 	let nowMs = 0;
-	const appInput = new AppInput(INPUT_DEFAULTS);
+	// The scenarios below press these fixture chords independently of editable product defaults.
+	const targetingInput = {
+		...INPUT_DEFAULTS,
+		client: {
+			...INPUT_DEFAULTS.client,
+			nextHostile: [
+				{ key: "v", ctrl: true, shift: false, alt: false, meta: false },
+			],
+			previousHostile: [
+				{ key: "v", ctrl: true, shift: true, alt: false, meta: false },
+			],
+		},
+	};
+	const appInput = new AppInput(targetingInput);
 	const character = appInput.characterContext(() => {});
 	const input = new ClientSelectionInput({
 		keyboard,
@@ -437,7 +450,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		expectSelected(1, "remapped self without rendered presentation");
 		keyboard.cancel();
 		character.replaceBindings(CLIENT_KEYBOARD_DEFAULTS.character);
-		appInput.replaceConfiguration(INPUT_DEFAULTS);
+		appInput.replaceConfiguration(targetingInput);
 		pointer.acquireViewportPoint(0, 0);
 		const request = requests.at(-1);
 		if (request === undefined)

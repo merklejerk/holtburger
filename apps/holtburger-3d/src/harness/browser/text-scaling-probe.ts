@@ -151,7 +151,7 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 			require(partyName.getBoundingClientRect().height >=
 				fontSize(partyName), "Party name row clipped scaled text");
 			const close = element('[aria-label="Close Settings"]');
-			const scroll = element(".settings-scroll");
+			const scroll = element('.settings-panel [role="tabpanel"]:not([hidden])');
 			require(scroll.scrollWidth <=
 				scroll.clientWidth + 1, "Scaled settings overflowed horizontally");
 			slider().scrollIntoView({ block: "nearest" });

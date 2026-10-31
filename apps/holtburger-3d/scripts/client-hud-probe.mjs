@@ -2696,6 +2696,32 @@ export async function probeClientSettingsTabs(
 			if (!window) throw new Error('Settings shortcut did not open its HUD window');
 			const tabs = [...window.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent.trim());
 			if (tabs.join(',') !== 'Graphics,Audio,UI,Input,Gameplay') throw new Error('Settings tabs are incomplete');
+			window.querySelector('#settings-tab-input').click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			const inputPanel = window.querySelector('#settings-section-input');
+			const tabList = window.querySelector('[role="tablist"]');
+			const tabTop = tabList.getBoundingClientRect().top;
+			const mouseSection = [...inputPanel.querySelectorAll('details')]
+				.find((section) => section.querySelector('summary')?.textContent === 'Mouse');
+			if (!mouseSection) throw new Error('Input mouse section is missing');
+			mouseSection.open = false;
+			inputPanel.scrollTop = inputPanel.scrollHeight;
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			const inputScroll = inputPanel.scrollTop;
+			if (inputScroll <= 0) throw new Error('Input settings must scroll within their tab panel');
+			if (Math.abs(tabList.getBoundingClientRect().top - tabTop) > 1 ||
+				tabList.getBoundingClientRect().bottom > inputPanel.getBoundingClientRect().top + 1)
+				throw new Error('Settings tabs moved or overlapped the scrolling content');
+			window.querySelector('#settings-tab-graphics').click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			if (!inputPanel.hidden || !inputPanel.inert) throw new Error('Inactive settings remain visible or interactive');
+			window.querySelector('#settings-tab-input').click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			if (window.querySelector('#settings-section-input') !== inputPanel ||
+				Math.abs(inputPanel.scrollTop - inputScroll) > 1 || mouseSection.open)
+				throw new Error('Settings lost scroll or disclosure state across tabs');
+			mouseSection.open = true;
+			inputPanel.scrollTop = 0;
 
 			window.querySelector('#settings-tab-gameplay').click();
 			await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -2805,7 +2831,7 @@ export async function probeClientSettingsTabs(
 			window.querySelector('#settings-tab-graphics').click();
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 			graphicsTab.focus();
-			return { tabs, selected: window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim(), selectedAfterArrow };
+			return { tabs, fixedTabs: true, retainedScrollAndDisclosures: true, selected: window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim(), selectedAfterArrow };
 		})()`,
 	);
 }

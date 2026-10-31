@@ -49,9 +49,6 @@
 				})}
 		/>
 	</label>
-	<p class="ui-muted">
-		Terrain and buildings extend to this distance; smaller objects stay nearby.
-	</p>
 	<label
 		>Field of view: {graphics.verticalFovDegrees}°
 		<UiRange

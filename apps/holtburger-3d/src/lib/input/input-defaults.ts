@@ -75,6 +75,10 @@ export const INPUT_DEFAULTS = {
 		toggleSettings: [
 			{ key: "F10", shift: false, ctrl: false, alt: false, meta: false },
 		],
+		/** Toggle the independent nearby entity list and alerts window. */
+		toggleNearby: [
+			{ key: "f", shift: false, ctrl: true, alt: false, meta: false },
+		],
 
 		/** Select the authoritative local player identity. */
 		selectSelf: [{ key: "x", ctrl: false, alt: false, meta: false }],

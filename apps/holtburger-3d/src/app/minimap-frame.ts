@@ -1,5 +1,6 @@
 import type { ResizeEdges } from "./resize-edges";
 import type { MapEntity } from "../lib/game/map/map-blips";
+import type { MapLandmarkCategory } from "../lib/game/map/map-blip-category";
 import type { MapWaypointDisplay } from "../lib/game/map/map-waypoint";
 import type { MapTerrainSource } from "../lib/game/map/map-renderer";
 import {
@@ -123,6 +124,8 @@ export interface MinimapFrame {
 	/** Null until there is a coherent subject position and ownership. */
 	readonly subject: MinimapSubject | null;
 	readonly presentedEntities: () => Iterable<MapEntity>;
+	/** Optional mode-owned public landmarks, sampled with this frame's semantic facts. */
+	readonly landmarkCategory?: (guid: number) => MapLandmarkCategory | null;
 	/** Cold selected identity; the widget samples it with the rest of its bounded frame. */
 	readonly selectedGuid: number | null;
 	/** Optional app-owned tracked identities; absent in Explorer and undecorated frames. */

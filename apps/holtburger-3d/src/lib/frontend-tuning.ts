@@ -346,6 +346,10 @@ export const SHARED_FRONTEND_TUNING = {
 				switch: hexRgba("#e5cc78ff"),
 				/** Uncategorized dynamic presentations. */
 				other: hexRgba("#d8d8e0ff"),
+				/** Public useables admitted by the entity-list category. */
+				useable: hexRgba("#38d64fff"),
+				/** Public corpses whose names match the local character. */
+				"own-corpse": hexRgba("#d8d8e0ff"),
 				/** The locally driven entity's directional marker. */
 				controlled: hexRgba("#bce8aeff"),
 			} as const,

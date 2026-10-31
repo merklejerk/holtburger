@@ -16,12 +16,13 @@ export async function probeBindingControls(client, evaluateExpression) {
 			await new Promise((resolve) => setTimeout(resolve, 20));
 		}
 	};
-	const key = async (name) => {
+	const key = async (name, modifiers = 0) => {
 		for (const type of ["keyDown", "keyUp"])
 			await client.send("Input.dispatchKeyEvent", {
 				type,
 				key: name,
 				code: name,
+				modifiers,
 			});
 		await settle();
 	};
@@ -48,6 +49,9 @@ export async function probeBindingControls(client, evaluateExpression) {
 			],
 			toggleSettings: [
 				{ key: "F10", shift: false, ctrl: false, alt: false, meta: false },
+			],
+			toggleNearby: [
+				{ key: "f", shift: false, ctrl: true, alt: false, meta: false },
 			],
 		},
 	};
@@ -88,6 +92,88 @@ export async function probeBindingControls(client, evaluateExpression) {
 			await key(name);
 			assert.equal(await read(pressed(label)), false, `${label} closes`);
 		}
+		const nearbyPressed = pressed("Nearby entities and alerts");
+		await key("b");
+		await key("f", 2);
+		assert.equal(
+			await read(nearbyPressed),
+			true,
+			"Ctrl+F opens the entity list",
+		);
+		assert.equal(
+			await read(pressed("Inventory")),
+			true,
+			"entity list preserves the main panel",
+		);
+		await client.send("Input.dispatchKeyEvent", {
+			type: "keyDown",
+			key: "f",
+			code: "KeyF",
+			modifiers: 2,
+			autoRepeat: true,
+		});
+		await client.send("Input.dispatchKeyEvent", {
+			type: "keyUp",
+			key: "f",
+			code: "KeyF",
+			modifiers: 2,
+		});
+		await settle();
+		assert.equal(await read(nearbyPressed), true, "entity list ignores repeat");
+		await key("f", 2);
+		assert.equal(
+			await read(nearbyPressed),
+			false,
+			"Ctrl+F closes the entity list",
+		);
+		await key("b");
+		const remappedNearby = {
+			...panelSettings,
+			client: {
+				...panelSettings.client,
+				toggleNearby: [
+					{ key: "h", ctrl: true, shift: false, alt: false, meta: false },
+				],
+			},
+		};
+		await read(
+			`${api}.bindingSettings.replace(${JSON.stringify(remappedNearby)})`,
+		);
+		await settle();
+		await key("f", 2);
+		assert.equal(await read(nearbyPressed), false, "remapping retires Ctrl+F");
+		await key("h", 2);
+		assert.equal(
+			await read(nearbyPressed),
+			true,
+			"remapped chord opens the entity list",
+		);
+		await key("h", 2);
+		await read(
+			`${api}.bindingSettings.replace(${JSON.stringify({ ...remappedNearby, client: { ...remappedNearby.client, toggleNearby: [] } })})`,
+		);
+		await settle();
+		await key("h", 2);
+		assert.equal(
+			await read(nearbyPressed),
+			false,
+			"entity list can be unbound",
+		);
+		await read(
+			`${api}.bindingSettings.replace(${JSON.stringify(panelSettings)})`,
+		);
+		await settle();
+		await key("F10");
+		await read(`document.querySelector('#settings-tab-input').click()`);
+		await settle();
+		assert.equal(
+			await read(
+				`document.querySelector('[aria-label="Add key for Toggle entity list"]') !== null`,
+			),
+			true,
+			"entity list is configurable in Input settings",
+		);
+		await key("F10");
 		await key("b");
 		await key("f");
 		assert.equal(
@@ -278,6 +364,14 @@ export async function probeBindingControls(client, evaluateExpression) {
 		);
 		return {
 			passed: true,
+			entityList: {
+				toggles: true,
+				preservesMainPanel: true,
+				ignoresRepeat: true,
+				remaps: true,
+				unbinds: true,
+				settingsRow: true,
+			},
 			systemPanels: {
 				toggles: true,
 				ignoresRepeat: true,

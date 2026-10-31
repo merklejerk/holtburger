@@ -42,11 +42,12 @@
 <script lang="ts">
 	import { observeUiTheme } from "./ui-theme";
 	import {
-		readMinimapAlertMarker,
-		drawMinimapAlertMarker,
-		MINIMAP_ALERT_ICON_SIZE,
-		type MinimapAlertMarker,
-	} from "./minimap-alert-marker";
+		readMinimapMarkers,
+		drawMinimapMarker,
+		MINIMAP_ICON_SIZE,
+		type MinimapMarker,
+		type MinimapIconCategory,
+	} from "./minimap-marker";
 	import MinimapResetIcon from "../assets/icons/minimap-reset.svg?component";
 	import MapWaypointDirectionIcon from "../assets/icons/map-waypoint-direction.svg?component";
 	import MapWaypointPinIcon from "../assets/icons/map-waypoint-pin.svg?component";
@@ -200,7 +201,8 @@
 		onFooterExtentChange,
 	}: Props = $props();
 	let minimapElement: HTMLElement;
-	let alertMarker: MinimapAlertMarker | null = null;
+	let markers: Readonly<Record<MinimapIconCategory, MinimapMarker>> | null =
+		null;
 	let waypointMarker: SVGGElement;
 	let waypointPointer: SVGGElement;
 	let waypointRow: HTMLButtonElement;
@@ -294,7 +296,7 @@
 
 	onMount(() => {
 		const stopTheme = observeUiTheme(minimapElement, () => {
-			alertMarker = readMinimapAlertMarker(minimapElement);
+			markers = readMinimapMarkers(minimapElement);
 		});
 		const element = footerElement;
 		const observer = new ResizeObserver(() => {
@@ -454,14 +456,19 @@
 			overlay,
 			frame.subject?.kind === "controlled-entity" ? frame.subject.guid : null,
 			frame.trackedGuids ?? EMPTY_ALERT_GUIDS,
+			frame.landmarkCategory,
 		)) {
 			// Clip space is [-1, 1] with +Y up; canvas pixels run down from the top-left.
 			const x = ((blip.clipX + 1) / 2) * size;
 			const y = ((1 - blip.clipY) / 2) * size;
-			if (blip.appearance.category === "alert") {
-				if (alertMarker === null)
-					throw new Error("Minimap alert marker is not initialized.");
-				drawMinimapAlertMarker(context, alertMarker, x, y);
+			if (
+				blip.appearance.category === "alert" ||
+				blip.appearance.category === "useable" ||
+				blip.appearance.category === "own-corpse"
+			) {
+				if (markers === null)
+					throw new Error("Minimap markers are not initialized.");
+				drawMinimapMarker(context, markers[blip.appearance.category], x, y);
 				hitTargets.push({ guid: blip.guid, name: blip.name, x, y });
 				drawSelectedBlipRing(
 					context,
@@ -469,7 +476,7 @@
 					blip.guid,
 					x,
 					y,
-					MINIMAP_ALERT_ICON_SIZE / 2,
+					MINIMAP_ICON_SIZE / 2,
 				);
 				continue;
 			}

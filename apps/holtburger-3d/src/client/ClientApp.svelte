@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { clientMinimapLandmark } from "./client-minimap-policy";
 	import { launcherTransport } from "../launcher/launcher-transport";
 	import type {
 		ClientGameplayOption,
@@ -1638,8 +1639,18 @@
 			source: null,
 			subject: null,
 		};
+		const entities = session?.entities.read();
+		const facts = entities?.kind === "current" ? entities.level.entities : null;
+		const player =
+			frame.subject?.kind === "controlled-entity"
+				? facts?.get(frame.subject.guid)
+				: undefined;
+		const playerName =
+			player?.description.kind === "known" ? player.description.name : null;
 		return {
 			...frame,
+			landmarkCategory: (guid) =>
+				clientMinimapLandmark(facts?.get(guid), playerName),
 			trackedGuids: nearby?.trackedGuids() ?? EMPTY_TRACKED_GUIDS,
 			waypoint: navigationWaypoint.read(
 				frame.subject,

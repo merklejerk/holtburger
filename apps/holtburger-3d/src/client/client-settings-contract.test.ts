@@ -88,7 +88,7 @@ describe("current client settings values", () => {
 		});
 	});
 
-	it.each(["toggleChatHistory", "holdChatHistory"] as const)(
+	it.each(["toggleChatHistory", "holdChatHistory", "toggleNearby"] as const)(
 		"fills missing %s while preserving saved alternatives and unbound choices",
 		(action) => {
 			const { [action]: defaultBinding, ...olderClient } =

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { provideClientHudGeometry } from "../../client/client-hud-geometry-context";
+	import { clientMinimapLandmark } from "../../client/client-minimap-policy";
 	import { CameraLookController } from "../../lib/game/controls/camera-look-controller";
 	import { createCameraAxesRadians } from "../../lib/game/math/camera-orientation";
 	import gameplayPreferencesFixture from "./fixtures/gameplay-preferences.json";
@@ -732,6 +734,8 @@
 	}
 
 	const { viewport: inputGate, keyboard } = provideAppInputPolicy();
+	// Standalone HUD probes inherit the geometry owner normally provided by ClientGameplayView.
+	provideClientHudGeometry();
 	const partyProbeContext = getAllContexts();
 	const worldMapFixture = createWorldMapFixture();
 	/** Cold authority fixtures for Housing tab/map acceptance through production components. */
@@ -4067,7 +4071,15 @@
 		showcaseWaypointEnabled = readMinimapFrame().waypoint !== null;
 	}
 	function readMinimapFrame(): MinimapFrame {
+		const read = interactionLifecycle.entities.read();
+		const facts = read.kind === "current" ? read.level.entities : null;
+		const player =
+			minimapSubjectGuid === null ? undefined : facts?.get(minimapSubjectGuid);
+		const playerName =
+			player?.description.kind === "known" ? player.description.name : null;
 		const frame: MinimapFrame = {
+			landmarkCategory: (guid) =>
+				clientMinimapLandmark(facts?.get(guid), playerName),
 			surfaceMapEligible: !minimapSubjectIndoor,
 			waypoint: null,
 			cameraFovRadians: Math.PI / 3,
@@ -4988,6 +5000,17 @@
 				minimapSubjectGuid = 1;
 				waypointProbeEnabled = true;
 				return probeClientNearby({
+					prepareMinimapLandmarks: () => {
+						minimapCategory = "other";
+						const read = interactionLifecycle.entities.read();
+						const player =
+							read.kind === "current" ? read.level.entities.get(1) : undefined;
+						if (player?.description.kind !== "known")
+							throw new Error(
+								"Minimap fixture requires the player's public name.",
+							);
+						return player.description.name;
+					},
 					owner: nearbyOwner,
 					scene: nearbyScene,
 					baseline: emitInteractionBaseline,

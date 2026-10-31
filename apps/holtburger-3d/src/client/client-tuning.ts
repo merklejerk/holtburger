@@ -196,7 +196,7 @@ export const CLIENT_TUNING = {
 		holdDelayMs: 500,
 		/** Input-only candidate admission and ordering. */
 		cycle: {
-			radiusMeters: 75,
+			radiusMeters: 125,
 			viewMarginMeters: 2,
 			distanceBandMeters: 5,
 			angularSectorCount: 8,

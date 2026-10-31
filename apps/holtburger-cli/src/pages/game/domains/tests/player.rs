@@ -104,6 +104,7 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         | holtburger_common::properties::EnchantmentTypeFlags::BENEFICIAL)
         .bits();
     let snapshot = ClientApplicationSnapshot {
+        barber: Default::default(),
         character_management: holtburger_core::client::types::CharacterManagementState::Idle,
         player_visual_capture: None,
         fellowship: None,

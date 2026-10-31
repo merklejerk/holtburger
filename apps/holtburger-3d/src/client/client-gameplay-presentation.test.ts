@@ -1,3 +1,9 @@
+import barberFixture from "./fixtures/barber-wire.json";
+import {
+	barberSnapshotSchema,
+	barberPreviewSchema,
+} from "./client-barber-contract";
+import type { DynamicPresentationOverride } from "../lib/game/runtime/dynamic-presentation-override";
 import { rotateRenderVector } from "../lib/game/math/camera-orientation";
 import { RenderSceneInterestController } from "../lib/game/runtime/render-scene-interest-controller";
 import {
@@ -69,6 +75,67 @@ import type { PrimaryCameraView } from "../lib/game/runtime/types";
 import { projectClientTargetIndicator } from "./client-target-indicator";
 
 describe("ClientGameplayPresentation", () => {
+	it("keeps barber previews scoped and applies committed particles independently of editor closure", async () => {
+		const guid = 0x01010001;
+		const state = currentState(guid);
+		const snapshot = barberSnapshotSchema.parse(barberFixture.snapshot);
+		if (snapshot.interaction === null)
+			throw new Error("Expected barber fixture.");
+		snapshot.interaction.subject = { guid, instance: 1 };
+		snapshot.particles = null;
+		const transport = new FakeClientTransport({ ...state, barber: snapshot });
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const presentation = new ClientGameplayPresentation({
+			canvas: fakeCanvas(),
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+		});
+		await presentation.start();
+		const preview = barberPreviewSchema.parse(barberFixture.preview);
+		preview.subject = { guid, instance: 1 };
+		await presentation.setBarberPreview(preview);
+		expect(runtime.presentationOverrides.at(-1)).toMatchObject({
+			guid,
+			generation: 1,
+			body: {
+				setupDid: preview.outcome.kind === "ready" ? preview.outcome.setup : 0,
+			},
+		});
+		transport.emit("client-barber-updated", {
+			...snapshot,
+			interaction: { ...snapshot.interaction, phase: { kind: "sending" } },
+			particles: { revision: 12, subject: { guid, instance: 1 }, script: null },
+		});
+		expect(runtime.presentationOverrides.at(-1)?.particles).toEqual({
+			key: "apply:12",
+			script: null,
+		});
+		expect(runtime.presentationOverrides.at(-1)?.body).not.toBeNull();
+		transport.emit("client-barber-updated", {
+			interaction: null,
+			result: null,
+			particles: { revision: 12, subject: { guid, instance: 1 }, script: null },
+		});
+		expect(runtime.presentationOverrides.at(-1)).toMatchObject({
+			body: null,
+			particles: { key: "apply:12", script: null },
+		});
+		transport.emit("client-barber-updated", {
+			interaction: null,
+			result: null,
+			particles: {
+				revision: 13,
+				subject: { guid, instance: 2 },
+				script: 0x33000001,
+			},
+		});
+		expect(runtime.presentationOverrides.at(-1)).toBeNull();
+		await presentation.destroy();
+		lifecycle.stop();
+	});
+
 	it("invalidates a delayed portal profile before another driver can borrow the runtime", async () => {
 		const state = {
 			...currentState(0x01010001),
@@ -1668,6 +1735,12 @@ function fallbackCameraTick(identity: {
 }
 
 class FakePresentationRuntime implements ClientGameplayRuntime {
+	readonly presentationOverrides: (DynamicPresentationOverride | null)[] = [];
+	async setDynamicPresentationOverride(
+		level: DynamicPresentationOverride | null,
+	): Promise<void> {
+		this.presentationOverrides.push(level);
+	}
 	readonly sceneMembership = new RenderSceneInterestController();
 	sceneInterestMembership() {
 		return this.sceneMembership;
@@ -2118,6 +2191,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 	const landblockId = playerGuid === 0x0101_0001 ? 0x0101_0100 : 0x0100_0001;
 	return {
 		characterSheet: null,
+		barber: { interaction: null, result: null, particles: null },
 		trade: { trade: null, pending_items: [] },
 		lifecycle: { kind: "in-world" },
 		characterManagement: { kind: "idle" },

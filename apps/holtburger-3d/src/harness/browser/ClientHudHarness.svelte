@@ -51,6 +51,8 @@
 	} from "../../client/client-housing-contract";
 	import { ClientTradeState } from "../../client/client-trade-state";
 	import { createTradeFixture } from "./client-trade-fixture";
+	import { createBarberFixture } from "./client-barber-fixture";
+	import { ClientBarberState } from "../../client/client-barber-state";
 	import { createVendorFixture } from "./client-vendor-fixture";
 	import { ClientVendorState } from "../../client/client-vendor-state";
 	import { ClientHouseCrystalState } from "../../client/client-house-crystal-state";
@@ -1268,9 +1270,11 @@
 		/** Verify live inventory, shared placement, geometry, selection, and recovery. */
 		readonly probeInventory: typeof probeInventory;
 		readonly probeLocks: () => ReturnType<typeof probeClientLocks>;
-		/** Synthetic replies through the real vendor session and HUD. */
 		/** Salvage authority replies exercise the production window and session. */
 		readonly salvageProbe: ReturnType<typeof createSalvageFixture>;
+		/** Synthetic replies through the real barber editor and HUD. */
+		readonly barberProbe: ReturnType<typeof createBarberFixture>;
+		/** Synthetic replies through the real vendor session and HUD. */
 		readonly vendorProbe: ReturnType<typeof createVendorFixture>;
 		/** Synthetic profiles and payment quotes through production session decoding. */
 		readonly housingProbe: ReturnType<typeof createHousingFixture>;
@@ -1485,6 +1489,7 @@
 		if (!userSettings.ui.useUnlockHelper) locks?.close();
 	});
 	let inventory = $state<ClientInventoryState | null>(null);
+	let barber = $state<ClientBarberState | null>(null);
 	let vendor = $state<ClientVendorState | null>(null);
 	let houseCrystal = $state<ClientHouseCrystalState | null>(null);
 	let housingManagement = $state<ClientHousingManagementState | null>(null);
@@ -1552,6 +1557,7 @@
 			spellCastTarget: null,
 			vitals: [],
 			characterSheet: null,
+			barber: { interaction: null, result: null, particles: null },
 			trade: { trade: null, pending_items: [] },
 			characterMotion: null,
 			activeConfirmation: null,
@@ -4755,6 +4761,12 @@
 			(message) => inventoryToasts.publish({ message, tone: "warning" }),
 		);
 		worldContainer = containerOwner;
+		const barberOwner = new ClientBarberState(
+			interactionLifecycle,
+			async () => {},
+			(message) => inventoryToasts.publish({ message, tone: "warning" }),
+		);
+		barber = barberOwner;
 		const vendorOwner = new ClientVendorState(
 			interactionLifecycle,
 			icons,
@@ -5376,6 +5388,11 @@
 				activateBound: (guid) =>
 					itemInteractions.activate(guid, "direct", false),
 			}),
+			barberProbe: createBarberFixture({
+				emit: emitInteractionEvent,
+				baseline: emitInteractionBaseline,
+				commands: interactionCommands,
+			}),
 			vendorProbe: createVendorFixture({
 				emit: emitInteractionEvent,
 				baseline: emitInteractionBaseline,
@@ -5932,6 +5949,10 @@
 			containerOwner.destroy();
 			tradeOwner.destroy();
 			trade = null;
+			void barberOwner.destroy().catch((error) => {
+				throw error;
+			});
+			barber = null;
 			vendorOwner.destroy();
 			unbindHousingDialogs();
 			unbindSalvage();
@@ -5997,6 +6018,7 @@
 			></canvas>
 			{#if gameplayCanvas !== null && interactionRoot !== null}
 				<ClientGameplayView
+					{barber}
 					lockInteractions={userSettings.lockInteractions}
 					onLockInteractionsChange={(lockInteractions) =>
 						(userSettings = { ...userSettings, lockInteractions })}

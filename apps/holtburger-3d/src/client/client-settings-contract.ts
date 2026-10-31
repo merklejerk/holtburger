@@ -81,6 +81,7 @@ const clientHudLayoutSchema = z
 		worldContainer: hudPlacementSchema,
 		locks: hudPlacementSchema,
 		salvage: hudPlacementSchema,
+		barber: hudPlacementSchema,
 		vendor: hudPlacementSchema,
 		houseCrystal: hudPlacementSchema,
 		logopolis: hudPlacementSchema,

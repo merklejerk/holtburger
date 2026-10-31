@@ -655,6 +655,8 @@ pub enum ClientWorldActivationCauseWire {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCurrentState {
+    /// Character-bound barber interaction and retained local racial effects.
+    pub barber: holtburger_core::client::barber::BarberSnapshot,
     /// Recoverable management operation and latest server-confirmed result.
     pub character_management: holtburger_core::client::types::CharacterManagementState,
     /// Latest complete gameplay visual, retained through event-stream recovery.
@@ -1325,6 +1327,10 @@ pub struct ClientExitRequested {
 /// frame only at the protocol writer, so core `ClientViewEvent` never becomes a wire contract.
 #[derive(Debug, Clone)]
 pub enum ClientHostEvent {
+    /// Cold appearance-editing interaction and local Apply consequences.
+    BarberUpdated(holtburger_core::client::barber::BarberSnapshot),
+    /// Candidate visual for one exact editor revision.
+    BarberPreview(holtburger_core::client::barber::BarberPreviewResult),
     /// Requested historical death locations for frontend-owned chat output.
     DeathLocations(holtburger_core::client::corpse::DeathLocationResult),
     /// Housing replacement level, independent of window-opening policy.
@@ -1648,6 +1654,7 @@ impl From<holtburger_core::ClientPresentationDiscontinuityKind>
 impl From<&ClientApplicationSnapshot> for ClientCurrentState {
     fn from(snapshot: &ClientApplicationSnapshot) -> Self {
         Self {
+            barber: snapshot.barber.clone(),
             character_management: snapshot.character_management.clone(),
             player_visual_capture: snapshot.player_visual_capture.clone(),
             party: snapshot.fellowship.as_ref().map(|party| {
@@ -1695,6 +1702,8 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::BarberUpdated(snapshot) => Some(ClientHostEvent::BarberUpdated(snapshot)),
+        ClientViewEvent::BarberPreview(result) => Some(ClientHostEvent::BarberPreview(result)),
         ClientViewEvent::HousingUpdated(housing) => Some(ClientHostEvent::HousingUpdated(housing)),
         ClientViewEvent::HousingCrystalReceived(crystal) => {
             Some(ClientHostEvent::HousingCrystalReceived(crystal))
@@ -3612,5 +3621,33 @@ mod salvage_wire_tests {
             .unwrap(),
             fixture["result"]
         );
+    }
+}
+
+#[cfg(test)]
+mod barber_contract_tests {
+    use holtburger_core::client::barber::{BarberPreviewResult, BarberRequest, BarberSnapshot};
+
+    #[test]
+    fn barber_contract_round_trips_browser_fixture_through_host_events() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../src/client/fixtures/barber-wire.json"))
+                .unwrap();
+        let snapshot: BarberSnapshot = serde_json::from_value(fixture["snapshot"].clone()).unwrap();
+        let preview: BarberPreviewResult =
+            serde_json::from_value(fixture["preview"].clone()).unwrap();
+        let request: BarberRequest = serde_json::from_value(fixture["request"].clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&snapshot).unwrap(),
+            fixture["snapshot"]
+        );
+        assert_eq!(serde_json::to_value(&preview).unwrap(), fixture["preview"]);
+        assert_eq!(serde_json::to_value(&request).unwrap(), fixture["request"]);
+        let event =
+            super::project_client_event(holtburger_core::ClientViewEvent::BarberPreview(preview));
+        assert!(matches!(
+            event,
+            Some(super::ClientHostEvent::BarberPreview(_))
+        ));
     }
 }

@@ -1,3 +1,5 @@
+import type { BarberPreview, BarberSnapshot } from "./client-barber-contract";
+import type { DynamicPresentationOverride } from "../lib/game/runtime/dynamic-presentation-override";
 import {
 	abortError,
 	isAbortError,
@@ -274,6 +276,9 @@ export type ClientGameplayPresentationCameraController =
 
 /** Runtime surface consumed by the client orchestration seam and injected by focused tests. */
 export interface ClientGameplayRuntime extends MapTerrainSource {
+	setDynamicPresentationOverride(
+		level: DynamicPresentationOverride | null,
+	): Promise<void>;
 	/** Accept every desired record before returning the visual-realization promise. */
 	replaceDynamicEntitySnapshot(
 		entities: readonly DynamicEntityView[],
@@ -415,6 +420,8 @@ type GameplayPresentationCue =
 export class ClientGameplayPresentation {
 	readonly camera: ClientGameplayPresentationCameraController;
 	readonly #session: ClientLifecycleSession;
+	/** Candidate visuals stay imperative; only their owner publishes cold HUD readiness. */
+	#barberPreview: BarberPreview | null = null;
 	readonly #canvas: HTMLCanvasElement;
 	readonly #onError: (error: unknown) => void;
 	readonly #resources: ClientGameplayPresentationResources;
@@ -1312,6 +1319,9 @@ export class ClientGameplayPresentation {
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
 		this.#sceneInterestCoordinator?.invalidate();
+		await attempt("withdraw-local-appearance", () =>
+			this.#activeResources?.runtime.setDynamicPresentationOverride(null),
+		);
 		await attempt("withdraw-live-entities", () =>
 			this.#activeResources?.runtime
 				.replaceDynamicEntitySnapshot([])
@@ -1370,6 +1380,7 @@ export class ClientGameplayPresentation {
 			const resources = this.#resources;
 			if (this.#destroyed) return;
 			this.#activeResources = resources;
+			await this.#reconcileBarberPresentation(this.#session.barberSnapshot());
 			this.#onSceneMembership?.(resources.runtime.sceneInterestMembership());
 			const server = createClientServerEnvironmentSource(
 				resources.activeRegion,
@@ -1435,6 +1446,11 @@ export class ClientGameplayPresentation {
 			case "resyncing":
 				this.#activeResources?.runtime.clearCombatEffects();
 				return;
+			case "barber-updated":
+				this.#observePresentationCompletion(
+					this.#reconcileBarberPresentation(event.barber),
+				);
+				return;
 			case "current-state":
 				this.#receiveCurrentState(event.state);
 				this.#reconcileEntityNameplates();
@@ -1485,8 +1501,64 @@ export class ClientGameplayPresentation {
 		}
 	}
 
+	/** Install only the current opening/revision's visual, leaving all authoritative facts untouched. */
+	async setBarberPreview(preview: BarberPreview | null): Promise<void> {
+		this.#barberPreview = preview;
+		if (preview !== null && this.#activeResources === null) await this.start();
+		await this.#reconcileBarberPresentation(this.#session.barberSnapshot());
+	}
+
+	async #reconcileBarberPresentation(snapshot: BarberSnapshot): Promise<void> {
+		const interaction = snapshot.interaction;
+		const preview = this.#barberPreview;
+		const usable =
+			preview !== null &&
+			preview.outcome.kind === "ready" &&
+			interaction?.id === preview.id &&
+			(interaction.phase.kind === "editing" ||
+				interaction.phase.kind === "sending");
+		if (!usable) this.#barberPreview = null;
+		const committed = snapshot.particles;
+		const subject = usable ? preview.subject : committed?.subject;
+		const entity =
+			subject === undefined ? null : this.#authoritativePlayer(subject.guid);
+		let level: DynamicPresentationOverride | null = null;
+		if (
+			subject !== undefined &&
+			subject.guid === this.#playerGuid &&
+			entity?.generation === subject.instance
+		) {
+			const candidate =
+				usable && preview.outcome.kind === "ready" ? preview.outcome : null;
+			const particle =
+				candidate?.particles.kind === "replace" &&
+				interaction?.phase.kind !== "sending"
+					? {
+							key: `preview:${preview?.id}:${candidate.particles.script}`,
+							script: candidate.particles.script,
+						}
+					: committed?.subject.guid === subject.guid &&
+						  committed.subject.instance === subject.instance
+						? { key: `apply:${committed.revision}`, script: committed.script }
+						: null;
+			level = {
+				guid: subject.guid,
+				generation: subject.instance,
+				body:
+					candidate === null
+						? null
+						: { setupDid: candidate.setup, appearance: candidate.appearance },
+				particles: particle,
+			};
+		}
+		await this.#activeResources?.runtime.setDynamicPresentationOverride(level);
+	}
+
 	#receiveCurrentState(state: ClientCurrentState): void {
 		this.#playerGuid = state.localPlayerGuid;
+		this.#observePresentationCompletion(
+			this.#reconcileBarberPresentation(state.barber),
+		);
 		this.#refreshEnvironment(performance.now());
 	}
 

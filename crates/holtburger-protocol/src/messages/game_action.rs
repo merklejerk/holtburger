@@ -1,5 +1,6 @@
 pub use crate::messages::allegiance::*;
 pub use crate::messages::book::actions::*;
+pub use crate::messages::character::barber::*;
 pub use crate::messages::chat::actions::*;
 pub use crate::messages::combat::actions::*;
 pub use crate::messages::contracts::*;
@@ -27,6 +28,8 @@ pub struct GameActionMessage {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameAction {
+    /// Complete resolved appearance submitted once when leaving the barber with Apply.
+    FinishBarber(Box<BarberAppearanceData>),
     /// Contract registry wire operation.
     AbandonContract(Box<AbandonContractActionData>),
 
@@ -146,6 +149,9 @@ impl ProtocolUnpack for GameActionMessage {
 
         let action_data = match action_op {
             Some(op) => match op {
+                GameActionOpcode::FinishBarber => {
+                    GameAction::FinishBarber(Box::new(BarberAppearanceData::unpack(data, offset)?))
+                }
                 GameActionOpcode::AbandonContract => GameAction::AbandonContract(Box::new(
                     AbandonContractActionData::unpack(data, offset)?,
                 )),
@@ -449,6 +455,10 @@ impl ProtocolPack for GameActionMessage {
         buf.write_u32::<LittleEndian>(self.sequence).unwrap();
 
         match &self.action {
+            GameAction::FinishBarber(data) => {
+                (GameActionOpcode::FinishBarber as u32).pack(buf);
+                data.pack(buf);
+            }
             GameAction::AbandonContract(data) => {
                 (GameActionOpcode::AbandonContract as u32).pack(buf);
                 data.pack(buf);

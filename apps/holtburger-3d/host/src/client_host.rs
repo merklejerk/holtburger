@@ -464,6 +464,7 @@ mod tests {
 
     fn snapshot_event() -> ClientViewEvent {
         ClientViewEvent::ApplicationSnapshot(Box::new(ClientApplicationSnapshot {
+            barber: Default::default(),
             character_management: holtburger_core::client::types::CharacterManagementState::Idle,
             player_visual_capture: None,
             fellowship: None,
@@ -1194,6 +1195,7 @@ mod tests {
         );
 
         let snapshot = ClientApplicationSnapshot {
+            barber: Default::default(),
             character_management: holtburger_core::client::types::CharacterManagementState::Idle,
             player_visual_capture: None,
             fellowship: None,

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { creationNameSchema } from "./client-character-creation-name";
+import { bodyAppearanceSchema } from "./client-body-appearance-contract";
 import type { HostTransport } from "../lib/host/host-transport";
 import { objectPreviewVisualSchema } from "./client-object-preview-contract";
 
@@ -10,14 +11,8 @@ const attributes = z.tuple([word, word, word, word, word, word]);
 const skills = z.array(index.max(3));
 
 /** Style ordinals, clothing palette-template keys and shades; the host resolves all DAT identities and substitutions. */
-const creationAppearanceSchema = z
-	.object({
-		eyes: word,
-		nose: word,
-		mouth: word,
-		hairColor: word,
-		eyeColor: word,
-		hairStyle: word,
+const creationAppearanceSchema = bodyAppearanceSchema
+	.extend({
 		headgearStyle: word,
 		headgearColor: word,
 		shirtStyle: word,
@@ -26,8 +21,6 @@ const creationAppearanceSchema = z
 		pantsColor: word,
 		footwearStyle: word,
 		footwearColor: word,
-		skinHue: hue,
-		hairHue: hue,
 		headgearHue: hue,
 		shirtHue: hue,
 		pantsHue: hue,

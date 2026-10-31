@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc};
 
 pub mod allegiance;
+pub mod barber;
 mod builder;
 mod busy_operation;
 mod camera;
@@ -201,6 +202,8 @@ enum PublishedCharacterMotionCapabilities {
 }
 
 pub struct ClientRuntime {
+    /// Character-bound appearance editing and persistent local racial particle selection.
+    barber: barber::BarberRuntime,
     /// Frontend-owned preference consumed by inventory and equipment planning.
     inventory_placement: inventory_storage::InventoryPlacementPolicy,
     /// Ordered diagnostic inputs; credentials and outgoing transport packets are excluded.
@@ -443,6 +446,7 @@ impl ClientRuntime {
     /// Builds one atomic replacement level for shells that lost their event baseline.
     pub fn application_snapshot(&self) -> ClientApplicationSnapshot {
         ClientApplicationSnapshot {
+            barber: self.barber.snapshot(),
             character_management: self.character_selection.management.clone(),
             player_visual_capture: self.player_visual.snapshot(),
             fellowship: self.world.fellowship.clone(),
@@ -958,6 +962,7 @@ impl ClientRuntime {
     }
 
     fn send_status_event(&mut self) {
+        self.poll_barber();
         if matches!(self.state, ClientState::Disconnected)
             && let Some(sample) = self.connection.snapshot(
                 Instant::now(),

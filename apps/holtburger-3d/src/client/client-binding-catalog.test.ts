@@ -34,6 +34,49 @@ const ctrlDigitTwo = {
 };
 
 describe("client binding catalog", () => {
+	it("captures physical Space consistently when its logical key is unidentified", () => {
+		for (const key of [" ", "Unidentified"]) {
+			expect(
+				captureClientBinding({ ...ctrlDigitTwo, key, code: "Space" }),
+			).toEqual({
+				code: "Space",
+				shift: false,
+				ctrl: true,
+				alt: false,
+				meta: false,
+			});
+		}
+		expect(
+			captureClientBinding({
+				...ctrlDigitTwo,
+				key: "Unidentified",
+				code: "KeyQ",
+			}),
+		).toMatchObject({ code: "KeyQ" });
+		expect(
+			captureClientBinding({ ...ctrlDigitTwo, key: "q", code: "KeyQ" }),
+		).toMatchObject({ key: "q" });
+	});
+
+	it("normalizes saved Space selectors without changing modifiers or alternate bindings", () => {
+		const restored = clientKeyboardSettingsSchema.parse({
+			...CLIENT_KEYBOARD_DEFAULTS,
+			client: {
+				...CLIENT_KEYBOARD_DEFAULTS.client,
+				preciseJump: [{ key: " ", ctrl: true }, { key: "F8" }],
+			},
+			character: {
+				...CLIENT_KEYBOARD_DEFAULTS.character,
+				jump: [{ key: " ", ctrl: false }],
+			},
+		});
+		expect(restored.client.preciseJump).toEqual([
+			{ code: "Space", ctrl: true },
+			{ key: "F8" },
+		]);
+		expect(restored.character.jump).toEqual([{ code: "Space", ctrl: false }]);
+	});
+
 	it("renames saved creature shortcuts without losing remaps or overriding explicit interactable bindings", () => {
 		const savedClient = { ...CLIENT_KEYBOARD_DEFAULTS.client };
 		Reflect.deleteProperty(savedClient, "nextInteractable");
@@ -195,7 +238,7 @@ describe("client binding catalog", () => {
 			),
 		).toEqual(["character.turnLeft"]);
 		expect(
-			conflictingClientBindings(settings, power, { key: " " }, null).map(
+			conflictingClientBindings(settings, power, { code: "Space" }, null).map(
 				(row) => row.id,
 			),
 		).toEqual(["character.jump"]);

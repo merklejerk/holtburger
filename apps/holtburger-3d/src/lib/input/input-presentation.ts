@@ -46,7 +46,7 @@ function selector(binding: KeyBinding, compact: boolean): string {
 	const key = binding.key;
 	const value = key === undefined ? binding.code : key;
 	if (value === undefined) throw new Error("Input binding has no key selector");
-	if (key === " ") return compact ? "Spc" : "Space";
+	if (key === " " || binding.code === "Space") return compact ? "Spc" : "Space";
 	const names: Readonly<Record<string, readonly [string, string]>> = {
 		ArrowUp: ["↑", "Arrow Up"],
 		ArrowDown: ["↓", "Arrow Down"],

@@ -259,16 +259,17 @@ fn standing_support_candidate(
         collision,
         hard,
         contact,
-        SupportRequest {
-            anchor,
-            center: primary.center,
-            radius: primary.radius,
-            maximum_drop: CONTACT_EPSILON,
-            // Upward acquisition uses the authored step limit, independently of downward reach.
-            maximum_rise: config.step_up_height,
-            placement: &contact.membership,
-        }
-        .into(),
+        SupportQuery {
+            sphere: PlacementRequest {
+                anchor,
+                center: primary.center,
+                radius: primary.radius,
+                placement: &contact.membership,
+            },
+            probe: SupportProbe::Standing {
+                maximum_rise: config.step_up_height,
+            },
+        },
     )?
     .into_iter()
     .filter(|support| {

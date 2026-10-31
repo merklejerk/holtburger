@@ -156,7 +156,7 @@ export class KeyboardInputPolicy {
 	/** Whether keyboard commands can currently enter the world context. */
 	get gameActive(): boolean {
 		return (
-			!this.#nativePageActive &&
+			!this.#activeNativePage &&
 			this.#allowsGame(this.#owner) &&
 			this.#modals.length === 0 &&
 			this.viewport.allowed
@@ -284,11 +284,14 @@ export class KeyboardInputPolicy {
 		};
 	};
 
-	/** Svelte action: a foreground form page uses browser defaults for its entire mounted lifetime. */
-	readonly nativePage = (element: HTMLElement): { destroy: () => void } => {
+	/** Foreground page ownership, with an optional default action after focused controls. */
+	readonly nativePage = (
+		element: HTMLElement,
+		keydown?: KeyboardScope["keydown"],
+	): { destroy: () => void } => {
 		const registration = this.scope(element, {
 			nativeControls: true,
-			keydown: () => {},
+			keydown: (event) => keydown?.(event),
 		});
 		this.#nativePages.add(element);
 		this.cancel();
@@ -302,11 +305,13 @@ export class KeyboardInputPolicy {
 		};
 	};
 
-	get #nativePageActive(): boolean {
-		return [...this.#nativePages].some(
-			(element) =>
-				element.isConnected && element.closest("[hidden], [inert]") === null,
-		);
+	get #activeNativePage(): HTMLElement | undefined {
+		return [...this.#nativePages]
+			.reverse()
+			.find(
+				(element) =>
+					element.isConnected && element.closest("[hidden], [inert]") === null,
+			);
 	}
 
 	/** Activate a registered surface, constrained to the top modal when one is open. */
@@ -428,7 +433,7 @@ export class KeyboardInputPolicy {
 		// Subsequent native Tab/arrow navigation is deliberate keyboard interaction.
 		this.#pointerControl = null;
 		this.#validateOwner();
-		const nativePage = this.#nativePageActive;
+		const nativePage = this.#activeNativePage;
 		if (this.#owner !== null)
 			this.#scopeFor(this.#owner)?.modifiersChanged?.(event);
 		const key = event.code || event.key;
@@ -455,7 +460,7 @@ export class KeyboardInputPolicy {
 			return;
 		}
 		// A native press retains its release destination even if selection changes while held.
-		if (this.#presses.get(key) === "native") return;
+		if (this.#presses.get(key) === "native" && !nativePage) return;
 		// An open select owns navigation and dismissal before panel/game Escape handlers.
 		// This mirrors external pickers, whose keyboard events never entered the document.
 		if (this.#owner?.closest("select:open")) {
@@ -480,7 +485,13 @@ export class KeyboardInputPolicy {
 		const owner = this.#owner;
 		const editor = owner !== null && isEditor(owner);
 		// The active interaction gets first refusal before another scope’s activation command.
-		if (owner !== null) this.#scopeFor(owner)?.keydown(event);
+		const ownerScope = owner === null ? undefined : this.#scopeFor(owner);
+		ownerScope?.keydown(event);
+		// Foreground pages may supply a default action after focused controls get first refusal.
+		if (!event.defaultPrevented && this.#modals.length === 0 && nativePage) {
+			const scope = this.#scopes.get(nativePage);
+			if (scope !== ownerScope) scope?.keydown(event);
+		}
 		if (
 			!event.defaultPrevented &&
 			this.#owner === owner &&
@@ -762,7 +773,7 @@ export class KeyboardInputPolicy {
 	readonly #pointerDown = (event: PointerEvent): void => {
 		// A drag may end without a click. A new press always retires its trailing-click guard.
 		this.#focusReturnGesture = null;
-		if (this.#nativePageActive) {
+		if (this.#activeNativePage) {
 			this.#pointerControl = null;
 			return;
 		}

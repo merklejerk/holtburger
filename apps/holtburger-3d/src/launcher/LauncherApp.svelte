@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from "svelte";
+	import { submitPregameOnEnter } from "../client/pregame-submit";
 	import ClientPregameScreen from "../client/ClientPregameScreen.svelte";
 	import UiDialog from "../app/UiDialog.svelte";
 	import { navigateVerticalButtons } from "../app/vertical-button-navigation";
@@ -32,6 +33,8 @@
 			null,
 	);
 	let busy = $state(false);
+	/** Primary submit control keeps keyboard entry on the validated form path. */
+	let playButton = $state<HTMLButtonElement>();
 	let browsingServers = $state(false);
 	let selectedServerId = $state("");
 	let selectedProfileId = $state("");
@@ -240,6 +243,15 @@
 	branding="corner"
 	showPortalLogo={true}
 	backdrop={false}
+	onDefaultKeydown={(event) => {
+		if (editor === null && !browsingServers)
+			submitPregameOnEnter(
+				event,
+				playButton,
+				event.target instanceof HTMLButtonElement &&
+					event.target.classList.contains("launcher-server-choice"),
+			);
+	}}
 	headerAside={notice !== null ? errorNotice : undefined}
 >
 	<section
@@ -440,6 +452,7 @@
 						>
 					</div>
 					<button
+						bind:this={playButton}
 						class="pregame-primary pregame-action ui-button launcher-play"
 						type="submit"
 						disabled={busy || !snapshot.canPlay || !server || !account}

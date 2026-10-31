@@ -21,6 +21,30 @@ function fixture() {
 }
 
 describe("game keyboard routing", () => {
+	it("routes unhandled keys and repeats to the foreground page and restores the previous page on teardown", () => {
+		const { keyboard } = fixture();
+		const element = () =>
+			({ isConnected: true, closest: () => null }) as unknown as HTMLElement;
+		const firstAction = vi.fn();
+		const secondAction = vi.fn((event: KeyboardEvent) =>
+			event.preventDefault(),
+		);
+		const first = keyboard.nativePage(element(), firstAction);
+		const second = keyboard.nativePage(element(), secondAction);
+		keyboard.keydown(keyEvent("Enter"));
+		keyboard.keydown(keyEvent("Enter", true));
+		expect(secondAction).toHaveBeenCalledTimes(2);
+		expect(firstAction).not.toHaveBeenCalled();
+		keyboard.keyup(keyEvent("Enter"));
+		second.destroy();
+		keyboard.keydown(keyEvent("Enter"));
+		expect(firstAction).toHaveBeenCalledOnce();
+		// A native press must still reach page policy on repeat so it can suppress resubmission.
+		keyboard.keydown(keyEvent("Enter", true));
+		expect(firstAction).toHaveBeenCalledTimes(2);
+		first.destroy();
+	});
+
 	it("allows initial Tab and Shift+Tab on a native page, then restores gameplay suppression on teardown", () => {
 		const { keyboard, game } = fixture();
 		const page = keyboard.nativePage({

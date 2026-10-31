@@ -20,6 +20,8 @@
 		readonly backdrop: boolean;
 		/** Page-owned status beside corner branding; absent pages retain the existing header layout. */
 		readonly headerAside?: Snippet;
+		/** Optional page action after focused controls have had first refusal. */
+		readonly onDefaultKeydown?: (event: KeyboardEvent) => void;
 		/** The active page owns its controls, status, and recovery actions. */
 		readonly children: Snippet;
 		/** Page-owned peripheral actions or metadata, kept outside the foreground content. */
@@ -30,6 +32,7 @@
 		showPortalLogo,
 		backdrop,
 		headerAside,
+		onDefaultKeydown,
 		children,
 		footer,
 	}: Props = $props();
@@ -79,7 +82,7 @@
 	class:with-backdrop={backdrop}
 	class:hero-brand={branding === "hero"}
 	aria-label="Holtburger client"
-	use:keyboard.nativePage
+	use:keyboard.nativePage={(event) => onDefaultKeydown?.(event)}
 >
 	<div class="pregame-header" class:with-aside={headerAside !== undefined}>
 		<header class="pregame-brand">

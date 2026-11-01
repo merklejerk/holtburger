@@ -67,6 +67,7 @@
 		"@electron-forge/cli": "^7.11.2",
 		"@electron-forge/maker-zip": "^7.11.2",
 		"@electron/asar": "^4.3.0",
+		"@electron/osx-sign": "^2.7.2",
 		"@eslint/js": "^10.0.1",
 		"@poppanator/sveltekit-svg": "^7.0.1",
 		"@resvg/resvg-js": "2.6.2",

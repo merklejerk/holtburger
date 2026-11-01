@@ -1,6 +1,8 @@
 # Holtburger 3D alpha
 
-Extract the complete archive for Linux x86-64, Windows x86-64, or macOS Apple Silicon.
+Choose the Windows x86-64 setup executable, macOS Apple Silicon DMG, or a portable
+archive for Linux x86-64, Windows x86-64, or macOS Apple Silicon. For portable use,
+extract the complete archive.
 Keep the files inside `h3d` together. This product contains the h3d client/Explorer and its
 private host/runtime/resources. Download the separate CLI product for the terminal client,
 scripts, and conversion utilities. `build-info.json` records product, version, source commit,
@@ -9,6 +11,31 @@ and target. Compare the download with the release's `SHA256SUMS`.
 h3d requires your own full HBA or retail DAT directory. A retail directory normally contains
 `client_portal.dat`, `client_cell_1.dat`, and `client_local_English.dat`;
 `client_highres.dat` is optional. Compact CLI content cannot supply 3D assets.
+
+## Install and update
+
+On Windows, run `holtburger-3d-VERSION-x86_64-pc-windows-msvc-setup.exe`. It installs
+for the current user without administrator privileges and creates a **Holtburger 3D
+Alpha** Start menu entry. To update or repair, quit the application and its host, then
+run the new setup executable. Setup reuses the previous location and replaces the
+owned program payload, including obsolete files. A locked payload stops installation;
+quit the running copy and retry. Interrupted installation can be repaired by rerunning
+setup. There is no in-app updater or guaranteed atomic rollback.
+
+On macOS, open `holtburger-3d-VERSION-aarch64-apple-darwin.dmg` and copy
+`holtburger-3d.app` into Applications. For an update, quit the existing application,
+drag the new app into the same location, and choose Replace. Eject the disk image
+after copying. Keep the accompanying quickstart and notices available in the DMG.
+
+Updates preserve the existing Electron user profile, including launcher profiles,
+saved credentials, themes, and settings. Keep user files and retail assets outside
+the installed program payload. Downgrading to older versions is not a supported
+settings migration. Portable ZIP installations are separate copies: installing setup
+does not remove an old extracted directory or its manually created shortcuts.
+
+Uninstall Windows through Installed apps. On macOS, quit and remove the `.app`.
+These operations retain the user profile and external game assets. Portable users
+should extract a new version into a fresh directory and retire the old program copy.
 
 ```sh
 # Linux
@@ -54,12 +81,16 @@ Corrupt HBAs remain errors; h3d never combines HBA and DAT families.
 
 Linux requires a graphical desktop and Electron system libraries, including GTK 3, NSS,
 GBM, and ALSA. The release manifest records linkage from the native build runner.
-Packages are unsigned; Windows/macOS may require an OS launch decision. The alpha is
-not Developer ID signed or notarized. If macOS reports a trusted download from this
+Windows packages are not publisher-signed. macOS apps are ad-hoc signed for bundle
+integrity, without Developer ID signing or notarization. Neither the installer format
+nor an integrity signature establishes a trusted publisher. Windows/macOS may warn
+or block launch, and macOS may not offer Open Anyway. If macOS reports a trusted download from this
 repository as damaged, remove quarantine only from the extracted app, then retry:
 
 ```sh
 xattr -dr com.apple.quarantine ./h3d/holtburger-3d.app
+# For the app copied from the DMG:
+xattr -dr com.apple.quarantine /Applications/holtburger-3d.app
 ```
 
 See the release notes for which native targets were actually verified.

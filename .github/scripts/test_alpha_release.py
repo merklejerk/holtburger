@@ -16,7 +16,7 @@ from unittest.mock import patch
 import zipfile
 
 from alpha_release import (
-    TARGETS, archive_bundle, digest, executable_architecture, extract_bundle,
+    TARGETS, INSTALLER_TARGETS, archive_bundle, digest, executable_architecture, extract_bundle,
     assemble, create_tag, manifest, plan, stage, validate_tag, verify_bundle,
     record_flatpak, flatpak_manifest,
     flatpak_runtime_ref, THREED_FLATPAK_RECIPE,
@@ -402,13 +402,40 @@ class ReleaseManifestTests(unittest.TestCase):
                 (root / f"metadata-{product}-flatpak.json").write_text(json.dumps(record))
             descriptor = root / "cli-content.json"
             descriptor.write_text(json.dumps({"sha256": content["contentSha256"]}))
+            for installer in INSTALLER_TARGETS:
+                native = json.loads((root / f"metadata-3d-{installer.triple}.json").read_text())
+                path = root / installer.filename(version)
+                path.write_bytes(installer.format.encode())
+                write = {**identity, "product": "3d", "target": installer.triple,
+                         "format": installer.format, "installer": path.name,
+                         "sha256": digest(path), "nativeArchiveSha256": native["sha256"]}
+                (root / f"metadata-3d-installer-{installer.triple}.json").write_text(json.dumps(write))
             with patch("alpha_release.source_identity", return_value=(commit, False)), \
                  patch("alpha_release.CLI_CONTENT_DESCRIPTOR", descriptor):
                 files = manifest(root)
                 expected_downloads = {notices.name, "release-manifest.json", "SHA256SUMS"}
                 expected_downloads.update(record["archive"] for record in json.loads((root / "release-manifest.json").read_text())["native"])
                 expected_downloads.update(f"holtburger-{product}-{version}-x86_64.flatpak" for product in ("cli", "3d"))
+                expected_downloads.update(installer.filename(version) for installer in INSTALLER_TARGETS)
                 self.assertEqual({path.name for path in files}, expected_downloads)
+                installer = INSTALLER_TARGETS[0]
+                receipt = root / f"metadata-3d-installer-{installer.triple}.json"
+                original = json.loads(receipt.read_text())
+                for field, bad in [("commit", "b" * 40), ("version", "0.0.0"),
+                                   ("format", "dmg"), ("nativeArchiveSha256", "0" * 64)]:
+                    receipt.write_text(json.dumps({**original, field: bad}))
+                    with self.subTest(field=field), self.assertRaisesRegex(ValueError, "Installer release identity mismatch"):
+                        manifest(root)
+                receipt.write_text(json.dumps({**original, "installer": "../unexpected.exe"}))
+                with self.assertRaisesRegex(ValueError, "Installer release filename mismatch"):
+                    manifest(root)
+                receipt.write_text(json.dumps({**original, "sha256": "0" * 64}))
+                with self.assertRaisesRegex(ValueError, "Installer release digest mismatch"):
+                    manifest(root)
+                receipt.unlink()
+                with self.assertRaises(FileNotFoundError):
+                    manifest(root)
+                receipt.write_text(json.dumps(original))
                 self.assertIn("THIRD_PARTY_NOTICES.html", (root / "SHA256SUMS").read_text())
                 threed = root / f"holtburger-3d-{version}-x86_64.flatpak"
                 threed.write_bytes(b"substituted bundle")
@@ -497,7 +524,7 @@ class ProductFlatpakTests(unittest.TestCase):
             (installed / "executable").write_bytes(b"changed executable")
             with patch("alpha_release.verify_bundle", return_value=self.info), \
                  patch("alpha_release.source_identity", return_value=(self.commit, False)):
-                with self.assertRaisesRegex(ValueError, "Flatpak file differs"):
+                with self.assertRaisesRegex(ValueError, "payload file differs"):
                     record_flatpak(files, native, root / "bundle", root / "receipt")
 
     def test_installed_cli_contains_the_full_native_inventory_with_bound_receipt(self):
@@ -527,7 +554,7 @@ class ProductFlatpakTests(unittest.TestCase):
                 self.assertEqual(record["contentFiles"], json.loads((native / "build-info.json").read_text())["contentFiles"])
                 executable = installed / "dat-tool"
                 executable.chmod(0o644)
-                with self.assertRaisesRegex(ValueError, "executable has lost permissions"):
+                with self.assertRaisesRegex(ValueError, "executable mode differs"):
                     record_flatpak(files, native, bundle, output)
                 executable.chmod(0o755)
                 metadata = files.parent / "metadata"
@@ -539,7 +566,7 @@ class ProductFlatpakTests(unittest.TestCase):
                         record_flatpak(files, native, bundle, output)
                 metadata.write_text(f"[Application]\nname={recipe['id']}\nruntime={runtime}\n")
                 (installed / "content/navigation.hnav").write_bytes(b"substituted")
-                with self.assertRaisesRegex(ValueError, "Flatpak file differs: content/navigation.hnav"):
+                with self.assertRaisesRegex(ValueError, "payload file differs: content/navigation.hnav"):
                     record_flatpak(files, native, bundle, output)
 
 

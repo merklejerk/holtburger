@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { join, normalize, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { verifyMacPackage } from "./mac-package.mjs";
 
 const scriptPath = fileURLToPath(import.meta.url);
 const appRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
@@ -60,6 +61,7 @@ export async function verifyElectronPackage(packageRoot) {
 			constants.R_OK,
 		);
 		await verifyMacFrameworkLinks(normalizedPackageRoot);
+		await verifyMacPackage(normalizedPackageRoot);
 	}
 	await requireNonEmptyFile(
 		join(electronNoticeRoot, "LICENSE"),

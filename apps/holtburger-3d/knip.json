@@ -18,6 +18,7 @@
 		"src/harness/user-theme-probe.ts",
 		"electron/preload.cts",
 		"forge.config.cjs",
+		"scripts/installer-profile.mjs",
 		"scripts/entry-paths.mjs"
 	],
 	"ignore": ["scripts/entry-paths.d.mts"],

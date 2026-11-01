@@ -37,6 +37,24 @@ TARGETS = (
     NativeTarget("x86_64-pc-windows-msvc", "windows-2022", "win32", "x64"),
     NativeTarget("aarch64-apple-darwin", "macos-15", "darwin", "arm64"),
 )
+
+
+@dataclass(frozen=True)
+class InstallerTarget:
+    """One desktop format required by complete-candidate staging."""
+
+    triple: str  # Native archive identity consumed by the installer generator.
+    format: str  # Explicit packaging format recorded in the release manifest.
+    suffix: str  # Canonical downloadable filename suffix, checked during staging.
+
+    def filename(self, version: str) -> str:
+        return f"holtburger-3d-{version}-{self.triple}{self.suffix}"
+
+
+INSTALLER_TARGETS = (
+    InstallerTarget("x86_64-pc-windows-msvc", "inno-setup", "-setup.exe"),
+    InstallerTarget("aarch64-apple-darwin", "dmg", ".dmg"),
+)
 SCRIPTS = ("fighter.js", "mage.js", "mage.data.json", "mage.data.bin")
 TOOLS = ("holtburger-cli", "dat2hba", "dat-tool")
 APP = ROOT / "apps/holtburger-3d"
@@ -287,6 +305,20 @@ def inspect_linkage(bundle: Path, target: NativeTarget, product: str) -> dict[st
     return reports
 
 
+def verify_host_origin(bundle: Path, source: Path, target: NativeTarget) -> None:
+    """Bind a final packaged host to Cargo, accounting for Mac signing mutations."""
+    host = executable_paths(bundle, target, "3d")[-1]
+    source_digest = digest(source)
+    if target.platform == "darwin":
+        provenance = json.loads(host.with_name("host-provenance.json").read_text())
+        if provenance["sourceHostSha256"] != source_digest:
+            raise ValueError("Mac signing provenance identifies a different Cargo host")
+        if provenance["packagedHostSha256"] != digest(host):
+            raise ValueError("Mac signing provenance identifies a different packaged host")
+    elif digest(host) != source_digest:
+        raise ValueError("Forge bundled a different Rust host than the target build")
+
+
 def assemble(arguments) -> None:
     target = target_named(arguments.target)
     if target.platform != sys.platform:
@@ -327,8 +359,7 @@ def assemble(arguments) -> None:
                          "contentFiles": {filename: digest(content / filename) for filename in CONTENT_FILES}})
         else:
             shutil.copytree(arguments.package, bundle / "h3d", symlinks=True)
-            if digest(executable_paths(bundle, target, product)[-1]) != digest(binaries / f"holtburger-3d-host{suffix}"):
-                raise ValueError("Forge bundled a different Rust host than the target build")
+            verify_host_origin(bundle, binaries / f"holtburger-3d-host{suffix}", target)
         shutil.copy2(ROOT / f"release/ALPHA_{product.upper()}_QUICKSTART.md", bundle / "QUICKSTART.md")
         shutil.copy2(ROOT / "LICENSE.md", bundle / "LICENSE.md")
         shutil.copy2(arguments.notices, bundle / "THIRD_PARTY_NOTICES.html")
@@ -398,10 +429,26 @@ def manifest(artifacts: Path) -> list[Path]:
             raise ValueError(f"Flatpak release archive mismatch: {product}")
         files.append(path)
         flatpaks.append(record)
+    installers = []
+    for installer in INSTALLER_TARGETS:
+        native = next(record for record in records if record["product"] == "3d" and record["target"] == installer.triple)
+        record = json.loads((artifacts / f"metadata-3d-installer-{installer.triple}.json").read_text())
+        expected = {**identity, "product": "3d", "target": installer.triple,
+                    "format": installer.format, "nativeArchiveSha256": native["sha256"]}
+        if any(record[key] != value for key, value in expected.items()):
+            raise ValueError(f"Installer release identity mismatch: {installer.triple}")
+        filename = installer.filename(version)
+        if record["installer"] != filename:
+            raise ValueError(f"Installer release filename mismatch: {installer.triple}")
+        path = artifacts / filename
+        if not path.stat().st_size or digest(path) != record["sha256"]:
+            raise ValueError(f"Installer release digest mismatch: {installer.triple}")
+        files.append(path)
+        installers.append(record)
     description = artifacts / "release-manifest.json"
     write_json(description, {
         "version": version, "commit": commit, "noticesSha256": notices_digest,
-        "native": records, "flatpaks": flatpaks,
+        "native": records, "flatpaks": flatpaks, "installers": installers,
         "assets": [{"name": path.name, "sha256": digest(path)} for path in files],
     })
     files.append(description)
@@ -530,6 +577,26 @@ def prepare_flatpak(artifacts: Path, product: str, output: Path, *, nightly_cli:
     return native.resolve()
 
 
+def verify_payload(native: Path, installed: Path) -> None:
+    """Compare an owned installed subtree with its verified native input, including links."""
+    expected = {path.relative_to(native) for path in native.rglob("*")}
+    actual = {path.relative_to(installed) for path in installed.rglob("*")}
+    if actual != expected:
+        raise ValueError("Installed payload inventory differs from its native input")
+    for relative in expected:
+        source, destination = native / relative, installed / relative
+        if source.is_symlink():
+            if not destination.is_symlink() or os.readlink(source) != os.readlink(destination):
+                raise ValueError(f"Installed payload link differs: {relative}")
+        elif source.is_file():
+            if destination.is_symlink() or digest(source) != digest(destination):
+                raise ValueError(f"Installed payload file differs: {relative}")
+            if sys.platform != "win32" and (source.stat().st_mode & 0o111) != (destination.stat().st_mode & 0o111):
+                raise ValueError(f"Installed payload executable mode differs: {relative}")
+        elif not destination.is_dir() or destination.is_symlink():
+            raise ValueError(f"Installed payload directory differs: {relative}")
+
+
 def record_flatpak(files: Path, native: Path, bundle: Path, output: Path) -> None:
     """Bind installed inventory and bytes to the selected native product and runtime."""
     info = verify_bundle(native)
@@ -537,23 +604,7 @@ def record_flatpak(files: Path, native: Path, bundle: Path, output: Path) -> Non
     if json.loads((installed / "build-info.json").read_text()) != info:
         raise ValueError("Installed Flatpak identity differs from its native input")
     require_flatpak_candidate(info)
-    expected = {path.relative_to(native) for path in native.rglob("*")}
-    actual = {path.relative_to(installed) for path in installed.rglob("*")}
-    if actual != expected:
-        raise ValueError("Installed Flatpak inventory differs from its native input")
-    for relative in expected:
-        source, destination = native / relative, installed / relative
-        if source.is_symlink():
-            if not destination.is_symlink() or os.readlink(source) != os.readlink(destination):
-                raise ValueError(f"Installed Flatpak link differs: {relative}")
-        elif source.is_file():
-            if destination.is_symlink() or digest(source) != digest(destination):
-                raise ValueError(f"Installed Flatpak file differs: {relative}")
-    # Exact byte/link equality already binds the architecture and package resources. Check the
-    # remaining install-specific executable mode without repeating renderer/archive inspection.
-    for executable in executable_paths(installed, target_named(info["target"]), info["product"]):
-        if not os.access(executable, os.X_OK):
-            raise ValueError(f"Installed Flatpak executable has lost permissions: {executable}")
+    verify_payload(native, installed)
     helper_identity = {}
     if info["product"] == "cli":
         for tool in TOOLS:

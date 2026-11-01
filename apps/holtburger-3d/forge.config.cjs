@@ -45,7 +45,13 @@ function ignoreApplicationSource(path) {
 
 module.exports = {
 	hooks: {
-		postPackage(_config, { platform, outputPaths }) {
+		async postPackage(_config, { platform, outputPaths }) {
+			if (platform === "darwin") {
+				const { sealMacPackage } = await import("./scripts/mac-package.mjs");
+				for (const outputPath of outputPaths)
+					await sealMacPackage(outputPath, hostPath);
+				return;
+			}
 			if (platform !== "win32") return;
 			for (const outputPath of outputPaths)
 				execFileSync(

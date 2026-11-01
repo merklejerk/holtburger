@@ -11,8 +11,14 @@ app ID and saved settings: `io.github.merklejerk.holtburger-alpha`. Its download
 `holtburger-3d`; CLI uses `io.github.merklejerk.holtburger-cli-alpha`. Archive utilities belong to
 CLI, including its Flatpak's `--command=dat-tool` and `--command=dat2hba` entries.
 
+3D also offers a per-user Windows setup executable and a macOS DMG. Quit before
+updating: rerun Windows setup, or replace the Mac app in Applications. Settings and
+external game assets are retained; there is no in-app updater. Portable archives and
+CLI downloads remain available. See the 3D quickstart for repair and uninstall behavior.
+
 Read `QUICKSTART.md` inside each product. h3d defaults to client mode and accepts explicit
-`explorer` mode. Both clients use `-p` for port and `-P` for password; there is no login UI.
+`explorer` mode. Both clients use `-p` for port and `-P` for password; h3d also offers
+its server/profile launcher, while CLI takes connection credentials as arguments.
 
 CLI local movement follows destination X/Y/Z with valid committed cell reports. It omits
 local gravity, jumping, falling, and stairs; it can skip portal paths across known gaps.
@@ -20,8 +26,10 @@ Remote prediction uses empty-room shells and terrain without furniture/peer coll
 ACE remains authoritative, including missile ground eligibility that the reduced client cannot
 solve locally. Reduced movement and this request policy are specific to the CLI composition.
 
-Packages are unsigned. macOS is not Developer ID signed or notarized; its quickstart has
-the app-specific quarantine workaround. Automated build/resource/identity/startup checks do
+Windows packages are not publisher-signed. macOS apps use ad-hoc integrity signing,
+without Developer ID signing or notarization; its quickstart has the app-specific
+quarantine workaround. Installer formats do not bypass OS publisher-trust checks.
+Automated build/resource/identity/startup and installer checks do
 not establish GPU, audio, input, scaling, Gatekeeper, or SmartScreen acceptance.
 
 This draft awaits final user acceptance. Record actual tested targets and remaining

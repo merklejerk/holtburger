@@ -27,12 +27,21 @@ const { values } = parseArgs({
 		flatpak: { type: "boolean" },
 		"theme-check": { type: "string", default: "assets" },
 		"presentation-content": { type: "string" },
+		"profile-root": { type: "string" },
+		"expected-server": { type: "string" },
 	},
 });
 if (!["assets", "full"].includes(values["theme-check"]))
 	throw new Error("--theme-check must be assets or full");
 if (values.flatpak === true && values.package !== undefined)
 	throw new Error("Choose --package <executable> or --flatpak");
+if (values["profile-root"] !== undefined && values.package === undefined)
+	throw new Error("An owned profile root requires --package");
+if (
+	values["expected-server"] !== undefined &&
+	values["profile-root"] === undefined
+)
+	throw new Error("Expected saved server requires --profile-root");
 const launchTarget =
 	values.flatpak === true
 		? {
@@ -54,7 +63,12 @@ const launchTarget =
 const profileName =
 	launchTarget.kind === "development" ? "holtburger-3d-dev" : "holtburger-3d";
 const directory = await mkdtemp(join(tmpdir(), "h3d-content-probe-"));
-const config = join(directory, "config");
+// Upgrade harnesses retain this owned profile across installations; only our scratch
+// directory is removed below. Ordinary startup probes continue using isolated profiles.
+const config =
+	values["profile-root"] === undefined
+		? join(directory, "config")
+		: resolve(values["profile-root"]);
 const preference = join(config, profileName, "content-selection.json");
 const localAssets = join(directory, "assets");
 await mkdir(localAssets, { recursive: true });
@@ -411,6 +425,16 @@ try {
 						throw error;
 					}
 				}, "failed client attempt returns to launcher");
+				if (values["expected-server"] !== undefined) {
+					const saved = await evaluate(
+						app.client,
+						`window.holtburgerLauncher.snapshot().then(value => !value.recoveryRequired && value.servers.some(server => server.name === ${JSON.stringify(values["expected-server"])}))`,
+					);
+					if (!saved)
+						throw new Error(
+							"Installed app did not load the retained launcher server",
+						);
+				}
 			} else {
 				const state = await waitFor(async () => {
 					const current = await app.snapshot();

@@ -2,7 +2,8 @@
 
 The alpha channel builds `3d-next` and stages a draft GitHub prerelease. The release has
 separate CLI and 3D products, each on Linux x86-64, Windows x86-64, and macOS Apple Silicon,
-plus one Flatpak per product. Intel macOS is not supported. Both products share one app
+plus one Flatpak per product. The 3D product also has a Windows setup executable and a
+macOS DMG. Intel macOS is not supported. Both products share one app
 version and source commit. Publication promotes the frozen draft after final user acceptance;
 it does not build new artifacts.
 
@@ -91,6 +92,33 @@ Assembly checks architecture, executable modes, notices/content identity, native
 and extracted layout. 3D also checks packaged host and renderer source identity. CLI needs
 no Node/Electron installation. 3D needs no compact CLI content.
 
+### Desktop installers and manual upgrades
+
+The desktop installer job consumes the verified 3D native ZIP. It does not rebuild
+Electron or the Rust host. Windows uses `apps/holtburger-3d/packaging/windows.iss` with
+the compiler selected by the installed Chocolatey package; macOS uses native `hdiutil`.
+Archives upload before installer generation, so a failed installer retains its source
+archive for diagnostics. The native job must still pass before complete-draft staging.
+
+macOS packaging signs the Rust host first, records its Cargo and signed digests in
+`Contents/Resources/host-provenance.json`, then seals the application. Both the native
+archive and Forge's app-only diagnostic ZIP retain that receipt. Assembly checks Cargo
+provenance; package/archive/copy inspection checks the final host and bundle signatures.
+Gatekeeper assessment is recorded separately and may reject the ad-hoc identity.
+
+`desktop_installers.py` requires the native OS and emits installer metadata only after
+its install/copy checks pass. Windows checks modify registry and Start menu state: run
+them only on ephemeral CI runners or disposable OS accounts/VMs. Local disposable
+accounts must explicitly set `HOLTBURGER_DISPOSABLE_INSTALL_TESTS=1`; an existing app
+registration or shortcut is refused. A temporary destination alone is not isolation.
+
+The checks cover install, repair, a generated predecessor upgrade, obsolete-file
+removal, retained launcher credentials, locked files, and uninstall/replacement. Mac
+checks also require rejection of a mutated sealed resource. The predecessor is a
+synthetic installation fixture, not proof of compatibility with every historical
+settings schema. Finder, browser-download quarantine, and visual acceptance remain
+user-owned. No update server or application updater is installed.
+
 ## Candidate builds and diagnostic selection
 
 `Alpha checks` validates pushes/PRs on `3d-next` on Linux. Prose-only changes outside shipped
@@ -137,8 +165,9 @@ git push origin refs/tags/alpha-YYYYMMDD-COMMITPREFIX
 These are operator actions requiring authorization, not automatic cleanup. Never move an
 existing alpha tag. The tag namespace avoids the separate cargo-dist release trigger. The existing `create-tag`
 command creates/reuses only the exact clean source and never moves a conflicting tag.
-The final aggregator requires CLI+3D native records on all targets, both Flatpaks, shared
-notices, one source/version, matching CLI companions, and exact archive checksums/names.
+The final aggregator requires CLI+3D native records on all targets, both Flatpaks, the
+Windows 3D setup and Mac DMG, shared notices, one source/version, matching CLI companions,
+and exact artifact checksums/names. Installer records bind to their native ZIP digest.
 It writes `release-manifest.json` and `SHA256SUMS`. No standalone micro download or combined
 third product remains. Diagnostic partial matrices cannot enter release staging.
 
@@ -227,7 +256,8 @@ This avoids repeating tool compilation and license collection in the release pat
 Manual native/visual acceptance happens after the complete draft exists. Provide its source,
 checksums, known limitations, and which automatic/manual checks actually ran:
 
-1. Download and checksum the matching CLI and/or 3D archive; extract with native tools.
+1. Download and checksum the matching CLI archive and/or 3D installer/archive. Exercise
+   a first installation and replacing a prior installation while retaining a real profile.
 2. CLI: use bundled content, check creation choices, entry, approach/follow, cell changes,
    and authoritative repositioning. Local movement has no gravity/jumping/stair simulation.
 3. 3D: supply full retail data, launch the default client and explicit Explorer, and check
@@ -237,8 +267,8 @@ checksums, known limitations, and which automatic/manual checks actually ran:
 
 Record unavailable native targets explicitly. Old alpha.3 acceptance does not establish the
 new split candidate's behavior. A fix requires a new identified candidate and affected checks;
-never silently replace frozen artifacts. macOS signing/notarization remains deferred, with
-the app-specific quarantine workaround in its quickstart.
+never silently replace frozen artifacts. Developer ID signing/notarization remains deferred;
+ad-hoc integrity signing does not remove the quarantine limitation in the quickstart.
 
 After final acceptance and explicit publication authorization, publish the existing draft
 without rebuilding or altering application assets:

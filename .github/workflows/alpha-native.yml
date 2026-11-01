@@ -164,3 +164,32 @@ jobs:
           name: verification-linux-electron
           path: apps/holtburger-3d/dist-electron/
           if-no-files-found: error
+      - name: Install the Windows installer compiler
+        if: runner.os == 'Windows' && inputs.product != 'cli'
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          $package = @(choco list --exact innosetup --limit-output | Where-Object { $_ -match '^innosetup\|' })
+          if ($package.Count -ne 1) { throw 'Expected one installed Inno Setup package' }
+          $major = ($package[0].Split('|')[1]).Split('.')[0]
+          $candidates = @(@("${env:ProgramFiles(x86)}\Inno Setup $major\ISCC.exe", "$env:ProgramFiles\Inno Setup $major\ISCC.exe") | Where-Object { Test-Path $_ })
+          if ($candidates.Count -ne 1) { throw 'Expected one compiler for the installed Inno Setup package' }
+          "INNO_COMPILER=$($candidates[0])" >> $env:GITHUB_ENV
+          & ($candidates[0]) /?
+      - name: Build and verify the desktop installer from the native archive
+        if: runner.os != 'Linux' && inputs.product != 'cli'
+        run: |
+          COMPILER=()
+          if [[ "$RUNNER_OS" == 'Windows' ]]; then COMPILER=(--iscc "$INNO_COMPILER"); fi
+          python .github/scripts/desktop_installers.py \
+            --artifacts .holtburger-local/alpha-artifacts/3d \
+            --target '${{ matrix.triple }}' \
+            --output .holtburger-local/alpha-installers "${COMPILER[@]}"
+      - uses: actions/upload-artifact@v4
+        if: runner.os != 'Linux' && inputs.product != 'cli'
+        with:
+          name: alpha-3d-installer-${{ matrix.triple }}
+          path: .holtburger-local/alpha-installers/*
+          if-no-files-found: error
+          compression-level: 0

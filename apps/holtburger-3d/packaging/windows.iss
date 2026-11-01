@@ -48,6 +48,12 @@ Source: "{#PayloadDir}\*"; DestDir: "{app}\payload"; Flags: ignoreversion recurs
 Name: "{userprograms}\{#DisplayName}"; Filename: "{app}\payload\h3d\holtburger-3d.exe"
 
 [Code]
+#if Ver < EncodeVer(7, 0, 0)
+type
+  { Inno 6 runs a 32-bit installer VM even when installing a 64-bit payload. }
+  NativeUInt = LongWord;
+#endif
+
 const
   { Windows file attributes, delete access, and sharing flags. }
   DirectoryAttribute = $10;

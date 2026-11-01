@@ -3,6 +3,31 @@ import fixture from "./fixtures/object-inspection-wire.json";
 import { decodeObjectInspectionResult } from "./client-object-inspection-contract";
 
 describe("object inspection host contract", () => {
+	it("preserves disclosed portal restrictions and distinguishes empty from absent", () => {
+		for (const portalRestrictions of [
+			null,
+			[],
+			[
+				"no-player-killers",
+				"no-lite-player-killers",
+				"no-non-player-killers",
+				"no-recall-or-tie",
+				"no-summon",
+			],
+		]) {
+			const item = structuredClone(fixture.item);
+			Object.assign(item.outcome.inspection.details.details, {
+				portalRestrictions,
+			});
+			expect(decodeObjectInspectionResult(item)).toEqual(item);
+		}
+		const item = structuredClone(fixture.item);
+		Object.assign(item.outcome.inspection.details.details, {
+			portalRestrictions: ["no-tie"],
+		});
+		expect(() => decodeObjectInspectionResult(item)).toThrow();
+	});
+
 	it("preserves template lockpick bonuses and unknown values without guessing zero", () => {
 		for (const bonus of [null, -10, 0, 30]) {
 			const item = structuredClone(fixture.item);

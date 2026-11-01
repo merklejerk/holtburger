@@ -307,6 +307,18 @@ const itemInspectionSchema = z
 		effects: z.array(effectSchema),
 		/** Server-authored portal destination display text, absent when undisclosed. */
 		portalDestination: z.string().nullable(),
+		/** Prohibitions from the latest appraisal; null means undisclosed. */
+		portalRestrictions: z
+			.array(
+				z.enum([
+					"no-player-killers",
+					"no-lite-player-killers",
+					"no-non-player-killers",
+					"no-recall-or-tie",
+					"no-summon",
+				]),
+			)
+			.nullable(),
 		useText: z.string().nullable(),
 		/** World-classified on-use behavior; healing-kit modifiers are distinct from flat restoration. */
 		useEffect: z

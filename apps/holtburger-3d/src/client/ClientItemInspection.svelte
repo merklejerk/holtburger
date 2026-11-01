@@ -25,6 +25,7 @@
 		formatInspectionPercent,
 		formatInspectionVitalChange,
 		formatItemStatuses,
+		formatPortalInspection,
 		formatWieldRequirement,
 		humanizeInspectionName,
 		inspectionBonusLabel,
@@ -55,6 +56,8 @@
 			: { kind: "failed", detail: "No item artwork was disclosed." },
 	);
 	const statuses = $derived(formatItemStatuses(item.status));
+	/** Cold appraisal facts consumed by the Portal section's labeled rows. */
+	const portalFacts = $derived(formatPortalInspection(item.portalRestrictions));
 	const lockpickingText = $derived(
 		item.lockpicking === null
 			? null
@@ -232,15 +235,6 @@
 			{#if inspection.level !== null}<p class="inspection-kicker">
 					Level {formatInspectionNumber(inspection.level)}
 				</p>{/if}
-			{#if item.portalDestination !== null}
-				<p class="inspection-description" data-inspection-portal-destination>
-					Destination: <ClientWaypointText
-						interactive
-						text={item.portalDestination}
-						{onSetWaypoint}
-					/>
-				</p>
-			{/if}
 			{#if inspection.description !== null}<p class="inspection-description">
 					{#if collapsedDescription !== null && !descriptionExpanded}
 						<ClientWaypointText
@@ -268,6 +262,46 @@
 				</p>{/if}
 		</div>
 	</header>
+
+	{#if item.portalDestination !== null || item.portalRestrictions !== null}
+		<section data-inspection-portal>
+			<h3 class="ui-section-heading">Portal</h3>
+			<dl class="inspection-facts">
+				<div class="inspection-wide" data-inspection-portal-destination>
+					<dt>Destination</dt>
+					<dd>
+						{#if item.portalDestination !== null}
+							<ClientWaypointText
+								interactive
+								text={item.portalDestination}
+								{onSetWaypoint}
+							/>
+						{:else}
+							Unknown
+						{/if}
+					</dd>
+				</div>
+				{#if portalFacts.recallAndTie !== null}
+					<div class="inspection-wide">
+						<dt>Recall &amp; tie</dt>
+						<dd>{portalFacts.recallAndTie}</dd>
+					</div>
+				{/if}
+				{#if portalFacts.summoning !== null}
+					<div class="inspection-wide">
+						<dt>Summoning</dt>
+						<dd>{portalFacts.summoning}</dd>
+					</div>
+				{/if}
+				{#if portalFacts.entryRestrictions !== null}
+					<div class="inspection-wide">
+						<dt>Entry restrictions</dt>
+						<dd>{portalFacts.entryRestrictions}</dd>
+					</div>
+				{/if}
+			</dl>
+		</section>
+	{/if}
 
 	{#if item.useEffect !== null || onUseIndexes.length > 0}
 		<section

@@ -3,7 +3,7 @@ use holtburger_common::properties::AttunedStatus;
 use holtburger_world::inspection::{
     BondedStatus, BonusKind, CreatureIdentity, CreatureInspection, Effect, InspectionSpellRole,
     InspectionUseEffect, ItemInspection, ItemManaKind, ObjectInspection, ObjectInspectionDetails,
-    WieldRequirement,
+    PortalRestriction, WieldRequirement,
 };
 use holtburger_world::item_progression::ItemAdvancement;
 use holtburger_world::spell::SpellCatalog;
@@ -201,6 +201,22 @@ fn push_item_info(
     item: &ItemInspection,
     spell_lookup: Option<&SpellCatalog>,
 ) {
+    if let Some(restrictions) = &item.portal_restrictions {
+        for restriction in restrictions {
+            let text = match restriction {
+                PortalRestriction::NoPlayerKillers => "Player Killers may not use this portal.",
+                PortalRestriction::NoLitePlayerKillers => {
+                    "Lite Player Killers may not use this portal."
+                }
+                PortalRestriction::NoNonPlayerKillers => {
+                    "Non-Player Killers may not use this portal."
+                }
+                PortalRestriction::NoRecallOrTie => "This portal cannot be recalled nor linked to.",
+                PortalRestriction::NoSummon => "This portal cannot be summoned.",
+            };
+            lines.extend(wrap_text(text, 40).into_iter().map(Line::from));
+        }
+    }
     push_item_on_use(lines, item, spell_lookup);
     if let Some(progression) = &item.progression {
         push_labeled(
@@ -742,6 +758,36 @@ mod tests {
     }
 
     #[test]
+    fn portal_inspection_displays_all_disclosed_prohibitions() {
+        let mut entity = Entity::new(Guid(1), "Portal".into(), WorldPosition::default());
+        entity.inspection_supplement = Some(InspectionSupplement {
+            portal_restrictions: Some(vec![
+                PortalRestriction::NoPlayerKillers,
+                PortalRestriction::NoLitePlayerKillers,
+                PortalRestriction::NoNonPlayerKillers,
+                PortalRestriction::NoRecallOrTie,
+                PortalRestriction::NoSummon,
+            ]),
+            ..Default::default()
+        });
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        for warning in [
+            "Player Killers may not use this portal.",
+            "Lite Player Killers may not use this portal.",
+            "Non-Player Killers may not use this portal.",
+            "This portal cannot be recalled nor linked to.",
+            "This portal cannot be summoned.",
+        ] {
+            assert!(text.contains(warning), "missing {warning}: {text}");
+        }
+    }
+
+    #[test]
     fn item_inspection_combines_configured_and_live_shared_cooldown() {
         let mut entity = Entity::new(Guid(1), "Essence".into(), WorldPosition::default());
         entity.set_int_prop(PropertyInt::SharedCooldown, 213);
@@ -968,6 +1014,7 @@ mod tests {
         entity.inspection_supplement = Some(InspectionSupplement {
             lockpicking: None,
             equipment_unenchantable: None,
+            portal_restrictions: None,
             armor_coverage: Some(ArmorCoverage {
                 head: ArmorCoverageValue {
                     level: 103,

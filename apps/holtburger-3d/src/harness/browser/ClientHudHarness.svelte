@@ -2436,6 +2436,7 @@
 							],
 							useEffect: null,
 							portalDestination: "Holtburg (42.1N, 33.6E).",
+							portalRestrictions: ["no-recall-or-tie", "no-summon"],
 							useText: "Use this item to recall to a remembered sanctuary.",
 							spells: [
 								{ id: 2000, role: "active-enchantment" as const },

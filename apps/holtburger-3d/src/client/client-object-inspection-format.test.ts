@@ -8,6 +8,7 @@ import {
 	formatInspectionNumber,
 	formatInspectionVitalChange,
 	formatItemStatuses,
+	formatPortalInspection,
 	formatPlayerKillerStatus,
 	formatWieldRequirement,
 	humanizeInspectionName,
@@ -16,6 +17,37 @@ import {
 } from "./client-object-inspection-format";
 
 describe("object inspection formatting", () => {
+	it("distinguishes undisclosed, empty and partially restricted portal appraisals", () => {
+		expect(formatPortalInspection(null)).toEqual({
+			recallAndTie: "Unknown",
+			summoning: "Unknown",
+			entryRestrictions: "Unknown",
+		});
+		expect(formatPortalInspection([])).toEqual({
+			recallAndTie: null,
+			summoning: null,
+			entryRestrictions: null,
+		});
+		expect(
+			formatPortalInspection([
+				"no-recall-or-tie",
+				"no-player-killers",
+				"no-lite-player-killers",
+			]),
+		).toEqual({
+			recallAndTie: "Prohibited",
+			summoning: null,
+			entryRestrictions: "No PK players; No PK Lite players",
+		});
+		expect(
+			formatPortalInspection(["no-summon", "no-non-player-killers"]),
+		).toEqual({
+			recallAndTie: null,
+			summoning: "Prohibited",
+			entryRestrictions: "No non-PK players",
+		});
+	});
+
 	it("describes signed base vital changes, including the full i32 range", () => {
 		expect(formatInspectionVitalChange({ vital: "Health", amount: 50 })).toBe(
 			"Restores 50 Health.",

@@ -273,10 +273,49 @@ pub struct ItemInspection {
     pub effects: Vec<Effect>,
     /// Server-authored portal destination display text, absent when undisclosed.
     pub portal_destination: Option<String>,
+    /// Restrictions disclosed by the latest successful appraisal; absence is unknown.
+    pub portal_restrictions: Option<Vec<PortalRestriction>>,
     /// Server-authored use text.
     pub use_text: Option<String>,
     /// Appraisal spells classified as ordinary item spells, on-use spells, or active enchantments.
     pub spells: Vec<InspectionSpell>,
+}
+
+/// Portal prohibitions displayed by retail inspection, independent of player eligibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PortalRestriction {
+    /// Full player killers cannot enter.
+    NoPlayerKillers,
+    /// Lite player killers cannot enter.
+    NoLitePlayerKillers,
+    /// Non-player killers cannot enter.
+    NoNonPlayerKillers,
+    /// The portal cannot become a recall destination or either portal tie.
+    NoRecallOrTie,
+    /// The portal cannot be summoned.
+    NoSummon,
+}
+
+// (Appraisal_ShowDescription); ACE PortalBitmask.cs. Recall and tie deliberately share one
+// prohibition (ACE Portal_Properties.cs:14–16).
+const PORTAL_RESTRICTION_FLAGS: [(i32, PortalRestriction); 5] = [
+    (0x02, PortalRestriction::NoPlayerKillers),
+    (0x04, PortalRestriction::NoLitePlayerKillers),
+    (0x08, PortalRestriction::NoNonPlayerKillers),
+    (0x20, PortalRestriction::NoRecallOrTie),
+    (0x10, PortalRestriction::NoSummon),
+];
+
+fn portal_restrictions(properties: &WorldObjectProperties) -> Option<Vec<PortalRestriction>> {
+    properties
+        .get_int_prop(PropertyInt::PortalBitmask)
+        .map(|mask| {
+            PORTAL_RESTRICTION_FLAGS
+                .into_iter()
+                .filter_map(|(flag, restriction)| (mask & flag != 0).then_some(restriction))
+                .collect()
+        })
 }
 
 /// Complete item-artwork identity consumed together by UI icon composition.
@@ -314,6 +353,8 @@ pub struct CreatureInspection {
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct InspectionSupplement {
+    /// Portal prohibitions from this response alone, including an explicitly empty set.
+    pub portal_restrictions: Option<Vec<PortalRestriction>>,
     /// Lock facts classified from this response alone, never inherited from merged properties.
     pub lockpicking: Option<LockpickingInfo>,
     /// Equipment enchantability derived from the current response's ResistMagic property.
@@ -510,6 +551,7 @@ impl InspectionSupplement {
         };
 
         Self {
+            portal_restrictions: portal_restrictions(properties),
             lockpicking: LockpickingInfo::from_properties(properties),
             equipment_unenchantable: properties
                 .get_int_prop(PropertyInt::ResistMagic)
@@ -1347,6 +1389,9 @@ impl ItemInspection {
             inscription: InscriptionInfo::from_object(object),
             imbued_effects: get_imbued_effects(object),
             effects: Effect::from_object(object),
+            portal_restrictions: object
+                .supplement
+                .and_then(|supplement| supplement.portal_restrictions.clone()),
             portal_destination: object
                 .get_string_prop(PropertyString::AppraisalPortalDestination)
                 .map(str::to_owned),
@@ -2445,6 +2490,47 @@ mod tests {
             panic!("item appraisal")
         };
         assert_eq!(item.progression.unwrap().level, 3);
+    }
+
+    #[test]
+    fn portal_restrictions_follow_each_successful_appraisal() {
+        let guid = Guid(0x6000_0001);
+        let mut entity = Entity::new(guid, "Portal".into(), WorldPosition::default());
+        let all_flags = PORTAL_RESTRICTION_FLAGS
+            .iter()
+            .fold(0, |mask, (flag, _)| mask | flag);
+        let all_restrictions: Vec<_> = PORTAL_RESTRICTION_FLAGS
+            .iter()
+            .map(|(_, value)| *value)
+            .collect();
+        let cases = PORTAL_RESTRICTION_FLAGS
+            .into_iter()
+            .map(|(flag, restriction)| (Some(flag), Some(vec![restriction])))
+            .chain([
+                (Some(all_flags), Some(all_restrictions.clone())),
+                (Some(0), Some(vec![])),
+                (Some(all_flags), Some(all_restrictions)),
+                (None, None),
+            ]);
+        for (mask, expected) in cases {
+            let mut response = IdentifyObjectResponseEventData {
+                object_guid: guid,
+                flags: IdentifyResponseFlags::INT_STATS_TABLE,
+                success: true,
+                ..Default::default()
+            };
+            if let Some(mask) = mask {
+                response
+                    .properties
+                    .set_int_prop(PropertyInt::PortalBitmask, mask);
+            }
+            assert!(entity.apply_identify_response(&response));
+            let ObjectInspectionDetails::Item(item) = inspect_entity(&entity).unwrap().details
+            else {
+                panic!("portal should use item inspection");
+            };
+            assert_eq!(item.portal_restrictions, expected, "mask {mask:?}");
+        }
     }
 
     #[test]

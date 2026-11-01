@@ -227,3 +227,32 @@ export function inspectionBonusLabel(
 		criticalFrequency: "Critical Frequency",
 	}[kind];
 }
+
+/** Omit unrestricted fields while preserving unknown appraisal disclosure. */
+export function formatPortalInspection(
+	restrictions: ItemInspection["portalRestrictions"],
+) {
+	if (restrictions === null) {
+		return {
+			recallAndTie: "Unknown",
+			summoning: "Unknown",
+			entryRestrictions: "Unknown",
+		};
+	}
+	const entryLabels = [
+		["no-player-killers", "No PK players"],
+		["no-lite-player-killers", "No PK Lite players"],
+		["no-non-player-killers", "No non-PK players"],
+	] as const;
+	const entryRestrictions = entryLabels
+		.filter(([restriction]) => restrictions.includes(restriction))
+		.map(([, label]) => label);
+	return {
+		recallAndTie: restrictions.includes("no-recall-or-tie")
+			? "Prohibited"
+			: null,
+		summoning: restrictions.includes("no-summon") ? "Prohibited" : null,
+		entryRestrictions:
+			entryRestrictions.length > 0 ? entryRestrictions.join("; ") : null,
+	};
+}

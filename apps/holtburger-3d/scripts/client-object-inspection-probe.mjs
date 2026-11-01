@@ -179,11 +179,14 @@ export async function probeObjectInspection(
 		assert.equal(item.selectedGuid, 8);
 		assert.equal(item.state.guid, 7);
 		assert.equal(item.window.count, 1);
-		assert.equal(
-			await read(
-				"document.querySelector('[data-inspection-portal-destination]').textContent.trim()",
-			),
-			"Destination: Holtburg (42.1N, 33.6E).",
+		assert.deepEqual(
+			await read(`Array.from(document.querySelectorAll('[data-inspection-portal] dl > div'),
+                (row) => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()])`),
+			[
+				["Destination", "Holtburg (42.1N, 33.6E)."],
+				["Recall & tie", "Prohibited"],
+				["Summoning", "Prohibited"],
+			],
 		);
 		assert.deepEqual(
 			await read(`[

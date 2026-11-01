@@ -2755,6 +2755,10 @@ mod tests {
             "Holtburg (42.1N, 33.6E).".into(),
         );
         item.inspection_supplement = Some(InspectionSupplement {
+            portal_restrictions: Some(vec![
+                holtburger_world::inspection::PortalRestriction::NoRecallOrTie,
+                holtburger_world::inspection::PortalRestriction::NoSummon,
+            ]),
             equipment_unenchantable: Some(true),
             ..InspectionSupplement::default()
         });
@@ -2804,6 +2808,7 @@ mod tests {
             enchantable: true,
         };
         character.inspection_supplement = Some(InspectionSupplement {
+            portal_restrictions: None,
             lockpicking: None,
             equipment_unenchantable: None,
             armor_coverage: Some(ArmorCoverage {

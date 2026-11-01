@@ -6,6 +6,7 @@ import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings";
 /** Absence defaults composed from shared rendering policy and client-only view choices. */
 export const CLIENT_GRAPHICS_DEFAULTS = {
 	viewDistance: 6,
+	sealedInteriorAmbientLevel: SHARED_FRAME_SETTINGS.sealedInteriorAmbientLevel,
 	ambientOcclusionEnabled: SHARED_FRAME_SETTINGS.ambientOcclusion.enabled,
 	entityShadowMode: SHARED_FRAME_SETTINGS.entityShadows.mode,
 	verticalFovDegrees: 75,
@@ -39,6 +40,7 @@ export function frameSettingsWithGraphics(
 ): FrameSettings {
 	return {
 		...settings,
+		sealedInteriorAmbientLevel: graphics.sealedInteriorAmbientLevel,
 		ambientOcclusion: {
 			...settings.ambientOcclusion,
 			enabled: graphics.ambientOcclusionEnabled,

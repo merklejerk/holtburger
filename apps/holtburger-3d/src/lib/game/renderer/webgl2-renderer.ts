@@ -434,7 +434,7 @@ const PROBE_SHADING: SceneShading = {
 	authoredLightResponse: 0,
 	dynamicLights: [],
 	staticLights: () => EMPTY_LANDBLOCK_LIGHTS,
-	lighting: resolveSceneLightingByRole(UNAUTHORED_SCENE_LIGHTING),
+	lighting: resolveSceneLightingByRole(UNAUTHORED_SCENE_LIGHTING, null),
 };
 
 /** Ranking position used before any view has been committed. */
@@ -1673,7 +1673,9 @@ export class WebGL2Renderer implements Renderer {
 				this.#resolveStaticLights(input, landblockId, sceneCameraPosition),
 			lighting: resolveSceneLightingByRole(
 				input.environment.lighting,
-				input.views.some((view) => view.cameraInsideSealedCell),
+				input.views.some((view) => view.cameraInsideSealedCell)
+					? input.frameSettings.sealedInteriorAmbientLevel
+					: null,
 			),
 		};
 		this.#beginFrame(shading.clearColor);
@@ -4060,7 +4062,7 @@ export class WebGL2Renderer implements Renderer {
 				sky: null,
 				staticLights: () => EMPTY_LANDBLOCK_LIGHTS,
 				weatherEnabled: false,
-				lighting: resolveSceneLightingByRole(PORTAL_TRANSITION_LIGHTING),
+				lighting: resolveSceneLightingByRole(PORTAL_TRANSITION_LIGHTING, null),
 			};
 			const phases = this.#createObjectSubmissionPhases(
 				portalViewInput,

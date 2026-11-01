@@ -64,6 +64,8 @@ export interface FrameSettings {
 	readonly nameplates: NameplateSettings;
 	/** Optional nearby opaque-geometry occlusion and its runtime-adjustable presentation values. */
 	readonly ambientOcclusion: AmbientOcclusionSettings;
+	/** White ambient level in [0, 1] used when the camera occupies a sealed interior. */
+	readonly sealedInteriorAmbientLevel: number;
 	/**
 	 * Optional presentation color grade applied once to the finished scene.
 	 *

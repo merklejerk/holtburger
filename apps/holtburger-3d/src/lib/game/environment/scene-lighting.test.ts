@@ -7,7 +7,6 @@ import {
 	objectLightingRole,
 	resolveAuthoredLightResponse,
 	resolveSceneLightingByRole,
-	SEALED_INTERIOR_AMBIENT,
 } from "./scene-lighting";
 
 const WHITE = { red: 1, green: 1, blue: 1, alpha: 1 };
@@ -22,20 +21,20 @@ const LIGHTING: ResolvedSceneLighting = {
 
 describe("resolveSceneLightingByRole", () => {
 	it("leaves terrain on the unboosted regional ambient", () => {
-		expect(resolveSceneLightingByRole(LIGHTING).terrain.ambientLevel).toBe(
-			LIGHTING.ambientLevel,
-		);
+		expect(
+			resolveSceneLightingByRole(LIGHTING, null).terrain.ambientLevel,
+		).toBe(LIGHTING.ambientLevel);
 	});
 
 	it("boosts object ambient by the scaled sun magnitude", () => {
-		const roles = resolveSceneLightingByRole(LIGHTING);
+		const roles = resolveSceneLightingByRole(LIGHTING, null);
 		expect(roles["outdoor-object"].ambientLevel).toBeCloseTo(
 			2 * OBJECT_AMBIENT_SUN_SCALE + LIGHTING.ambientLevel,
 		);
 	});
 
 	it("disables the sun for interior draws while keeping the world ambient", () => {
-		const roles = resolveSceneLightingByRole(LIGHTING);
+		const roles = resolveSceneLightingByRole(LIGHTING, null);
 		const interior = roles["interior-object"];
 		expect(interior.sunVector.x).toBe(0);
 		expect(interior.sunVector.y).toBe(0);
@@ -44,7 +43,7 @@ describe("resolveSceneLightingByRole", () => {
 	});
 
 	it("keeps sun and ambient colors shared across roles", () => {
-		const roles = resolveSceneLightingByRole(LIGHTING);
+		const roles = resolveSceneLightingByRole(LIGHTING, null);
 		for (const role of [
 			"terrain",
 			"outdoor-object",
@@ -70,24 +69,29 @@ describe("objectLightingRole", () => {
 });
 
 describe("sealed interior ambient", () => {
-	it("forces retail's flat white ambient when the camera cannot see outdoors", () => {
-		const interior = resolveSceneLightingByRole(LIGHTING, true)[
-			"interior-object"
-		];
-		expect(interior.ambientLevel).toBe(SEALED_INTERIOR_AMBIENT.level);
-		expect(interior.ambientColor).toEqual(SEALED_INTERIOR_AMBIENT.color);
-	});
+	it.each([0, 0.65, 1])(
+		"uses selected ambient %s when the camera cannot see outdoors",
+		(ambientLevel) => {
+			const interior = resolveSceneLightingByRole(LIGHTING, ambientLevel)[
+				"interior-object"
+			];
+			expect(interior.ambientLevel).toBe(ambientLevel);
+			expect(interior.ambientColor).toEqual(WHITE);
+		},
+	);
 
 	it("keeps the regional ambient for a cell that can see outdoors", () => {
-		const interior = resolveSceneLightingByRole(LIGHTING, false)[
+		const interior = resolveSceneLightingByRole(LIGHTING, null)[
 			"interior-object"
 		];
-		expect(interior.ambientLevel).not.toBe(SEALED_INTERIOR_AMBIENT.level);
+		expect(interior.ambientLevel).toBe(
+			resolveSceneLightingByRole(LIGHTING, null)["outdoor-object"].ambientLevel,
+		);
 		expect(interior.ambientColor).toBe(LIGHTING.ambientColor);
 	});
 
 	it("never applies the interior override to outdoor draws", () => {
-		const roles = resolveSceneLightingByRole(LIGHTING, true);
+		const roles = resolveSceneLightingByRole(LIGHTING, 0.65);
 		expect(roles["outdoor-object"].ambientColor).toBe(LIGHTING.ambientColor);
 		expect(roles.terrain.ambientLevel).toBe(LIGHTING.ambientLevel);
 	});

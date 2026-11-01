@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { SPELL_BAR_INDICES } from "./client-spell-bar-state";
 import {
 	clientAudioSettingsSchema,
+	clientGraphicsSettingsSchema,
 	clientUiSettingsSchema,
 	clientCharacterSettingsSchema,
 	clientUserSettingsSchema,
@@ -23,6 +24,7 @@ import {
 
 import {
 	CLIENT_VITAL_WARNING_PERCENT,
+	CLIENT_GRAPHICS_RANGES,
 	CLIENT_VITAL_WARNING_THRESHOLDS,
 	CLIENT_DEFAULT_THEME_ID,
 	CLIENT_TEXT_SCALE,
@@ -470,3 +472,42 @@ it.each([false, true])(
 		).toEqual(changed);
 	},
 );
+
+describe("dungeon ambient settings", () => {
+	it("fills older graphics profiles and preserves saved ambient choices", () => {
+		const { sealedInteriorAmbientLevel, ...older } =
+			createDefaultClientUserSettings(viewport, 0).graphics;
+		expect(clientGraphicsSettingsSchema.parse(older)).toEqual({
+			...older,
+			sealedInteriorAmbientLevel,
+		});
+		const { minimum, maximum } =
+			CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel;
+		for (const level of [minimum, (minimum + maximum) / 2, maximum]) {
+			expect(
+				clientGraphicsSettingsSchema.parse({
+					...older,
+					sealedInteriorAmbientLevel: level,
+				}).sealedInteriorAmbientLevel,
+			).toBe(level);
+		}
+	});
+
+	it.each([
+		CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.minimum -
+			CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.step,
+		CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.maximum +
+			CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.step,
+		NaN,
+		Infinity,
+		"0.5",
+	])("rejects invalid ambient level %s", (level) => {
+		const graphics = createDefaultClientUserSettings(viewport, 0).graphics;
+		expect(
+			clientGraphicsSettingsSchema.safeParse({
+				...graphics,
+				sealedInteriorAmbientLevel: level,
+			}).success,
+		).toBe(false);
+	});
+});

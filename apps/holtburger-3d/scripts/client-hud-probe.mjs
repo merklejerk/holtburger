@@ -2737,6 +2737,25 @@ export async function probeClientSettingsTabs(
 			if (!window) throw new Error('Settings shortcut did not open its HUD window');
 			const tabs = [...window.querySelectorAll('[role="tab"]')].map((tab) => tab.textContent.trim());
 			if (tabs.join(',') !== 'Graphics,Audio,UI,Input,Gameplay') throw new Error('Settings tabs are incomplete');
+			const ambientLabel = [...window.querySelectorAll('#settings-section-graphics label')]
+				.find((label) => label.textContent.includes('Dungeon ambient light'));
+			const ambientSlider = ambientLabel?.querySelector('input[type="range"]');
+			if (!ambientSlider) throw new Error('Dungeon ambient slider is missing');
+			const originalAmbient = ambientSlider.value;
+			ambientSlider.value = ambientSlider.max;
+			ambientSlider.dispatchEvent(new Event('input', { bubbles: true }));
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			if (!ambientLabel.textContent.includes(Math.round(Number(ambientSlider.max) * 100) + '%')) throw new Error('Dungeon ambient slider did not publish its value');
+			window.querySelector('#settings-tab-audio').click();
+			window.querySelector('#settings-tab-graphics').click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			if (ambientSlider.value !== ambientSlider.max) throw new Error('Dungeon ambient preference was lost across tabs');
+			const resetGraphics = [...window.querySelectorAll('#settings-section-graphics button')]
+				.find((button) => button.textContent.trim() === 'Reset graphics');
+			if (!resetGraphics) throw new Error('Graphics reset button is missing');
+			resetGraphics.click();
+			await new Promise((resolve) => requestAnimationFrame(resolve));
+			if (ambientSlider.value !== originalAmbient) throw new Error('Graphics reset did not restore default dungeon ambient');
 			window.querySelector('#settings-tab-input').click();
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 			const inputPanel = window.querySelector('#settings-section-input');
@@ -2872,7 +2891,7 @@ export async function probeClientSettingsTabs(
 			window.querySelector('#settings-tab-graphics').click();
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 			graphicsTab.focus();
-			return { tabs, fixedTabs: true, retainedScrollAndDisclosures: true, selected: window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim(), selectedAfterArrow };
+			return { tabs, fixedTabs: true, dungeonAmbientSlider: true, retainedScrollAndDisclosures: true, selected: window.querySelector('[role="tab"][aria-selected="true"]')?.textContent.trim(), selectedAfterArrow };
 		})()`,
 	);
 }

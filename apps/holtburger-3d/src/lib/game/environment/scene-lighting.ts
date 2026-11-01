@@ -9,13 +9,12 @@ import { type ResolvedSceneLighting } from "./scene-environment";
  */
 export const OBJECT_AMBIENT_SUN_SCALE = 0.2;
 
-/**
- * Ambient retail forces while the camera occupies a cell that cannot see outdoors. Flat,
- * white, and independent of time of day.
- */
-export const SEALED_INTERIOR_AMBIENT = {
-	level: 0.2,
-	color: { red: 1, green: 1, blue: 1, alpha: 1 },
+/** Retail's sealed-interior ambient is white and independent of time of day. */
+const SEALED_INTERIOR_AMBIENT_COLOR = {
+	red: 1,
+	green: 1,
+	blue: 1,
+	alpha: 1,
 } as const;
 
 /**
@@ -37,12 +36,17 @@ export type SceneLightingByRole = Readonly<
 /**
  * Derive every draw role's lighting from one frame's resolved regional lighting.
  *
+ * RETAIL DIVERGENCE: users may select sealed-interior ambient instead of retail's fixed 0.2 to
+ * improve dungeon visibility. Restoring the fixed value would remove that preference. This
+ * applies to all sealed-interior draws; no content census was performed.
+ *
  * This covers only the sun and ambient terms. Dynamic lights are frame-global rather than
  * per-role, so the renderer binds them separately and they reach every draw.
  */
 export function resolveSceneLightingByRole(
 	lighting: ResolvedSceneLighting,
-	cameraInsideSealedCell = false,
+	/** Selected sealed-interior ambient, or null to retain regional ambient. */
+	sealedInteriorAmbientLevel: number | null,
 ): SceneLightingByRole {
 	const objectAmbientLevel =
 		Math.hypot(
@@ -57,12 +61,14 @@ export function resolveSceneLightingByRole(
 		"outdoor-object": { ...lighting, ambientLevel: objectAmbientLevel },
 		"interior-object": {
 			...lighting,
-			ambientLevel: cameraInsideSealedCell
-				? SEALED_INTERIOR_AMBIENT.level
-				: objectAmbientLevel,
-			ambientColor: cameraInsideSealedCell
-				? SEALED_INTERIOR_AMBIENT.color
-				: lighting.ambientColor,
+			ambientLevel:
+				sealedInteriorAmbientLevel !== null
+					? sealedInteriorAmbientLevel
+					: objectAmbientLevel,
+			ambientColor:
+				sealedInteriorAmbientLevel !== null
+					? SEALED_INTERIOR_AMBIENT_COLOR
+					: lighting.ambientColor,
 			// Retail's cell pass runs with the sun disabled; a zero vector removes the
 			// diffuse term without needing a second shader or a branch.
 			sunVector: ZERO_SUN,

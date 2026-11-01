@@ -551,6 +551,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		runtime.setFrameSettings({
 			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
 			showRetailHiddenGeometry: false,
+			sealedInteriorAmbientLevel: 0.65,
 			nameplates: SHARED_FRAME_SETTINGS.nameplates,
 			ambientOcclusion: {
 				...SHARED_FRAME_SETTINGS.ambientOcclusion,
@@ -579,6 +580,7 @@ describe("GamePresentationRuntime view and interest control", () => {
 		expect(frames[1]?.frameSettings).toEqual({
 			layerVisibility: SHARED_FRAME_SETTINGS.layerVisibility,
 			showRetailHiddenGeometry: false,
+			sealedInteriorAmbientLevel: 0.65,
 			nameplates: SHARED_FRAME_SETTINGS.nameplates,
 			ambientOcclusion: {
 				...SHARED_FRAME_SETTINGS.ambientOcclusion,

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import UiRange from "../app/UiRange.svelte";
 	import type { ClientGraphicsSettings } from "./client-settings-contract";
+	import { CLIENT_GRAPHICS_DEFAULTS } from "./client-settings-policy";
 	import { CLIENT_GRAPHICS_RANGES } from "./client-settings-values";
 	import { ENTITY_SHADOW_MODES } from "../lib/game/renderer/entity-shadow-modes";
 	import {
@@ -60,6 +61,22 @@
 				onGraphicsChange({
 					...graphics,
 					verticalFovDegrees: event.currentTarget.valueAsNumber,
+				})}
+		/>
+	</label>
+	<label
+		>Dungeon ambient light: {Math.round(
+			graphics.sealedInteriorAmbientLevel * 100,
+		)}%
+		<UiRange
+			min={CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.minimum}
+			max={CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.maximum}
+			step={CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.step}
+			value={graphics.sealedInteriorAmbientLevel}
+			oninput={(event) =>
+				onGraphicsChange({
+					...graphics,
+					sealedInteriorAmbientLevel: event.currentTarget.valueAsNumber,
 				})}
 		/>
 	</label>
@@ -142,5 +159,11 @@
 					weatherEnabled: event.currentTarget.checked,
 				})}
 		/> Weather</label
+	>
+	<button
+		type="button"
+		class="ui-button"
+		onclick={() => onGraphicsChange(CLIENT_GRAPHICS_DEFAULTS)}
+		>Reset graphics</button
 	>
 </div>

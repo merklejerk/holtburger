@@ -1,4 +1,4 @@
-import { hexRgb, hexRgba } from "./frontend-color";
+import { hexRgb, hexRgba } from "./frontend-color.js";
 import type { FrontendTuning } from "./frontend-tuning-contract";
 
 /**
@@ -603,6 +603,8 @@ export const SHARED_FRONTEND_TUNING = {
 			speedMultiplier: 0.5,
 		},
 		frameDefaults: {
+			/** White ambient in sealed interiors; retail uses 0.2. */
+			sealedInteriorAmbientLevel: 0.2,
 			/** Whether region-authored distance fog is enabled initially. */
 			distanceFogEnabled: true,
 			/**

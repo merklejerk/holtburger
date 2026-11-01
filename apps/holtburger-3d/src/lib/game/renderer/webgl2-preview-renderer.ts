@@ -69,12 +69,15 @@ const PREVIEW_POSE_KEY = "object-preview";
 const PREVIEW_NODE_ID = "scene-node:0";
 
 /** Neutral inspection lighting independent of regional environment and viewer-light policy. */
-const PREVIEW_LIGHTING = resolveSceneLightingByRole({
-	ambientLevel: 0.52,
-	ambientColor: { red: 1, green: 1, blue: 1, alpha: 1 },
-	sunVector: new Vec3(-0.8, 1.2, 1.4),
-	sunColor: { red: 1, green: 0.96, blue: 0.9, alpha: 1 },
-})["outdoor-object"];
+const PREVIEW_LIGHTING = resolveSceneLightingByRole(
+	{
+		ambientLevel: 0.52,
+		ambientColor: { red: 1, green: 1, blue: 1, alpha: 1 },
+		sunVector: new Vec3(-0.8, 1.2, 1.4),
+		sunColor: { red: 1, green: 0.96, blue: 0.9, alpha: 1 },
+	},
+	null,
+)["outdoor-object"];
 
 const NO_LIGHTS: readonly RuntimeLight[] = [];
 

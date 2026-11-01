@@ -29,3 +29,13 @@ describe("client nameplate preference", () => {
 		expect(enabled.nameplates).toEqual(SHARED_FRAME_SETTINGS.nameplates);
 	});
 });
+
+describe("client interior lighting preference", () => {
+	it("passes the selected ambient level into frame settings", () => {
+		const settings = frameSettingsWithGraphics(SHARED_FRAME_SETTINGS, {
+			...CLIENT_GRAPHICS_DEFAULTS,
+			sealedInteriorAmbientLevel: 0.65,
+		});
+		expect(settings.sealedInteriorAmbientLevel).toBe(0.65);
+	});
+});

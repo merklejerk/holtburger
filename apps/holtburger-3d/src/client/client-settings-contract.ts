@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning.js";
 import { uiThemeIdSchema } from "../app/ui-theme-contract.js";
 import { entityAlertRulesSchema } from "./client-entity-alerts.js";
 import { loadoutActionContentSchema } from "./client-loadout.js";
@@ -145,6 +146,14 @@ export const clientGraphicsSettingsSchema = z
 			.min(CLIENT_GRAPHICS_RANGES.viewDistance.minimum)
 			.max(CLIENT_GRAPHICS_RANGES.viewDistance.maximum),
 		ambientOcclusionEnabled: z.boolean(),
+		/** Saved sealed-interior ambient; older profiles inherit the shared baseline. */
+		sealedInteriorAmbientLevel: finiteNumber
+			.min(CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.minimum)
+			.max(CLIENT_GRAPHICS_RANGES.sealedInteriorAmbientLevel.maximum)
+			.default(
+				SHARED_FRONTEND_TUNING.rendering.frameDefaults
+					.sealedInteriorAmbientLevel,
+			),
 		entityShadowMode: z.enum(ENTITY_SHADOW_MODES),
 		verticalFovDegrees: finiteNumber
 			.min(CLIENT_GRAPHICS_RANGES.verticalFovDegrees.minimum)

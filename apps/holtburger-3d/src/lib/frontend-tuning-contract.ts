@@ -245,6 +245,7 @@ interface FrontendEntityShadowTuning {
 /** Initial frame choices flattened for convenient tuning authoring. */
 type FrontendFrameDefaultsTuning = Pick<
 	FrameSettings,
+	| "sealedInteriorAmbientLevel"
 	| "distanceFogEnabled"
 	| "weatherEnabled"
 	| "staticLightsEnabled"

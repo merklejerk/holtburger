@@ -47,6 +47,8 @@ export const SHARED_FRAME_SETTINGS = {
 		[LandblockLayerKind.EnvCells]: true,
 	},
 	showRetailHiddenGeometry: false,
+	sealedInteriorAmbientLevel:
+		SHARED_FRONTEND_TUNING.rendering.frameDefaults.sealedInteriorAmbientLevel,
 	nameplates: SHARED_NAMEPLATE_SETTINGS,
 	ambientOcclusion: {
 		enabled: SHARED_FRONTEND_TUNING.rendering.ambientOcclusion.enabledByDefault,

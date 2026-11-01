@@ -33,6 +33,9 @@ The user verified the Apple Silicon DMG from
 [diagnostic run 41258522177](https://github.com/merklejerk/holtburger/actions/runs/41258522177):
 after copying the app into Applications, first launch succeeded through System
 Settings → Privacy & Security → Open Anyway, without a Terminal workaround.
+Windows [diagnostic run 41261883335](https://github.com/merklejerk/holtburger/actions/runs/41261883335)
+passed native setup, uninstall, upgrade, repair, retained-profile startup, and
+app/host deletion-lock refusal checks. Windows visual acceptance remains pending.
 Automated build/resource/identity/startup and installer checks do
 not establish GPU, audio, input, scaling, Gatekeeper, or SmartScreen acceptance.
 

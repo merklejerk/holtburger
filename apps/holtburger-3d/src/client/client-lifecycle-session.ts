@@ -309,6 +309,7 @@ type ClientCommandName = Extract<
 	| "teleport_client_to_map_position"
 	| "recall_client"
 	| "toggle_client_combat_mode"
+	| "set_client_combat_mode"
 	| "set_client_appearance_option"
 	| "set_client_gameplay_option"
 	| "cast_client_spell"
@@ -1298,6 +1299,15 @@ export class ClientLifecycleSession {
 	async toggleCombatMode(): Promise<void> {
 		if (this.#state.lifecycle?.kind !== "in-world") return;
 		await this.#transport.invoke("toggle_client_combat_mode");
+	}
+
+	/** Request an explicit stance; completion acknowledges enqueue, not the resulting stance. */
+	async setCombatMode(
+		mode: Exclude<ClientCombatMode, "unknown">,
+	): Promise<void> {
+		if (this.#state.lifecycle?.kind !== "in-world")
+			throw new Error("Combat stance session is unavailable.");
+		await this.#transport.invoke("set_client_combat_mode", { mode });
 	}
 
 	async beginCombatEngagement(

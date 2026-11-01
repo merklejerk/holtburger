@@ -382,7 +382,7 @@ pub struct DynamicEntityMotion {
     pub ordinary: Option<DynamicEntityMotionLayer>,
     /// Independent locomotion, including while hidden by a gesture.
     pub locomotion: Option<DynamicEntityMotionLayer>,
-    /// Semantic activity consumed by frontend visual priority.
+    /// Semantic activity consumed by client policy and frontend visual priority.
     pub activity: DynamicEntityMotionActivity,
 }
 
@@ -394,6 +394,8 @@ pub enum DynamicEntityMotionActivity {
     Gesture,
     /// Pickup/drop reach, retained through its authored return transition.
     Reach,
+    /// Social action or retained pose, classified by the shared motion owner.
+    Emote,
     Explicit,
 }
 
@@ -426,6 +428,7 @@ impl From<MotionPlayback> for DynamicEntityMotion {
                 OrdinaryMotionActivity::Locomotion => DynamicEntityMotionActivity::Locomotion,
                 OrdinaryMotionActivity::Gesture => DynamicEntityMotionActivity::Gesture,
                 OrdinaryMotionActivity::Reach => DynamicEntityMotionActivity::Reach,
+                OrdinaryMotionActivity::Emote => DynamicEntityMotionActivity::Emote,
                 OrdinaryMotionActivity::Explicit => DynamicEntityMotionActivity::Explicit,
             },
         }

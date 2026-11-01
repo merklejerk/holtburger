@@ -4,6 +4,7 @@ use holtburger_common::Guid;
 
 const BOW: MotionCommand = MotionCommand(0x4300_00ec);
 const BOW_ANIM: u32 = 0x0300_0020;
+const WAVE: MotionCommand = MotionCommand(0x1300_0087);
 
 fn local_catalog() -> MotionSequenceCatalog {
     let data = |id| motion(vec![clip(id, 4.0)], None, None);
@@ -21,7 +22,7 @@ fn local_catalog() -> MotionSequenceCatalog {
             links: HashMap::from([
                 (
                     MotionTable::cycle_key(STYLE, STAND),
-                    HashMap::from([(ACTION, data(ACTION_ANIM))]),
+                    HashMap::from([(ACTION, data(ACTION_ANIM)), (WAVE.raw(), data(ACTION_ANIM))]),
                 ),
                 (
                     MotionTable::cycle_key(STYLE, BOW.raw()),
@@ -156,4 +157,78 @@ fn unsupported_local_command_class_does_not_acquire_playback_ownership() {
     );
     assert!(!registry.get(BODY).unwrap().has_local_command());
     assert_eq!(registry.get(BODY).unwrap().action_count(), 0);
+}
+
+#[test]
+fn social_activity_tracks_queued_actions_and_held_poses_until_they_are_left() {
+    let catalog = local_catalog();
+    let table = catalog.table(TABLE).unwrap();
+    let mut registry = MotionRuntimeRegistry::new();
+    for sequence in 1..=2 {
+        assert_eq!(
+            submit(&mut registry, table, WAVE, sequence),
+            MotionCommandAdmissionOutcome::Accepted
+        );
+    }
+    assert_eq!(
+        registry
+            .get(BODY)
+            .unwrap()
+            .motion_playback()
+            .unwrap()
+            .activity,
+        OrdinaryMotionActivity::Emote
+    );
+    registry.advance_local_command(table, BODY, 0.5);
+    assert_eq!(
+        registry
+            .get(BODY)
+            .unwrap()
+            .motion_playback()
+            .unwrap()
+            .activity,
+        OrdinaryMotionActivity::Emote
+    );
+    for _ in 0..2 {
+        registry.advance_local_command(table, BODY, 2.0);
+    }
+    assert_eq!(
+        registry
+            .get(BODY)
+            .unwrap()
+            .motion_playback()
+            .unwrap()
+            .activity,
+        OrdinaryMotionActivity::Locomotion
+    );
+    submit(&mut registry, table, BOW, 3);
+    registry.advance_local_command(table, BODY, 100.0);
+    assert_eq!(
+        registry
+            .get(BODY)
+            .unwrap()
+            .motion_playback()
+            .unwrap()
+            .activity,
+        OrdinaryMotionActivity::Emote
+    );
+    registry.drive_manual(
+        table,
+        BODY,
+        MotionOrder {
+            forward: Some((MotionCommand(WALK), 1.0)),
+            ..Default::default()
+        },
+        CharacterMotionPresentation::Grounded,
+        4.0,
+    );
+    assert_eq!(
+        registry
+            .get(BODY)
+            .unwrap()
+            .motion_playback()
+            .unwrap()
+            .activity,
+        OrdinaryMotionActivity::Locomotion
+    );
 }

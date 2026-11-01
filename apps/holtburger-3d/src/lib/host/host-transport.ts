@@ -186,6 +186,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"teleport_client_to_map_position",
 	"recall_client",
 	"toggle_client_combat_mode",
+	"set_client_combat_mode",
 	"set_client_appearance_option",
 	"set_client_gameplay_option",
 	"cast_client_spell",

@@ -152,6 +152,11 @@ impl MotionCommand {
     pub const fn is_action(self) -> bool {
         self.0 & Self::ACTION != 0
     }
+
+    /// Retail marks social animations independently of their action/substate playback class.
+    pub const fn is_chat_emote(self) -> bool {
+        self.0 & 0x0200_0000 != 0
+    }
 }
 
 impl MotionCommand {

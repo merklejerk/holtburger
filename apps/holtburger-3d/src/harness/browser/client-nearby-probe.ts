@@ -17,6 +17,8 @@ import type { MapWaypointTarget } from "../../lib/game/map/map-waypoint";
 export async function probeClientNearby(dependencies: {
 	/** Hide authored radar markers and return the current fixture character name. */
 	readonly prepareMinimapLandmarks: () => string;
+	/** Read persisted outdoor zoom to verify the production rim controls. */
+	readonly minimapDiameter: () => number;
 	readonly owner: ClientNearby;
 	readonly scene: RenderSceneInterestController;
 	readonly baseline: () => void;
@@ -122,6 +124,17 @@ export async function probeClientNearby(dependencies: {
 	require(launcher !== null &&
 		launcherIcon != null &&
 		lock !== null, "launcher icon and HUD reference control exist");
+	await settle();
+	require(!launcher.classList.contains(
+		"nearby-alert-active",
+	), "launcher is quiet without matching alerts");
+	const initialDiameter = dependencies.minimapDiameter();
+	await click('[aria-label="Zoom minimap in"]');
+	require(dependencies.minimapDiameter() <
+		initialDiameter, "zoom-in rim button narrows the persisted map diameter");
+	await click('[aria-label="Zoom minimap out"]');
+	require(Math.abs(dependencies.minimapDiameter() - initialDiameter) <
+		1e-9, "zoom-out rim button reverses one zoom-in step");
 	const launcherBox = launcher.getBoundingClientRect();
 	const iconBox = launcherIcon.getBoundingClientRect();
 	require(launcherBox.height <= lock.getBoundingClientRect().height &&
@@ -310,9 +323,16 @@ export async function probeClientNearby(dependencies: {
 	require(owner.rules()[0]?.match.mode ===
 		"exact", "row action preserves literal names");
 	require(owner.trackedGuids().has(7), "exact rule tracks existing entity");
+	require(launcher.classList.contains("nearby-alert-active") &&
+		getComputedStyle(launcher).animationIterationCount ===
+			"infinite", "matching alert starts the launcher's repeating pulse");
 	const exactId = owner.rules()[0]?.id;
 	require(exactPressed(), "new exact-name rule presses the toggle");
 	await click(exactToggle);
+	await settle();
+	require(!launcher.classList.contains(
+		"nearby-alert-active",
+	), "disabling the last matching alert clears launcher attention");
 	require(!exactPressed() &&
 		!owner.trackedGuids().has(7) &&
 		owner.rules().length === 1 &&
@@ -780,6 +800,8 @@ export async function probeClientNearby(dependencies: {
 			"chat-entity-generation-guard",
 			"chat-entity-click-through",
 			"compact-launcher",
+			"minimap-rim-zoom",
+			"active-alert-launcher-pulse",
 			"catalog-row-controls",
 			"pointer-hit-testing",
 			"search",

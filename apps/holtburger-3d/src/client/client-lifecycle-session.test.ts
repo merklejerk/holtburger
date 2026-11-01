@@ -970,6 +970,24 @@ describe("ClientLifecycleSession", () => {
 		session.stop();
 	});
 
+	it("requests peace explicitly and leaves confirmation to server events", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await expect(session.setCombatMode("peace")).rejects.toThrow("unavailable");
+		await session.start();
+		transport.emit("client-current-state", {
+			...currentState(1),
+			combatMode: "magic",
+		});
+		transport.calls.length = 0;
+		await session.setCombatMode("peace");
+		expect(transport.calls).toContain("invoke:set_client_combat_mode");
+		expect(session.state().combatMode).toBe("magic");
+		transport.emit("client-combat-mode-updated", { mode: "peace" });
+		expect(session.state().combatMode).toBe("peace");
+		session.stop();
+	});
+
 	it("recovers known spells from snapshots and preserves them across portal updates", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);

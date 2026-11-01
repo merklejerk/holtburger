@@ -5014,6 +5014,7 @@
 				minimapSubjectGuid = 1;
 				waypointProbeEnabled = true;
 				return probeClientNearby({
+					minimapDiameter: () => userSettings.minimapViewDiameters.outdoor,
 					prepareMinimapLandmarks: () => {
 						minimapCategory = "other";
 						const read = interactionLifecycle.entities.read();

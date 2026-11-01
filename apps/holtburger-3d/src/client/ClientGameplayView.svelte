@@ -156,7 +156,7 @@
 	} from "./ClientSettingsPanel.svelte";
 	import type { TextureFilteringCapabilities } from "../lib/game/renderer/texture-filtering-policy";
 	import type { ClientToast } from "./client-toast-center";
-	import { CLIENT_TUNING } from "./client-tuning";
+	import { CLIENT_NEARBY_TUNING, CLIENT_TUNING } from "./client-tuning";
 	import {
 		anchorClientHudPlacement,
 		createClientHudLayout,
@@ -762,6 +762,18 @@
 		height: window.innerHeight,
 	};
 	let nearbyOpen = $state(false);
+	/** Launcher attention samples current matches at the nearby panel's bounded display cadence. */
+	let nearbyAlertActive = $state(false);
+	$effect(() => {
+		const owner = nearby;
+		const pull = () => {
+			nearbyAlertActive = owner !== null && owner.trackedGuids().size > 0;
+		};
+		pull();
+		if (owner === null) return;
+		const timer = setInterval(pull, CLIENT_NEARBY_TUNING.displayIntervalMs);
+		return () => clearInterval(timer);
+	});
 	const nearbyShortcut = $derived(
 		presentClientBinding(
 			input,
@@ -1196,6 +1208,7 @@
 			{#snippet actions()}
 				<button
 					class="ui-button ui-icon-button ui-minimap-button"
+					class:nearby-alert-active={nearbyAlertActive}
 					type="button"
 					aria-label="Nearby entities and alerts"
 					title={`Nearby entities and alerts (${nearbyShortcut.description})`}
@@ -1959,6 +1972,31 @@
 		.gameplay-controls {
 			display: contents;
 			pointer-events: auto;
+		}
+
+		.nearby-alert-active {
+			--ui-hud-pulse-intensity: 0.7;
+			color: var(--ui-minimap-alert-color);
+			border-color: var(--ui-minimap-alert-color);
+			box-shadow: 0 0 4px var(--ui-minimap-alert-color);
+			animation-name: var(--ui-hud-pulse-animation), nearby-alert-glow;
+			animation-duration: 1000ms;
+			animation-timing-function: var(--ui-hud-pulse-easing);
+			animation-iteration-count: infinite;
+		}
+		@keyframes nearby-alert-glow {
+			0%,
+			100% {
+				box-shadow: 0 0 4px var(--ui-minimap-alert-color);
+			}
+			50% {
+				box-shadow: 0 0 14px 4px var(--ui-minimap-alert-color);
+			}
+		}
+		@media (prefers-reduced-motion: reduce) {
+			.nearby-alert-active {
+				animation: none;
+			}
 		}
 
 		.client-ui-lock {

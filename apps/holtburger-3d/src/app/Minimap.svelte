@@ -6,6 +6,8 @@
 	 * disc scale together when the widget is resized, the way one piece of compass art would.
 	 */
 	const RIM_FRACTION = 0.055;
+	/** Multiplicative step shared by wheel and button zoom. */
+	const ZOOM_FACTOR = 1.2;
 	/** Map disc radius in the compass viewBox's units, where the frame's outer edge is 100. */
 	const DISC_RADIUS = 100 - RIM_FRACTION * 200;
 	/**
@@ -48,6 +50,8 @@
 		type MinimapMarker,
 		type MinimapIconCategory,
 	} from "./minimap-marker";
+	import ZoomInIcon from "../assets/icons/hud-add.svg?component";
+	import ZoomOutIcon from "../assets/icons/minimap-zoom-out.svg?component";
 	import MinimapResetIcon from "../assets/icons/minimap-reset.svg?component";
 	import MapWaypointDirectionIcon from "../assets/icons/map-waypoint-direction.svg?component";
 	import MapWaypointPinIcon from "../assets/icons/map-waypoint-pin.svg?component";
@@ -910,7 +914,10 @@
 	function zoom(event: WheelEvent): void {
 		event.preventDefault();
 		// Multiplicative so each notch covers the same proportion at every scale.
-		const factor = event.deltaY > 0 ? 1.2 : 1 / 1.2;
+		changeZoom(event.deltaY > 0 ? ZOOM_FACTOR : 1 / ZOOM_FACTOR);
+	}
+
+	function changeZoom(factor: number): void {
 		const frame = readFrame();
 		const anchor = frame.subject?.anchor ?? null;
 		const environment = mapEnvironment(anchor);
@@ -1042,10 +1049,24 @@
 				r="3.5"
 			/>
 		</svg>
+		<button
+			type="button"
+			class="minimap-zoom-in minimap-rim-button ui-button ui-icon-button ui-minimap-button"
+			onclick={() => changeZoom(1 / ZOOM_FACTOR)}
+			aria-label="Zoom minimap in"
+			title="Zoom minimap in"><ZoomInIcon /></button
+		>
+		<button
+			type="button"
+			class="minimap-zoom-out minimap-rim-button ui-button ui-icon-button ui-minimap-button"
+			onclick={() => changeZoom(ZOOM_FACTOR)}
+			aria-label="Zoom minimap out"
+			title="Zoom minimap out"><ZoomOutIcon /></button
+		>
 		{#if minimapDetached}
 			<button
 				type="button"
-				class="minimap-reset ui-button ui-icon-button ui-minimap-button"
+				class="minimap-reset minimap-rim-button ui-button ui-icon-button ui-minimap-button"
 				onclick={resetMinimapPan}
 				aria-label="Re-anchor minimap"
 				title="Re-anchor minimap"
@@ -1209,9 +1230,27 @@
 			transform: translate(-50%, calc(-100% - 8px));
 		}
 
-		.minimap-reset {
+		.minimap-rim-button {
 			position: absolute;
 			transform: translate(-50%, -50%);
+			cursor: pointer;
+		}
+		.minimap-zoom-in,
+		.minimap-zoom-out {
+			/* Keep a 4px gap between circular buttons along the diagonal rim tangent. */
+			--zoom-offset: calc(
+				(var(--ui-minimap-button-size) * var(--ui-icon-scale) + 4px) * 0.353553
+			);
+		}
+		.minimap-zoom-in {
+			top: calc(85.355% - var(--zoom-offset));
+			left: calc(85.355% + var(--zoom-offset));
+		}
+		.minimap-zoom-out {
+			top: calc(85.355% + var(--zoom-offset));
+			left: calc(85.355% - var(--zoom-offset));
+		}
+		.minimap-reset {
 			/* Top-right diagonal rim position, clear of the cardinal labels. */
 			top: 14.645%;
 			left: 85.355%;

@@ -1,5 +1,6 @@
 import { ExplorerCameraInputController } from "../../explorer/explorer-camera-input-controller";
-import { APP_INPUT } from "../../lib/input/app-input";
+import { AppInput } from "../../lib/input/app-input";
+import { createInputDefaults } from "../../lib/input/input-defaults";
 import type {
 	EscapeContextHandle,
 	KeyboardInputPolicy,
@@ -178,7 +179,7 @@ export function installKeyboardPolicyFixture(
 	keyboard.returnToGame();
 	const controller = new ExplorerCameraInputController({
 		canvas,
-		input: APP_INPUT,
+		input: new AppInput(createInputDefaults("windows")),
 		inputGate,
 		keyboard,
 		onChange() {},

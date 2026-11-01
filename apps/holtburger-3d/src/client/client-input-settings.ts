@@ -1,6 +1,7 @@
+import type { InputPlatform } from "../lib/input/input-platform.js";
 import equal from "fast-deep-equal";
 import { z } from "zod";
-import { INPUT_DEFAULTS } from "../lib/input/input-defaults.js";
+import { createInputDefaults } from "../lib/input/input-defaults.js";
 import {
 	ACTION_BAR_COMMANDS,
 	CHARACTER_ACTIONS,
@@ -47,28 +48,13 @@ const keyboardSettingsBaseSchema = z
 			.readonly(),
 		preciseJump: z
 			.record(z.enum(PRECISE_JUMP_ACTIONS), bindingListSchema)
-			.readonly()
-			.default(INPUT_DEFAULTS.preciseJump),
+			.readonly(),
 		client: z.preprocess(
-			// Fill missing shortcut defaults without replacing saved bindings; retire old jump step actions.
+			// Normalize retired shortcut identities without inserting default bindings.
 			(value) => {
 				if (typeof value !== "object" || value === null || Array.isArray(value))
 					return value;
-				const current = {
-					toggleInventory: INPUT_DEFAULTS.client.toggleInventory,
-					toggleCharacter: INPUT_DEFAULTS.client.toggleCharacter,
-					toggleSocial: INPUT_DEFAULTS.client.toggleSocial,
-					toggleWorld: INPUT_DEFAULTS.client.toggleWorld,
-					toggleJournal: INPUT_DEFAULTS.client.toggleJournal,
-					toggleSettings: INPUT_DEFAULTS.client.toggleSettings,
-					toggleNearby: INPUT_DEFAULTS.client.toggleNearby,
-
-					splitStack: INPUT_DEFAULTS.client.splitStack,
-					cycleRestPosture: INPUT_DEFAULTS.client.cycleRestPosture,
-					toggleChatHistory: INPUT_DEFAULTS.client.toggleChatHistory,
-					holdChatHistory: INPUT_DEFAULTS.client.holdChatHistory,
-					...value,
-				};
+				const current = { ...value };
 				// Rename saved actions without replacing explicit new-name bindings (including unbound lists).
 				for (const [oldAction, action] of [
 					["nextInteractable", "nextSmartCombat"],
@@ -133,26 +119,39 @@ export const clientKeyboardSettingsSchema = keyboardSettingsBaseSchema
 	.strict()
 	.readonly();
 
-/** Keyboard defaults shared by per-action resets and complete input defaults. */
-export const CLIENT_KEYBOARD_DEFAULTS: ClientKeyboardConfiguration = {
-	character: INPUT_DEFAULTS.character,
-	preciseJump: INPUT_DEFAULTS.preciseJump,
-	client: INPUT_DEFAULTS.client,
-	spellBar: INPUT_DEFAULTS.spellBar,
-	combatBar: INPUT_DEFAULTS.combatBar,
-	actionBars: INPUT_DEFAULTS.actionBars,
-};
+/** Change detection covers exactly the persisted keyboard groups, excluding mouse preferences. */
+const keyboardGroups = Object.keys(
+	clientKeyboardSettingsSchema.unwrap().shape,
+) as (keyof ClientKeyboardConfiguration)[];
 
-/** Complete client input defaults, shared by resets and missing-field normalization. */
-export const CLIENT_INPUT_DEFAULTS: ClientInputConfiguration = {
-	...CLIENT_KEYBOARD_DEFAULTS,
+/** Platform-independent preferences shared by construction and missing-field validation. */
+const inputPreferenceDefaults = {
 	targetOnlyInView: false,
 	mouseMovement: true,
 	invertCameraHorizontal: false,
 	invertCameraVertical: false,
 	invertSteeringHorizontal: false,
 	invertSteeringVertical: false,
-};
+} as const;
+
+/** Resolve keyboard groups for per-binding reset and persisted keyboard contracts. */
+export function createClientKeyboardDefaults(
+	platform: InputPlatform,
+): ClientKeyboardConfiguration {
+	const { character, preciseJump, client, spellBar, combatBar, actionBars } =
+		createInputDefaults(platform);
+	return { character, preciseJump, client, spellBar, combatBar, actionBars };
+}
+
+/** Build first-run and complete reset policy from one explicit platform fact. */
+export function createClientInputDefaults(
+	platform: InputPlatform,
+): ClientInputConfiguration {
+	return {
+		...createClientKeyboardDefaults(platform),
+		...inputPreferenceDefaults,
+	};
+}
 
 /** User-scoped input; retiring the old mouse block must not discard saved keyboard bindings. */
 export const clientInputSettingsSchema = z.preprocess(
@@ -169,20 +168,20 @@ export const clientInputSettingsSchema = z.preprocess(
 			/** Profiles without this preference inherit the default target acquisition policy. */
 			targetOnlyInView: z
 				.boolean()
-				.default(CLIENT_INPUT_DEFAULTS.targetOnlyInView),
-			mouseMovement: z.boolean().default(CLIENT_INPUT_DEFAULTS.mouseMovement),
+				.default(inputPreferenceDefaults.targetOnlyInView),
+			mouseMovement: z.boolean().default(inputPreferenceDefaults.mouseMovement),
 			invertCameraHorizontal: z
 				.boolean()
-				.default(CLIENT_INPUT_DEFAULTS.invertCameraHorizontal),
+				.default(inputPreferenceDefaults.invertCameraHorizontal),
 			invertCameraVertical: z
 				.boolean()
-				.default(CLIENT_INPUT_DEFAULTS.invertCameraVertical),
+				.default(inputPreferenceDefaults.invertCameraVertical),
 			invertSteeringHorizontal: z
 				.boolean()
-				.default(CLIENT_INPUT_DEFAULTS.invertSteeringHorizontal),
+				.default(inputPreferenceDefaults.invertSteeringHorizontal),
 			invertSteeringVertical: z
 				.boolean()
-				.default(CLIENT_INPUT_DEFAULTS.invertSteeringVertical),
+				.default(inputPreferenceDefaults.invertSteeringVertical),
 		})
 		.strict()
 		.readonly(),
@@ -191,9 +190,10 @@ export const clientInputSettingsSchema = z.preprocess(
 /** Resolve keyboard policy while retaining Explorer camera maps; client mouse policy has its own owner. */
 export function clientInputConfiguration(
 	keyboard: ClientKeyboardConfiguration,
+	platform: InputPlatform,
 ): InputConfiguration {
 	return {
-		...INPUT_DEFAULTS,
+		...createInputDefaults(platform),
 		...keyboard,
 	};
 }
@@ -203,8 +203,5 @@ export function clientKeyboardSettingsEqual(
 	left: ClientKeyboardConfiguration,
 	right: ClientKeyboardConfiguration,
 ): boolean {
-	const groups = Object.keys(
-		CLIENT_KEYBOARD_DEFAULTS,
-	) as (keyof ClientKeyboardConfiguration)[];
-	return groups.every((group) => equal(left[group], right[group]));
+	return keyboardGroups.every((group) => equal(left[group], right[group]));
 }

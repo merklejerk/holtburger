@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { createFixtureThemeSettings } from "./ui-showcase-themes";
+	import type { InputPlatform } from "../../lib/input/input-platform";
 	import { untrack } from "svelte";
 	import ClientJumpPowerBar from "../../client/ClientJumpPowerBar.svelte";
 	import { compactInputHint } from "../../lib/input/input-presentation";
@@ -10,10 +11,13 @@
 	import { EMPTY_CLIENT_SELECTED_DISPLAY } from "../../client/client-selected-entity-tracking";
 	const fixtureTheme = createFixtureThemeSettings(() => {});
 	const {
+		platform,
 		initial,
 		accept,
 		interact,
 	}: {
+		/** Platform fact shared by reset policy and key labels in this fixture. */
+		platform: InputPlatform;
 		initial: ClientInputConfiguration;
 		accept: (input: ClientInputConfiguration) => ClientInputConfiguration;
 		interact: () => void;
@@ -21,6 +25,7 @@
 	const defaults = createDefaultClientUserSettings(
 		{ width: window.innerWidth, height: window.innerHeight },
 		9,
+		untrack(() => platform),
 	);
 	// This fixture starts from one accepted snapshot; later changes flow through Settings.
 	let input = $state.raw(untrack(() => initial));
@@ -34,8 +39,8 @@
 		precise={true}
 		readExtent={() => 0.5}
 		powerKeys={[
-			compactInputHint(input.preciseJump.increasePower, "windows") ?? "—",
-			compactInputHint(input.preciseJump.decreasePower, "windows") ?? "—",
+			compactInputHint(input.preciseJump.increasePower, platform) ?? "—",
+			compactInputHint(input.preciseJump.decreasePower, platform) ?? "—",
 		]}
 		powerControl={null}
 	/>
@@ -60,7 +65,7 @@
 		onClockFormatChange={() => undefined}
 		onEnvironmentOverridesChange={() => undefined}
 		{input}
-		displayPlatform="windows"
+		displayPlatform={platform}
 		textureFilteringCapabilities={null}
 		selectedTab="input"
 		onSelectTab={() => {}}
@@ -81,7 +86,7 @@
 	{#key menu}
 		<ClientSelectedEntityHud
 			{input}
-			displayPlatform="windows"
+			displayPlatform={platform}
 			selectedGuid={91}
 			readSelectedDisplay={() => ({
 				...EMPTY_CLIENT_SELECTED_DISPLAY,

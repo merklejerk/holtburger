@@ -27,3 +27,22 @@
 		--ui-combat-reticle-glow-blur: 7px;
 	}
 }
+
+/* Target-local lock feedback: inherited paint and motion must update on mounted icons. */
+@layer overrides {
+	#lock-feedback-theme-probe {
+		--ui-lock-feedback-size: 54px;
+		--ui-lock-feedback-body: #123456;
+		--ui-lock-feedback-failure-color: #ab3412;
+		--ui-lock-feedback-success-color: #12ab34;
+		--ui-lock-feedback-stroke-width: 5;
+		--ui-lock-feedback-glow: #abcdef;
+		--ui-lock-feedback-glow-blur: 8px;
+		--ui-lock-feedback-shake-travel: 7px;
+		--ui-lock-feedback-shake-angle: 9deg;
+		--ui-lock-feedback-pop-scale: 1.4;
+		--ui-lock-feedback-pop-rise: 8px;
+		--ui-lock-feedback-rise: 30px;
+		--ui-lock-feedback-open-angle: 55deg;
+	}
+}

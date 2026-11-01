@@ -137,9 +137,8 @@ const profileMemorySettingsSchema = profileMemoryCatalogSchema.safeExtend({
 	version: z.literal(3),
 });
 /** Profile-free credentials belong to their server and never overwrite a named preset. */
-export const launcherSettingsSchema = profileMemoryCatalogSchema
+const credentialMemoryCatalogSchema = profileMemoryCatalogSchema
 	.safeExtend({
-		version: z.literal(4),
 		serverCredentials: z.record(z.string().uuid(), encryptedCredentialsSchema),
 	})
 	.superRefine((value, context) => {
@@ -153,6 +152,33 @@ export const launcherSettingsSchema = profileMemoryCatalogSchema
 				message: "Saved credentials reference an unknown server",
 			});
 	});
+const credentialMemorySettingsSchema = credentialMemoryCatalogSchema.safeExtend(
+	{ version: z.literal(4) },
+);
+/** Version five stores each preset's optional session content selection. */
+export const launcherSettingsSchema = credentialMemoryCatalogSchema.safeExtend({
+	version: z.literal(5),
+	profiles: z.array(
+		launcherProfileSchema.extend({
+			/** Null inherits the application default; explicit selections never rewrite it. */
+			contentPath: z.string().min(1).nullable(),
+		}),
+	),
+});
+
+/** Preserve encrypted credentials while giving older profiles the application default. */
+function upgradeContentPaths(
+	value: z.infer<typeof credentialMemoryCatalogSchema>,
+): LauncherSettings {
+	return launcherSettingsSchema.parse({
+		...value,
+		version: 5,
+		profiles: value.profiles.map((profile) => ({
+			...profile,
+			contentPath: null,
+		})),
+	});
+}
 /** Only the load boundary accepts older documents. */
 const legacyLauncherSettingsSchema = launcherCatalogSchema
 	.extend({
@@ -190,19 +216,20 @@ const legacyLauncherSettingsSchema = launcherCatalogSchema
 export function decodeLauncherSettings(input: unknown): LauncherSettings {
 	const current = launcherSettingsSchema.safeParse(input);
 	if (current.success) return current.data;
+	const credentialMemory = credentialMemorySettingsSchema.safeParse(input);
+	if (credentialMemory.success)
+		return upgradeContentPaths(credentialMemory.data);
 	const profileMemory = profileMemorySettingsSchema.safeParse(input);
 	if (profileMemory.success)
-		return launcherSettingsSchema.parse({
+		return upgradeContentPaths({
 			...profileMemory.data,
-			version: 4,
 			serverCredentials: {},
 		});
 	const previous = z
 		.union([previousLauncherSettingsSchema, legacyLauncherSettingsSchema])
 		.parse(input);
-	return launcherSettingsSchema.parse({
+	return upgradeContentPaths({
 		...previous,
-		version: 4,
 		serverCredentials: {},
 		lastProfileByServer:
 			previous.lastSelection === null
@@ -227,6 +254,8 @@ export interface LauncherProfileView {
 	readonly name: string;
 	/** Reference to one catalog server, never a game settings/cache key. */
 	readonly serverId: string;
+	/** Optional preset content folder or archive; null uses the application default. */
+	readonly contentPath: string | null;
 	/** Main-owned decryption result; consumers never infer readiness from ciphertext. */
 	readonly credentialStatus: "absent" | "saved" | "unavailable";
 }
@@ -253,12 +282,16 @@ export const profileSaveSchema = z
 		id: z.string().uuid(),
 		name: z.string().trim().min(1),
 		serverId: z.string().uuid(),
+		/** Explicit draft selection; null uses the application default. */
+		contentPath: z.string().min(1).nullable(),
 		credentials: launcherCredentialsSchema,
 	})
 	.strict();
 /** Play uses the current form values and never creates or overwrites a saved profile. */
 export const launcherPlaySchema = launcherSelectionSchema
 	.extend({
+		/** Explicit draft selection; null uses the application default. */
+		contentPath: z.string().min(1).nullable(),
 		credentials: launcherCredentialsSchema,
 	})
 	.strict();

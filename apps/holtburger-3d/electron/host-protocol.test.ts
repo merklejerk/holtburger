@@ -549,6 +549,7 @@ describe("SidecarHostClient", () => {
 		const process = new FakeProcess();
 		const client = await connect(process, PROTOCOL_VERSION, "client");
 		const startup = {
+			contentPath: "/assets/profile",
 			host: "127.0.0.1",
 			port: 9000,
 			account: "account",
@@ -557,6 +558,9 @@ describe("SidecarHostClient", () => {
 		const request = client.startClient(startup);
 		await new Promise((resolve) => setTimeout(resolve, 0));
 		expect(process.stdin.writes).toHaveLength(2);
+		expect(Buffer.concat(process.stdin.writes).toString()).not.toContain(
+			"/assets/profile",
+		);
 		process.stdout.push(
 			encodeSidecarFrame({
 				kind: "response",

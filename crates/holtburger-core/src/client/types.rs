@@ -1030,6 +1030,8 @@ pub struct ClientDynamicScriptCue {
 
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
+    /// Target-local server lock evidence, independent of request completion and scene admission.
+    LockFeedback(super::lock_feedback::LockFeedback),
     /// Complete cold barber interaction and committed local particle state.
     BarberUpdated(super::barber::BarberSnapshot),
     /// Resolved candidate for the exact frontend draft revision.

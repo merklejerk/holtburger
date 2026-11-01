@@ -116,6 +116,23 @@
 		--ui-combat-reticle-glow-color: #fff4ddcc;
 		--ui-combat-reticle-glow-blur: 4px;
 
+		/* Target-local lock feedback; duration stays with the frontend effect lifetime. */
+		--ui-lock-feedback-size: 42px;
+		--ui-lock-feedback-body: #171923;
+		--ui-lock-feedback-failure-color: #c6adb0;
+		--ui-lock-feedback-success-color: #a4efb3;
+		/* Unitless stroke width uses the artwork's 48-unit SVG viewBox. */
+		--ui-lock-feedback-stroke-width: 3.5;
+		--ui-lock-feedback-glow: #69d69099;
+		--ui-lock-feedback-glow-blur: 5px;
+		--ui-lock-feedback-shake-travel: 3px;
+		--ui-lock-feedback-shake-angle: 4deg;
+		/* The starting scale mirrors the pop around 1; settling uses half the pop rise. */
+		--ui-lock-feedback-pop-scale: 1.15;
+		--ui-lock-feedback-pop-rise: 4px;
+		--ui-lock-feedback-rise: 18px;
+		--ui-lock-feedback-open-angle: 35deg;
+
 		/* Offscreen combat guidance inherits reticle paint unless the theme overrides arrow colors. */
 		--ui-combat-target-arrow-size: 48px;
 		--ui-combat-target-arrow-outline-width: 2;

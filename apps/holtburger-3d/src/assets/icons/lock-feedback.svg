@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+  <path class="lock-feedback-shackle" d="M14 23V16a10 10 0 0 1 20 0v7" />
+  <rect x="9" y="23" width="30" height="21" rx="5" fill="var(--ui-lock-feedback-body)" />
+  <path d="M24 31v6" />
+</svg>

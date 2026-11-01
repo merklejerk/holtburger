@@ -1,6 +1,6 @@
 import { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
 import { AppInput } from "../lib/input/app-input";
-import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
+import { createInputDefaults } from "../lib/input/input-defaults";
 import { ViewportInputGate } from "../lib/input/viewport-input-gate";
 import { describe, expect, it, vi } from "vitest";
 import { Vec3 } from "../lib/game/math/types";
@@ -48,7 +48,7 @@ function controllerHarness(
 		inputGate,
 		keyboard,
 		input: new AppInput({
-			...INPUT_DEFAULTS,
+			...createInputDefaults("windows"),
 			character: {
 				forward: [{ key: "w" }],
 				backward: [{ key: "s" }],
@@ -71,7 +71,7 @@ function controllerHarness(
 				precision: [{ key: "Shift" }],
 			},
 			pointer: {
-				...INPUT_DEFAULTS.pointer,
+				...createInputDefaults("windows").pointer,
 				possessionOrbit: [0],
 				flyRotate: [0],
 				flyPan: [1, 2],

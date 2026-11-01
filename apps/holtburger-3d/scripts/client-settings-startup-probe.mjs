@@ -126,7 +126,7 @@ try {
 			const defaults = createDefaultClientUserSettings(
 				{ width: window.innerWidth, height: window.innerHeight }, 0
 			);
-			const before = await bridge.loadUser({ viewport: { width: window.innerWidth, height: window.innerHeight }, shortcutCount: 0 });
+			const before = await bridge.loadUser({ viewport: { width: window.innerWidth, height: window.innerHeight }, shortcutCount: 0, platform: "windows" });
 			if (before.repaired.length !== 0)
 				throw new Error("Startup repair was repeated on the second load");
 			if (before.settings.ui.fonts.heading !== defaults.ui.fonts.heading ||

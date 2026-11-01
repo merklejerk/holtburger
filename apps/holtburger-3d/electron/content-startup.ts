@@ -22,6 +22,7 @@ export type StartupHost = Pick<
 
 interface Dependencies<T extends StartupHost> {
 	readonly store: ContentPreferenceStore;
+	/** Explicit session selection from CLI or launcher; never changes the global preference. */
 	readonly overridePath: string | null;
 	/** Launch-only restriction; saved and explicitly selected paths still work. */
 	readonly noContentSearch: boolean;

@@ -20,6 +20,7 @@
 	const defaults = createDefaultClientUserSettings(
 		{ width: innerWidth, height: innerHeight },
 		createClientShortcuts(false).length,
+		"windows",
 	);
 	const transport = createElectronClientSettingsTransport();
 	const owner = new UiThemeSelection(
@@ -51,6 +52,7 @@
 		const loaded = await transport.loadUser({
 			viewport: { width: window.innerWidth, height: window.innerHeight },
 			shortcutCount: 0,
+			platform: "windows" as const,
 		});
 		settings = loaded.settings;
 		await owner.refresh();

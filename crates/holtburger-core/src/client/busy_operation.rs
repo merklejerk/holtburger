@@ -86,6 +86,15 @@ impl ClientRuntime {
             } else {
                 (error, None)
             };
+            // Wrong-key errors carry no target; resolve it before retiring captured use intent.
+            if resolved_error == WeenieError::KeyDoesntFitThisLock
+                && let PendingOperation::GuardedUse {
+                    intent: holtburger_world::item_use::ItemUseIntent::Targeted { target, .. },
+                    ..
+                } = &pending.operation
+            {
+                self.emit_lock_feedback(*target, super::lock_feedback::LockFeedbackOutcome::Failed);
+            }
             self.emit_item_use_finished(
                 &pending.operation,
                 ItemUseCompletion::Completed {

@@ -8,7 +8,8 @@
 	import type { CombatEffectsFixtureResult } from "../../lib/game/renderer/webgl2-combat-effects-fixture";
 	import { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
 	import { ViewportInputGate } from "../../lib/input/viewport-input-gate";
-	import { APP_INPUT } from "../../lib/input/app-input";
+	import { AppInput } from "../../lib/input/app-input";
+	import { createInputDefaults } from "../../lib/input/input-defaults";
 	import { onMount, tick as svelteTick } from "svelte";
 	import { PortalTransitionController } from "../../lib/client/portal-transition-controller";
 	import type { PortalTransitionPresentationReceipt } from "../../lib/client/portal-transition-presentation";
@@ -3396,7 +3397,7 @@
 		const controller = new ExplorerCameraInputController({
 			inputGate,
 			keyboard,
-			input: APP_INPUT,
+			input: new AppInput(createInputDefaults("windows")),
 			canvas,
 			onChange() {},
 			onCharacterInput: (input) => routedCharacterInput.push(input),

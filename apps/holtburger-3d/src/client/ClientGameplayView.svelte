@@ -1,4 +1,8 @@
 <script lang="ts">
+	import { type InputPlatform } from "../lib/input/input-platform";
+
+	import ClientLockFeedback from "./ClientLockFeedback.svelte";
+	import type { ClientLockFeedbackFrame } from "./client-lock-feedback";
 	import { applyUiScale } from "../app/ui-scale";
 	import { logicalClientHudViewport } from "./client-hud-layout";
 	import { presentClientBinding } from "./client-binding-catalog";
@@ -54,7 +58,7 @@
 		type ClientInputConfiguration,
 		type InputDigitIndex,
 	} from "../lib/input/input-contract";
-	import { inputDisplayPlatform } from "../lib/input/input-presentation";
+
 	import ClientSpellBar from "./ClientSpellBar.svelte";
 	import ClientCombatBar from "./ClientCombatBar.svelte";
 	import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
@@ -181,6 +185,8 @@
 	import ClientSystemMenu from "./ClientSystemMenu.svelte";
 
 	interface Props {
+		/** Startup platform used by input reset policy and key labels. */
+		readonly platform: InputPlatform;
 		/** Local chat admission preferences, independent of server character options. */
 		readonly chatSuppression: ClientChatSuppressionSettings;
 		/** Local persisted policy for key automation and chooser presentation. */
@@ -388,6 +394,8 @@
 		readonly onExamineSpell: (spellId: number) => void;
 		readonly onCloseInspection: () => void;
 		readonly readCombatTargetFrame: () => ClientCombatTargetFrame | null;
+		/** Pull transient target feedback independently of helper visibility. */
+		readonly readLockFeedbackFrames: () => readonly ClientLockFeedbackFrame[];
 		readonly readTargetIndicatorFrame: () => ClientTargetIndicatorFrame | null;
 		readonly selectedEntityGuid: number | null;
 		readonly hoveredEntityGuid: number | null;
@@ -582,6 +590,7 @@
 		onCloseInspection,
 		readTargetIndicatorFrame,
 		readCombatTargetFrame,
+		readLockFeedbackFrames,
 		selectedEntityGuid,
 		hoveredEntityGuid,
 		entityCollisionDisabled,
@@ -624,11 +633,12 @@
 		onChatNotice,
 		canvasElement,
 		interactionRoot,
+		platform,
 	}: Props = $props();
 	provideClientHudGeometry();
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
-	const displayPlatform = inputDisplayPlatform(navigator.userAgent);
+	const displayPlatform = $derived(platform);
 	/** The wheel owns a disposable physical-key lifetime while its activation key is held. */
 	let emoteWheel = $state<{ readonly release: () => void } | null>(null);
 	function closeEmotes(): void {
@@ -1172,6 +1182,7 @@
 		/>
 	{/key}
 	<ClientCombatTargetIndicator readFrame={readCombatTargetFrame} />
+	<ClientLockFeedback readFrames={readLockFeedbackFrames} />
 	<ClientTargetIndicator
 		readFrame={readTargetIndicatorFrame}
 		selectedGuid={selectedEntityGuid}

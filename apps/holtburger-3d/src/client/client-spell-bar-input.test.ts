@@ -1,12 +1,12 @@
 import { expect, it, vi } from "vitest";
 import { handleSpellBarKeydown } from "./client-spell-bar-input";
 import { AppInput } from "../lib/input/app-input";
-import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
+import { createInputDefaults } from "../lib/input/input-defaults";
 import { SPELL_BAR_INDICES } from "./client-spell-bar-state";
 import { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
 import { ViewportInputGate } from "../lib/input/viewport-input-gate";
 
-const TEST_INPUT = new AppInput(INPUT_DEFAULTS);
+const TEST_INPUT = new AppInput(createInputDefaults("windows"));
 
 /** Physical key facts exercised through the production game-dispatch function. */
 function event(

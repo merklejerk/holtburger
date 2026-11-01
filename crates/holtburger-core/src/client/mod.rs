@@ -58,6 +58,7 @@ mod inventory_runtime;
 pub mod inventory_storage;
 pub mod item_use;
 mod lifecycle;
+pub mod lock_feedback;
 mod map_teleport;
 mod messages;
 mod movement;
@@ -1299,6 +1300,7 @@ impl ClientRuntime {
                 }
             }
             WorldEvent::PropertiesUpdated { guid, updates } => {
+                self.observe_lock_properties(*guid, updates);
                 let _ = self
                     .client_view_event_tx
                     .send(ClientViewEvent::EntityPropertiesUpdated {

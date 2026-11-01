@@ -4,7 +4,7 @@ import type { ClientMouseMovementInput } from "../../client/client-viewport-mous
 import type { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
 import type { ViewportInputGate } from "../../lib/input/viewport-input-gate";
 import { AppInput } from "../../lib/input/app-input";
-import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
+import { createInputDefaults } from "../../lib/input/input-defaults";
 
 /** Asset-free movement composition behind the production ClientGameplayView DOM handlers. */
 export function createClientMouseMovementFixture(
@@ -26,7 +26,7 @@ export function createClientMouseMovementFixture(
 	});
 	const arbiter = new ClientInputArbiter({
 		ordinary: controller,
-		powerBindings: INPUT_DEFAULTS.preciseJump,
+		powerBindings: createInputDefaults("windows").preciseJump,
 		onEnter() {},
 		onActivate() {},
 		onCancel() {},
@@ -65,9 +65,9 @@ export function createClientMouseMovementFixture(
 		},
 		block: () => gate.block(),
 		bindKeyboard: () => {
-			const input = new AppInput(INPUT_DEFAULTS).characterContext(
-				(action, down) => arbiter.applyAction(action, down),
-			);
+			const input = new AppInput(
+				createInputDefaults("windows"),
+			).characterContext((action, down) => arbiter.applyAction(action, down));
 			keyboard.returnToGame();
 			return keyboard.bindGame({
 				keydown: (event) => {

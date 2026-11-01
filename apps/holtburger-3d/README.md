@@ -169,8 +169,12 @@ viewport button maps. Keyboard bindings use browser `key` names (case-insensitiv
 modifier constraints. Multiple bindings may activate the same action. Pointer maps use browser
 button numbers: primary `0`, middle `1`, secondary `2`.
 
-`APP_INPUT` is the shared configuration entry point for both modes. Its `InputContext` resolves
-presses to semantic actions, suppresses repeat, and retains physical-key ownership until release.
+`createInputDefaults(platform)` resolves the maps from an explicit platform fact. Mac uses Command
+for held chat-history interaction to preserve native Control-click behavior; other platforms use
+Control. Startup settings, missing-binding repair, and input resets use the same policy. Saved
+bindings remain explicit choices. Each frontend constructs its own `AppInput` from the resolved
+configuration. `InputContext` resolves presses to semantic actions, suppresses repeat, and retains
+physical-key ownership until release.
 Each mounted frontend owns its action context. `provideAppInputPolicy()` provides one keyboard
 router and one `ViewportInputGate`; descendants access them with `useAppInputPolicy()`.
 `ClientApp` and `ExplorerApp` mount keyboard routing at their app lifetimes. Gameplay action
@@ -748,6 +752,18 @@ npm run dev:explorer -- --content "/path/to/Asherons Call"
 npm run dev:client -- --account example --content "/path/to/Asherons Call"
 ```
 
+The client launcher has an optional Content path override field inside its initially collapsed
+Advanced section. Leave it empty to use the application default. Browse selects a folder, and an
+exact HBA path may also be entered. Selecting a profile restores
+its path and credentials. Play uses the current form; Save to new profile or Overwrite profile
+persists it. Explicit session paths never replace the application default in `content-selection.json`.
+
+With direct-login arguments, `--content` selects assets for that initial session. Otherwise it
+initializes the first launcher form after the remembered profile is loaded. Later profile selections
+and edits own the value. Returning from a session does not reapply the CLI path. Explorer continues
+to use `--content` for its launch. Recovery replacements for explicit selections apply only to the
+current attempt; return to the launcher to save a different profile path.
+
 Directories prefer HBA archives. If no HBA exists, the host opens retail DATs and identifies their
 roles from their headers. The standard base portal/highres pair is supported: highres resources
 take precedence by membership, with base portal supplying other portal resources. Cell and
@@ -793,8 +809,8 @@ The canonical successful location is saved in `content-selection.json` under Ele
 profile, shared by both modes and separate from character/server settings. Development uses a
 separate profile. A required resource read/decode failure marks that saved installation as needing
 attention, causing the next launch to open setup with the prior diagnostic. Optional content
-failures do not mark the installation. `--content` and any replacement chosen during an override
-launch are temporary and never rewrite the saved preference. `--ignore-config` does not bypass
+failures do not mark the installation. CLI and launcher overrides, including replacements chosen during recovery,
+never rewrite the saved application preference. Profile paths are saved separately in the launcher catalog. `--ignore-config` does not bypass
 asset recovery.
 
 Startup checks are shallow, so an installation can fail when a necessary resource is first used.

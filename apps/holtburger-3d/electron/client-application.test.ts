@@ -11,6 +11,7 @@ function deferred<T>() {
 	return { promise, resolve };
 }
 const configuration = () => ({
+	contentPath: null,
 	host: "localhost",
 	port: 9000,
 	account: "test",

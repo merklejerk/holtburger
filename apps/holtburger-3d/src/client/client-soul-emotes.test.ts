@@ -15,7 +15,7 @@ import {
 } from "./client-emote-wheel";
 import { soulEmoteFixture } from "./client-soul-emotes.test-support";
 import { CLIENT_TUNING } from "./client-tuning";
-import { CLIENT_KEYBOARD_DEFAULTS } from "./client-input-settings";
+import { createClientInputDefaults } from "./client-input-settings";
 import {
 	CLIENT_BINDING_ROWS,
 	conflictingClientBindings,
@@ -329,11 +329,16 @@ describe("curated wheel", () => {
 		);
 		if (row === undefined) throw new Error("Missing emote binding");
 		for (const binding of readClientBinding(
-			CLIENT_KEYBOARD_DEFAULTS,
+			createClientInputDefaults("windows"),
 			row.reference,
 		))
 			expect(
-				conflictingClientBindings(CLIENT_KEYBOARD_DEFAULTS, row, binding, null),
+				conflictingClientBindings(
+					createClientInputDefaults("windows"),
+					row,
+					binding,
+					null,
+				),
 			).toEqual([]);
 	});
 });

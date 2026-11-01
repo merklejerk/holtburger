@@ -1,19 +1,19 @@
 import { expect, it, vi } from "vitest";
 import { AppInput } from "./app-input";
-import { INPUT_DEFAULTS } from "./input-defaults";
+import { createInputDefaults } from "./input-defaults";
 import { InputContext, matchesKey } from "./input-context";
 
 it("remaps numbered focus, cells, navigation, confirm, shared cancel, and the pointer/key modifier", () => {
 	const input = new AppInput({
-		...INPUT_DEFAULTS,
+		...createInputDefaults("windows"),
 		actionBars: {
 			focus: {
-				...INPUT_DEFAULTS.actionBars.focus,
+				...createInputDefaults("windows").actionBars.focus,
 				0: [{ key: "F5" }],
 				9: [{ key: "b", alt: true }],
 			},
 			cells: {
-				...INPUT_DEFAULTS.actionBars.cells,
+				...createInputDefaults("windows").actionBars.cells,
 				0: [{ code: "KeyQ" }],
 				9: [],
 			},
@@ -26,7 +26,10 @@ it("remaps numbered focus, cells, navigation, confirm, shared cancel, and the po
 			},
 			alternate: "ctrl",
 		},
-		client: { ...INPUT_DEFAULTS.client, cancel: [{ key: "Backspace" }] },
+		client: {
+			...createInputDefaults("windows").client,
+			cancel: [{ key: "Backspace" }],
+		},
 	});
 	const event = {
 		key: "F5",

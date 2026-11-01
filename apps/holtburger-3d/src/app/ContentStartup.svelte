@@ -211,8 +211,8 @@
 				{#snippet children()}
 					{#if snapshot?.temporary}
 						<p>
-							This launch uses a temporary asset selection. This selection will
-							not be saved.
+							This launch uses an explicit asset selection. Recovery choices do
+							not change the application default.
 						</p>
 					{/if}
 				{/snippet}

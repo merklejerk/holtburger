@@ -1,9 +1,9 @@
 import { expect, it, vi } from "vitest";
 import { handleCombatBarKeydown } from "./client-combat-bar-input";
 import { AppInput } from "../lib/input/app-input";
-import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
+import { createInputDefaults } from "../lib/input/input-defaults";
 
-const TEST_INPUT = new AppInput(INPUT_DEFAULTS);
+const TEST_INPUT = new AppInput(createInputDefaults("windows"));
 
 /** Physical digit facts exercised through the production combat dispatcher. */
 function digit(

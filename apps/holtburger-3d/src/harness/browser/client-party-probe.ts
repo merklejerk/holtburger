@@ -1,4 +1,4 @@
-import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
+import { createInputDefaults } from "../../lib/input/input-defaults";
 import { mount, tick, unmount } from "svelte";
 import { probeDialogBackdrops } from "./client-dialog-backdrop-probe";
 import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
@@ -105,7 +105,7 @@ export async function probeParty(options: {
 		target: hudTarget,
 		context: options.context,
 		props: {
-			input: INPUT_DEFAULTS,
+			input: createInputDefaults("windows"),
 			displayPlatform: "unknown",
 			selectedGuid: 10,
 			readSelectedDisplay: () => ({

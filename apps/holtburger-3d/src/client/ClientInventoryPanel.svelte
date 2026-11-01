@@ -28,7 +28,7 @@
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import { presentClientBinding } from "./client-binding-catalog";
 	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
-	import type { InputDisplayPlatform } from "../lib/input/input-presentation";
+	import type { InputPlatform } from "../lib/input/input-platform";
 	import { CLIENT_TUNING } from "./client-tuning";
 	import type {
 		ClientAppearanceOption,
@@ -40,7 +40,7 @@
 		readonly onSaveLoadout: () => void;
 		/** Accepted bindings and platform vocabulary keep stack hints current after remapping. */
 		readonly input: ClientKeyboardConfiguration;
-		readonly displayPlatform: InputDisplayPlatform;
+		readonly displayPlatform: InputPlatform;
 		/** Stable session owner; the parent keys this component by that lifetime. */
 		readonly inventory: ClientInventoryState;
 		/** Shared source activation and target acquisition. */

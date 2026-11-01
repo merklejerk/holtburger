@@ -4,7 +4,6 @@ import {
 	formatInputBinding,
 	formatInputBindings,
 	formatInputPill,
-	inputDisplayPlatform,
 	modifierName,
 } from "./input-presentation";
 
@@ -62,18 +61,5 @@ describe("input presentation", () => {
 		expect(compactInputHint([{ key: "ArrowLeft" }], "linux")).toBe("←");
 		expect(compactInputHint([{ code: "Numpad1" }], "linux")).toBe("N1");
 		expect(formatInputBinding({ code: "Numpad1" }, "linux")).toBe("Numpad 1");
-	});
-
-	it("resolves a display platform from the browser user agent", () => {
-		expect(
-			inputDisplayPlatform("Mozilla/5.0 (Macintosh; Intel Mac OS X)"),
-		).toBe("mac");
-		expect(inputDisplayPlatform("Mozilla/5.0 (Windows NT 10.0)")).toBe(
-			"windows",
-		);
-		expect(inputDisplayPlatform("Mozilla/5.0 (X11; Linux x86_64)")).toBe(
-			"linux",
-		);
-		expect(inputDisplayPlatform("test host")).toBe("unknown");
 	});
 });

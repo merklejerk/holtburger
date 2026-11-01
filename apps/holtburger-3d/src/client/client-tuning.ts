@@ -286,3 +286,9 @@ export const CLIENT_CONNECTION_BADGE_TUNING = {
 
 /** Visible Allegiance tab read cadence; hidden presentation produces no requests. */
 export const CLIENT_ALLEGIANCE_REFRESH_INTERVAL_MS = 15_000;
+
+/** Short target-local feedback; failure retries replace the existing icon rather than stack. */
+export const CLIENT_LOCK_FEEDBACK_TUNING = {
+	successLifetimeMs: 1_100,
+	failureLifetimeMs: 550,
+} as const;

@@ -1,3 +1,7 @@
+import {
+	lockFeedbackSchema,
+	type ClientLockFeedback,
+} from "./client-lock-feedback-contract";
 import type { RestPosture } from "../lib/game/runtime/dynamic-entity-feed";
 import type {
 	ClientGameplayOption,
@@ -382,6 +386,7 @@ type ClientEventName = Extract<
 	| "client-item-use-result"
 	| "client-item-use-finished"
 	| "client-locked-target"
+	| "client-lock-feedback"
 	| "client-state-resyncing"
 	| "client-entity-facts-changed"
 	| "client-entity-collision-disabled"
@@ -571,6 +576,7 @@ export type ClientLifecycleSessionEvent =
 			readonly type: "item-use-finished";
 			readonly result: ClientItemUseFinished;
 	  }
+	| { readonly type: "lock-feedback"; readonly feedback: ClientLockFeedback }
 	| { readonly type: "locked-target"; readonly target: ClientLockedTarget }
 	| {
 			readonly type: "inventory-preview";
@@ -1832,6 +1838,12 @@ export class ClientLifecycleSession {
 					this.#emit({
 						type: "item-use-finished",
 						result: itemUseFinishedSchema.parse(payload),
+					});
+				}),
+				await listen("client-lock-feedback", (payload) => {
+					this.#emit({
+						type: "lock-feedback",
+						feedback: lockFeedbackSchema.parse(payload),
 					});
 				}),
 				await listen("client-locked-target", (payload) => {

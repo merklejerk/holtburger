@@ -1,4 +1,5 @@
-import { CLIENT_KEYBOARD_DEFAULTS } from "../../client/client-input-settings";
+import equal from "fast-deep-equal";
+import { createClientInputDefaults } from "../../client/client-input-settings";
 import { formatInputBindings } from "../../lib/input/input-presentation";
 import { mount, tick, unmount } from "svelte";
 import ClientBindingProbe from "./ClientBindingProbe.svelte";
@@ -16,6 +17,7 @@ export async function probeClientBindings(options: {
 	readonly interact: () => void;
 	readonly submissions: () => number;
 }) {
+	const platformDefaults = await probePlatformDefaults(options.context);
 	const target = document.createElement("div");
 	target.className = "ui-theme";
 	document.body.append(target);
@@ -24,6 +26,7 @@ export async function probeClientBindings(options: {
 		target,
 		context: options.context,
 		props: {
+			platform: "windows",
 			initial: options.initial,
 			accept: (input) => {
 				acceptedInput = options.accept(input);
@@ -35,19 +38,7 @@ export async function probeClientBindings(options: {
 	const require = (condition: unknown, message: string) => {
 		if (!condition) throw new Error(message);
 	};
-	const click = async (label: string) => {
-		const button = Array.from(
-			target.querySelectorAll<HTMLButtonElement>("button"),
-		).find(
-			(button) =>
-				button.getAttribute("aria-label") === label ||
-				button.textContent?.trim() === label,
-		);
-		if (button === undefined)
-			throw new Error(`Missing binding probe button ${label}`);
-		button.click();
-		await tick();
-	};
+	const click = (label: string) => clickBindingControl(target, label);
 	const press = (
 		key: string,
 		code: string,
@@ -170,7 +161,7 @@ export async function probeClientBindings(options: {
 		require(target.querySelector<HTMLButtonElement>(
 			'button[aria-label="Examine"]',
 		)?.title ===
-			`Examine (${formatInputBindings(CLIENT_KEYBOARD_DEFAULTS.client.examine, "windows")})`, "Restore-all did not update the HUD");
+			`Examine (${formatInputBindings(createClientInputDefaults("windows").client.examine, "windows")})`, "Restore-all did not update the HUD");
 		const splitRow = Array.from(
 			target.querySelectorAll<HTMLElement>(".binding-row"),
 		).find(
@@ -213,7 +204,7 @@ export async function probeClientBindings(options: {
 		await click("Restore default keys for Increase jump power (precise mode)");
 		require(target.querySelector(".jump-power-keys kbd")?.textContent ===
 			formatInputBindings(
-				CLIENT_KEYBOARD_DEFAULTS.preciseJump.increasePower,
+				createClientInputDefaults("windows").preciseJump.increasePower,
 				"windows",
 			).toUpperCase(), "Power default did not restore its keycap");
 		const historyLabel = "Interact with chat history (hold)";
@@ -259,6 +250,7 @@ export async function probeClientBindings(options: {
 		await click(`Restore default keys for ${historyLabel}`);
 		return {
 			passed: true,
+			platformDefaults,
 			original,
 			remapped: "Trade (e)",
 			oldKeyStopped: true,
@@ -271,4 +263,88 @@ export async function probeClientBindings(options: {
 		await unmount(component);
 		target.remove();
 	}
+}
+
+/** Exercise both reset paths through the real settings panel with deterministic platform facts. */
+async function probePlatformDefaults(context: Map<unknown, unknown>) {
+	const evidence = [];
+	for (const platform of ["mac", "windows"] as const) {
+		const defaults = createClientInputDefaults(platform);
+		let accepted: ClientInputConfiguration = {
+			...defaults,
+			client: {
+				...defaults.client,
+				holdChatHistory: [{ key: "F12" }],
+				examine: [{ key: "F8" }],
+			},
+		};
+		const target = document.createElement("div");
+		document.body.append(target);
+		const component = mount(ClientBindingProbe, {
+			target,
+			context,
+			props: {
+				platform,
+				initial: accepted,
+				accept: (input) => {
+					accepted = input;
+					return input;
+				},
+				interact: () => {},
+			},
+		});
+		try {
+			await tick();
+			const click = (label: string) => clickBindingControl(target, label);
+			const verifyHistory = () => {
+				if (
+					!equal(
+						accepted.client.holdChatHistory,
+						defaults.client.holdChatHistory,
+					)
+				)
+					throw new Error(
+						`${platform} reset disagreed with startup history defaults`,
+					);
+			};
+			await click("Restore default keys for Interact with chat history (hold)");
+			verifyHistory();
+			if (accepted.client.examine[0]?.key !== "F8")
+				throw new Error("Per-binding reset changed another binding");
+			await click("Restore default input settings");
+			verifyHistory();
+			if (!equal(accepted, defaults))
+				throw new Error(
+					`${platform} complete reset disagreed with startup defaults`,
+				);
+			evidence.push({
+				platform,
+				holdChatHistory: accepted.client.holdChatHistory,
+				singleReset: true,
+				completeReset: true,
+			});
+		} finally {
+			await unmount(component);
+			target.remove();
+		}
+	}
+	return evidence;
+}
+
+/** Click the same accessible settings action and wait for its accepted state to render. */
+async function clickBindingControl(
+	target: HTMLElement,
+	label: string,
+): Promise<void> {
+	const button = Array.from(
+		target.querySelectorAll<HTMLButtonElement>("button"),
+	).find(
+		(candidate) =>
+			candidate.getAttribute("aria-label") === label ||
+			candidate.textContent?.trim() === label,
+	);
+	if (button === undefined)
+		throw new Error(`Missing binding probe button ${label}`);
+	button.click();
+	await tick();
 }

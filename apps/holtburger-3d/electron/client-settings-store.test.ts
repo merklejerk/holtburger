@@ -29,6 +29,7 @@ import {
 const userContext = {
 	viewport: { width: 1440, height: 900 },
 	shortcutCount: 8,
+	platform: "windows" as const,
 };
 
 const initialWindow = {
@@ -39,6 +40,7 @@ const initialWindow = {
 const defaultUser = createDefaultClientUserSettings(
 	initialWindow.normalBounds,
 	8,
+	"windows",
 );
 const defaultCharacter = createDefaultClientCharacterSettings();
 
@@ -56,6 +58,50 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it.each(["mac", "windows", "linux", "unknown"] as const)(
+		"uses %s input defaults for fresh, absent, and incomplete settings",
+		async (platform) => {
+			const path = await temporarySettingsPath();
+			const context = { ...userContext, platform };
+			const defaults = createDefaultClientUserSettings(
+				context.viewport,
+				context.shortcutCount,
+				platform,
+			);
+			try {
+				const store = new ClientSettingsStore(path, initialWindow);
+				await store.load();
+				for (const mode of ["fresh", "persisted"] as const)
+					expect((await store.loadUser(context, mode)).settings.input).toEqual(
+						defaults.input,
+					);
+				const { holdChatHistory: omitted, ...client } = defaults.input.client;
+				await writeFile(
+					path,
+					JSON.stringify({
+						formatVersion: 1,
+						user: {
+							input: {
+								version: 1,
+								value: {
+									...defaults.input,
+									client: { ...client, examine: [{ key: "F12" }] },
+								},
+							},
+						},
+						characters: {},
+					}),
+				);
+				const reloaded = new ClientSettingsStore(path, initialWindow);
+				await reloaded.load();
+				const result = await reloaded.loadUser(context, "persisted");
+				expect(result.settings.input.client.holdChatHistory).toEqual(omitted);
+				expect(result.settings.input.client.examine).toEqual([{ key: "F12" }]);
+			} finally {
+				await rm(dirname(path), { recursive: true, force: true });
+			}
+		},
+	);
 	it.each(["absent", "malformed"] as const)(
 		"resolves %s placement defaults after restoring scale and preserves valid anchors",
 		async (kind) => {
@@ -84,6 +130,7 @@ describe("ClientSettingsStore", () => {
 					height: userContext.viewport.height / ui.uiScale,
 				},
 				userContext.shortcutCount,
+				"windows",
 			);
 			expect(loaded.settings.hudLayout.chat).toEqual(
 				logicalDefaults.hudLayout.chat,
@@ -227,7 +274,11 @@ describe("ClientSettingsStore", () => {
 	it("evolves older graphics preferences and persists disabled ambient nameplates", async () => {
 		const path = await temporarySettingsPath();
 		const { alwaysShowEntityNameplates, ...olderGraphics } =
-			createDefaultClientUserSettings({ width: 1440, height: 900 }, 8).graphics;
+			createDefaultClientUserSettings(
+				{ width: 1440, height: 900 },
+				8,
+				"windows",
+			).graphics;
 		const savedGraphics = { ...olderGraphics, weatherEnabled: false };
 		try {
 			await writeFile(
@@ -430,6 +481,7 @@ describe("ClientSettingsStore", () => {
 			const defaults = createDefaultClientUserSettings(
 				{ width: 1440, height: 900 },
 				8,
+				"windows",
 			);
 			const { toggleChatHistory: omittedToggle, ...oldClient } =
 				defaults.input.client;
@@ -539,6 +591,7 @@ describe("ClientSettingsStore", () => {
 		const defaults = createDefaultClientUserSettings(
 			{ width: 1440, height: 900 },
 			8,
+			"windows",
 		);
 		const ui = {
 			...defaults.ui,
@@ -559,6 +612,7 @@ describe("ClientSettingsStore", () => {
 		const defaults = createDefaultClientUserSettings(
 			{ width: 1440, height: 900 },
 			8,
+			"windows",
 		);
 		const store = new ClientSettingsStore(path, initialWindow);
 		await store.load();
@@ -630,6 +684,7 @@ describe("ClientSettingsStore", () => {
 		const user = createDefaultClientUserSettings(
 			{ width: 1440, height: 900 },
 			8,
+			"windows",
 		);
 		const character = createDefaultClientCharacterSettings();
 		await store.saveUserPatch({
@@ -725,6 +780,7 @@ describe("ClientSettingsStore", () => {
 		const user = createDefaultClientUserSettings(
 			{ width: 1440, height: 900 },
 			8,
+			"windows",
 		);
 		const savedPanel = {
 			...user.hudLayout.characterSheet,
@@ -801,6 +857,7 @@ describe("ClientSettingsStore", () => {
 		const user = createDefaultClientUserSettings(
 			{ width: 1440, height: 900 },
 			8,
+			"windows",
 		);
 		await first.saveUserPatch({ sections: { graphics: user.graphics } });
 		await second.saveUserPatch({ sections: { ui: user.ui } });
@@ -860,6 +917,7 @@ describe("ClientSettingsStore", () => {
 		const user = createDefaultClientUserSettings(
 			{ width: 1440, height: 900 },
 			8,
+			"windows",
 		);
 		await store.saveUserPatch({ sections: { graphics: user.graphics } });
 		const before = await readFile(path, "utf8");

@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt;
 
+use super::lock_feedback::OPEN_FAIL_DUE_TO_LOCK_SOUND;
 use super::{ClientRuntime, ClientViewEvent, PendingOperation};
 use crate::{ActionResultReason, ActionResultSource};
 use holtburger_world::{CollisionReportOutcome, CollisionReportPhase, WorldState};
@@ -56,9 +57,6 @@ pub(super) fn collision_script_cues(
 
 /// Retail keeps its missing-object placeholder, including queued network blobs, for 25 seconds.
 const RETAIL_MISSING_OBJECT_LIFETIME: Duration = Duration::from_secs(25);
-
-/// ACE Sound.OpenFailDueToLock, also broadcast for housing storage permission denial.
-const OPEN_FAIL_DUE_TO_LOCK_SOUND: u32 = 0x94;
 
 /// Standard retail housing storage: ACE/Source/ACE.Entity/Enum/WeenieClassName.cs,
 /// W_STORAGE_CLASS. Retail IsStorage compares the template ID. Keep this narrow sound heuristic
@@ -589,6 +587,13 @@ mod tests {
         }))
         .pack(&mut bytes);
         client.handle_message(&bytes).await.unwrap();
+        assert!(
+            matches!(events.try_recv().unwrap(), ClientViewEvent::LockFeedback(
+            super::super::lock_feedback::LockFeedback {
+                target, outcome: super::super::lock_feedback::LockFeedbackOutcome::Failed, ..
+            }
+        ) if target == guid)
+        );
         assert!(
             matches!(events.try_recv().unwrap(), ClientViewEvent::ActionResult {
             source: ActionResultSource::Client,

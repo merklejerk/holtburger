@@ -107,6 +107,7 @@ describe("parseClientLaunchArguments", () => {
 			]),
 		).toEqual({
 			startup: {
+				contentPath: null,
 				host: "world.example",
 				port: 9001,
 				account: "ash",
@@ -132,6 +133,7 @@ describe("parseClientLaunchArguments", () => {
 			]),
 		).toEqual({
 			startup: {
+				contentPath: null,
 				host: "localhost",
 				port: 9010,
 				account: "ash",
@@ -220,6 +222,7 @@ describe("parseClientLaunchArguments", () => {
 			]),
 		).toEqual({
 			startup: {
+				contentPath: null,
 				host: "localhost",
 				port: 9010,
 				account: "ash",

@@ -106,7 +106,7 @@ export async function probeClientMouseMovement(client, evaluate) {
 		);
 	}
 	const defaults = await read(
-		`import('/src/client/client-input-settings.ts').then(module => module.CLIENT_INPUT_DEFAULTS)`,
+		`import('/src/client/client-input-settings.ts').then(module => module.createClientInputDefaults("windows"))`,
 	);
 	await read(
 		`${api}.bindingSettings.replace({...${api}.bindingSettings.read(), mouseMovement:${!defaults.mouseMovement}, character:{...${api}.bindingSettings.read().character,forward:[{key:'F8'}]}})`,

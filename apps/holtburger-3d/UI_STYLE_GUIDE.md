@@ -344,6 +344,29 @@ key sequence; inspecting an explicit object does not change selection.
 The horizontal action buttons use `--ui-locks-action-icon-size`; the preferred item cell
 uses the shared authored `--ui-item-cell-min-size`, with overall scaling applied by its UI boundary.
 
+Lock feedback is a pointer-transparent DOM/SVG overlay at the target's projected
+bounds center, independent of selection and the unlock helper. Unlock updates
+open, lift, and fade the padlock; failed picks, wrong keys, and locked opening
+attempts shake the closed padlock briefly. Nearby players' broadcast attempts
+also count. Each target has one icon, with repeated failures restarting it.
+`CLIENT_LOCK_FEEDBACK_TUNING` owns lifetimes, keeping DOM expiry and animation duration
+in sync. Defaults live in `ui-base.css`; themes may override these inherited tokens live:
+
+| Token suffix (`--ui-lock-feedback-…`)    | Meaning / units                                                                                                |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `size`                                   | Icon width and height, CSS length                                                                              |
+| `body`, `failure-color`, `success-color` | Padlock fill and outcome stroke colors                                                                         |
+| `stroke-width`                           | Unitless SVG stroke width in the 48-unit viewBox                                                               |
+| `glow`, `glow-blur`                      | Success shadow color and CSS blur length                                                                       |
+| `shake-travel`, `shake-angle`            | Failure translation length and rotation angle                                                                  |
+| `pop-scale`, `pop-rise`                  | Success peak scale and upward length; starting scale mirrors the peak around 1 and settling uses half the rise |
+| `rise`                                   | Total upward travel at the end of success, CSS length                                                          |
+| `open-angle`                             | Shackle opening angle, also used for reduced motion                                                            |
+
+Use nonnegative travel lengths, an opening angle, and a pop scale between 1 and 2.
+Reduced motion uses a fade and a static open shackle. Like the combat reticle,
+projection does not test wall occlusion; offscreen effects expire without an arrow.
+
 The Enchantments window shares the spell panel's padding, row, filter, and color
 tokens. Its affected-stat headings use `--ui-enchantments-heading-margin`,
 `--ui-enchantments-heading-font-size`, `--ui-enchantments-heading-letter-spacing`,

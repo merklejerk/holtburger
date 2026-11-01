@@ -1,5 +1,6 @@
 import { readFile, copyFile } from "node:fs/promises";
 import { constants } from "node:fs";
+import { resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { clientServerScope } from "./client-profile-key.js";
 import { replaceLocalFile } from "./replace-local-file.js";
@@ -49,7 +50,7 @@ export class LauncherStore {
 	}
 	#empty(): LauncherSettings {
 		return {
-			version: 4,
+			version: 5,
 			serverCredentials: {},
 			servers: [],
 			profiles: [],
@@ -96,6 +97,7 @@ export class LauncherStore {
 					id: profile.id,
 					name: profile.name,
 					serverId: profile.serverId,
+					contentPath: profile.contentPath,
 					credentialStatus,
 				};
 			}),
@@ -231,6 +233,8 @@ export class LauncherStore {
 						name: edit.name,
 						serverId: edit.serverId,
 						credentials: encryptCredentials(edit.id, edit.credentials),
+						contentPath:
+							edit.contentPath === null ? null : resolve(edit.contentPath),
 					},
 				],
 			};
@@ -313,7 +317,12 @@ export class LauncherStore {
 				[server.id]: selection.profileId,
 			},
 		}));
-		return { ...server.endpoint, ...selection.credentials };
+		return {
+			...server.endpoint,
+			...selection.credentials,
+			contentPath:
+				selection.contentPath === null ? null : resolve(selection.contentPath),
+		};
 	}
 	updateWindow(window: ClientWindowSettings): Promise<void> {
 		if (this.#recoveryRequired) return Promise.resolve();

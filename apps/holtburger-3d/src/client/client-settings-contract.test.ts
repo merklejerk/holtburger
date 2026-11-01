@@ -1,4 +1,3 @@
-import { CLIENT_PANEL_SHORTCUT_ACTIONS } from "../lib/input/input-contract";
 import { describe, expect, it } from "vitest";
 import { SPELL_BAR_INDICES } from "./client-spell-bar-state";
 import {
@@ -15,10 +14,9 @@ import {
 } from "./client-settings-defaults";
 import { hudTrayOrientation, rotateHudTray } from "./client-hud-tray-layout";
 import {
-	CLIENT_KEYBOARD_DEFAULTS,
+	createClientInputDefaults,
+	createClientKeyboardDefaults,
 	clientInputSettingsSchema,
-	CLIENT_INPUT_DEFAULTS,
-	clientKeyboardSettingsSchema,
 	clientKeyboardSettingsEqual,
 } from "./client-input-settings";
 
@@ -35,7 +33,7 @@ const viewport = { width: 1440, height: 900 };
 
 describe("current client settings values", () => {
 	it("loads older UI profiles with FPS hidden and preserves explicit visibility", () => {
-		const ui = createDefaultClientUserSettings(viewport, 0).ui;
+		const ui = createDefaultClientUserSettings(viewport, 0, "windows").ui;
 		const { showFps, ...older } = ui;
 		expect(clientUiSettingsSchema.parse(older)).toEqual({ ...older, showFps });
 		for (const enabled of [true, false]) {
@@ -52,6 +50,7 @@ describe("current client settings values", () => {
 		const { showHelpLabels, ...older } = createDefaultClientUserSettings(
 			viewport,
 			0,
+			"windows",
 		).ui;
 		expect(showHelpLabels).toBe(true);
 		expect(clientUiSettingsSchema.parse(older).showHelpLabels).toBe(true);
@@ -67,52 +66,6 @@ describe("current client settings values", () => {
 		).toBe(false);
 	});
 
-	it("adds panel defaults to old profiles and preserves remapped and unbound panels", () => {
-		const olderClient = Object.fromEntries(
-			Object.entries(CLIENT_KEYBOARD_DEFAULTS.client).filter(
-				([action]) =>
-					!CLIENT_PANEL_SHORTCUT_ACTIONS.some((panel) => panel === action),
-			),
-		);
-		const previous = { ...CLIENT_KEYBOARD_DEFAULTS, client: olderClient };
-		expect(clientKeyboardSettingsSchema.parse(previous)).toEqual(
-			CLIENT_KEYBOARD_DEFAULTS,
-		);
-		const client = {
-			...olderClient,
-			toggleInventory: [],
-			toggleCharacter: [{ key: "F8" }],
-		};
-		const loaded = clientKeyboardSettingsSchema.parse({ ...previous, client });
-		expect(loaded.client).toEqual({
-			...CLIENT_KEYBOARD_DEFAULTS.client,
-			...client,
-		});
-	});
-
-	it.each(["toggleChatHistory", "holdChatHistory", "toggleNearby"] as const)(
-		"fills missing %s while preserving saved alternatives and unbound choices",
-		(action) => {
-			const { [action]: defaultBinding, ...olderClient } =
-				CLIENT_KEYBOARD_DEFAULTS.client;
-			const previous = {
-				...CLIENT_KEYBOARD_DEFAULTS,
-				client: { ...olderClient, examine: [{ key: "F9" }] },
-			};
-			expect(clientKeyboardSettingsSchema.parse(previous).client).toEqual({
-				...previous.client,
-				[action]: defaultBinding,
-			});
-			for (const binding of [[], [{ key: "F10", ctrl: true }]]) {
-				expect(
-					clientKeyboardSettingsSchema.parse({
-						...previous,
-						client: { ...previous.client, [action]: binding },
-					}).client[action],
-				).toEqual(binding);
-			}
-		},
-	);
 	it("adds warning thresholds to older UI profiles while preserving font choices", () => {
 		const fonts = { body: "serif", heading: "sans", mono: "mono" } as const;
 		// An explicit Base choice must survive the change in absence defaults.
@@ -231,38 +184,12 @@ describe("current client settings values", () => {
 			).toEqual(vitalWarningThresholds);
 		},
 	);
-	it("adds split-stack to older keyboard maps while retaining customized keys", () => {
-		const { splitStack, ...olderClient } = CLIENT_KEYBOARD_DEFAULTS.client;
-		const previous = {
-			...CLIENT_KEYBOARD_DEFAULTS,
-			client: { ...olderClient, examine: [{ key: "F9" }] },
-		};
-		expect(clientKeyboardSettingsSchema.parse(previous).client).toEqual({
-			...previous.client,
-			splitStack,
-		});
-		for (const binding of [[], [{ key: "F10", ctrl: true }]]) {
-			expect(
-				clientKeyboardSettingsSchema.parse({
-					...previous,
-					client: { ...previous.client, splitStack: binding },
-				}).client.splitStack,
-			).toEqual(binding);
-		}
-	});
-	it("adds independent power defaults to older maps and preserves saved power alternatives", () => {
-		const { preciseJump, ...older } = CLIENT_KEYBOARD_DEFAULTS;
-		expect(clientKeyboardSettingsSchema.parse(older).preciseJump).toEqual(
-			preciseJump,
-		);
-		const remapped = { increasePower: [{ key: "i" }], decreasePower: [] };
-		expect(
-			clientKeyboardSettingsSchema.parse({ ...older, preciseJump: remapped })
-				.preciseJump,
-		).toEqual(remapped);
-	});
 	it("loads saved keyboard maps while preserving current remapped controls", () => {
-		const current = createDefaultClientUserSettings(viewport, 8).input;
+		const current = createDefaultClientUserSettings(
+			viewport,
+			8,
+			"windows",
+		).input;
 		const examine = [{ key: "F8" }];
 		const forward = [{ key: "i" }];
 		const saved = {
@@ -281,9 +208,9 @@ describe("current client settings values", () => {
 	});
 
 	it("uses the declared initial audio mix", () => {
-		expect(createDefaultClientUserSettings(viewport, 8).audio).toEqual(
-			CLIENT_AUDIO_DEFAULTS,
-		);
+		expect(
+			createDefaultClientUserSettings(viewport, 8, "windows").audio,
+		).toEqual(CLIENT_AUDIO_DEFAULTS);
 	});
 	it.each(["masterVolume", "effectVolume", "ambientVolume"] as const)(
 		"validates %s independently",
@@ -304,14 +231,14 @@ describe("current client settings values", () => {
 		},
 	);
 	it("validates complete runtime user and character settings", () => {
-		const user = createDefaultClientUserSettings(viewport, 8);
+		const user = createDefaultClientUserSettings(viewport, 8, "windows");
 		const character = createDefaultClientCharacterSettings();
 		expect(clientUserSettingsSchema.parse(user)).toEqual(user);
 		expect(clientCharacterSettingsSchema.parse(character)).toEqual(character);
 	});
 
 	it("keeps the status tray orientation invariant", () => {
-		const user = createDefaultClientUserSettings(viewport, 8);
+		const user = createDefaultClientUserSettings(viewport, 8, "windows");
 		const rotated = rotateHudTray(user.hudLayout.statusTray);
 		expect(hudTrayOrientation(rotated)).not.toBe(
 			hudTrayOrientation(user.hudLayout.statusTray),
@@ -337,7 +264,7 @@ describe("current client settings values", () => {
 	});
 
 	it("rejects unknown fields and invalid fixed collections", () => {
-		const user = createDefaultClientUserSettings(viewport, 8);
+		const user = createDefaultClientUserSettings(viewport, 8, "windows");
 		const character = createDefaultClientCharacterSettings();
 		expect(() =>
 			clientUserSettingsSchema.parse({ ...user, extra: true }),
@@ -381,15 +308,19 @@ describe("current client settings values", () => {
 });
 
 it("preserves keyboard preferences and round-trips mouse settings", () => {
+	const defaults = createClientKeyboardDefaults("windows");
 	const keyboard = {
-		...CLIENT_KEYBOARD_DEFAULTS,
+		...defaults,
 		character: {
-			...CLIENT_KEYBOARD_DEFAULTS.character,
+			...defaults.character,
 			forward: [{ key: "F8" }],
 		},
 	};
 	const migrated = clientInputSettingsSchema.parse(keyboard);
-	expect(migrated).toEqual({ ...CLIENT_INPUT_DEFAULTS, ...keyboard });
+	expect(migrated).toEqual({
+		...createClientInputDefaults("windows"),
+		...keyboard,
+	});
 	expect(clientInputSettingsSchema.parse({ ...keyboard, mouse: {} })).toEqual(
 		migrated,
 	);
@@ -422,39 +353,36 @@ it.each([
 ])("rejects non-boolean %s", (field) => {
 	expect(() =>
 		clientInputSettingsSchema.parse({
-			...CLIENT_INPUT_DEFAULTS,
+			...createClientInputDefaults("windows"),
 			[field]: "yes",
 		}),
 	).toThrow();
 });
 
 it("preserves physical key ownership for acquisition and mouse edits but detects binding changes", () => {
+	const defaults = createClientInputDefaults("windows");
 	const changed = {
-		...CLIENT_INPUT_DEFAULTS,
-		targetOnlyInView: !CLIENT_INPUT_DEFAULTS.targetOnlyInView,
-		mouseMovement: !CLIENT_INPUT_DEFAULTS.mouseMovement,
-		invertCameraHorizontal: !CLIENT_INPUT_DEFAULTS.invertCameraHorizontal,
-		invertCameraVertical: !CLIENT_INPUT_DEFAULTS.invertCameraVertical,
-		invertSteeringHorizontal: !CLIENT_INPUT_DEFAULTS.invertSteeringHorizontal,
-		invertSteeringVertical: !CLIENT_INPUT_DEFAULTS.invertSteeringVertical,
+		...defaults,
+		targetOnlyInView: !defaults.targetOnlyInView,
+		mouseMovement: !defaults.mouseMovement,
+		invertCameraHorizontal: !defaults.invertCameraHorizontal,
+		invertCameraVertical: !defaults.invertCameraVertical,
+		invertSteeringHorizontal: !defaults.invertSteeringHorizontal,
+		invertSteeringVertical: !defaults.invertSteeringVertical,
 	};
-	expect(clientKeyboardSettingsEqual(CLIENT_INPUT_DEFAULTS, changed)).toBe(
-		true,
-	);
+	expect(clientKeyboardSettingsEqual(defaults, changed)).toBe(true);
 	const rebound = {
 		...changed,
 		character: { ...changed.character, forward: [{ key: "F8" }] },
 	};
-	expect(clientKeyboardSettingsEqual(CLIENT_INPUT_DEFAULTS, rebound)).toBe(
-		false,
-	);
+	expect(clientKeyboardSettingsEqual(defaults, rebound)).toBe(false);
 });
 
 it("does not treat settings normalization as a keyboard edit", () => {
 	expect(
 		clientKeyboardSettingsEqual(
-			CLIENT_INPUT_DEFAULTS,
-			clientInputSettingsSchema.parse(CLIENT_INPUT_DEFAULTS),
+			createClientInputDefaults("windows"),
+			clientInputSettingsSchema.parse(createClientInputDefaults("windows")),
 		),
 	).toBe(true);
 });
@@ -462,9 +390,11 @@ it("does not treat settings normalization as a keyboard edit", () => {
 it.each([false, true])(
 	"restores absent targeting preferences and preserves an explicit view restriction of %s",
 	(targetOnlyInView) => {
-		const initial = clientInputSettingsSchema.parse(CLIENT_KEYBOARD_DEFAULTS);
+		const initial = clientInputSettingsSchema.parse(
+			createClientKeyboardDefaults("windows"),
+		);
 		expect(initial.targetOnlyInView).toBe(
-			CLIENT_INPUT_DEFAULTS.targetOnlyInView,
+			createClientInputDefaults("windows").targetOnlyInView,
 		);
 		const changed = { ...initial, targetOnlyInView };
 		expect(
@@ -476,7 +406,7 @@ it.each([false, true])(
 describe("dungeon ambient settings", () => {
 	it("fills older graphics profiles and preserves saved ambient choices", () => {
 		const { sealedInteriorAmbientLevel, ...older } =
-			createDefaultClientUserSettings(viewport, 0).graphics;
+			createDefaultClientUserSettings(viewport, 0, "windows").graphics;
 		expect(clientGraphicsSettingsSchema.parse(older)).toEqual({
 			...older,
 			sealedInteriorAmbientLevel,
@@ -502,7 +432,11 @@ describe("dungeon ambient settings", () => {
 		Infinity,
 		"0.5",
 	])("rejects invalid ambient level %s", (level) => {
-		const graphics = createDefaultClientUserSettings(viewport, 0).graphics;
+		const graphics = createDefaultClientUserSettings(
+			viewport,
+			0,
+			"windows",
+		).graphics;
 		expect(
 			clientGraphicsSettingsSchema.safeParse({
 				...graphics,

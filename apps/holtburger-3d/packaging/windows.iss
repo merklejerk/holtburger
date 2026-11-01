@@ -49,17 +49,26 @@ Name: "{userprograms}\{#DisplayName}"; Filename: "{app}\payload\h3d\holtburger-3
 
 [Code]
 const
-  { Windows file attributes and Delphi stream access/share modes. }
+  { Windows file attributes, delete access, and sharing flags. }
   DirectoryAttribute = $10;
   ReparsePointAttribute = $400;
-  OpenReadWriteExclusive = $12;
+  DeleteAccess = $10000;
+  ShareReadWriteDelete = 7;
+  OpenExisting = 3;
+
+function OpenForDeletion(FileName: String; DesiredAccess, ShareMode: Cardinal;
+  SecurityAttributes: NativeUInt; CreationDisposition, Flags: Cardinal;
+  TemplateFile: NativeUInt): NativeUInt;
+  external 'CreateFileW@kernel32.dll stdcall';
+function CloseFileHandle(Handle: NativeUInt): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
 
 { Preflight never edits files. Reject links and locks before removing the owned payload. }
 function CheckPayload(const Directory: String): String;
 var
   Entry: TFindRec;
   Path: String;
-  Stream: TFileStream;
+  Handle: NativeUInt;
 begin
   Result := '';
   if not DirExists(Directory) then exit;
@@ -86,12 +95,13 @@ begin
         if (Entry.Attributes and DirectoryAttribute) <> 0 then
           Result := CheckPayload(Path)
         else begin
-          try
-            Stream := TFileStream.Create(Path, OpenReadWriteExclusive);
-            Stream.Free;
-          except
-            Result := 'Quit Holtburger and its host, then retry. Cannot replace: ' + Path + #13#10 + GetExceptionMessage;
-          end;
+          { Readers sharing deletion do not prevent whole-payload replacement.
+            Ask for the delete access cleanup needs; never open payload files for writing. }
+          Handle := OpenForDeletion(Path, DeleteAccess, ShareReadWriteDelete, 0, OpenExisting, 0, 0);
+          if Handle = NativeUInt(-1) then
+            Result := 'Quit Holtburger and its host, then retry. Cannot replace: ' + Path + #13#10 + SysErrorMessage(DLLGetLastError)
+          else if not CloseFileHandle(Handle) then
+            RaiseException('Cannot close the payload preflight handle: ' + Path);
         end;
         if Result <> '' then exit;
       end;

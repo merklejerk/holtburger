@@ -155,15 +155,18 @@ def verify_windows_installer(native: Path, installer: Path, compiler: Path, work
     profile = work / "retained profile"
     server = profile_fixture("seed", profile)["serverName"]
     quiet = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
+    # Keep operation logs outside disposable payload cleanup; CI monitoring can
+    # retain reader handles to a failed operation's log after it has been printed.
+    logs = installer.parent.parent / "installer-logs"
+    logs.mkdir(exist_ok=True)
 
     def run_installer(path: Path, options: list[str]) -> subprocess.CompletedProcess:
         """Expose native setup diagnostics when a silent operation fails."""
-        log = work / "installer-operation.log"
-        log.unlink(missing_ok=True)
+        with tempfile.NamedTemporaryFile(prefix="operation-", suffix=".log", dir=logs, delete=False) as file:
+            log = Path(file.name)
         result = subprocess.run([str(path), *quiet, *options, f"/LOG={log}"], timeout=180)
         if result.returncode != 0 and log.exists():
             print(log.read_text(encoding="utf-8-sig"), flush=True)
-            diagnose_windows_payload(payload)
         return result
 
     def setup(path: Path, select_destination: bool) -> None:
@@ -221,63 +224,6 @@ def verify_windows_installer(native: Path, installer: Path, compiler: Path, work
             raise ValueError("Uninstall retained its application registration")
     except FileNotFoundError:
         pass
-
-
-def diagnose_windows_payload(payload: Path) -> None:
-    """Temporary native diagnostics distinguish running images from strict sharing checks."""
-    import ctypes
-    from ctypes import wintypes
-
-    # Restart Manager reports processes retaining these installed executable files.
-    class ProcessIdentity(ctypes.Structure):
-        _fields_ = [("pid", wintypes.DWORD), ("started", wintypes.FILETIME)]
-
-    class ProcessInfo(ctypes.Structure):
-        _fields_ = [("process", ProcessIdentity), ("application", wintypes.WCHAR * 256),
-                    ("service", wintypes.WCHAR * 64), ("kind", wintypes.UINT),
-                    ("status", wintypes.ULONG), ("session", wintypes.DWORD),
-                    ("restartable", wintypes.BOOL)]
-
-    manager = ctypes.WinDLL("rstrtmgr")
-    session, key = wintypes.DWORD(), ctypes.create_unicode_buffer(33)
-    result = manager.RmStartSession(ctypes.byref(session), 0, key)
-    if result != 0:
-        raise ctypes.WinError(result)
-    executables = [payload / "h3d/holtburger-3d.exe", payload / "h3d/resources/holtburger-3d-host.exe"]
-    try:
-        files = (wintypes.LPCWSTR * len(executables))(*(str(path) for path in executables))
-        result = manager.RmRegisterResources(session, len(files), files, 0, None, 0, None)
-        if result != 0:
-            raise ctypes.WinError(result)
-        needed, count, reasons = wintypes.UINT(), wintypes.UINT(), wintypes.DWORD()
-        result = manager.RmGetList(session, ctypes.byref(needed), ctypes.byref(count), None, ctypes.byref(reasons))
-        if result not in (0, 234):
-            raise ctypes.WinError(result)
-        processes = (ProcessInfo * needed.value)()
-        count.value = needed.value
-        result = manager.RmGetList(session, ctypes.byref(needed), ctypes.byref(count), processes, ctypes.byref(reasons))
-        if result != 0:
-            raise ctypes.WinError(result)
-        print(json.dumps({"payloadProcesses": [{"pid": item.process.pid, "application": item.application}
-                                               for item in processes[:count.value]]}), flush=True)
-    finally:
-        result = manager.RmEndSession(session)
-        if result != 0:
-            raise ctypes.WinError(result)
-    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
-                                  ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
-    kernel.CreateFileW.restype = wintypes.HANDLE
-    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel.CloseHandle.restype = wintypes.BOOL
-    for executable in executables:
-        for label, access, sharing in [("read-write-exclusive", 0xc0000000, 0),
-                                       ("delete-shared", 0x10000, 7), ("read-shared", 0x80000000, 7)]:
-            handle = kernel.CreateFileW(str(executable), access, sharing, None, 3, 0, None)
-            error = ctypes.get_last_error() if handle == ctypes.c_void_p(-1).value else 0
-            print(json.dumps({"executable": str(executable), "access": label, "error": error}), flush=True)
-            if error == 0 and not kernel.CloseHandle(handle):
-                raise ctypes.WinError(ctypes.get_last_error())
 
 
 def build(artifacts: Path, triple: str, output: Path, compiler: Path | None) -> Path:

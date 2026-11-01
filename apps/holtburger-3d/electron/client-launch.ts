@@ -1,8 +1,10 @@
 import { parseClientLaunchArgument } from "../scripts/entry-paths.mjs";
 import { resolve } from "node:path";
 
-/** Launch-only credentials and endpoint resolved by Electron main. */
+/** Session content, credentials, and endpoint resolved by Electron main. */
 export interface ClientLaunchConfiguration {
+	/** Session asset selection; null uses the application default. */
+	contentPath: string | null;
 	host: string;
 	port: number;
 	account: string;
@@ -166,6 +168,7 @@ export function parseClientLaunchArguments(
 			account === undefined
 				? null
 				: {
+						contentPath: null,
 						host,
 						port,
 						account,

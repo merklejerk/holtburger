@@ -232,7 +232,10 @@ function entryArguments(): {
 	let rendererArguments: readonly string[] = entryArgs;
 	if (mode === "client") {
 		const parsed = parseClientLaunchArguments(entryArgs);
-		clientStartup = parsed.startup ?? undefined;
+		clientStartup =
+			parsed.startup === null
+				? undefined
+				: { ...parsed.startup, contentPath: extracted.contentPath };
 		noLauncher = parsed.noLauncher;
 		ignorePersistedConfig = parsed.ignorePersistedConfig;
 		ignoreWorldMapCache = parsed.ignoreWorldMapCache;
@@ -336,10 +339,28 @@ function launchHost(
 	return new SidecarHostClient(child, mode);
 }
 
+/** Both launcher drafts and startup recovery use the same native folder selection behavior. */
+async function chooseContentFolder(
+	window: BrowserWindow,
+	previous: string | null,
+): Promise<string | null> {
+	const result = await dialog.showOpenDialog(window, {
+		title: "Choose Asheron's Call assets",
+		properties: ["openDirectory"],
+		...(previous === null ? {} : { defaultPath: previous }),
+	});
+	if (result.canceled) return null;
+	const [path] = result.filePaths;
+	if (path === undefined)
+		throw new Error("Folder picker returned no selection");
+	return path;
+}
+
 function createContentStartup(
 	window: BrowserWindow,
 	entry: ReturnType<typeof entryArguments>,
 	clearContent: boolean,
+	overridePath: string | null,
 	isCurrent: () => boolean,
 	detach: (() => void)[],
 ): ContentStartup<SidecarHostClient> {
@@ -347,7 +368,7 @@ function createContentStartup(
 		store: new ContentPreferenceStore(
 			join(app.getPath("userData"), "content-selection.json"),
 		),
-		overridePath: entry.contentPath,
+		overridePath,
 		noContentSearch: entry.noContentSearch,
 		clearContent,
 		portableRoot: join(
@@ -380,18 +401,7 @@ function createContentStartup(
 				else unlisten();
 			}
 		},
-		pickFolder: async (previous) => {
-			const result = await dialog.showOpenDialog(window, {
-				title: "Choose Asheron's Call assets",
-				properties: ["openDirectory"],
-				...(previous === null ? {} : { defaultPath: previous }),
-			});
-			if (result.canceled) return null;
-			const [path] = result.filePaths;
-			if (path === undefined)
-				throw new Error("Folder picker returned no selection");
-			return path;
-		},
+		pickFolder: (previous) => chooseContentFolder(window, previous),
 	});
 	detach.push(
 		startup.listen((snapshot) => {
@@ -832,6 +842,7 @@ void (async () => {
 			window,
 			entry,
 			entry.clearContent,
+			entry.contentPath,
 			() => !quitting,
 			detach,
 		);
@@ -850,6 +861,9 @@ void (async () => {
 	await launcher.load();
 	let clearContent = entry.clearContent;
 	const gamePath = entry.path;
+	// CLI content initializes only the first interactive draft or the direct launch.
+	let initialContentPath =
+		entry.clientStartup === undefined ? entry.contentPath : null;
 	const showPicker = async (diagnostic: string | null) => {
 		if (quitting) return;
 		await stopWindowGeometry();
@@ -899,6 +913,7 @@ void (async () => {
 				window,
 				entry,
 				clearContent,
+				startup.contentPath,
 				() => owner.attempt?.content === content,
 				detach,
 			);
@@ -1017,6 +1032,19 @@ void (async () => {
 		launcher.snapshot(pickerFailure, owner.canPlay),
 	);
 	const directory = new ServerDirectoryCatalog(fetch);
+	handle("launcher:initial-content-path", "picker", () => {
+		const path = initialContentPath;
+		initialContentPath = null;
+		return path;
+	});
+	handle(
+		"launcher:choose-content-path",
+		"picker",
+		async (_event, previous: unknown) => {
+			const path = z.string().min(1).nullable().parse(previous);
+			return chooseContentFolder(window, path);
+		},
+	);
 	handle("launcher:directory", "picker", async (_event, refresh: unknown) => {
 		await directory.load(z.boolean().parse(refresh));
 		return directory.view(

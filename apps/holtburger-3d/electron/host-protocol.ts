@@ -379,7 +379,20 @@ export class SidecarHostClient {
 	/** Sends the one launch-only client command; this method is not part of the preload bridge. */
 	async startClient(startup: ClientLaunchConfiguration): Promise<void> {
 		try {
-			await this.#invokeWire({ command: "start_client", startup });
+			// Content was selected when the host process launched; the game command owns connection data.
+			const { host, port, account, password, meleeMaxChaseDistance } = startup;
+			await this.#invokeWire({
+				command: "start_client",
+				startup: {
+					host,
+					port,
+					account,
+					password,
+					...(meleeMaxChaseDistance === undefined
+						? {}
+						: { meleeMaxChaseDistance }),
+				},
+			});
 		} finally {
 			// Release the caller's retained credential as soon as the encoded startup request settles.
 			startup.password = "";

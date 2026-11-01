@@ -19,7 +19,7 @@
 		readonly showPortalLogo: boolean;
 		/** Ready world scenery remains visible beneath the foreground composition. */
 		readonly backdrop: boolean;
-		/** Page-owned status beside corner branding; absent pages retain the existing header layout. */
+		/** Page-owned status fits beside corner branding without changing the content area. */
 		readonly headerAside?: Snippet;
 		/** Optional page action after focused controls have had first refusal. */
 		readonly onDefaultKeydown?: (event: KeyboardEvent) => void;
@@ -160,7 +160,7 @@
 		}
 		.pregame-header.with-aside {
 			display: flex;
-			align-items: start;
+			align-items: stretch;
 			justify-content: space-between;
 			gap: 24px;
 		}
@@ -168,6 +168,10 @@
 			flex: none;
 		}
 		.pregame-header-aside {
+			/* Branding owns header height; status must scroll inside that allocation. */
+			contain: size;
+			display: grid;
+			min-height: 0;
 			min-width: 0;
 			max-width: 50%;
 			flex: 0 1 50ch;
@@ -218,16 +222,6 @@
 			.pregame-content {
 				grid-template-rows: auto;
 				overflow: hidden auto;
-			}
-		}
-		@container pregame-viewport (max-width: 720px) {
-			.pregame-header.with-aside {
-				flex-wrap: wrap;
-				gap: 12px;
-			}
-			.pregame-header-aside {
-				flex-basis: 100%;
-				max-width: 100%;
 			}
 		}
 	}

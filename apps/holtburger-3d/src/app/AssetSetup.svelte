@@ -7,7 +7,7 @@
 	interface Props {
 		/** Native setup state remains active while the folder browser is open. */
 		readonly state: Extract<ContentStartupPhase, { kind: "needs_assets" }>;
-		/** A replacement picked during a CLI override is also temporary. */
+		/** Replacements for explicit session content never rewrite the application default. */
 		readonly temporary: boolean;
 		/** The shell owns operation failures and native actions. */
 		readonly onChoose: () => void;
@@ -70,8 +70,8 @@
 					{state.message}
 				</p>{/if}
 			{#if temporary}<p class="asset-hint">
-					This launch uses a temporary asset selection. This selection will not
-					be saved.
+					This launch uses an explicit asset selection. Recovery changes apply
+					to this attempt only and do not change the application default.
 				</p>{/if}
 			<div class="asset-actions">
 				<button

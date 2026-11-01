@@ -40,6 +40,10 @@
 	let selectedProfileId = $state("");
 	let account = $state("");
 	let password = $state("");
+	/** Cold launch draft, restored on profile selection and saved only by explicit profile actions. */
+	let contentPath = $state("");
+	/** Empty means default; preserve path characters supplied by the native folder picker. */
+	const draftContentPath = $derived(contentPath === "" ? null : contentPath);
 	/** Baseline for the selected preset; null also allows repairing missing or unreadable credentials. */
 	let savedProfileCredentials = $state<LauncherCredentials | null>(null);
 	/** Revealing a password is local to the current credential draft. */
@@ -58,7 +62,8 @@
 		profile !== null &&
 			(savedProfileCredentials === null ||
 				account !== savedProfileCredentials.account ||
-				password !== savedProfileCredentials.password),
+				password !== savedProfileCredentials.password ||
+				draftContentPath !== profile.contentPath),
 	);
 	type Editor =
 		| {
@@ -86,6 +91,8 @@
 		savedProfileCredentials = null;
 		passwordVisible = false;
 		selectedProfileId = id;
+		contentPath =
+			snapshot?.profiles.find((value) => value.id === id)?.contentPath ?? "";
 		account = "";
 		password = "";
 		const serverId = selectedServerId;
@@ -192,6 +199,7 @@
 			id,
 			serverId,
 			name,
+			contentPath: draftContentPath,
 			credentials: { account, password },
 		});
 		await refresh();
@@ -205,6 +213,7 @@
 			await transport.play({
 				serverId,
 				profileId: profile?.id ?? null,
+				contentPath: draftContentPath,
 				credentials: { account, password },
 			});
 			password = "";
@@ -216,9 +225,15 @@
 			await refresh();
 			selectedServerId =
 				snapshot?.lastSelection?.serverId ?? snapshot?.servers[0]?.id ?? "";
-			await chooseProfile(
-				snapshot?.lastProfileByServer[selectedServerId] ?? "",
-			);
+			const initial = await transport.takeInitialContentPath();
+			try {
+				await chooseProfile(
+					snapshot?.lastProfileByServer[selectedServerId] ?? "",
+				);
+			} finally {
+				// Saved credentials can be unreadable independently of an explicit CLI content selection.
+				if (initial !== null) contentPath = initial;
+			}
 		});
 		return unmount;
 	});
@@ -373,20 +388,40 @@
 					<header>
 						<h2>Launch options</h2>
 					</header>
-					<label
-						>Profile (optional)<select
-							class="ui-input"
-							value={selectedProfileId}
-							disabled={busy || !server}
-							onchange={(event) =>
-								void run(() => chooseProfile(event.currentTarget.value))}
+					<div class="launcher-profile-picker">
+						<label
+							>Profile (optional)<select
+								class="ui-input"
+								value={selectedProfileId}
+								disabled={busy || !server}
+								onchange={(event) =>
+									void run(() => chooseProfile(event.currentTarget.value))}
+							>
+								<option value="">No profile</option>
+								{#each profiles as item (item.id)}<option value={item.id}
+										>{item.name}</option
+									>{/each}
+							</select></label
 						>
-							<option value="">No profile</option>
-							{#each profiles as item (item.id)}<option value={item.id}
-									>{item.name}</option
-								>{/each}
-						</select></label
-					>
+						{#if profile}
+							<div class="ui-icon-actions">
+								<button
+									class="ui-button ui-icon-button pregame-quiet"
+									type="button"
+									aria-label="Delete profile"
+									title="Delete profile"
+									disabled={busy}
+									onclick={() => {
+										if (profile)
+											editor = { kind: "delete-profile", value: profile };
+									}}
+									><span class="pregame-icon" aria-hidden="true"
+										><DeleteIcon /></span
+									></button
+								>
+							</div>
+						{/if}
+					</div>
 					{#if profile?.credentialStatus === "unavailable"}<p role="alert">
 							Saved credentials could not be loaded. Enter credentials and
 							overwrite this profile to repair it.
@@ -424,6 +459,41 @@
 							>
 						</div>
 					</div>
+					<details
+						class="launcher-advanced ui-disclosure ui-disclosure-section"
+					>
+						<summary>Advanced</summary>
+						<div class="launcher-advanced-content ui-disclosure-body ui-inset">
+							<label
+								>Content path override<input
+									class="ui-input"
+									bind:value={contentPath}
+									placeholder="Use application default"
+									disabled={busy || !server}
+								/></label
+							>
+							<div class="launcher-actions">
+								<button
+									class="pregame-action ui-button"
+									type="button"
+									disabled={busy || !server}
+									onclick={() =>
+										void run(async () => {
+											const selected =
+												await transport.chooseContentPath(draftContentPath);
+											if (selected !== null) contentPath = selected;
+										})}>Browse content folder</button
+								>
+								<button
+									class="pregame-action ui-button"
+									type="button"
+									disabled={busy || !server || !contentPath}
+									onclick={() => (contentPath = "")}
+									>Use application default</button
+								>
+							</div>
+						</div>
+					</details>
 					<div class="launcher-actions">
 						{#if profile}<button
 								class="pregame-action ui-button"
@@ -433,15 +503,6 @@
 									if (profile && profileChanged)
 										void run(() => persistProfile(profile.id, profile.name));
 								}}>Overwrite profile</button
-							>{/if}
-						{#if profile}<button
-								class="pregame-action ui-button"
-								type="button"
-								disabled={busy}
-								onclick={() => {
-									if (profile)
-										editor = { kind: "delete-profile", value: profile };
-								}}>Delete profile</button
 							>{/if}
 						<button
 							class="pregame-action ui-button launcher-save-profile"
@@ -687,6 +748,11 @@
 		.launcher-save-profile {
 			margin-inline-start: auto;
 		}
+		.launcher-advanced-content {
+			display: grid;
+			gap: 16px;
+		}
+		.launcher-profile-picker,
 		.launcher-password {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;
@@ -701,18 +767,23 @@
 			margin-top: auto;
 		}
 		.launcher-error {
+			min-height: 0;
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;
-			align-items: start;
+			grid-template-rows: minmax(0, 1fr);
+			align-items: stretch;
 			gap: 12px;
 			padding: 12px;
 			color: var(--ui-color-danger);
+		}
+		.launcher-error .ui-icon-actions {
+			align-self: start;
 		}
 		.launcher-error-message {
 			margin: 0;
 			white-space: pre-wrap;
 			overflow-wrap: anywhere;
-			max-height: min(24vh, 10rem);
+			min-height: 0;
 			overflow: auto;
 		}
 		@media (max-width: 720px) {

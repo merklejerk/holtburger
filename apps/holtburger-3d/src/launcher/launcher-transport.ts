@@ -13,6 +13,10 @@ interface LauncherBridge {
 	/** Native application policy; unavailable launcher navigation must not be offered. */
 	readonly enabled: boolean;
 	snapshot(): Promise<LauncherSnapshot>;
+	/** Consume CLI content initialization once; later launcher documents load their profiles. */
+	takeInitialContentPath(): Promise<string | null>;
+	/** Browse without changing preferences or validating runtime content. */
+	chooseContentPath(previous: string | null): Promise<string | null>;
 	directory(refresh: boolean): Promise<ServerDirectory>;
 	importServer(key: string): Promise<string | null>;
 	saveServer(value: LauncherServer): Promise<void>;

@@ -2,7 +2,7 @@
 	import ResizeBorders from "../app/ResizeBorders.svelte";
 	import type { ResizeEdges } from "../app/resize-edges";
 	import { onDestroy, untrack, type Snippet } from "svelte";
-	import { trackPointerGesture } from "../app/pointer-gesture";
+	import { trackUiPointerGesture, pointerUiScale } from "../app/ui-scale";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import type { EscapeContextHandle } from "../lib/input/keyboard-input-policy";
 	import { CLIENT_UI_LAYERS } from "./client-ui-layers";
@@ -112,6 +112,7 @@
 		if (event.button !== 0) return;
 		event.preventDefault();
 		event.stopPropagation();
+		const scale = pointerUiScale(event);
 		const startX = event.clientX;
 		const startY = event.clientY;
 		const start = resolved;
@@ -121,7 +122,7 @@
 			height: sizedPlacement.preferredHeight,
 		};
 		cancelPointerGesture?.();
-		cancelPointerGesture = trackPointerGesture(
+		cancelPointerGesture = trackUiPointerGesture(
 			window,
 			event.pointerId,
 			(moved) => {
@@ -129,8 +130,8 @@
 					anchorClientHudPlacement(
 						{
 							...start,
-							left: start.left + moved.clientX - startX,
-							top: start.top + moved.clientY - startY,
+							left: start.left + (moved.clientX - startX) / scale,
+							top: start.top + (moved.clientY - startY) / scale,
 						},
 						startViewport,
 						preferred,
@@ -144,12 +145,13 @@
 		if (event.button !== 0) return;
 		event.preventDefault();
 		event.stopPropagation();
+		const scale = pointerUiScale(event);
 		const startX = event.clientX;
 		const startY = event.clientY;
 		const start = resolved;
 		const startViewport = viewport;
 		cancelPointerGesture?.();
-		cancelPointerGesture = trackPointerGesture(
+		cancelPointerGesture = trackUiPointerGesture(
 			window,
 			event.pointerId,
 			(moved) => {
@@ -157,7 +159,10 @@
 					start,
 					startViewport,
 					minimum,
-					{ x: moved.clientX - startX, y: moved.clientY - startY },
+					{
+						x: (moved.clientX - startX) / scale,
+						y: (moved.clientY - startY) / scale,
+					},
 					edges,
 				);
 				onPlacementChange(

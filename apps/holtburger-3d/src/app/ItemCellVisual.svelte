@@ -64,7 +64,7 @@
 	@layer components {
 		.item-cell-art {
 			position: absolute;
-			inset: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
+			inset: var(--ui-item-cell-padding);
 			display: grid;
 			place-items: center;
 			min-width: 0;
@@ -72,10 +72,10 @@
 		}
 		.item-cell-meter {
 			position: absolute;
-			top: calc(var(--ui-item-structure-inset) * var(--ui-icon-scale));
-			right: calc(var(--ui-item-structure-inset) * var(--ui-icon-scale));
-			bottom: calc(var(--ui-item-structure-inset) * var(--ui-icon-scale));
-			width: calc(var(--ui-item-structure-width) * var(--ui-icon-scale));
+			top: var(--ui-item-structure-inset);
+			right: var(--ui-item-structure-inset);
+			bottom: var(--ui-item-structure-inset);
+			width: var(--ui-item-structure-width);
 			background: var(--ui-item-structure-background);
 			box-shadow: 0 0 0 1px var(--ui-item-structure-outline);
 			pointer-events: none;
@@ -87,33 +87,28 @@
 		}
 		/* Keep small positive amounts visible without making exhausted items look usable. */
 		.item-cell-meter-fill.nonempty {
-			min-height: min(
-				100%,
-				calc(var(--ui-item-structure-min-fill) * var(--ui-icon-scale))
-			);
+			min-height: min(100%, var(--ui-item-structure-min-fill));
 		}
 		.item-equipped {
 			position: absolute;
-			right: calc(1px * var(--ui-icon-scale));
-			bottom: calc(1px * var(--ui-icon-scale));
-			padding: 0 calc(2px * var(--ui-icon-scale));
-			border-radius: calc(2px * var(--ui-icon-scale));
+			right: 1px;
+			bottom: 1px;
+			padding: 0 2px;
+			border-radius: 2px;
 			background: var(--ui-item-equipped-background);
 			color: var(--ui-item-equipped-color);
 			font: bold
-				calc(var(--ui-item-equipped-font-size) * var(--ui-icon-scale)) / 1.2
+				calc(var(--ui-item-equipped-font-size) * var(--ui-text-scale)) / 1.2
 				sans-serif;
 			pointer-events: none;
 		}
 		.item-equipped.above-count {
-			top: calc(1px * var(--ui-icon-scale));
+			top: 1px;
 			bottom: auto;
 		}
 		.item-equipped.beside-meter {
 			right: calc(
-				calc(var(--ui-item-structure-inset) * var(--ui-icon-scale)) +
-					calc(var(--ui-item-structure-width) * var(--ui-icon-scale)) +
-					calc(1px * var(--ui-icon-scale))
+				var(--ui-item-structure-inset) + var(--ui-item-structure-width) + 1px
 			);
 		}
 	}

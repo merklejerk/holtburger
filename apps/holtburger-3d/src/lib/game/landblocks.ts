@@ -1,5 +1,5 @@
 import type { LandblockOwnerId } from "./game-types";
-import { Vec3 } from "./math/types";
+import { Vec3 } from "./math/types.js";
 
 /** Retail outdoor coordinates are 0..254: bounds 2040 cells / 8. */
 export const OUTDOOR_LANDBLOCK_COUNT = 255;

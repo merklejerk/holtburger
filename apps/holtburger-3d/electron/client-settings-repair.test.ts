@@ -1,4 +1,11 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+	copyFile,
+	mkdtemp,
+	readFile,
+	readdir,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,6 +19,16 @@ import {
 } from "../src/client/client-settings-defaults";
 import { clientEnvironmentOverridesSchema } from "../src/client/client-environment-settings";
 import { clientSettingsCollectionSchema } from "../src/client/client-settings-sections";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:fs/promises")>();
+	return { ...actual, copyFile: vi.fn(actual.copyFile) };
+});
+
+const userContext = {
+	viewport: { width: 1440, height: 900 },
+	shortcutCount: 8,
+};
 
 const initialWindow = {
 	normalBounds: { width: 1440, height: 900 },
@@ -51,14 +68,40 @@ async function fixture(
 }
 
 describe("persisted settings repair", () => {
+	it("keeps the exact source when pruning cannot back it up, then permits a retry", async () => {
+		const { store, path } = await fixture({
+			audio: { version: 1, value: user.audio },
+		});
+		const source = JSON.stringify({
+			formatVersion: 1,
+			user: {
+				audio: { version: 1, value: user.audio },
+				unknown: { version: 1, value: true },
+			},
+			characters: {},
+		});
+		await writeFile(path, source);
+		vi.mocked(copyFile).mockRejectedValueOnce(new Error("backup unavailable"));
+		const patch = { sections: { audio: { ...user.audio, muted: true } } };
+		await expect(store.saveUserPatch(patch)).rejects.toThrow(
+			"backup unavailable",
+		);
+		expect(await readFile(path, "utf8")).toBe(source);
+		await store.saveUserPatch(patch);
+		const saved = clientSettingsCollectionSchema.parse(
+			JSON.parse(await readFile(path, "utf8")),
+		);
+		expect(saved.user).toEqual({
+			audio: { version: 1, value: patch.sections.audio },
+		});
+	});
 	it("leaves valid reordered settings untouched, including no-op saves", async () => {
 		const audio = Object.fromEntries(Object.entries(user.audio).reverse());
 		const { store, path, source, directory } = await fixture({
 			audio: { value: audio, version: 1 },
 		});
-		const loaded = await store.loadUser(user, "persisted");
-		expect(loaded.sections.audio).toEqual(user.audio);
-		expect(loaded.repaired).toEqual([]);
+		const loaded = await store.loadUser(userContext, "persisted");
+		expect(loaded.settings.audio).toEqual(user.audio);
 		await store.saveUserPatch({ sections: { audio: user.audio } });
 		expect(await readFile(path, "utf8")).toBe(source);
 		expect(await readdir(directory)).toEqual(["settings.json"]);
@@ -76,11 +119,8 @@ describe("persisted settings repair", () => {
 			},
 		});
 		expect(store.readWindow()).toEqual({
-			settings: {
-				normalBounds: initialWindow.normalBounds,
-				maximized: true,
-			},
-			unavailable: null,
+			normalBounds: initialWindow.normalBounds,
+			maximized: true,
 		});
 	});
 
@@ -99,18 +139,17 @@ describe("persisted settings repair", () => {
 				value: { muted: true, effectVolume: 0.25, ambientVolume: 0.5 },
 			},
 		});
-		const loaded = await store.loadUser(user, "persisted");
-		expect(loaded.sections.ui?.fonts).toEqual({
+		const loaded = await store.loadUser(userContext, "persisted");
+		expect(loaded.settings.ui?.fonts).toEqual({
 			...user.ui.fonts,
 			body: "mono",
 		});
-		expect(loaded.sections.audio).toEqual({
+		expect(loaded.settings.audio).toEqual({
 			...user.audio,
 			muted: true,
 			effectVolume: 0.25,
 			ambientVolume: 0.5,
 		});
-		expect(loaded.unavailable).toEqual([]);
 		expect(new Set(loaded.repaired)).toEqual(
 			new Set([
 				"user.ui.retired: removed unknown field",
@@ -126,47 +165,45 @@ describe("persisted settings repair", () => {
 		const normalized = await readFile(path, "utf8");
 		const reloaded = new ClientSettingsStore(path, initialWindow);
 		await reloaded.load();
-		expect((await reloaded.loadUser(user, "persisted")).repaired).toEqual([]);
+		expect(
+			(await reloaded.loadUser(userContext, "persisted")).repaired,
+		).toEqual([]);
 		expect(await readFile(path, "utf8")).toBe(normalized);
 		expect(await readdir(directory)).toHaveLength(2);
 		await reloaded.saveUserPatch({ sections: { ui: user.ui } });
-		expect((await reloaded.loadUser(user, "persisted")).sections.ui).toEqual(
-			user.ui,
-		);
+		expect(
+			(await reloaded.loadUser(userContext, "persisted")).settings.ui,
+		).toEqual(user.ui);
 	});
 
-	it("protects unknown siblings and future versions while repairing malformed known entries", async () => {
+	it("prunes unsupported sections and repairs supported siblings", async () => {
 		const future = { version: 2, value: { future: true } };
-		const unknown = { version: 7, value: "opaque" };
 		const { store, path } = await fixture({
 			graphics: future,
-			unknown,
+			unknown: future,
 			audio: "broken",
-			hudPlacements: { book: future, chat: null, unknown },
+			hudPlacements: { book: future, chat: null, unknown: future },
 		});
-		const loaded = await store.loadUser(user, "persisted");
-		expect(loaded.sections.audio).toEqual(user.audio);
-		expect(loaded.hudPlacements.chat).toEqual(user.hudLayout.chat);
-		expect(loaded.unavailable).toEqual([
-			"user.graphics uses unsupported version 2",
-			"hudPlacements.book uses unsupported version 2",
-		]);
-		await expect(
-			store.saveUserPatch({ sections: { graphics: user.graphics } }),
-		).rejects.toThrow("unsupported version 2");
+		const loaded = await store.loadUser(userContext, "persisted");
+		expect(loaded.settings.audio).toEqual(user.audio);
+		expect(loaded.settings.hudLayout.chat).toEqual(user.hudLayout.chat);
 		const document = clientSettingsCollectionSchema.parse(
 			JSON.parse(await readFile(path, "utf8")),
 		);
-		expect(document.user.graphics).toEqual(future);
-		expect(document.user.unknown).toEqual(unknown);
-		expect(document.user.hudPlacements).toMatchObject({
-			book: future,
-			unknown,
+		expect(document.user).toEqual({
+			audio: { version: 1, value: user.audio },
+			hudPlacements: { chat: { version: 1, value: user.hudLayout.chat } },
 		});
+		await store.saveUserPatch({ sections: { graphics: user.graphics } });
+		expect(
+			(await store.loadUser(userContext, "persisted")).settings.graphics,
+		).toEqual(user.graphics);
 	});
 
 	it("repairs character collections atomically and preserves the other character", async () => {
-		const other = { combatControls: { version: 8, value: "opaque" } };
+		const other = {
+			combatControls: { version: 1, value: character.combatControls },
+		};
 		const { store, path } = await fixture(
 			{},
 			{
@@ -194,7 +231,6 @@ describe("persisted settings repair", () => {
 		expect(loaded.sections.spellBarBindings).toEqual(
 			character.spellBarBindings,
 		);
-		expect(loaded.unavailable).toEqual([]);
 		expect(loaded.repaired).toContain(
 			"character.spellBarBindings.tabs: reset invalid value",
 		);
@@ -247,7 +283,7 @@ describe("persisted settings repair", () => {
 
 	it("does not touch persisted settings when config is bypassed", async () => {
 		const { store, path, source, directory } = await fixture({ audio: null });
-		expect((await store.loadUser(user, "fresh")).repaired).toEqual([]);
+		expect((await store.loadUser(userContext, "fresh")).repaired).toEqual([]);
 		expect(await readFile(path, "utf8")).toBe(source);
 		expect(await readdir(directory)).toEqual(["settings.json"]);
 	});
@@ -257,11 +293,11 @@ describe("persisted settings repair", () => {
 		vi.spyOn(replacement, "replaceLocalFile").mockRejectedValueOnce(
 			new Error("disk full"),
 		);
-		await expect(store.loadUser(user, "persisted")).rejects.toThrow(
+		await expect(store.loadUser(userContext, "persisted")).rejects.toThrow(
 			"disk full",
 		);
 		expect(await readFile(path, "utf8")).toBe(source);
-		expect((await store.loadUser(user, "persisted")).repaired).toEqual([
+		expect((await store.loadUser(userContext, "persisted")).repaired).toEqual([
 			"user.audio: reset malformed entry",
 		]);
 	});

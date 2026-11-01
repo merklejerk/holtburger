@@ -1,3 +1,4 @@
+import { isolateHudProbe } from "./hud-probe-isolation.mjs";
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 
@@ -8,7 +9,7 @@ export async function probeActionBars(
 	screenshotPath,
 ) {
 	const { read } = actionBarProbeDriver(client, evaluateExpression);
-	const restore = await isolateActionBarProbe(read);
+	const restore = await isolateHudProbe(read, "[data-action-bar-surface]");
 	try {
 		return await runActionBarProbe(client, evaluateExpression, screenshotPath);
 	} finally {
@@ -595,7 +596,7 @@ export async function probeHudSnapping(client, evaluateExpression) {
 		client,
 		evaluateExpression,
 	);
-	const restore = await isolateActionBarProbe(read);
+	const restore = await isolateHudProbe(read, "[data-action-bar-surface]");
 	// Menus and rotation only arrange the fixture; movement below uses native pointer input.
 	const clickControl = (selector) =>
 		read(`document.querySelector(${JSON.stringify(selector)}).click()`);
@@ -750,16 +751,4 @@ function actionBarProbeDriver(client, evaluateExpression) {
 		const r = element.getBoundingClientRect(); return {left:r.left, top:r.top, right:r.right, bottom:r.bottom};
 	})`);
 	return { read, point, mouse, click, bounds };
-}
-
-/** Each scenario owns its isolation style, including when scenarios are nested. */
-async function isolateActionBarProbe(read) {
-	const id = await read(`(() => {
-		const style = document.createElement('style');
-		style.id = 'action-bar-probe-' + crypto.randomUUID();
-		style.textContent = '.hud-panel:not(:has([data-action-bar-surface])) { visibility: hidden !important; }';
-		document.head.append(style);
-		return style.id;
-	})()`);
-	return () => read(`document.getElementById(${JSON.stringify(id)}).remove()`);
 }

@@ -74,9 +74,7 @@ it("defers Client construction and composes saved HUD placements after content r
 	const defaults = createDefaultClientUserSettings(viewport, 0);
 	const inventory = { ...defaults.hudLayout.inventory, preferredWidth: 444 };
 	bridge.loadUser.mockResolvedValue({
-		sections: {},
-		hudPlacements: { inventory },
-		unavailable: [],
+		settings: { ...defaults, hudLayout: { ...defaults.hudLayout, inventory } },
 		repaired: [],
 	});
 	const entry = "./main";
@@ -136,9 +134,7 @@ function savedTheme(id: string) {
 	});
 	const defaults = createDefaultClientUserSettings(viewport, 0);
 	bridge.loadUser.mockResolvedValue({
-		sections: { ui: { ...defaults.ui, themeId: id } },
-		hudPlacements: {},
-		unavailable: [],
+		settings: { ...defaults, ui: { ...defaults.ui, themeId: id } },
 		repaired: [],
 	});
 }

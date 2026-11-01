@@ -11,7 +11,7 @@ export const CLIENT_GRAPHICS_RANGES = {
 	renderScale: { minimum: 0.5, maximum: 2 },
 } as const;
 
-/** Client text multiplier; artwork and independently sized world labels keep their own policy. */
+/** Additional client text enlargement, composed with the overall UI scale. */
 export const CLIENT_TEXT_SCALE = {
 	initial: 1,
 	minimum: 0.75,
@@ -19,8 +19,8 @@ export const CLIENT_TEXT_SCALE = {
 	step: 0.05,
 } as const;
 
-/** Client artwork multiplier; cell geometry and attached badges scale with their artwork. */
-export const CLIENT_ICON_SCALE = {
+/** Overall client interface scale, applied once at UI layout boundaries. */
+export const CLIENT_UI_SCALE = {
 	initial: 1,
 	minimum: 0.75,
 	maximum: 2,

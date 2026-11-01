@@ -2098,8 +2098,11 @@
 				minSize={140}
 				resizeBounds={null}
 				resizable={true}
-				onStateChange={(next) => {
-					minimap = next;
+				onGeometryChange={(geometry) => {
+					minimap = { ...minimap, ...geometry };
+				}}
+				onViewDiametersChange={(viewDiameters) => {
+					minimap = { ...minimap, viewDiameters };
 				}}
 				onSelectEntity={selectMinimapEntity}
 			/>

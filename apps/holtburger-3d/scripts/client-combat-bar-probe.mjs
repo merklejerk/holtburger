@@ -562,8 +562,18 @@ export async function probeCombatBar(
 	await client.send("Emulation.setEmulatedMedia", {
 		features: [{ name: "prefers-reduced-motion", value: "reduce" }],
 	});
+	// Earlier pointer scenarios can leave the cursor over the remounted bar.
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		x: 0,
+		y: 0,
+	});
 	await read(`${api}.begin('melee')`);
 	await settle();
+	assert.equal(
+		await read("document.querySelector('.combat-bar').matches(':hover')"),
+		false,
+	);
 	assert.equal(
 		await read(
 			"getComputedStyle(document.querySelector('.combat-bar')).animationName",
@@ -575,6 +585,10 @@ export async function probeCombatBar(
 			"getComputedStyle(document.querySelector('.combat-bar')).opacity",
 		),
 		"1",
+	);
+	// Reduced motion disables the entrance animation; hover-help opacity still transitions.
+	await read(
+		"Promise.all(document.querySelector('.power-label').getAnimations().map(animation => animation.finished))",
 	);
 	assert.equal(await helpOpacity(), "0");
 	await read(`${api}.end()`);

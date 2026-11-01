@@ -12,7 +12,7 @@ type ClientUiAnchor =
 
 /** Initial height that reserves viewport space without exceeding its preferred bounds. */
 interface ViewportHeight {
-	/** Space reserved outside this surface, in CSS pixels. */
+	/** Space reserved outside this surface, in logical UI units. */
 	readonly viewportMinus: number;
 	/** Lower preferred height before viewport fitting. */
 	readonly min: number;
@@ -24,13 +24,13 @@ interface ViewportHeight {
 interface ClientUiPlacement {
 	/** Viewport reference used for the initial placement. */
 	readonly anchor: ClientUiAnchor;
-	/** CSS-pixel displacement from the anchor. */
+	/** logical UI displacement from the anchor. */
 	readonly offset: { readonly x: number; readonly y: number };
 }
 
 /** Rectangular HUD geometry and its user-editing policy. */
 export interface ClientUiPanel extends ClientUiPlacement {
-	/** Preferred CSS-pixel size; shortcut widths may scale with the visible button count. */
+	/** Preferred logical UI size; shortcut widths may scale with the visible button count. */
 	readonly size: {
 		readonly width: number | { readonly perShortcut: number };
 		readonly height: number | ViewportHeight;
@@ -99,7 +99,7 @@ export interface ClientUiDefaults {
 	readonly jumpPower: ClientUiPanel;
 	/** Circular radar; diameter keeps both axes coupled. */
 	readonly minimap: ClientUiPlacement & {
-		/** Preferred diameter in CSS pixels. */
+		/** Preferred diameter in logical UI units. */
 		readonly size: number;
 		/** Minimum editable diameter. */
 		readonly minSize: number;

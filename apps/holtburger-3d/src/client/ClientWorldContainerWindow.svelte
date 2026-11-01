@@ -152,7 +152,7 @@
 			position: absolute;
 			visibility: hidden;
 			pointer-events: none;
-			width: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
+			width: var(--ui-item-cell-min-size);
 		}
 		.world-container-window :global(.contents-scroll) {
 			scrollbar-gutter: stable;

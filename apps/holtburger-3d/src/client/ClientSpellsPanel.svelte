@@ -316,7 +316,10 @@
 			cursor: default;
 		}
 		.spell-filters {
-			max-height: var(--ui-filter-max-height);
+			max-height: var(
+				--ui-filter-max-height,
+				calc(var(--ui-viewport-height) * 0.4)
+			);
 			overflow: auto;
 		}
 		.spell-count {
@@ -391,9 +394,9 @@
 			gap: var(--ui-catalog-row-gap);
 		}
 		.spell-icon {
-			width: calc(var(--ui-spell-icon-size) * var(--ui-icon-scale));
-			height: calc(var(--ui-spell-icon-size) * var(--ui-icon-scale));
-			flex: 0 0 calc(var(--ui-spell-icon-size) * var(--ui-icon-scale));
+			width: var(--ui-spell-icon-size);
+			height: var(--ui-spell-icon-size);
+			flex: 0 0 var(--ui-spell-icon-size);
 			display: grid;
 			place-items: center;
 		}

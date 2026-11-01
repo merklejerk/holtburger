@@ -1,19 +1,26 @@
+import type { ClientHudLayout } from "../../client/client-hud-layout";
+import { probeUiScaleBoundary } from "./ui-scale-boundary-probe";
+import { applyUiScale, uiScale } from "../../app/ui-scale";
 import { mount, tick, unmount } from "svelte";
 import ClientMessageDialog from "../../client/ClientMessageDialog.svelte";
 import ClientPartyHud from "../../client/ClientPartyHud.svelte";
 import ExplorerEntityList from "../../explorer/ExplorerEntityList.svelte";
 import ExplorerEntitySpawnComposer from "../../explorer/ExplorerEntitySpawnComposer.svelte";
 import "../../explorer/explorer.css";
-import IconScalingProbe from "./IconScalingProbe.svelte";
+import UiScaleFixture from "./UiScaleFixture.svelte";
 import {
-	CLIENT_ICON_SCALE,
+	CLIENT_UI_SCALE,
 	CLIENT_TEXT_SCALE,
 } from "../../client/client-settings-values";
 import { uiThemes } from "../../app/mount";
 import steelUrl from "./themes/steel.css?url&no-inline";
 
 /** Exercise live settings, CSS inheritance, top-layer dialogs and measured HUD geometry. */
-export async function probeTextScaling(context: Map<unknown, unknown>) {
+export async function probeUiScaling(
+	context: Map<unknown, unknown>,
+	readPlacements: () => ClientHudLayout,
+) {
+	const boundary = await probeUiScaleBoundary();
 	function element<ElementType extends HTMLElement = HTMLElement>(
 		selector: string,
 	) {
@@ -27,6 +34,7 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 	}
 	const scope = element(".harness-appearance");
 	const canvas = element(".client-canvas");
+	const originalCanvasBounds = canvas.getBoundingClientRect();
 	const fixture = document.createElement("section");
 	fixture.style.cssText = "position:fixed;left:-2000px;top:0;width:220px";
 	fixture.innerHTML = `<div class="ui-theme" data-scale-body>
@@ -38,6 +46,7 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 		<div class="ui-body">Panel inset</div><label class="ui-label">Editor label<input></label>
 	</div>`;
 	scope.append(fixture);
+	const fixtureScale = applyUiScale(fixture, CLIENT_UI_SCALE.initial);
 	const independent = document.createElement("div");
 	independent.className = "ui-theme";
 	independent.textContent = "Independent frontend root";
@@ -58,11 +67,7 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 	];
 	const independentSize = fontSize(independent);
 	const rootSize = fontSize(document.documentElement);
-	const excluded = [
-		...document.querySelectorAll(
-			".ui-shortcut-hint, .item-count-overlay, .minimap-cardinal, .spell-tab-hint",
-		),
-	];
+	const excluded = [...document.querySelectorAll(".minimap-cardinal")];
 	const excludedSizes = excluded.map(fontSize);
 	const slider = () =>
 		element<HTMLInputElement>('input[aria-label="Text scaling"]');
@@ -77,7 +82,7 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 		slider().dispatchEvent(new Event("input", { bubbles: true }));
 		await settle();
 	};
-	const iconFixture = mount(IconScalingProbe, { target: fixture, context });
+	const uiFixture = mount(UiScaleFixture, { target: fixture, context });
 	const party = mount(ClientPartyHud, {
 		target: fixture,
 		context,
@@ -144,7 +149,9 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 					rootSize, "Client preference changed independent roots or document geometry");
 			excluded.forEach((node, index) =>
 				require(fontSize(node) ===
-					excludedSizes[index], "Geometry-bound text inherited UI scaling"),
+					excludedSizes[
+						index
+					], "Map cardinal typography lost its independent policy"),
 			);
 			require(Math.abs(fontSize(partyName) - partyFont * scale) <
 				0.02, "Party names ignored text scaling");
@@ -173,17 +180,18 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 				partyRow: partyName.getBoundingClientRect().height,
 			});
 		}
-		// Resolve dimensions through real shared cells, bars and trays; font and artwork axes stay independent.
-		const iconSlider = () =>
-			element<HTMLInputElement>('input[aria-label="Icon scaling"]');
-		const editIcon = async (value: number) => {
-			iconSlider().value = String(value);
-			iconSlider().dispatchEvent(new Event("input", { bubbles: true }));
+		// Resolve dimensions through real shared cells, bars and trays; overall UI and additional text scaling compose.
+		const uiSlider = () =>
+			element<HTMLInputElement>('input[aria-label="UI scaling"]');
+		const editUi = async (value: number) => {
+			uiSlider().value = String(value);
+			uiSlider().dispatchEvent(new Event("input", { bubbles: true }));
+			fixtureScale.update(value);
 			await settle();
 			await settle(); // ResizeObserver publishes cold bar/tray geometry after the CSS update.
 		};
 		await edit(CLIENT_TEXT_SCALE.initial);
-		await editIcon(CLIENT_ICON_SCALE.initial);
+		await editUi(CLIENT_UI_SCALE.initial);
 		const dimensions = [
 			element("[data-scale-icons] .item-grid-cell"),
 			element("[data-scale-icons] .item-cell-art"),
@@ -201,18 +209,94 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 			element("[data-scale-icons] .item-equipped"),
 			element(".ui-shortcut-hint"),
 		];
-		const badgeSizes = badges.map(fontSize);
-		const iconEvidence = [];
+		const renderedFontSize = (node: Element) => fontSize(node) * uiScale(node);
+		const badgeSizes = badges.map(renderedFontSize);
+		const uiEvidence = [];
 		for (const scale of [
-			CLIENT_ICON_SCALE.minimum,
+			CLIENT_UI_SCALE.minimum,
 			1.05,
 			1.1,
 			1.15,
 			1.35,
 			1.5,
-			CLIENT_ICON_SCALE.maximum,
+			CLIENT_UI_SCALE.maximum,
 		]) {
-			await editIcon(scale);
+			await editUi(scale);
+			const canvasBounds = canvas.getBoundingClientRect();
+			require(Math.abs(canvasBounds.width - originalCanvasBounds.width) < 0.1 &&
+				Math.abs(canvasBounds.height - originalCanvasBounds.height) <
+					0.1, "UI scale changed the world canvas viewport");
+			const savedLayout = JSON.stringify(readPlacements());
+			element<HTMLButtonElement>(".minimap-zoom-in").click();
+			await settle();
+			require(JSON.stringify(readPlacements()) ===
+				savedLayout, "Minimap zoom rewrote fitted HUD placements");
+			element<HTMLButtonElement>(".minimap-zoom-out").click();
+			await settle();
+			require(JSON.stringify(readPlacements()) ===
+				savedLayout, "Restoring minimap zoom rewrote preferred placements");
+			uiFixture.resetGeometry();
+			await settle();
+			const windowFixture = element(
+				'section[aria-label="Scale geometry fixture"]',
+			);
+			const beforeGesture = windowFixture.getBoundingClientRect();
+			const pointer = (
+				target: EventTarget,
+				type: string,
+				x: number,
+				y: number,
+			) =>
+				target.dispatchEvent(
+					new PointerEvent(type, {
+						bubbles: true,
+						pointerId: 991,
+						button: 0,
+						clientX: x,
+						clientY: y,
+					}),
+				);
+			const header = element(
+				'section[aria-label="Scale geometry fixture"] header',
+			);
+			pointer(header, "pointerdown", 0, 0);
+			pointer(window, "pointermove", 25, 15);
+			pointer(window, "pointerup", 25, 15);
+			await settle();
+			require(Math.abs(
+				windowFixture.getBoundingClientRect().left - beforeGesture.left - 25,
+			) < 0.1, "Window drag did not follow browser pointer travel");
+			require(Math.abs(
+				uiFixture.geometry().placement.horizontal.offset - 20 - 25 / scale,
+			) < 0.1, "Window drag saved screen pixels instead of logical units");
+			const widthBefore = windowFixture.getBoundingClientRect().width;
+			pointer(
+				element(
+					'section[aria-label="Scale geometry fixture"] .resize-border-right',
+				),
+				"pointerdown",
+				0,
+				0,
+			);
+			pointer(window, "pointermove", 30, 0);
+			pointer(window, "pointerup", 30, 0);
+			await settle();
+			require(Math.abs(
+				windowFixture.getBoundingClientRect().width - widthBefore - 30,
+			) < 0.1, "Window resize did not follow browser pointer travel");
+			const saved = JSON.stringify(uiFixture.geometry());
+			pointer(header, "pointerdown", 0, 0);
+			await editUi(
+				scale === CLIENT_UI_SCALE.maximum
+					? CLIENT_UI_SCALE.minimum
+					: CLIENT_UI_SCALE.maximum,
+			);
+			pointer(window, "pointermove", 40, 20);
+			pointer(window, "pointerup", 40, 20);
+			await settle();
+			require(JSON.stringify(uiFixture.geometry()) ===
+				saved, "Scale change committed a stale geometry gesture");
+			await editUi(scale);
 			const leader = element(".party-member__leader");
 			const leaderRow = element(
 				".party-member__name:has(.party-member__leader)",
@@ -274,11 +358,11 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 					0.15, `${node.className} did not scale its hit geometry once at ${scale}: ${node.getBoundingClientRect().width} vs ${widths[index] * scale}`),
 			);
 			badges.forEach((node, index) =>
-				require(Math.abs(fontSize(node) - badgeSizes[index] * scale) <
-					0.02, "Icon badge did not follow artwork scale"),
+				require(Math.abs(renderedFontSize(node) - badgeSizes[index] * scale) <
+					0.02, "Badge did not follow UI scale"),
 			);
 			require(Math.abs(fontSize(consumers[0]) - baseline[0]) <
-				0.02, "Icon scaling changed ordinary text");
+				0.02, "UI scaling modified local font metrics");
 			const bounds = element(
 				"[data-scale-icons] .item-grid-cell",
 			).getBoundingClientRect();
@@ -295,19 +379,27 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 				) < 0.15, "Text scaling changed fixed icon geometry"),
 			);
 			badges.forEach((node, index) =>
-				require(Math.abs(fontSize(node) - badgeSizes[index] * scale) <
-					0.02, "Mixed scales multiplied badges twice"),
+				require(Math.abs(
+					renderedFontSize(node) -
+						badgeSizes[index] * scale * CLIENT_TEXT_SCALE.maximum,
+				) < 0.02, "Additional text scale did not compose with UI scale"),
 			);
 			await edit(CLIENT_TEXT_SCALE.initial);
-			iconSlider().scrollIntoView({ block: "nearest" });
-			const sliderBounds = iconSlider().getBoundingClientRect();
+			uiSlider().scrollIntoView({ block: "nearest" });
+			const sliderBounds = uiSlider().getBoundingClientRect();
 			require(sliderBounds.top >= 0 &&
 				sliderBounds.bottom <=
-					window.innerHeight, "Icon-scale slider cannot be reached");
-			iconEvidence.push({
+					window.innerHeight, `UI-scale slider cannot be reached: ${JSON.stringify(
+				{
+					scale,
+					slider: sliderBounds.toJSON(),
+					viewport: { width: innerWidth, height: innerHeight },
+				},
+			)}`);
+			uiEvidence.push({
 				scale,
 				cell: dimensions[0].getBoundingClientRect().width,
-				badge: fontSize(badges[0]),
+				badge: renderedFontSize(badges[0]),
 			});
 		}
 		fixture.style.setProperty("--ui-item-cell-min-size", "40px");
@@ -316,19 +408,20 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 		await settle();
 		require(Math.abs(
 			dimensions[0].getBoundingClientRect().width -
-				40 * CLIENT_ICON_SCALE.maximum,
+				40 * CLIENT_UI_SCALE.maximum,
 		) < 0.1, "Scoped icon dimensions did not compose with scaling");
-		require(Math.abs(fontSize(badges[0]) - 18 * CLIENT_ICON_SCALE.maximum) <
-			0.02, "Scoped count font did not compose with scaling");
+		require(Math.abs(
+			renderedFontSize(badges[0]) - 18 * CLIENT_UI_SCALE.maximum,
+		) < 0.02, "Scoped count font did not compose with scaling");
 		require(Math.abs(
 			dimensions[3].getBoundingClientRect().width -
-				11 * CLIENT_ICON_SCALE.maximum,
+				11 * CLIENT_UI_SCALE.maximum,
 		) < 0.1, "Scoped currency art did not compose with scaling");
 		fixture.style.removeProperty("--ui-item-cell-min-size");
 		fixture.style.removeProperty("--ui-item-count-font-size");
 		fixture.style.removeProperty("--ui-inventory-currency-icon-size");
 
-		await editIcon(CLIENT_ICON_SCALE.initial);
+		await editUi(CLIENT_UI_SCALE.initial);
 		await edit(CLIENT_TEXT_SCALE.maximum);
 
 		const node = element("[data-scale-body]");
@@ -375,7 +468,7 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 		} finally {
 			await unmount(dialog);
 		}
-		await editIcon(CLIENT_ICON_SCALE.maximum);
+		await editUi(CLIENT_UI_SCALE.maximum);
 		// Settings currently remounts on close; user preferences must survive without recreating the viewport.
 		element('[aria-label="Close Settings"]').click();
 		await settle();
@@ -387,12 +480,12 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 		await settle();
 		require(Number(slider().value) ===
 			CLIENT_TEXT_SCALE.maximum, "Reopened settings lost text scale");
-		require(Number(iconSlider().value) ===
-			CLIENT_ICON_SCALE.maximum, "Reopened settings lost icon scale");
-		await editIcon(CLIENT_ICON_SCALE.initial);
+		require(Number(uiSlider().value) ===
+			CLIENT_UI_SCALE.maximum, "Reopened settings lost UI scale");
+		await editUi(CLIENT_UI_SCALE.initial);
 		dimensions.forEach((node, index) =>
 			require(Math.abs(node.getBoundingClientRect().width - widths[index]) <
-				0.15, "Neutral icon scale did not restore authored geometry"),
+				0.15, "Neutral UI scale did not restore authored geometry"),
 		);
 		await edit(CLIENT_TEXT_SCALE.initial);
 		require(Number(slider().value) ===
@@ -405,7 +498,8 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 		) < 0.1, "Character HUD minimum did not shrink with text scale");
 		return {
 			samples: evidence,
-			iconSamples: iconEvidence,
+			boundary,
+			uiSamples: uiEvidence,
 			characterHeightRestored: true,
 			nestedRoots: true,
 			themeOverrides: true,
@@ -417,16 +511,16 @@ export async function probeTextScaling(context: Map<unknown, unknown>) {
 		await unmount(explorerComposer);
 		await unmount(explorerList);
 		await unmount(party);
-		await unmount(iconFixture);
+		await unmount(uiFixture);
 		fixture.remove();
 		independent.remove();
 		await uiThemes.replace(null, null);
 		await edit(CLIENT_TEXT_SCALE.initial);
-		const iconControl = element<HTMLInputElement>(
-			'input[aria-label="Icon scaling"]',
+		const uiControl = element<HTMLInputElement>(
+			'input[aria-label="UI scaling"]',
 		);
-		iconControl.value = String(CLIENT_ICON_SCALE.initial);
-		iconControl.dispatchEvent(new Event("input", { bubbles: true }));
+		uiControl.value = String(CLIENT_UI_SCALE.initial);
+		uiControl.dispatchEvent(new Event("input", { bubbles: true }));
 		await settle();
 	}
 }

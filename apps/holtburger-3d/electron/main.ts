@@ -534,11 +534,11 @@ function installSettingsIpcBridge(
 	const readMode: ClientSettingsReadMode = ignorePersistedConfig
 		? "fresh"
 		: "persisted";
-	handle("settings:load-user", "client", async (event, defaults: unknown) => {
+	handle("settings:load-user", "client", async (event, context: unknown) => {
 		requireApplicationFrame(event, window);
 		const attempt = requireAttempt();
 		try {
-			return await requireSettings().loadUser(defaults, readMode);
+			return await requireSettings().loadUser(context, readMode);
 		} catch (error) {
 			// User settings load before the renderer mounts, so no toast can report
 			// a failed backup or repair write. Use the existing startup error surface.
@@ -930,12 +930,7 @@ void (async () => {
 						`Client window settings repaired: ${repaired.join("; ")}`,
 					);
 				attempt.cancellation.signal.throwIfAborted();
-				const restored = settings.readWindow();
-				if (restored.unavailable !== null)
-					console.warn(
-						`Client window settings unavailable: ${restored.unavailable}`,
-					);
-				restoreGeometry(window, restored.settings, "client");
+				restoreGeometry(window, settings.readWindow(), "client");
 				stopGeometry = observeWindowGeometry(
 					window,
 					(value) => settings.updateWindow(value),

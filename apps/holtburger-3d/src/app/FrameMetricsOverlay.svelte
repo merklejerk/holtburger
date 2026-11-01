@@ -105,7 +105,7 @@
 			left: 12px;
 			bottom: 12px;
 			z-index: 2;
-			max-width: calc(100vw - 24px);
+			max-width: calc(var(--ui-viewport-width) - 24px);
 			padding: 3px 6px;
 			font-variant-numeric: tabular-nums;
 			line-height: 1.2;

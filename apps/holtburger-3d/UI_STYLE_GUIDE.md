@@ -4,6 +4,22 @@ Client and Explorer share document-wide CSS themes. Components own arrangement a
 interaction; themes own appearance. Renderer and host lifetimes do not depend on
 stylesheet changes.
 
+## UI sizing contract
+
+Client `ui.uiScale` scales complete interface surfaces through `applyUiScale`. Theme lengths
+stay authored and `--ui-scale` is consumed by the boundary, not by individual icon rules.
+Native top-layer dialogs and nested popovers inherit the effective layout scale once.
+`--ui-text-scale` is additional text enlargement; apply it once to absolute font roles,
+including item counts and shortcut hints. Relative typography inherits that result.
+
+Saved window dimensions, edge/center offsets, snap geometry, and content-fit measurements use
+logical UI units. Browser pointer coordinates and bounding rectangles remain displayed CSS pixels;
+convert at the positioning/gesture boundary. Browser hit testing always receives browser coordinates.
+Use the boundary's `--ui-viewport-width` and `--ui-viewport-height` for logical viewport caps.
+Pregame responsive rules query the named `pregame-viewport` container so their breakpoints
+follow the available logical size at the chosen UI scale.
+The main world canvas and screen-space target/warning overlays stay outside UI scaling.
+
 ## Edit points
 
 | Concern                                               | Owner                                                           |
@@ -43,7 +59,7 @@ Wrap optional theme rules in `@scope (:root) to (.client-pregame-screen)` so
 pregame and its descendants retain their independently authored appearance.
 Base token defaults are declared again at that boundary to stop inherited theme
 palette and component defaults. Typography preferences (font roles, text scale,
-and icon scale) continue to inherit across modes; pregame retains its existing
+and overall UI scale) continue to inherit across modes; pregame retains its existing
 body/heading font overrides. The scope also excludes modal dialogs in the
 pregame subtree, even when the browser paints them in the top layer.
 Traveler’s Kit follows this convention; custom stylesheets must follow it too.
@@ -322,7 +338,7 @@ selection's policy. Neither combat marker tests wall occlusion.
 Unlock controls follow the current selection. Changing selection cancels a running
 key sequence; inspecting an explicit object does not change selection.
 The horizontal action buttons use `--ui-locks-action-icon-size`; the preferred item cell
-retains the shared `--ui-item-cell-min-size` and `--ui-icon-scale` sizing.
+uses the shared authored `--ui-item-cell-min-size`, with overall scaling applied by its UI boundary.
 
 The Enchantments window shares the spell panel's padding, row, filter, and color
 tokens. Its affected-stat headings use `--ui-enchantments-heading-margin`,
@@ -358,8 +374,8 @@ backing as action cells. Their blue palette is independent of the mana meter:
 | `--ui-spell-tab-border`, `--ui-spell-tab-radius`, `--ui-spell-tab-active-shadow`    | Tab decoration and selected indicator.                                       |
 | `--ui-spell-drop-outline`                                                           | Drop-target feedback.                                                        |
 
-Spell and action bar cells follow `--ui-shortcut-cell-size` (40px in Base),
-multiplied once by `--ui-icon-scale`. The same measured size determines their
+Spell and action bar cells follow the authored `--ui-shortcut-cell-size`. Their UI boundary
+applies overall scale once; component CSS must not multiply icon lengths again. The same local measured size determines their
 grids, clipping and HUD bounds. Both bars use
 the same inward-facing grid button: click to toggle between one ten-cell strip
 and two five-cell strips. Spell tabs retain their compact ten-button

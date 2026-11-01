@@ -29,7 +29,7 @@
 	@layer components {
 		.item-cooldown-fill {
 			position: absolute;
-			inset: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
+			inset: var(--ui-item-cell-padding);
 			background: var(--ui-item-cooldown-fill);
 			pointer-events: none;
 			transform-origin: bottom;

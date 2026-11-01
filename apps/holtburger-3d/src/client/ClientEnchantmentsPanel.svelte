@@ -514,7 +514,7 @@
 		.tree-spacer {
 			flex: 0 0 var(--ui-enchantments-tree-gutter);
 			width: var(--ui-enchantments-tree-gutter);
-			height: calc(var(--ui-spell-icon-size) * var(--ui-icon-scale));
+			height: var(--ui-spell-icon-size);
 		}
 		.tree-toggle {
 			font: inherit;
@@ -552,9 +552,9 @@
 			background: var(--ui-color-control);
 		}
 		.spell-icon {
-			width: calc(var(--ui-spell-icon-size) * var(--ui-icon-scale));
-			height: calc(var(--ui-spell-icon-size) * var(--ui-icon-scale));
-			flex: 0 0 calc(var(--ui-spell-icon-size) * var(--ui-icon-scale));
+			width: var(--ui-spell-icon-size);
+			height: var(--ui-spell-icon-size);
+			flex: 0 0 var(--ui-spell-icon-size);
 			display: grid;
 			place-items: center;
 		}

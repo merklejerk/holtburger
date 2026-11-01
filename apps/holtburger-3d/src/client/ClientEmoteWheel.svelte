@@ -222,8 +222,8 @@
 			position: relative;
 			width: min(
 				var(--ui-emote-wheel-size),
-				calc(100vw - 2rem),
-				calc(100dvh - 2rem)
+				calc(var(--ui-viewport-width) - 2rem),
+				calc(var(--ui-viewport-height) - 2rem)
 			);
 			aspect-ratio: 1;
 			outline: none;

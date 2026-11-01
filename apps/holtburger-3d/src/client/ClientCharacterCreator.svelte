@@ -1042,7 +1042,7 @@
 					1fr
 				);
 			grid-template-rows: auto minmax(0, 1fr);
-			gap: clamp(16px, 2vw, 40px);
+			gap: clamp(16px, calc(var(--ui-viewport-width) * 0.02), 40px);
 			min-width: 0;
 			min-height: 0;
 		}
@@ -1350,7 +1350,7 @@
 		.creation-next {
 			transform: rotate(180deg);
 		}
-		@media (min-width: 851px) and (max-height: 900px) {
+		@container pregame-viewport (min-width: 851px) and (max-height: 900px) {
 			/* Keep scaled text controls readable while reserving room for the world character. */
 			.creation-rotate,
 			.creation-focus .pregame-icon,
@@ -1358,7 +1358,7 @@
 				display: none;
 			}
 		}
-		@media (max-width: 850px) {
+		@container pregame-viewport (max-width: 850px) {
 			.creation-layout {
 				grid-template-columns: minmax(0, 1fr);
 				overflow: clip;
@@ -1377,7 +1377,7 @@
 				margin-bottom: 0;
 			}
 			.creation-viewport {
-				height: 50vh;
+				height: calc(var(--ui-viewport-height) * 0.5);
 			}
 			.creation-editor {
 				grid-template-rows: auto auto auto;
@@ -1423,10 +1423,10 @@
 			transform: rotate(45deg);
 		}
 		.creation-step-icon {
-			width: calc(34px * var(--ui-icon-scale));
-			height: calc(34px * var(--ui-icon-scale));
+			width: 34px;
+			height: 34px;
 		}
-		@media (max-width: 850px) {
+		@container pregame-viewport (max-width: 850px) {
 			.creation-navigation :global(.ui-tabs::before) {
 				top: -24px;
 				bottom: -12px;

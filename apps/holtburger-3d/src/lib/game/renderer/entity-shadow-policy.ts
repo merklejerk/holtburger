@@ -1,12 +1,12 @@
-import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning.js";
 import type { DynamicEntityPresentationClass } from "../dynamic-entity-presentation-class";
 import type { ObjectPresentationFootprint } from "./render-world";
 import {
 	ENTITY_SHADOW_MODES,
 	type EntityShadowMode,
-} from "./entity-shadow-modes";
-export { ENTITY_SHADOW_MODES } from "./entity-shadow-modes";
-export type { EntityShadowMode } from "./entity-shadow-modes";
+} from "./entity-shadow-modes.js";
+export { ENTITY_SHADOW_MODES } from "./entity-shadow-modes.js";
+export type { EntityShadowMode } from "./entity-shadow-modes.js";
 
 /** Complete cascade capacity compiled into the bounded outdoor shadow shader family. */
 export const MAX_OUTDOOR_PSSM_CASCADES = 2;

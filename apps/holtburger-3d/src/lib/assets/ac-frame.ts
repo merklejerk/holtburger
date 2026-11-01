@@ -1,8 +1,8 @@
-import { Mat4, Quat, Vec3 } from "../game/math/types";
+import { Mat4, Quat, Vec3 } from "../game/math/types.js";
 import {
 	quaternionFromRotationMat4,
 	writeQuaternionFromRotationMat4,
-} from "../game/math/matrices";
+} from "../game/math/matrices.js";
 
 /** One AC-authored position/orientation frame before render-axis conversion. */
 export interface AcFrame {

@@ -19,7 +19,7 @@ import {
 	CLIENT_VITAL_WARNING_THRESHOLDS,
 	CLIENT_GRAPHICS_RANGES,
 	CLIENT_TEXT_SCALE,
-	CLIENT_ICON_SCALE,
+	CLIENT_UI_SCALE,
 } from "./client-settings-values.js";
 import { clientInputSettingsSchema } from "./client-input-settings.js";
 import {
@@ -193,7 +193,7 @@ export type ClientVitalWarningThresholds = z.infer<
 	typeof clientVitalWarningThresholdsSchema
 >;
 
-/** User-scoped typography, artwork sizing, and vital warning thresholds. */
+/** User-scoped UI sizing, typography, and vital warning thresholds. */
 export const clientUiSettingsSchema = z
 	.object({
 		/** Show the FPS HUD; older profiles keep it hidden until explicitly enabled. */
@@ -209,11 +209,11 @@ export const clientUiSettingsSchema = z
 			.min(CLIENT_TEXT_SCALE.minimum)
 			.max(CLIENT_TEXT_SCALE.maximum)
 			.default(CLIENT_TEXT_SCALE.initial),
-		/** Artwork remains at its authored size when older sections omit this preference. */
-		iconScale: finiteNumber
-			.min(CLIENT_ICON_SCALE.minimum)
-			.max(CLIENT_ICON_SCALE.maximum)
-			.default(CLIENT_ICON_SCALE.initial),
+		/** Overall UI geometry starts neutral when older sections omit this preference. */
+		uiScale: finiteNumber
+			.min(CLIENT_UI_SCALE.minimum)
+			.max(CLIENT_UI_SCALE.maximum)
+			.default(CLIENT_UI_SCALE.initial),
 		/** Profiles without warnings get the same thresholds as first-run settings. */
 		vitalWarningThresholds: clientVitalWarningThresholdsSchema.default(
 			CLIENT_VITAL_WARNING_THRESHOLDS,

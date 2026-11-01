@@ -156,7 +156,7 @@
 			--_ui-party-name-height: max(
 				var(--ui-party-name-height),
 				calc(var(--_ui-party-name-font-size) * var(--ui-line-height-body)),
-				calc(var(--ui-party-leader-icon-size) * var(--ui-icon-scale))
+				var(--ui-party-leader-icon-size)
 			);
 			/* Resolve dependent row dimensions at the consumer so scoped theme overrides work. */
 			--_ui-party-cell-height: calc(
@@ -223,8 +223,8 @@
 			white-space: nowrap;
 		}
 		.party-member__leader {
-			width: calc(var(--ui-party-leader-icon-size) * var(--ui-icon-scale));
-			height: calc(var(--ui-party-leader-icon-size) * var(--ui-icon-scale));
+			width: var(--ui-party-leader-icon-size);
+			height: var(--ui-party-leader-icon-size);
 			flex: none;
 		}
 		.party-member__leader :global(svg) {

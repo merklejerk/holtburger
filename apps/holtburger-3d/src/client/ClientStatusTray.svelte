@@ -141,13 +141,13 @@
 			right: 2px;
 			top: 0;
 			font-weight: 700;
-			font-size: calc(var(--ui-status-badge-font-size) * var(--ui-icon-scale));
+			font-size: calc(var(--ui-status-badge-font-size) * var(--ui-text-scale));
 		}
 		.status-icon {
 			box-sizing: border-box;
-			flex: 0 0 calc(32px * var(--ui-icon-scale));
-			width: calc(32px * var(--ui-icon-scale));
-			height: calc(32px * var(--ui-icon-scale));
+			flex: 0 0 32px;
+			width: 32px;
+			height: 32px;
 			pointer-events: auto;
 		}
 	}

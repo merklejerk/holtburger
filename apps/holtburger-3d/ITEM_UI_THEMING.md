@@ -66,8 +66,7 @@ The strip adds its horizontal insets, and the inventory panel allocates space fo
 the resulting width plus its divider. No independent strip-width setting is needed.
 Cell-edge navigation measures the rendered layout, so changing the basis does not
 require changing the scroll implementation. Spell/action bars use
-`--ui-shortcut-cell-size` (40px in Base) for their fixed cells, with the same
-`--ui-icon-scale` multiplier.
+`--ui-shortcut-cell-size` (40px in Base) for their fixed cells, within the same UI scale boundary.
 
 ## Stack counts
 

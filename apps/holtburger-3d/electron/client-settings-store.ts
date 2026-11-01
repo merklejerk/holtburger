@@ -3,15 +3,25 @@ import { copyFile, readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { replaceLocalFile } from "./replace-local-file.js";
-import { repairSettingsEntry } from "./client-settings-repair.js";
-import type { ZodType } from "zod";
+import {
+	repairSettingsEntry,
+	pruneUnsupportedSettings,
+} from "./client-settings-repair.js";
+import type { ZodType, output } from "zod";
 import {
 	clientUserSettingsSchema,
 	clientCharacterSettingsSchema,
 	clientWindowSettingsSchema,
 	type ClientWindowSettings,
+	type ClientUserSettings,
 } from "../src/client/client-settings-contract.js";
-import type { ClientHudLayout } from "../src/client/client-hud-layout.js";
+import {
+	logicalClientHudViewport,
+	createClientHudLayout,
+	type ClientHudLayout,
+} from "../src/client/client-hud-layout.js";
+import { createDefaultClientUserSections } from "../src/client/client-settings-defaults.js";
+import { CLIENT_UI_DEFAULTS } from "../src/client/client-ui-defaults.js";
 import {
 	clientCharacterSectionEntry,
 	clientCharacterSectionSchemas,
@@ -21,11 +31,11 @@ import {
 	clientSettingsCollectionSchema,
 	clientUserSectionEntry,
 	clientUserSectionSchemas,
+	clientUserSettingsContextSchema,
 	clientWindowSettingsEntry,
 	emptyClientSettingsCollection,
 	readClientSettingsSection,
 	type ClientCharacterSectionKey,
-	type ClientCharacterSectionValues,
 	type ClientCharacterSettingsPatch,
 	type ClientHudPlacementKey,
 	type ClientSettingsCollection,
@@ -35,19 +45,6 @@ import {
 } from "../src/client/client-settings-sections.js";
 
 export type ClientSettingsReadMode = "persisted" | "fresh";
-
-/** Values this build can use; unavailable keys are reported and never overwritten. */
-export interface LoadedClientUserSettings {
-	readonly sections: Partial<ClientUserSectionValues>;
-	readonly hudPlacements: Partial<ClientHudLayout>;
-	readonly unavailable: readonly string[];
-}
-
-/** Character sections can be loaded even when one section belongs to a newer build. */
-export interface LoadedClientCharacterSettings {
-	readonly sections: Partial<ClientCharacterSectionValues>;
-	readonly unavailable: readonly string[];
-}
 
 /** Electron-main filesystem owner for independently versioned settings sections. */
 export class ClientSettingsStore {
@@ -84,42 +81,79 @@ export class ClientSettingsStore {
 		});
 	}
 
-	/** Frontend supplies viewport-aware defaults; the filesystem owner repairs before publishing. */
-	async loadUser(defaults: unknown, mode: ClientSettingsReadMode) {
-		const { hudLayout, ...sections } = clientUserSettingsSchema.parse(defaults);
-		if (mode === "fresh") return { ...this.#readUser(mode), repaired: [] };
-		const repaired = await this.#queueWrite<readonly string[]>((document) => {
+	/** Assemble complete settings only after the persisted scale is known. Missing sections stay sparse on disk. */
+	async loadUser(context: unknown, mode: ClientSettingsReadMode) {
+		const request = clientUserSettingsContextSchema.parse(context);
+		const defaults = createDefaultClientUserSections();
+		return this.#queueWrite((document) => {
+			if (mode === "fresh")
+				return {
+					document,
+					result: {
+						settings: {
+							...defaults,
+							hudLayout: createClientHudLayout(
+								CLIENT_UI_DEFAULTS,
+								logicalClientHudViewport(request.viewport, defaults.ui.uiScale),
+								request.shortcutCount,
+							),
+						},
+						repaired: [],
+					},
+				};
 			const user = repairEntries(
 				document.user,
 				clientUserSectionSchemas,
-				sections,
+				defaults,
 				"user",
 			);
-			const hud = clientHudPlacementEntries(document);
+			const values = readSupportedValues(
+				user.entries,
+				clientUserSectionSchemas,
+				"user",
+			);
+			const ui = values.ui ?? defaults.ui;
+			const layoutDefaults = createClientHudLayout(
+				CLIENT_UI_DEFAULTS,
+				logicalClientHudViewport(request.viewport, ui.uiScale),
+				request.shortcutCount,
+			);
+			const hud = clientHudPlacementEntries({
+				...document,
+				user: user.entries,
+			});
 			const notices = [...user.notices];
-			if (hud.kind === "unavailable") {
-				user.entries.hudPlacements = {};
-				notices.push("hudPlacements: reset invalid map");
-			} else if (hud.kind === "loaded") {
-				const placements = repairEntries(
+			let placements: SupportedValues<typeof clientHudPlacementSchemas> = {};
+			if (hud.kind === "invalid") throw new Error(hud.reason);
+			if (hud.kind === "loaded") {
+				const repaired = repairEntries(
 					hud.value,
 					clientHudPlacementSchemas,
-					hudLayout,
+					layoutDefaults,
 					"hudPlacements",
 				);
-				user.entries.hudPlacements = placements.entries;
-				notices.push(...placements.notices);
+				user.entries.hudPlacements = repaired.entries;
+				placements = readSupportedValues(
+					repaired.entries,
+					clientHudPlacementSchemas,
+					"hudPlacements",
+				);
+				notices.push(...repaired.notices);
 			}
+			const settings: ClientUserSettings = {
+				...defaults,
+				...values,
+				hudLayout: { ...layoutDefaults, ...placements },
+			};
 			return {
 				document: { ...document, user: user.entries },
-				result: notices,
+				result: { settings, repaired: notices },
 				backup: true,
 			};
 		});
-		return { ...this.#readUser(mode), repaired };
 	}
 
-	/** Repair only the requested profile, preserving other characters and unknown sections. */
+	/** Repair supported values for the requested profile after file-wide structural normalization. */
 	async loadCharacter(
 		profileKey: string,
 		defaults: unknown,
@@ -129,8 +163,10 @@ export class ClientSettingsStore {
 			...clientCharacterSettingsSchema.parse(defaults),
 			lastKnownName: null,
 		};
-		if (mode === "fresh")
-			return { ...this.#readCharacter(profileKey, mode), repaired: [] };
+		if (mode === "fresh") {
+			await this.#queueWrite((document) => document);
+			return { sections: {}, repaired: [] };
+		}
 		const repaired = await this.#queueWrite<readonly string[]>((document) => {
 			const profile = document.characters[profileKey];
 			if (profile === undefined) return { document, result: [] };
@@ -149,112 +185,39 @@ export class ClientSettingsStore {
 				backup: true,
 			};
 		});
-		return { ...this.#readCharacter(profileKey, mode), repaired };
+		return {
+			sections: readSupportedValues(
+				this.#document.characters[profileKey] ?? {},
+				clientCharacterSectionSchemas,
+				"character",
+			),
+			repaired,
+		};
 	}
 
-	readWindow(): {
-		readonly settings: ClientWindowSettings;
-		readonly unavailable: string | null;
-	} {
+	/** Native geometry has been normalized before restoration. */
+	readWindow(): ClientWindowSettings {
 		const read = readClientSettingsSection(
 			this.#document.user.window,
 			clientWindowSettingsSchema,
 			"window",
 		);
-		return read.kind === "loaded"
-			? { settings: read.value, unavailable: null }
-			: {
-					settings: this.#initialWindow,
-					unavailable: read.kind === "unavailable" ? read.reason : null,
-				};
+		if (read.kind === "invalid") throw new Error(read.reason);
+		return read.kind === "loaded" ? read.value : this.#initialWindow;
 	}
 
-	#readUser(mode: ClientSettingsReadMode): LoadedClientUserSettings {
-		const sections: Record<string, unknown> = {};
-		const hudPlacements: Record<string, unknown> = {};
-		const unavailable: string[] = [];
-		for (const key of Object.keys(
-			clientUserSectionSchemas,
-		) as ClientUserSectionKey[]) {
-			const read = readClientSettingsSection(
-				this.#document.user[key],
-				clientUserSectionSchemas[key] as ZodType,
-				`user.${key}`,
-			);
-			if (read.kind === "unavailable") unavailable.push(read.reason);
-			else if (read.kind === "loaded" && mode === "persisted")
-				sections[key] = read.value;
-		}
-		const hud = clientHudPlacementEntries(this.#document);
-		if (hud.kind === "unavailable") unavailable.push(hud.reason);
-		else if (hud.kind === "loaded") {
-			for (const key of Object.keys(
-				clientHudPlacementSchemas,
-			) as ClientHudPlacementKey[]) {
-				const read = readClientSettingsSection(
-					hud.value[key],
-					clientHudPlacementSchemas[key],
-					`hudPlacements.${key}`,
-				);
-				if (read.kind === "unavailable") unavailable.push(read.reason);
-				else if (read.kind === "loaded" && mode === "persisted")
-					hudPlacements[key] = read.value;
-			}
-		}
-		return {
-			sections: sections as Partial<ClientUserSectionValues>,
-			hudPlacements: hudPlacements as Partial<ClientHudLayout>,
-			unavailable,
-		};
-	}
-
-	#readCharacter(
-		profileKey: string,
-		mode: ClientSettingsReadMode,
-	): LoadedClientCharacterSettings {
-		const profile = this.#document.characters[profileKey];
-		const sections: Record<string, unknown> = {};
-		const unavailable: string[] = [];
-		for (const key of Object.keys(
-			clientCharacterSectionSchemas,
-		) as ClientCharacterSectionKey[]) {
-			const read = readClientSettingsSection(
-				profile?.[key],
-				clientCharacterSectionSchemas[key] as ZodType,
-				`character.${key}`,
-			);
-			if (read.kind === "unavailable") unavailable.push(read.reason);
-			else if (read.kind === "loaded" && mode === "persisted")
-				sections[key] = read.value;
-		}
-		return {
-			sections: sections as Partial<ClientCharacterSectionValues>,
-			unavailable,
-		};
-	}
-
-	/** Change only the keys named by the renderer; unknown siblings remain on disk. */
+	/** Persist a validated patch after file-wide structural normalization. */
 	saveUserPatch(patch: ClientUserSettingsPatch): Promise<void> {
 		const sections = validatedUserEntries(patch.sections);
 		const placements = validatedHudEntries(patch.hudPlacements);
 		return this.#queueWrite((document) => {
 			const user = { ...document.user };
 			for (const [key, entry] of Object.entries(sections)) {
-				assertWritable(
-					user[key],
-					clientUserSectionSchemas[key as ClientUserSectionKey] as ZodType,
-					`user.${key}`,
-				);
 				user[key] = entry;
 			}
 			if (Object.keys(placements).length > 0) {
 				const hud = { ...requireHudEntries(document) };
 				for (const [key, entry] of Object.entries(placements)) {
-					assertWritable(
-						hud[key],
-						clientHudPlacementSchemas[key as ClientHudPlacementKey],
-						`hudPlacements.${key}`,
-					);
 					hud[key] = entry;
 				}
 				user.hudPlacements = hud;
@@ -263,41 +226,15 @@ export class ClientSettingsStore {
 		});
 	}
 
-	/** Explicit reset replaces supported values and reports every blocked section. */
-	resetUser(settings: unknown): Promise<readonly string[]> {
-		const parsed = clientUserSettingsSchema.parse(settings);
-		const { hudLayout, ...values } = parsed;
+	/** Explicit reset replaces supported preferences while retaining native window geometry. */
+	resetUser(settings: unknown): Promise<void> {
+		const { hudLayout, ...values } = clientUserSettingsSchema.parse(settings);
 		const sections = validatedUserEntries(values);
 		const placements = validatedHudEntries(hudLayout);
-		return this.#queueWrite<readonly string[]>((document) => {
-			const user = { ...document.user };
-			const unavailable: string[] = [];
-			for (const [key, entry] of Object.entries(sections)) {
-				const read = readClientSettingsSection(
-					user[key],
-					clientUserSectionSchemas[key as ClientUserSectionKey] as ZodType,
-					`user.${key}`,
-				);
-				if (read.kind === "unavailable") unavailable.push(read.reason);
-				else user[key] = entry;
-			}
-			const existing = clientHudPlacementEntries(document);
-			if (existing.kind === "unavailable") unavailable.push(existing.reason);
-			else {
-				const hud = { ...(existing.kind === "loaded" ? existing.value : {}) };
-				for (const [key, entry] of Object.entries(placements)) {
-					const read = readClientSettingsSection(
-						hud[key],
-						clientHudPlacementSchemas[key as ClientHudPlacementKey],
-						`hudPlacements.${key}`,
-					);
-					if (read.kind === "unavailable") unavailable.push(read.reason);
-					else hud[key] = entry;
-				}
-				user.hudPlacements = hud;
-			}
-			return { document: { ...document, user }, result: unavailable };
-		});
+		return this.#queueWrite((document) => ({
+			...document,
+			user: { ...document.user, ...sections, hudPlacements: placements },
+		}));
 	}
 
 	saveCharacterPatch(
@@ -310,11 +247,6 @@ export class ClientSettingsStore {
 		return this.#queueWrite((document) => {
 			const profile = { ...document.characters[profileKey] };
 			for (const [key, entry] of Object.entries(sections)) {
-				assertWritable(
-					profile[key],
-					clientCharacterSectionSchemas[key as ClientCharacterSectionKey],
-					`character.${key}`,
-				);
 				profile[key] = entry;
 			}
 			return {
@@ -327,11 +259,6 @@ export class ClientSettingsStore {
 	updateWindow(settings: unknown): Promise<void> {
 		const entry = clientWindowSettingsEntry(settings);
 		return this.#queueWrite((document) => {
-			assertWritable(
-				document.user.window,
-				clientWindowSettingsSchema,
-				"window",
-			);
 			return { ...document, user: { ...document.user, window: entry } };
 		});
 	}
@@ -353,12 +280,16 @@ export class ClientSettingsStore {
 	): Promise<Result> {
 		const write = this.#writeTail.then(async () => {
 			const current = await this.#readDocument();
-			const changed = change(current);
+			const pruned = pruneUnsupportedSettings(current);
+			const changed = change(pruned.document);
 			const document = "document" in changed ? changed.document : changed;
 			// Object key order is presentation, not a preference change. All mutations
 			// share this decision so no-op loads and saves cannot create backups or writes.
 			if (!isDeepStrictEqual(document, current)) {
-				if ("document" in changed && changed.backup)
+				if (
+					pruned.notices.length > 0 ||
+					("document" in changed && changed.backup)
+				)
 					await copyFile(
 						this.#path,
 						`${this.#path}.backup-${randomUUID()}`,
@@ -370,6 +301,10 @@ export class ClientSettingsStore {
 				);
 			}
 			this.#document = document;
+			if (pruned.notices.length > 0)
+				console.warn(
+					`Client settings normalized: ${pruned.notices.join("; ")}`,
+				);
 			return ("document" in changed ? changed.result : undefined) as Result;
 		});
 		this.#writeTail = write.then(
@@ -414,7 +349,7 @@ export class ClientSettingsStore {
 	}
 }
 
-/** Unknown sibling sections are opaque; only schema-owned entries can be normalized. */
+/** Repair supported values after the transaction has pruned unsupported sections. */
 function repairEntries(
 	raw: Readonly<Record<string, unknown>>,
 	schemas: Readonly<Record<string, ZodType>>,
@@ -430,7 +365,8 @@ function repairEntries(
 			defaults[key],
 			`${label}.${key}`,
 		);
-		if (raw[key] !== undefined) entries[key] = repaired.entry;
+		if (repaired.entry === undefined) delete entries[key];
+		else entries[key] = repaired.entry;
 		notices.push(...repaired.notices);
 	}
 	return { entries, notices };
@@ -483,15 +419,31 @@ function requireHudEntries(
 	document: ClientSettingsCollection,
 ): Readonly<Record<string, unknown>> {
 	const read = clientHudPlacementEntries(document);
-	if (read.kind === "unavailable") throw new Error(read.reason);
+	if (read.kind === "invalid") throw new Error(read.reason);
 	return read.kind === "loaded" ? read.value : {};
-}
-
-function assertWritable(raw: unknown, schema: ZodType, label: string): void {
-	const read = readClientSettingsSection(raw, schema, label);
-	if (read.kind === "unavailable") throw new Error(read.reason);
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 	return error instanceof Error && "code" in error;
+}
+
+/** Preserve each schema's output type while reading an independently optional persisted section map. */
+type SupportedValues<Schemas extends Readonly<Record<string, ZodType>>> = {
+	readonly [Key in keyof Schemas]?: output<Schemas[Key]>;
+};
+
+/** Only normalized, supported values may enter runtime settings assembly. */
+function readSupportedValues<Schemas extends Readonly<Record<string, ZodType>>>(
+	raw: Readonly<Record<string, unknown>>,
+	schemas: Schemas,
+	label: string,
+): SupportedValues<Schemas> {
+	const values: Record<string, unknown> = {};
+	for (const [key, schema] of Object.entries(schemas)) {
+		const read = readClientSettingsSection(raw[key], schema, label + "." + key);
+		if (read.kind === "invalid") throw new Error(read.reason);
+		if (read.kind === "loaded") values[key] = read.value;
+	}
+	// The dynamic iteration preserves the exact schema key and parsed value pairing.
+	return values as SupportedValues<Schemas>;
 }

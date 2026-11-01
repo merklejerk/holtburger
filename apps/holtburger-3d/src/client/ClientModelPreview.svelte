@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { UI_SCALE_CHANGE_EVENT } from "../app/ui-scale";
 	import { onMount } from "svelte";
 	import "./client-model-surface.css";
 	import {
@@ -111,6 +112,11 @@
 			publishViewport();
 		};
 		document.addEventListener("visibilitychange", visibilityChanged);
+		const scaleChanged = () => {
+			rotationInput?.cancelPointer();
+			publishViewport();
+		};
+		window.addEventListener(UI_SCALE_CHANGE_EVENT, scaleChanged);
 		publishViewport();
 		void handle.ready.then(
 			() => {
@@ -131,6 +137,7 @@
 			rotationInput = null;
 			observer.disconnect();
 			document.removeEventListener("visibilitychange", visibilityChanged);
+			window.removeEventListener(UI_SCALE_CHANGE_EVENT, scaleChanged);
 			handle.setViewport(null);
 			void handle
 				.dispose()

@@ -19,13 +19,21 @@ export interface ClientHudPlacement {
 	readonly preferredHeight: number;
 }
 
-/** Current usable client content dimensions. */
+/** Current usable client content dimensions in logical UI units. */
 export interface ClientHudViewport {
 	readonly width: number;
 	readonly height: number;
 }
 
-/** Concrete viewport-relative rectangle consumed by positioned Svelte components. */
+/** Convert unscaled browser content dimensions into the HUD's logical layout units. */
+export function logicalClientHudViewport(
+	viewport: ClientHudViewport,
+	scale: number,
+): ClientHudViewport {
+	return { width: viewport.width / scale, height: viewport.height / scale };
+}
+
+/** Concrete viewport-relative rectangle in logical UI units, consumed by positioned Svelte components. */
 export interface ResolvedClientHudPlacement {
 	readonly left: number;
 	readonly top: number;
@@ -43,7 +51,7 @@ interface PreferredClientHudExtent {
 	readonly height: number;
 }
 
-/** Pointer displacement from the start of one drag gesture. */
+/** Pointer displacement from the start of one drag gesture, already converted to logical UI units. */
 interface ClientPointerDelta {
 	readonly x: number;
 	readonly y: number;

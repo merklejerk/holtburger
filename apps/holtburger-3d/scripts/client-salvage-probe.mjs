@@ -174,7 +174,7 @@ export async function probeSalvage(client, evaluateExpression) {
         const cell = document.querySelector('[data-salvage-item="9201"]');
         const rect = cell.getBoundingClientRect();
         const style = getComputedStyle(cell);
-        const expected = parseFloat(style.getPropertyValue('--ui-item-cell-min-size')) * parseFloat(style.getPropertyValue('--ui-icon-scale'));
+        const expected = parseFloat(style.getPropertyValue('--ui-item-cell-min-size')) * parseFloat(style.getPropertyValue('--ui-scale'));
         return Math.abs(rect.width - expected) < 1 && Math.abs(rect.height - rect.width) < 1;
     })()`,
 		"Queued salvage cell does not use the shared square item dimensions",

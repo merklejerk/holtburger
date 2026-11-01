@@ -1,4 +1,4 @@
-import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning.js";
 
 declare const ambientOcclusionDistanceFadeBrand: unique symbol;
 

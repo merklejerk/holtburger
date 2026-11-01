@@ -39,13 +39,15 @@ export async function probeTrade(client, evaluateExpression) {
 		const reset = panel.querySelector('.trade-reset');
 		const art = reset.querySelector('svg');
 		const surround = panel.querySelector('.trade-reset-control');
-		const { CLIENT_ICON_SCALE } = await import('/src/client/client-settings-values.ts');
+		const { CLIENT_UI_SCALE } = await import('/src/client/client-settings-values.ts');
 		const measure = () => [reset, art, surround].map(node => node.getBoundingClientRect());
-		panel.style.setProperty('--ui-icon-scale', String(CLIENT_ICON_SCALE.initial));
+		globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setUiScale(CLIENT_UI_SCALE.initial);
+		await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 		const baseline = measure();
 		try {
-			for (const scale of [CLIENT_ICON_SCALE.minimum, CLIENT_ICON_SCALE.maximum]) {
-				panel.style.setProperty('--ui-icon-scale', String(scale));
+			for (const scale of [CLIENT_UI_SCALE.minimum, CLIENT_UI_SCALE.maximum]) {
+				globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setUiScale(scale);
+				await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 				const bounds = measure();
 				bounds.forEach((rect, index) => {
 					if (Math.abs(rect.width - baseline[index].width * scale) > 0.1 || Math.abs(rect.height - baseline[index].height * scale) > 0.1)
@@ -54,7 +56,8 @@ export async function probeTrade(client, evaluateExpression) {
 				if (bounds[1].left < bounds[0].left || bounds[1].right > bounds[0].right || bounds[1].top < bounds[0].top || bounds[1].bottom > bounds[0].bottom)
 					throw new Error('Trade reset artwork escapes its hit target');
 			}
-		} finally { panel.style.removeProperty('--ui-icon-scale'); }
+		} finally { globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setUiScale(CLIENT_UI_SCALE.initial);
+			await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); }
 	})()`);
 
 	const point = (selector) =>
@@ -305,13 +308,14 @@ export async function probeTrade(client, evaluateExpression) {
 	const offerGeometry = await read(`(async () => {
 		const panel = document.querySelector('[data-trade-panel]');
 		const grid = panel.querySelector('[data-trade-side="partner"] .trade-grid');
-		const { CLIENT_ICON_SCALE } = await import('/src/client/client-settings-values.ts');
+		const { CLIENT_UI_SCALE } = await import('/src/client/client-settings-values.ts');
 		const measurements = [];
 		try {
-			for (const scale of [CLIENT_ICON_SCALE.minimum, CLIENT_ICON_SCALE.initial, CLIENT_ICON_SCALE.maximum]) {
-				panel.style.setProperty('--ui-icon-scale', String(scale));
+			for (const scale of [CLIENT_UI_SCALE.minimum, CLIENT_UI_SCALE.initial, CLIENT_UI_SCALE.maximum]) {
+				globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setUiScale(scale);
+				await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 				const cells = Array.from(grid.querySelectorAll('[data-trade-item]'), cell => cell.getBoundingClientRect());
-				const gap = parseFloat(getComputedStyle(grid).rowGap);
+				const gap = parseFloat(getComputedStyle(grid).rowGap) * scale;
 				for (let index = 0; index < cells.length; index++) {
 					const cell = cells[index];
 					if (Math.abs(cell.width - cell.height) > 1)
@@ -324,7 +328,8 @@ export async function probeTrade(client, evaluateExpression) {
 					throw new Error('Large trade offer does not scroll');
 				measurements.push({scale, width: cells[0].width, height: cells[0].height, scrollHeight: grid.scrollHeight, clientHeight: grid.clientHeight});
 			}
-		} finally { panel.style.removeProperty('--ui-icon-scale'); }
+		} finally { globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setUiScale(CLIENT_UI_SCALE.initial);
+			await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); }
 		return measurements;
 	})()`);
 	await read(`${fixture}.close()`);

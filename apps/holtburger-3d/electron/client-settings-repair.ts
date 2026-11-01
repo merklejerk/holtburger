@@ -1,8 +1,14 @@
 import { z } from "zod";
+import {
+	clientUserSectionSchemas,
+	clientHudPlacementSchemas,
+	clientCharacterSectionSchemas,
+	type ClientSettingsCollection,
+} from "../src/client/client-settings-sections.js";
 
 /** A supported section normalized for disk, with notices only for discarded choices. */
 export interface RepairedSettingsEntry {
-	/** Canonical supported entry, or an untouched future-version entry. */
+	/** Canonical supported entry, or undefined when the section is absent. */
 	readonly entry: unknown;
 	/** Discarded preferences to report after the replacement succeeds. */
 	readonly notices: readonly string[];
@@ -13,7 +19,11 @@ const envelopeSchema = z.object({
 	value: z.unknown(),
 });
 
-/** Repair persisted input only. Runtime values and save requests still use strict parsing. */
+const supportedEnvelopeSchema = envelopeSchema.extend({
+	version: z.literal(1),
+});
+
+/** Repair supported persisted input after structural pruning. Save requests still use strict parsing. */
 export function repairSettingsEntry(
 	raw: unknown,
 	schema: z.ZodType,
@@ -21,10 +31,7 @@ export function repairSettingsEntry(
 	label: string,
 ): RepairedSettingsEntry {
 	if (raw === undefined) return { entry: raw, notices: [] };
-	const envelope = envelopeSchema.safeParse(raw);
-	// A newer build owns this value; its contract cannot be inferred from ours.
-	if (envelope.success && envelope.data.version > 1)
-		return { entry: raw, notices: [] };
+	const envelope = supportedEnvelopeSchema.safeParse(raw);
 	const fallback = schema.parse(defaults);
 	if (!envelope.success)
 		return {
@@ -83,6 +90,66 @@ export function repairSettingsEntry(
 				cause: parsed.error,
 			});
 	}
+}
+
+/** Prune section identities and versions without requiring viewport- or character-specific defaults. */
+export function pruneUnsupportedSettings(document: ClientSettingsCollection): {
+	document: ClientSettingsCollection;
+	notices: readonly string[];
+} {
+	const notices: string[] = [];
+	const prune = (
+		raw: Readonly<Record<string, unknown>>,
+		supported: ReadonlySet<string>,
+		label: string,
+	) => {
+		const entries: Record<string, unknown> = {};
+		for (const [key, value] of Object.entries(raw)) {
+			const path = `${label}.${key}`;
+			if (!supported.has(key)) {
+				notices.push(`${path}: removed unknown section`);
+				continue;
+			}
+			const envelope = envelopeSchema.safeParse(value);
+			if (envelope.success && envelope.data.version !== 1) {
+				notices.push(
+					`${path}: removed unsupported version ${envelope.data.version}`,
+				);
+				continue;
+			}
+			entries[key] = value;
+		}
+		return entries;
+	};
+	// hudPlacements is a section map, not a versioned entry. Exclude it from envelope parsing.
+	const { hudPlacements, ...userEntries } = document.user;
+	const user = prune(
+		userEntries,
+		new Set([...Object.keys(clientUserSectionSchemas), "window"]),
+		"user",
+	);
+	if (hudPlacements !== undefined) {
+		if (isRecord(hudPlacements))
+			user.hudPlacements = prune(
+				hudPlacements,
+				new Set(Object.keys(clientHudPlacementSchemas)),
+				"user.hudPlacements",
+			);
+		else {
+			user.hudPlacements = {};
+			notices.push("user.hudPlacements: reset invalid map");
+		}
+	}
+	const supportedCharacterSections = new Set(
+		Object.keys(clientCharacterSectionSchemas),
+	);
+	const characters = Object.fromEntries(
+		Object.entries(document.characters).map(([profile, entries]) => [
+			profile,
+			prune(entries, supportedCharacterSections, `characters.${profile}`),
+		]),
+	);
+	return { document: { ...document, user, characters }, notices };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

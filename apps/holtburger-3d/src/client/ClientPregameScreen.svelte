@@ -7,6 +7,7 @@
 	import type { Snippet } from "svelte";
 	import PortalLogo from "../../../../assets/branding/portal.svg?component";
 	import { APP_BUILD_LABEL } from "../app/app-build";
+	import { uiScale } from "../app/ui-scale";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import "./client-pregame.css";
 	import "../app/themes/holtburger-pregame.css";
@@ -55,7 +56,9 @@
 				".hero-letter",
 			)) {
 				const bounds = letter.getBoundingClientRect();
-				const offset = center - (bounds.left + bounds.width / 2);
+				// Bounds are displayed pixels; CSS transforms consume local UI units.
+				const offset =
+					(center - (bounds.left + bounds.width / 2)) / uiScale(node);
 				animations.push(
 					letter.animate(
 						[
@@ -77,57 +80,63 @@
 	}
 </script>
 
-<main
-	class="client-pregame-screen ui-theme"
-	class:with-backdrop={backdrop}
-	class:hero-brand={branding === "hero"}
-	aria-label="Holtburger client"
-	use:keyboard.nativePage={(event) => onDefaultKeydown?.(event)}
->
-	<div class="pregame-header" class:with-aside={headerAside !== undefined}>
-		<header class="pregame-brand">
-			{#if showPortalLogo}
-				<span class="pregame-logo" aria-hidden="true"><PortalLogo /></span>
+<div class="pregame-viewport">
+	<main
+		class="client-pregame-screen ui-theme"
+		class:with-backdrop={backdrop}
+		class:hero-brand={branding === "hero"}
+		aria-label="Holtburger client"
+		use:keyboard.nativePage={(event) => onDefaultKeydown?.(event)}
+	>
+		<div class="pregame-header" class:with-aside={headerAside !== undefined}>
+			<header class="pregame-brand">
+				{#if showPortalLogo}
+					<span class="pregame-logo" aria-hidden="true"><PortalLogo /></span>
+				{/if}
+				{#if branding === "hero"}
+					<span role="img" aria-label="Holtburger" use:revealWordmark>
+						{#each [..."Holtburger"] as letter, index (index)}<span
+								class="hero-letter"
+								aria-hidden="true">{letter}</span
+							>{/each}
+					</span>
+				{:else}
+					<span>Holtburger</span>
+				{/if}
+			</header>
+			{#if headerAside}
+				<div class="pregame-header-aside">{@render headerAside()}</div>
 			{/if}
-			{#if branding === "hero"}
-				<span role="img" aria-label="Holtburger" use:revealWordmark>
-					{#each [..."Holtburger"] as letter, index (index)}<span
-							class="hero-letter"
-							aria-hidden="true">{letter}</span
-						>{/each}
-				</span>
-			{:else}
-				<span>Holtburger</span>
-			{/if}
-		</header>
-		{#if headerAside}
-			<div class="pregame-header-aside">{@render headerAside()}</div>
-		{/if}
-	</div>
-	<div class="pregame-content">{@render children()}</div>
-	<footer class="pregame-footer">
-		{@render footer()}
-		<span class="pregame-build" aria-label="Build information"
-			>{APP_BUILD_LABEL}</span
-		>
-	</footer>
-</main>
+		</div>
+		<div class="pregame-content">{@render children()}</div>
+		<footer class="pregame-footer">
+			{@render footer()}
+			<span class="pregame-build" aria-label="Build information"
+				>{APP_BUILD_LABEL}</span
+			>
+		</footer>
+	</main>
+</div>
 
 <style>
 	@layer components {
 		.hero-letter {
 			display: inline-block;
 		}
+		.pregame-viewport {
+			height: var(--ui-viewport-height);
+			container: pregame-viewport / size;
+		}
 		.client-pregame-screen {
 			position: relative;
 			display: grid;
 			grid-template-rows: auto minmax(0, 1fr) auto;
-			gap: clamp(16px, 3vh, 32px);
+			gap: clamp(16px, calc(var(--ui-viewport-height) * 0.03), 32px);
 			/* A definite height bounds percentage-sized previews and reserves the footer row. */
-			height: 100dvh;
+			height: 100%;
 			min-height: 0;
 			overflow: clip;
-			padding: clamp(20px, 4vw, 64px);
+			padding: clamp(20px, calc(var(--ui-viewport-width) * 0.04), 64px);
 			padding-bottom: 12px;
 		}
 		.client-pregame-screen.hero-brand {
@@ -204,14 +213,14 @@
 			text-align: right;
 			overflow-wrap: anywhere;
 		}
-		@media (max-width: 850px) {
+		@container pregame-viewport (max-width: 850px) {
 			/* Stacked pages scroll as one area, with the footer remaining in place. */
 			.pregame-content {
 				grid-template-rows: auto;
 				overflow: hidden auto;
 			}
 		}
-		@media (max-width: 720px) {
+		@container pregame-viewport (max-width: 720px) {
 			.pregame-header.with-aside {
 				flex-wrap: wrap;
 				gap: 12px;

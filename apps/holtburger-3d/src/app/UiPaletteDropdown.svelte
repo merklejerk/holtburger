@@ -72,18 +72,16 @@
 	@layer components {
 		.palette-dropdown {
 			width: calc(
-				(var(--ui-menu-grid-icon-size) + 2 * var(--ui-menu-grid-padding)) *
-					var(--ui-icon-scale)
+				(var(--ui-menu-grid-icon-size) + 2 * var(--ui-menu-grid-padding))
 			);
 			height: calc(
-				(var(--ui-menu-grid-icon-size) + 2 * var(--ui-menu-grid-padding)) *
-					var(--ui-icon-scale)
+				(var(--ui-menu-grid-icon-size) + 2 * var(--ui-menu-grid-padding))
 			);
 			justify-self: start;
 		}
 		.palette-dropdown > .palette-swatch {
-			width: calc(var(--ui-menu-grid-icon-size) * var(--ui-icon-scale));
-			height: calc(var(--ui-menu-grid-icon-size) * var(--ui-icon-scale));
+			width: var(--ui-menu-grid-icon-size);
+			height: var(--ui-menu-grid-icon-size);
 		}
 		.palette-swatch.selected {
 			outline: 2px solid currentColor;
@@ -91,8 +89,8 @@
 		}
 		.palette-swatch {
 			display: inline-block;
-			width: calc(var(--ui-overlay-icon-size) * var(--ui-icon-scale));
-			height: calc(var(--ui-overlay-icon-size) * var(--ui-icon-scale));
+			width: var(--ui-overlay-icon-size);
+			height: var(--ui-overlay-icon-size);
 			border: 1px solid var(--ui-color-border);
 			border-radius: 0;
 			flex-shrink: 0;

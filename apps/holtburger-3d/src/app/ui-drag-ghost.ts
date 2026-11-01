@@ -1,4 +1,7 @@
-/** Copy a source's artwork region, excluding surrounding controls, labels, and item overlays. */
+/**
+ * Copy displayed artwork into a ghost hosted by the unscaled canvas/HUD interaction root.
+ * Source bounds and ghost positioning both use browser pixels, even when the source UI is scaled.
+ */
 export function showUiDragGhost(
 	ghost: HTMLElement,
 	source: HTMLElement,

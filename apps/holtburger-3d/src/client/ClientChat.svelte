@@ -786,7 +786,7 @@
 		bottom: 100%;
 		left: 0;
 		right: 0;
-		max-height: min(18rem, 50vh);
+		max-height: min(18rem, calc(var(--ui-viewport-height) * 0.5));
 		overflow: auto;
 		display: flex;
 		flex-direction: column;

@@ -358,7 +358,7 @@
 			/* Header priority stays local to this HUD. */
 			isolation: isolate;
 			/* One dimension keeps header controls and their reserved grid column aligned. */
-			--selected-action-size: calc(32px * var(--ui-icon-scale));
+			--selected-action-size: 32px;
 			display: grid;
 			box-sizing: border-box;
 			width: 100%;
@@ -395,13 +395,13 @@
 			display: grid;
 			width: var(--selected-action-size);
 			height: var(--selected-action-size);
-			padding: calc(6px * var(--ui-icon-scale));
+			padding: 6px;
 			place-items: center;
 			pointer-events: auto;
 		}
 		.selected-entity__heading button :global(svg) {
-			width: calc(20px * var(--ui-icon-scale));
-			height: calc(20px * var(--ui-icon-scale));
+			width: 20px;
+			height: 20px;
 		}
 		.selected-entity__health {
 			overflow: hidden;

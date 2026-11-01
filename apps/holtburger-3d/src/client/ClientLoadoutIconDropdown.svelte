@@ -96,11 +96,11 @@
 			display: flex;
 			padding: 0;
 			width: auto;
-			height: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
+			height: var(--ui-item-cell-min-size);
 			flex-shrink: 0;
 		}
 		.icon-preview {
-			width: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
+			width: var(--ui-item-cell-min-size);
 			height: 100%;
 		}
 		.icon-preview[data-draggable="true"] {
@@ -109,7 +109,7 @@
 		.icon-disclosure {
 			display: grid;
 			place-items: center;
-			width: calc(1.2rem * var(--ui-icon-scale));
+			width: 1.2rem;
 			border-left: 1px solid var(--ui-color-border);
 			cursor: pointer;
 		}

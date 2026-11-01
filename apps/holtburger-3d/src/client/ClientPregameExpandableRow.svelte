@@ -51,7 +51,7 @@
 			display: flex;
 			align-self: start;
 			align-items: center;
-			gap: calc(8px * var(--ui-icon-scale));
+			gap: 8px;
 			margin-block: 4px;
 		}
 	}

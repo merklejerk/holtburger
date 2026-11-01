@@ -3,7 +3,7 @@ import type {
 	ResolvedClientHudPlacement,
 } from "./client-hud-layout";
 
-/** CSS-pixel attraction range and spacing between adjacent HUD surfaces. */
+/** logical UI attraction range and spacing between adjacent HUD surfaces. */
 export interface HudSnapOptions {
 	/** Maximum displacement on either axis from raw pointer-derived placement. */
 	readonly distance: number;

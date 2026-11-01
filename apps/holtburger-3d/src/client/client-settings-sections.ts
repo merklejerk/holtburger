@@ -33,6 +33,24 @@ export const clientUserSectionSchemas = {
 export type ClientUserSectionKey = keyof typeof clientUserSectionSchemas;
 export type ClientUserSectionValues = Omit<ClientUserSettings, "hudLayout">;
 
+/** Browser facts needed to assemble scale-aware client defaults before mounting. */
+export const clientUserSettingsContextSchema = z
+	.object({
+		/** Unscaled browser content extent in viewport CSS pixels. */
+		viewport: z
+			.object({
+				width: z.number().finite().nonnegative(),
+				height: z.number().finite().nonnegative(),
+			})
+			.strict(),
+		/** Actual launch-specific shortcut count used by the HUD's default layout. */
+		shortcutCount: z.number().int().nonnegative(),
+	})
+	.strict();
+export type ClientUserSettingsContext = z.infer<
+	typeof clientUserSettingsContextSchema
+>;
+
 /** Each HUD surface evolves independently; the tray has an additional shape invariant. */
 export const clientHudPlacementSchemas = hudShape;
 export type ClientHudPlacementKey = keyof ClientHudLayout;
@@ -69,11 +87,11 @@ export interface ClientUserSettingsPatch {
 export type ClientCharacterSettingsPatch =
 	Partial<ClientCharacterSectionValues>;
 
-export const clientUserSectionsSchema = z
+const clientUserSectionsSchema = z
 	.object(clientUserSectionSchemas)
 	.partial()
 	.strict();
-export const clientHudPlacementsSchema = z
+const clientHudPlacementsSchema = z
 	.object(clientHudPlacementSchemas)
 	.partial()
 	.strict();
@@ -117,9 +135,9 @@ const entrySchema = z
 export type ClientSectionRead<Value> =
 	| { readonly kind: "missing" }
 	| { readonly kind: "loaded"; readonly value: Value }
-	| { readonly kind: "unavailable"; readonly reason: string };
+	| { readonly kind: "invalid"; readonly reason: string };
 
-/** Parse only a section owned by this build; unknown siblings remain opaque. */
+/** Validate one section after file-wide normalization, reporting any violated persistence invariant. */
 export function readClientSettingsSection<Value>(
 	raw: unknown,
 	schema: z.ZodType<Value>,
@@ -128,16 +146,16 @@ export function readClientSettingsSection<Value>(
 	if (raw === undefined) return { kind: "missing" };
 	const entry = entrySchema.safeParse(raw);
 	if (!entry.success)
-		return { kind: "unavailable", reason: `${label} has an invalid entry` };
+		return { kind: "invalid", reason: `${label} has an invalid entry` };
 	if (entry.data.version !== 1)
 		return {
-			kind: "unavailable",
+			kind: "invalid",
 			reason: `${label} uses unsupported version ${entry.data.version}`,
 		};
 	const value = schema.safeParse(entry.data.value);
 	return value.success
 		? { kind: "loaded", value: value.data }
-		: { kind: "unavailable", reason: `${label} has an invalid value` };
+		: { kind: "invalid", reason: `${label} has an invalid value` };
 }
 
 /** Validate the new value before constructing a durable section. */
@@ -202,7 +220,7 @@ export function clientHudPlacementEntries(
 	if (raw === undefined) return { kind: "missing" };
 	if (typeof raw !== "object" || raw === null || Array.isArray(raw))
 		return {
-			kind: "unavailable",
+			kind: "invalid",
 			reason: "hudPlacements has an invalid map",
 		};
 	return { kind: "loaded", value: raw as Readonly<Record<string, unknown>> };

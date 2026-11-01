@@ -260,12 +260,18 @@
 		background: transparent;
 	}
 	.client-pregame-screen.hero-brand .pregame-brand {
-		font-size: calc(clamp(26px, 7vw, 88px) * var(--ui-text-scale));
+		font-size: calc(
+			clamp(26px, calc(var(--ui-viewport-width) * 0.07), 88px) *
+				var(--ui-text-scale)
+		);
 	}
 	.client-pregame-screen .pregame-brand {
 		font-family: var(--ui-font-heading);
 		color: var(--ui-color-highlight);
-		font-size: calc(clamp(24px, 2.2vw, 34px) * var(--ui-text-scale));
+		font-size: calc(
+			clamp(24px, calc(var(--ui-viewport-width) * 0.022), 34px) *
+				var(--ui-text-scale)
+		);
 		letter-spacing: 0.24em;
 		text-transform: uppercase;
 		border-bottom: 1px solid var(--ui-color-border);
@@ -303,7 +309,7 @@
 		font-size: calc(var(--ui-font-size-micro) * var(--ui-text-scale));
 		text-shadow: 0 1px 4px var(--ui-color-well);
 	}
-	@media (max-width: 640px) {
+	@container pregame-viewport (max-width: 640px) {
 		.client-pregame-screen .character-roster::before {
 			background: linear-gradient(
 				180deg,
@@ -324,7 +330,10 @@
 		);
 	}
 	.client-pregame-screen :where(.creation-layout) h1 {
-		font-size: calc(clamp(28px, 2.8vw, 42px) * var(--ui-text-scale));
+		font-size: calc(
+			clamp(28px, calc(var(--ui-viewport-width) * 0.028), 42px) *
+				var(--ui-text-scale)
+		);
 		font-weight: 400;
 	}
 	.client-pregame-screen .creation-name {
@@ -438,7 +447,7 @@
 	.client-pregame-screen .creation-actions {
 		border-top: 1px solid var(--ui-color-border);
 	}
-	@media (max-width: 850px) {
+	@container pregame-viewport (max-width: 850px) {
 		.client-pregame-screen .creation-navigation::before {
 			background: linear-gradient(
 				transparent,
@@ -489,7 +498,7 @@
 		background: transparent;
 		color: var(--ui-color-highlight);
 	}
-	@media (max-width: 850px) {
+	@container pregame-viewport (max-width: 850px) {
 		.client-pregame-screen .creation-navigation .ui-tabs::before {
 			background: var(--ui-color-border);
 		}

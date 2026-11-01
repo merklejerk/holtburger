@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { applyUiScale } from "../app/ui-scale";
+	import { logicalClientHudViewport } from "./client-hud-layout";
 	import { presentClientBinding } from "./client-binding-catalog";
 	import { ClientCombineCells } from "./client-combine-cells";
 	import type {
@@ -83,6 +85,7 @@
 	import type {
 		MinimapFrame,
 		MinimapState,
+		MinimapGeometry,
 		MinimapFooterExtent,
 	} from "../app/minimap-frame";
 	import ClientVitalWarningOverlay from "./ClientVitalWarningOverlay.svelte";
@@ -751,6 +754,12 @@
 		spells;
 		spellDrag?.cancel();
 	});
+	$effect(() => {
+		// Scale invalidates both pointer coordinate spaces; spell edits only retire spell gestures.
+		ui.uiScale;
+		itemDrag?.cancel();
+		spellDrag?.cancel();
+	});
 	onMount(() =>
 		inputGate.attach(() => {
 			spellDrag?.cancel();
@@ -829,12 +838,16 @@
 	onDestroy(() => onPartyHudDemand(false));
 
 	let worldElement = $state<HTMLElement | null>(null);
+	let uiElement = $state<HTMLElement | null>(null);
 	$effect(() => {
 		if (worldElement === null || itemInteractions === null) return;
 		const cells = new ClientCombineCells(worldElement, itemInteractions);
 		return () => cells.destroy();
 	});
-	let viewport = $state<ClientHudViewport>(initialViewport);
+	// Mount snapshot only; the scaled DOM observer owns subsequent viewport updates.
+	let viewport = $state<ClientHudViewport>(
+		untrack(() => logicalClientHudViewport(initialViewport, ui.uiScale)),
+	);
 	// The launch capability is immutable; snapshotting it avoids resetting edited HUD layout.
 	const shortcuts = untrack(() => createClientShortcuts(debugEnabled));
 	let resetActionBars = $state<(() => boolean) | null>(null);
@@ -1011,7 +1024,8 @@
 	});
 
 	$effect(() => {
-		if (worldElement === null) return;
+		if (uiElement === null) return;
+		ui.uiScale;
 		const observer = new ResizeObserver(([entry]) => {
 			if (entry === undefined) return;
 			viewport = {
@@ -1019,12 +1033,11 @@
 				height: entry.contentRect.height,
 			};
 		});
-		observer.observe(worldElement);
+		observer.observe(uiElement);
 		return () => observer.disconnect();
 	});
 
-	function updateMinimap(next: MinimapState): void {
-		onMinimapViewDiametersChange(next.viewDiameters);
+	function updateMinimapGeometry(next: MinimapGeometry): void {
 		const sizeChanged = next.size !== resolvedMapPlacement.width;
 		const preferredSize = sizeChanged
 			? next.size
@@ -1151,19 +1164,23 @@
 	}}
 	aria-label="Holtburger client world"
 >
-	<div class="gameplay-controls">
-		{#key characterGuid}
-			<ClientVitalWarningOverlay
-				{vitals}
-				enabled={vitalWarningsEnabled}
-				thresholds={ui.vitalWarningThresholds}
-			/>
-		{/key}
-		<ClientCombatTargetIndicator readFrame={readCombatTargetFrame} />
-		<ClientTargetIndicator
-			readFrame={readTargetIndicatorFrame}
-			selectedGuid={selectedEntityGuid}
+	{#key characterGuid}
+		<ClientVitalWarningOverlay
+			{vitals}
+			enabled={vitalWarningsEnabled}
+			thresholds={ui.vitalWarningThresholds}
 		/>
+	{/key}
+	<ClientCombatTargetIndicator readFrame={readCombatTargetFrame} />
+	<ClientTargetIndicator
+		readFrame={readTargetIndicatorFrame}
+		selectedGuid={selectedEntityGuid}
+	/>
+	<div
+		class="gameplay-controls"
+		bind:this={uiElement}
+		use:applyUiScale={ui.uiScale}
+	>
 		<ClientSystemMenu
 			bind:this={systemMenu}
 			canReturn={canReturnToMenu}
@@ -1194,7 +1211,8 @@
 			}}
 			resizable={CLIENT_UI_DEFAULTS.minimap.resizable}
 			editable={hudMode === "layout"}
-			onStateChange={updateMinimap}
+			onGeometryChange={updateMinimapGeometry}
+			onViewDiametersChange={onMinimapViewDiametersChange}
 			onFooterExtentChange={(extent) => {
 				if (
 					extent.width !== minimapFooterExtent.width ||
@@ -1970,7 +1988,13 @@
 			pointer-events: none;
 		}
 		.gameplay-controls {
-			display: contents;
+			position: absolute;
+			inset: 0;
+			pointer-events: none;
+		}
+		/* The scaling boundary has a real box; only its surfaces may intercept the world.
+		 * Low specificity preserves each surface's explicit pass-through policy. */
+		:where(.gameplay-controls) > :global(*) {
 			pointer-events: auto;
 		}
 

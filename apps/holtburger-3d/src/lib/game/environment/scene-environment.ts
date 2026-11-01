@@ -1,9 +1,9 @@
-import { renderVector } from "../../assets/ac-frame";
-import { bracketKeyframes } from "./keyframe-bracket";
-import { quantizeDayFraction } from "./game-clock";
-import { resolveSkyState } from "./sky-state";
+import { renderVector } from "../../assets/ac-frame.js";
+import { bracketKeyframes } from "./keyframe-bracket.js";
+import { quantizeDayFraction } from "./game-clock.js";
+import { resolveSkyState } from "./sky-state.js";
 import type { ActiveRegionSource } from "../../assets/active-region-source";
-import type { ResolvedSkyState } from "./sky-state";
+import type { ResolvedSkyState } from "./sky-state.js";
 import type { Vec3 } from "../math/types";
 
 /**

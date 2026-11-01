@@ -48,8 +48,11 @@
 		},
 	};
 	async function restore() {
-		const loaded = await transport.loadUser(defaults);
-		settings = { ...defaults, ...loaded.sections };
+		const loaded = await transport.loadUser({
+			viewport: { width: window.innerWidth, height: window.innerHeight },
+			shortcutCount: 0,
+		});
+		settings = loaded.settings;
 		await owner.refresh();
 		await owner.select(settings.ui.themeId);
 		ready = true;

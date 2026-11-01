@@ -21,10 +21,15 @@ import { EQUIPMENT_SLOTS } from "../src/client/client-inventory-equipment";
 import { loadoutActionContentSchema } from "../src/client/client-loadout";
 import { bindActionCell } from "../src/client/client-action-bar-state";
 import {
-	CLIENT_ICON_SCALE,
+	CLIENT_UI_SCALE,
 	CLIENT_DEFAULT_THEME_ID,
 	CLIENT_TEXT_SCALE,
 } from "../src/client/client-settings-values";
+
+const userContext = {
+	viewport: { width: 1440, height: 900 },
+	shortcutCount: 8,
+};
 
 const initialWindow = {
 	normalBounds: { width: 1440, height: 900 },
@@ -51,13 +56,94 @@ async function readCollection(path: string) {
 }
 
 describe("ClientSettingsStore", () => {
+	it.each(["absent", "malformed"] as const)(
+		"resolves %s placement defaults after restoring scale and preserves valid anchors",
+		async (kind) => {
+			const path = await temporarySettingsPath();
+			const ui = { ...defaultUser.ui, uiScale: CLIENT_UI_SCALE.maximum };
+			const placements = {
+				inventory: { version: 1, value: defaultUser.hudLayout.inventory },
+				...(kind === "malformed"
+					? { chat: { version: 1, value: "broken" } }
+					: {}),
+			};
+			await writeFile(
+				path,
+				JSON.stringify({
+					formatVersion: 1,
+					user: { ui: { version: 1, value: ui }, hudPlacements: placements },
+					characters: {},
+				}),
+			);
+			const store = new ClientSettingsStore(path, initialWindow);
+			await store.load();
+			const loaded = await store.loadUser(userContext, "persisted");
+			const logicalDefaults = createDefaultClientUserSettings(
+				{
+					width: userContext.viewport.width / ui.uiScale,
+					height: userContext.viewport.height / ui.uiScale,
+				},
+				userContext.shortcutCount,
+			);
+			expect(loaded.settings.hudLayout.chat).toEqual(
+				logicalDefaults.hudLayout.chat,
+			);
+			expect(loaded.settings.hudLayout.inventory).toEqual(
+				defaultUser.hudLayout.inventory,
+			);
+			const before = (await readCollection(path)).user.hudPlacements;
+			await store.saveUserPatch({
+				sections: { ui: { ...ui, uiScale: CLIENT_UI_SCALE.minimum } },
+			});
+			expect((await readCollection(path)).user.hudPlacements).toEqual(before);
+			if (kind === "malformed")
+				expect(before).toMatchObject({
+					chat: { version: 1, value: logicalDefaults.hudLayout.chat },
+				});
+		},
+	);
+
+	it("normalizes a retired UI preference without losing customized typography", async () => {
+		const path = await temporarySettingsPath();
+		const fonts = { body: "mono", heading: "serif", mono: "sans" } as const;
+		await writeFile(
+			path,
+			JSON.stringify({
+				formatVersion: 1,
+				user: {
+					ui: {
+						version: 1,
+						value: {
+							...defaultUser.ui,
+							uiScale: undefined,
+							iconScale: 1.75,
+							fonts,
+						},
+					},
+				},
+				characters: {},
+			}),
+		);
+		const store = new ClientSettingsStore(path, initialWindow);
+		await store.load();
+		const result = await store.loadUser(userContext, "persisted");
+		expect(result.settings.ui).toEqual({ ...defaultUser.ui, fonts });
+		await store.saveUserPatch({
+			sections: {
+				ui: { ...result.settings.ui, uiScale: CLIENT_UI_SCALE.maximum },
+			},
+		});
+		expect(
+			(await store.loadUser(userContext, "persisted")).settings.ui,
+		).toEqual({ ...defaultUser.ui, fonts, uiScale: CLIENT_UI_SCALE.maximum });
+	});
 	it("defaults automatic keys on for existing profiles and persists explicit opt-outs", async () => {
 		const path = await temporarySettingsPath();
 		try {
 			const store = new ClientSettingsStore(path, initialWindow);
 			await store.load();
-			const loaded = await store.loadUser(defaultUser, "persisted");
-			expect({ ...defaultUser, ...loaded.sections }.lockInteractions).toEqual({
+			const loaded = await store.loadUser(userContext, "persisted");
+			expect({ ...defaultUser, ...loaded.settings }.lockInteractions).toEqual({
 				autoUseKeys: true,
 			});
 			await store.saveUserPatch({
@@ -65,9 +151,9 @@ describe("ClientSettingsStore", () => {
 			});
 			const reloaded = new ClientSettingsStore(path, initialWindow);
 			await reloaded.load();
-			expect(await reloaded.loadUser(defaultUser, "persisted")).toMatchObject({
-				sections: { lockInteractions: { autoUseKeys: false } },
-				unavailable: [],
+			expect(await reloaded.loadUser(userContext, "persisted")).toMatchObject({
+				settings: { lockInteractions: { autoUseKeys: false } },
+				repaired: [],
 			});
 		} finally {
 			await rm(dirname(path), { recursive: true, force: true });
@@ -79,18 +165,18 @@ describe("ClientSettingsStore", () => {
 		try {
 			const store = new ClientSettingsStore(path, initialWindow);
 			await store.load();
-			const initial = await store.loadUser(defaultUser, "persisted");
-			expect({ ...defaultUser, ...initial.sections }.chatTimestamps).toBe(true);
+			const initial = await store.loadUser(userContext, "persisted");
+			expect({ ...defaultUser, ...initial.settings }.chatTimestamps).toBe(true);
 			for (const chatTimestamps of [false, true]) {
 				await store.saveUserPatch({
 					sections: { chatTimestamps, chatFilters: ["combat"] },
 				});
 				const reloaded = new ClientSettingsStore(path, initialWindow);
 				await reloaded.load();
-				expect(await reloaded.loadUser(defaultUser, "persisted")).toMatchObject(
+				expect(await reloaded.loadUser(userContext, "persisted")).toMatchObject(
 					{
-						sections: { chatTimestamps, chatFilters: ["combat"] },
-						unavailable: [],
+						settings: { chatTimestamps, chatFilters: ["combat"] },
+						repaired: [],
 					},
 				);
 			}
@@ -112,10 +198,10 @@ describe("ClientSettingsStore", () => {
 			);
 			const store = new ClientSettingsStore(path, initialWindow);
 			await store.load();
-			const loaded = await store.loadUser(defaultUser, "persisted");
-			expect(loaded.unavailable).toEqual([]);
+			const loaded = await store.loadUser(userContext, "persisted");
+			expect(loaded.repaired).toEqual([]);
 			// Startup composes absent sections from first-run defaults.
-			expect({ ...defaultUser, ...loaded.sections }).toMatchObject({
+			expect({ ...defaultUser, ...loaded.settings }).toMatchObject({
 				chatSuppression: {
 					hideSelfEvasionsAndResists: true,
 					hideSpellIncantations: true,
@@ -129,9 +215,9 @@ describe("ClientSettingsStore", () => {
 			await store.saveUserPatch({ sections: { chatSuppression } });
 			const reloaded = new ClientSettingsStore(path, initialWindow);
 			await reloaded.load();
-			expect(await reloaded.loadUser(defaultUser, "persisted")).toMatchObject({
-				sections: { chatSuppression, chatFilters: ["chat"] },
-				unavailable: [],
+			expect(await reloaded.loadUser(userContext, "persisted")).toMatchObject({
+				settings: { chatSuppression, chatFilters: ["chat"] },
+				repaired: [],
 			});
 		} finally {
 			await rm(dirname(path), { recursive: true, force: true });
@@ -154,18 +240,18 @@ describe("ClientSettingsStore", () => {
 			);
 			const store = new ClientSettingsStore(path, initialWindow);
 			await store.load();
-			expect(await store.loadUser(defaultUser, "persisted")).toMatchObject({
-				sections: {
+			expect(await store.loadUser(userContext, "persisted")).toMatchObject({
+				settings: {
 					graphics: { ...savedGraphics, alwaysShowEntityNameplates },
 				},
-				unavailable: [],
+				repaired: [],
 			});
 			const graphics = { ...savedGraphics, alwaysShowEntityNameplates: false };
 			await store.saveUserPatch({ sections: { graphics } });
 			const reloaded = new ClientSettingsStore(path, initialWindow);
 			await reloaded.load();
 			expect(
-				(await reloaded.loadUser(defaultUser, "persisted")).sections.graphics,
+				(await reloaded.loadUser(userContext, "persisted")).settings.graphics,
 			).toEqual(graphics);
 		} finally {
 			await rm(dirname(path), { recursive: true, force: true });
@@ -176,7 +262,6 @@ describe("ClientSettingsStore", () => {
 		const path = await temporarySettingsPath();
 		const fonts = { body: "serif", heading: "mono", mono: "sans" } as const;
 		const vitalWarningThresholds = { health: 35, stamina: 15, mana: 25 };
-		const future = { version: 4, value: { future: true } };
 		try {
 			await writeFile(
 				path,
@@ -184,7 +269,6 @@ describe("ClientSettingsStore", () => {
 					formatVersion: 1,
 					user: {
 						ui: { version: 1, value: { fonts, vitalWarningThresholds } },
-						future,
 					},
 					characters: {},
 				}),
@@ -192,7 +276,7 @@ describe("ClientSettingsStore", () => {
 			const store = new ClientSettingsStore(path, initialWindow);
 			await store.load();
 			expect(
-				(await store.loadUser(defaultUser, "persisted")).sections.ui,
+				(await store.loadUser(userContext, "persisted")).settings.ui,
 			).toEqual({
 				themeId: CLIENT_DEFAULT_THEME_ID,
 				showFps: false,
@@ -201,7 +285,7 @@ describe("ClientSettingsStore", () => {
 				fonts,
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.initial,
-				iconScale: CLIENT_ICON_SCALE.initial,
+				uiScale: CLIENT_UI_SCALE.initial,
 			});
 			const ui = {
 				themeId: "Midnight 雪",
@@ -211,7 +295,7 @@ describe("ClientSettingsStore", () => {
 				fonts,
 				vitalWarningThresholds,
 				textScale: CLIENT_TEXT_SCALE.maximum,
-				iconScale: CLIENT_ICON_SCALE.minimum,
+				uiScale: CLIENT_UI_SCALE.minimum,
 			};
 			await store.saveUserPatch({ sections: { ui } });
 			await store.saveCharacterPatch("example:9000/0x50000001", {
@@ -223,16 +307,15 @@ describe("ClientSettingsStore", () => {
 			const reloaded = new ClientSettingsStore(path, initialWindow);
 			await reloaded.load();
 			expect(
-				(await reloaded.loadUser(defaultUser, "persisted")).sections.ui,
+				(await reloaded.loadUser(userContext, "persisted")).settings.ui,
 			).toEqual(ui);
-			expect((await readCollection(path)).user.future).toEqual(future);
 			expect(() =>
 				reloaded.saveUserPatch({
 					sections: { ui: { ...ui, textScale: CLIENT_TEXT_SCALE.maximum + 1 } },
 				}),
 			).toThrow();
 			expect(
-				(await reloaded.loadUser(defaultUser, "persisted")).sections.ui,
+				(await reloaded.loadUser(userContext, "persisted")).settings.ui,
 			).toEqual(ui);
 		} finally {
 			await rm(dirname(path), { recursive: true, force: true });
@@ -244,8 +327,8 @@ describe("ClientSettingsStore", () => {
 			const store = new ClientSettingsStore(path, initialWindow);
 			await store.load();
 			expect(
-				(await store.loadUser(defaultUser, "persisted")).sections.recentEmotes,
-			).toBeUndefined();
+				(await store.loadUser(userContext, "persisted")).settings.recentEmotes,
+			).toEqual(defaultUser.recentEmotes);
 			const recentEmotes = ["wave", "bowdeepstate"];
 			await store.saveUserPatch({ sections: { recentEmotes } });
 			await store.saveCharacterPatch("first:9000/0x50000001", {
@@ -257,12 +340,9 @@ describe("ClientSettingsStore", () => {
 			const reloaded = new ClientSettingsStore(path, initialWindow);
 			await reloaded.load();
 			expect(
-				(await reloaded.loadUser(defaultUser, "persisted")).sections
+				(await reloaded.loadUser(userContext, "persisted")).settings
 					.recentEmotes,
 			).toEqual(recentEmotes);
-			expect(
-				(await reloaded.loadUser(defaultUser, "persisted")).unavailable,
-			).toEqual([]);
 			const saved = await readCollection(path);
 			expect(saved.user.recentEmotes).toEqual({
 				version: 1,
@@ -332,7 +412,6 @@ describe("ClientSettingsStore", () => {
 				defaultCharacter,
 				"persisted",
 			);
-			expect(read.unavailable).toEqual([]);
 			expect(read.repaired).toEqual([
 				"character.entityAlerts: reset invalid value",
 			]);
@@ -371,13 +450,13 @@ describe("ClientSettingsStore", () => {
 			);
 			const store = new ClientSettingsStore(path, initialWindow);
 			await store.load();
-			const loaded = await store.loadUser(defaultUser, "persisted");
-			expect(loaded.unavailable).toEqual([]);
-			expect(loaded.sections.input?.client).toEqual({
+			const loaded = await store.loadUser(userContext, "persisted");
+			expect(loaded.repaired).toEqual([]);
+			expect(loaded.settings.input?.client).toEqual({
 				...input.client,
 				toggleChatHistory: omittedToggle,
 			});
-			expect(loaded.sections.chatFilters).toEqual(["combat"]);
+			expect(loaded.settings.chatFilters).toEqual(["combat"]);
 			await store.saveUserPatch({
 				sections: {
 					input: {
@@ -389,11 +468,11 @@ describe("ClientSettingsStore", () => {
 			const reloaded = new ClientSettingsStore(path, initialWindow);
 			await reloaded.load();
 			expect(
-				(await reloaded.loadUser(defaultUser, "persisted")).sections.input
+				(await reloaded.loadUser(userContext, "persisted")).settings.input
 					?.client.toggleChatHistory,
 			).toEqual([]);
 			expect(
-				(await reloaded.loadUser(defaultUser, "persisted")).sections
+				(await reloaded.loadUser(userContext, "persisted")).settings
 					.chatFilters,
 			).toEqual(["combat"]);
 		} finally {
@@ -471,7 +550,7 @@ describe("ClientSettingsStore", () => {
 		const loaded = new ClientSettingsStore(path, initialWindow);
 		await loaded.load();
 		expect(
-			(await loaded.loadUser(defaultUser, "persisted")).sections.ui,
+			(await loaded.loadUser(userContext, "persisted")).settings.ui,
 		).toEqual(ui);
 	});
 
@@ -487,9 +566,9 @@ describe("ClientSettingsStore", () => {
 			sections: { ui: defaults.ui, graphics: defaults.graphics },
 		});
 		expect(
-			(await store.loadUser(defaultUser, "persisted")).sections
+			(await store.loadUser(userContext, "persisted")).settings
 				.environmentOverrides,
-		).toBeUndefined();
+		).toEqual(CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT);
 		const preset = clientWeatherPresets(clientEnvironmentFixture())[0];
 		if (preset === undefined) throw new Error("Fixture preset missing.");
 		const environmentOverrides = {
@@ -502,7 +581,7 @@ describe("ClientSettingsStore", () => {
 		const loaded = new ClientSettingsStore(path, initialWindow);
 		await loaded.load();
 		expect(
-			(await loaded.loadUser(defaultUser, "persisted")).sections,
+			(await loaded.loadUser(userContext, "persisted")).settings,
 		).toMatchObject({
 			ui: defaults.ui,
 			graphics: defaults.graphics,
@@ -513,7 +592,7 @@ describe("ClientSettingsStore", () => {
 			sections: { environmentOverrides: CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT },
 		});
 		expect(
-			(await loaded.loadUser(defaultUser, "persisted")).sections
+			(await loaded.loadUser(userContext, "persisted")).settings
 				.environmentOverrides,
 		).toEqual(CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT);
 	});
@@ -522,8 +601,8 @@ describe("ClientSettingsStore", () => {
 		const store = new ClientSettingsStore(path, initialWindow);
 		await store.load();
 		expect(
-			(await store.loadUser(defaultUser, "persisted")).sections.audio,
-		).toBeUndefined();
+			(await store.loadUser(userContext, "persisted")).settings.audio,
+		).toEqual(CLIENT_AUDIO_DEFAULTS);
 		const audio = {
 			...CLIENT_AUDIO_DEFAULTS,
 			masterVolume: 0.35,
@@ -535,13 +614,13 @@ describe("ClientSettingsStore", () => {
 		const loaded = new ClientSettingsStore(path, initialWindow);
 		await loaded.load();
 		expect(
-			(await loaded.loadUser(defaultUser, "persisted")).sections.audio,
+			(await loaded.loadUser(userContext, "persisted")).settings.audio,
 		).toEqual(audio);
 		await loaded.saveUserPatch({ sections: { audio: CLIENT_AUDIO_DEFAULTS } });
 		const reset = new ClientSettingsStore(path, initialWindow);
 		await reset.load();
 		expect(
-			(await reset.loadUser(defaultUser, "persisted")).sections.audio,
+			(await reset.loadUser(userContext, "persisted")).settings.audio,
 		).toEqual(CLIENT_AUDIO_DEFAULTS);
 	});
 	it("loads and saves user, HUD, window, and character sections independently", async () => {
@@ -565,14 +644,16 @@ describe("ClientSettingsStore", () => {
 
 		const loaded = new ClientSettingsStore(path, initialWindow);
 		await loaded.load();
-		expect(await loaded.loadUser(defaultUser, "persisted")).toMatchObject({
-			sections: { graphics: user.graphics },
-			hudPlacements: { book: user.hudLayout.book, world: user.hudLayout.world },
-			unavailable: [],
+		expect(await loaded.loadUser(userContext, "persisted")).toMatchObject({
+			settings: {
+				graphics: user.graphics,
+				hudLayout: { book: user.hudLayout.book, world: user.hudLayout.world },
+			},
+			repaired: [],
 		});
-		expect(await loaded.loadUser(defaultUser, "fresh")).toMatchObject({
-			sections: {},
-			hudPlacements: {},
+		expect(await loaded.loadUser(userContext, "fresh")).toEqual({
+			settings: defaultUser,
+			repaired: [],
 		});
 		expect(
 			await loaded.loadCharacter(
@@ -582,64 +663,61 @@ describe("ClientSettingsStore", () => {
 			),
 		).toMatchObject({
 			sections: { actionBars: character.actionBars, lastKnownName: "Mira" },
-			unavailable: [],
 		});
-		expect(loaded.readWindow()).toEqual({
-			settings: initialWindow,
-			unavailable: null,
-		});
+		expect(loaded.readWindow()).toEqual(initialWindow);
 	});
 
-	it("preserves unknown siblings and refuses to downgrade incompatible known sections", async () => {
+	it("prunes all profile sections before restoring supported settings", async () => {
 		const path = await temporarySettingsPath();
-		const user = createDefaultClientUserSettings(
-			{ width: 1440, height: 900 },
-			8,
-		);
-		const unknown = { version: 3, value: { future: [1, 2, 3] } };
-		const futureInput = { version: 2, value: { changed: true } };
+		const future = { version: 2, value: { changed: true } };
 		await writeFile(
 			path,
 			JSON.stringify({
 				formatVersion: 1,
 				user: {
-					input: futureInput,
-					futureUser: unknown,
+					window: future,
+					input: future,
+					futureUser: future,
 					hudPlacements: {
-						futurePanel: unknown,
-						chat: { version: 1, value: user.hudLayout.chat },
+						futurePanel: future,
+						book: future,
+						chat: { version: 1, value: defaultUser.hudLayout.chat },
 					},
 				},
 				characters: {
-					"example:9000/0x50000001": { futureCharacter: unknown },
+					first: { futureCharacter: future, combatControls: future },
+					second: {
+						lastKnownName: { version: 1, value: "Wayfarer" },
+						unknown: future,
+					},
 				},
 			}),
-			"utf8",
 		);
 		const store = new ClientSettingsStore(path, initialWindow);
 		await store.load();
-		expect(
-			(await store.loadUser(defaultUser, "persisted")).unavailable,
-		).toContain("user.input uses unsupported version 2");
-		await store.saveUserPatch({
-			sections: { graphics: user.graphics },
-			hudPlacements: { book: user.hudLayout.book, world: user.hudLayout.world },
+		expect(await readCollection(path)).toEqual({
+			formatVersion: 1,
+			user: {
+				hudPlacements: {
+					chat: { version: 1, value: defaultUser.hudLayout.chat },
+				},
+			},
+			characters: {
+				first: {},
+				second: { lastKnownName: { version: 1, value: "Wayfarer" } },
+			},
 		});
-		await store.saveCharacterPatch("example:9000/0x50000001", {
-			combatControls: createDefaultClientCharacterSettings().combatControls,
+		await store.saveUserPatch({ sections: { input: defaultUser.input } });
+		await store.saveCharacterPatch("first", {
+			combatControls: defaultCharacter.combatControls,
 		});
-		await expect(
-			store.saveUserPatch({ sections: { input: user.input } }),
-		).rejects.toThrow("user.input uses unsupported version 2");
-		const document = await readCollection(path);
-		expect(document.user.futureUser).toEqual(unknown);
-		expect(document.user.input).toEqual(futureInput);
+		expect((await readCollection(path)).user.input).toEqual({
+			version: 1,
+			value: defaultUser.input,
+		});
 		expect(
-			(document.user.hudPlacements as Record<string, unknown>).futurePanel,
-		).toEqual(unknown);
-		expect(
-			document.characters["example:9000/0x50000001"].futureCharacter,
-		).toEqual(unknown);
+			(await readCollection(path)).characters.first.combatControls,
+		).toEqual({ version: 1, value: defaultCharacter.combatControls });
 	});
 
 	it("restores character panel geometry and saves only its placement", async () => {
@@ -653,7 +731,6 @@ describe("ClientSettingsStore", () => {
 			horizontal: { alignment: "start", offset: 73 },
 			preferredWidth: 620,
 		} as const;
-		const futurePanel = { version: 4, value: { opaque: true } };
 		await writeFile(
 			path,
 			JSON.stringify({
@@ -662,7 +739,6 @@ describe("ClientSettingsStore", () => {
 					hudPlacements: {
 						characterSheet: { version: 1, value: savedPanel },
 						book: { version: 1, value: user.hudLayout.book },
-						futurePanel,
 					},
 				},
 				characters: {},
@@ -671,7 +747,7 @@ describe("ClientSettingsStore", () => {
 		const store = new ClientSettingsStore(path, initialWindow);
 		await store.load();
 		expect(
-			(await store.loadUser(defaultUser, "persisted")).hudPlacements
+			(await store.loadUser(userContext, "persisted")).settings.hudLayout
 				.characterSheet,
 		).toEqual(savedPanel);
 		const before = await readCollection(path);
@@ -691,41 +767,29 @@ describe("ClientSettingsStore", () => {
 		});
 	});
 
-	it("refuses newer character panel placements and preserves them during reset", async () => {
+	it("can reset a pruned placement to a supported value", async () => {
 		const path = await temporarySettingsPath();
-		const user = createDefaultClientUserSettings(
-			{ width: 1440, height: 900 },
-			8,
-		);
-		const future = { version: 2, value: { future: true } };
 		await writeFile(
 			path,
 			JSON.stringify({
 				formatVersion: 1,
-				user: { hudPlacements: { characterSheet: future } },
+				user: {
+					hudPlacements: { characterSheet: { version: 2, value: {} } },
+				},
 				characters: {},
 			}),
 		);
 		const store = new ClientSettingsStore(path, initialWindow);
 		await store.load();
-		const unavailable =
-			"hudPlacements.characterSheet uses unsupported version 2";
-		expect(
-			(await store.loadUser(defaultUser, "persisted")).unavailable,
-		).toEqual([unavailable]);
-		expect(
-			(await store.loadUser(defaultUser, "persisted")).hudPlacements
-				.characterSheet,
-		).toBeUndefined();
-		await expect(
-			store.saveUserPatch({
-				hudPlacements: { characterSheet: user.hudLayout.characterSheet },
-			}),
-		).rejects.toThrow(unavailable);
-		expect(await store.resetUser(user)).toEqual([unavailable]);
-		expect((await readCollection(path)).user.hudPlacements).toMatchObject({
-			characterSheet: future,
-		});
+		await store.resetUser(defaultUser);
+		expect((await readCollection(path)).user.hudPlacements).toEqual(
+			Object.fromEntries(
+				Object.entries(defaultUser.hudLayout).map(([key, value]) => [
+					key,
+					{ version: 1, value },
+				]),
+			),
+		);
 	});
 
 	it("re-reads the file for sequential saves from separate store instances", async () => {
@@ -748,36 +812,26 @@ describe("ClientSettingsStore", () => {
 		expect(document.user.ui).toEqual({ version: 1, value: user.ui });
 	});
 
-	it("reset replaces supported values while retaining incompatible entries", async () => {
+	it("normalizes unsupported sections introduced after startup during a later patch", async () => {
 		const path = await temporarySettingsPath();
-		const user = createDefaultClientUserSettings(
-			{ width: 1440, height: 900 },
-			8,
-		);
-		const future = { version: 2, value: { future: true } };
+		const store = new ClientSettingsStore(path, initialWindow);
+		await store.load();
 		await writeFile(
 			path,
 			JSON.stringify({
 				formatVersion: 1,
-				user: { input: future, hudPlacements: { book: future } },
-				characters: {},
+				user: {
+					input: { version: 2, value: {} },
+					unknown: { version: 1, value: null },
+				},
+				characters: { inactive: { future: { version: 2, value: null } } },
 			}),
-			"utf8",
 		);
-		const store = new ClientSettingsStore(path, initialWindow);
-		await store.load();
-		expect(await store.resetUser(user)).toEqual([
-			"user.input uses unsupported version 2",
-			"hudPlacements.book uses unsupported version 2",
-		]);
-		const document = await readCollection(path);
-		expect(document.user.input).toEqual(future);
-		expect(
-			(document.user.hudPlacements as Record<string, unknown>).book,
-		).toEqual(future);
-		expect(document.user.graphics).toEqual({
-			version: 1,
-			value: user.graphics,
+		await store.saveUserPatch({ sections: { audio: defaultUser.audio } });
+		expect(await readCollection(path)).toEqual({
+			formatVersion: 1,
+			user: { audio: { version: 1, value: defaultUser.audio } },
+			characters: { inactive: {} },
 		});
 	});
 

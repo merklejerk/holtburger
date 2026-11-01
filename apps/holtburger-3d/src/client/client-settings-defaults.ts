@@ -1,34 +1,35 @@
+import type { ClientUserSectionValues } from "./client-settings-sections.js";
 import {
 	CLIENT_DEFAULT_THEME_ID,
 	CLIENT_TEXT_SCALE,
-	CLIENT_ICON_SCALE,
+	CLIENT_UI_SCALE,
 	CLIENT_VITAL_WARNING_THRESHOLDS,
-} from "./client-settings-values";
-import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance";
-import { CLIENT_CHAT_FILTER_TAGS } from "./client-chat-policy";
+} from "./client-settings-values.js";
+import { MAP_DEFAULT_VIEW_DIAMETERS } from "../lib/game/map/map-appearance.js";
+import { CLIENT_CHAT_FILTER_TAGS } from "./client-chat-policy.js";
 import {
 	createClientHudLayout,
 	type ClientHudViewport,
-} from "./client-hud-layout";
-import { initialActionBar } from "./client-action-bar-state";
-import { initialSpellBarBindings } from "./client-spell-bar-state";
+} from "./client-hud-layout.js";
+import { initialActionBar } from "./client-action-bar-state.js";
+import { initialSpellBarBindings } from "./client-spell-bar-state.js";
 import {
 	clientChatSuppressionSettingsSchema,
 	clientLockInteractionSettingsSchema,
-} from "./client-settings-contract";
+} from "./client-settings-contract.js";
 import type {
 	ClientAudioSettings,
 	ClientCharacterSettings,
 	ClientUserSettings,
-} from "./client-settings-contract";
-import { CLIENT_TUNING } from "./client-tuning";
-import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults";
-import { CLIENT_GRAPHICS_DEFAULTS } from "./client-settings-policy";
-import { CLIENT_INPUT_DEFAULTS } from "./client-input-settings";
+} from "./client-settings-contract.js";
+import { CLIENT_TUNING } from "./client-tuning.js";
+import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults.js";
+import { CLIENT_GRAPHICS_DEFAULTS } from "./client-settings-policy.js";
+import { CLIENT_INPUT_DEFAULTS } from "./client-input-settings.js";
 import {
 	CLIENT_CLOCK_FORMAT_DEFAULT,
 	CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
-} from "./client-environment-settings";
+} from "./client-environment-settings.js";
 
 /** First-run and reset mix; frontend preferences remain separate from engine tuning. */
 export const CLIENT_AUDIO_DEFAULTS = {
@@ -44,11 +45,18 @@ export function createDefaultClientUserSettings(
 	shortcutCount: number,
 ): ClientUserSettings {
 	return {
+		...createDefaultClientUserSections(),
 		hudLayout: createClientHudLayout(
 			CLIENT_UI_DEFAULTS,
 			viewport,
 			shortcutCount,
 		),
+	};
+}
+
+/** Non-layout defaults can be repaired before the saved UI scale determines placement defaults. */
+export function createDefaultClientUserSections(): ClientUserSectionValues {
+	return {
 		spellBarShape: "single",
 		minimapViewDiameters: { ...MAP_DEFAULT_VIEW_DIAMETERS },
 		recentEmotes: [],
@@ -63,7 +71,7 @@ export function createDefaultClientUserSettings(
 			showHelpLabels: true,
 			useUnlockHelper: true,
 			textScale: CLIENT_TEXT_SCALE.initial,
-			iconScale: CLIENT_ICON_SCALE.initial,
+			uiScale: CLIENT_UI_SCALE.initial,
 			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
 			themeId: CLIENT_DEFAULT_THEME_ID,
 			fonts: { body: "theme", heading: "theme", mono: "theme" },

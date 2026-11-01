@@ -170,19 +170,13 @@
 		}
 		.locks-action-icon {
 			display: block;
-			width: calc(
-				var(--ui-locks-action-icon-size, 48px) * var(--ui-icon-scale)
-			);
-			height: calc(
-				var(--ui-locks-action-icon-size, 48px) * var(--ui-icon-scale)
-			);
+			width: var(--ui-locks-action-icon-size, 48px);
+			height: var(--ui-locks-action-icon-size, 48px);
 		}
 		.locks-action-art {
 			display: grid;
 			place-items: center;
-			height: calc(
-				var(--ui-locks-action-icon-size, 48px) * var(--ui-icon-scale)
-			);
+			height: var(--ui-locks-action-icon-size, 48px);
 		}
 		.preferred-pick-cell {
 			position: relative;
@@ -190,7 +184,7 @@
 			flex: none;
 			aspect-ratio: 1;
 			overflow: hidden;
-			width: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
+			width: var(--ui-item-cell-min-size);
 		}
 	}
 </style>

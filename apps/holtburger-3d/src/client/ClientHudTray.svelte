@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { uiLocalSize } from "../app/ui-scale";
 	import { untrack, type Snippet } from "svelte";
 	import LayoutHandleIcon from "../app/LayoutHandleIcon.svelte";
 	import ClientHudPanel from "./ClientHudPanel.svelte";
@@ -47,11 +48,11 @@
 		const viewportNode = node.parentElement;
 		if (viewportNode === null) throw new Error("Missing HUD tray viewport");
 		const update = () => {
-			const { width, height } = node.getBoundingClientRect();
+			const { width, height } = uiLocalSize(node);
 			if (width <= 0 || height <= 0)
 				throw new Error("Invalid HUD tray dimensions");
 			// Hover artwork may paint beyond the tray; only fitted geometry should enable scrolling.
-			const available = viewportNode.getBoundingClientRect();
+			const available = uiLocalSize(viewportNode);
 			dimensions = {
 				// Fractional display scales can round a measured length down on CSS reassignment.
 				// Reserve whole CSS pixels outward so the panel always contains its natural tray.
@@ -100,8 +101,8 @@
 	<div class="tray-scroll" class:constrained={dimensions.constrained}>
 		<div
 			class="hud-tray"
-			style:width={`calc((${placement.preferredWidth}px + ${orientation === "horizontal" ? gapCount : 0} * var(--ui-hud-icon-gap)) * var(--ui-icon-scale))`}
-			style:height={`calc((${placement.preferredHeight}px + ${orientation === "vertical" ? gapCount : 0} * var(--ui-hud-icon-gap)) * var(--ui-icon-scale))`}
+			style:width={`calc(${placement.preferredWidth}px + ${orientation === "horizontal" ? gapCount : 0} * var(--ui-hud-icon-gap))`}
+			style:height={`calc(${placement.preferredHeight}px + ${orientation === "vertical" ? gapCount : 0} * var(--ui-hud-icon-gap))`}
 			use:measureDimensions
 			class:vertical={orientation === "vertical"}
 		>
@@ -137,7 +138,7 @@
 			box-sizing: border-box;
 			display: flex;
 			align-items: center;
-			gap: calc(var(--ui-hud-icon-gap) * var(--ui-icon-scale));
+			gap: var(--ui-hud-icon-gap);
 			position: relative;
 			width: 100%;
 			height: 100%;

@@ -1,4 +1,4 @@
-import { bracketKeyframes } from "./keyframe-bracket";
+import { bracketKeyframes } from "./keyframe-bracket.js";
 import type { ActiveRegionSource } from "../../assets/active-region-source";
 
 /** One authored day group from the active region's sky descriptor. */

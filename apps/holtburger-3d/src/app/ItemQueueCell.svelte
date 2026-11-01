@@ -41,7 +41,7 @@
 			aspect-ratio: 1;
 			width: 100%;
 			min-width: 0;
-			padding: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
+			padding: var(--ui-item-cell-padding);
 			overflow: hidden;
 			user-select: none;
 		}

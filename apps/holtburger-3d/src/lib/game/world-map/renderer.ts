@@ -67,8 +67,10 @@ export class WorldMapRenderer {
 	draw(view: WorldMapView): void {
 		if (this.#disposed) return;
 		this.#checkContents();
-		const width = Math.max(1, Math.round(this.#canvas.clientWidth));
-		const height = Math.max(1, Math.round(this.#canvas.clientHeight));
+		// Sample the displayed UI extent; map view and overlay geometry remain in local units.
+		const displayed = this.#canvas.getBoundingClientRect();
+		const width = Math.max(1, Math.round(displayed.width));
+		const height = Math.max(1, Math.round(displayed.height));
 		if (this.#canvas.width !== width) this.#canvas.width = width;
 		if (this.#canvas.height !== height) this.#canvas.height = height;
 		this.#context.clearRect(0, 0, width, height);

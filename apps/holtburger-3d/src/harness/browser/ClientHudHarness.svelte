@@ -1,10 +1,14 @@
 <script lang="ts">
+	import { applyUiScale } from "../../app/ui-scale";
 	import { provideClientHudGeometry } from "../../client/client-hud-geometry-context";
 	import { clientMinimapLandmark } from "../../client/client-minimap-policy";
 	import { CameraLookController } from "../../lib/game/controls/camera-look-controller";
 	import { createCameraAxesRadians } from "../../lib/game/math/camera-orientation";
 	import gameplayPreferencesFixture from "./fixtures/gameplay-preferences.json";
-	import type { ClientUserSettings } from "../../client/client-settings-contract";
+	import {
+		clientUiSettingsSchema,
+		type ClientUserSettings,
+	} from "../../client/client-settings-contract";
 	import { createFixtureThemeSettings } from "./ui-showcase-themes";
 	import UiShowcaseWorkbench from "./UiShowcaseWorkbench.svelte";
 	import {
@@ -133,7 +137,7 @@
 	import { probeAllegiance } from "./client-allegiance-probe";
 	import { probeSquelch } from "./client-squelch-probe";
 	import { probeOverlayTheme } from "./overlay-theme-probe";
-	import { probeTextScaling } from "./text-scaling-probe";
+	import { probeUiScaling } from "./ui-scaling-probe";
 	import { probeSelectedActions } from "./client-selected-actions-probe";
 	import {
 		contractsUpdatedSchema,
@@ -1310,8 +1314,10 @@
 		readonly probeSquelch: () => ReturnType<typeof probeSquelch>;
 		/** Verify shared surface, backdrop, and density overrides across overlay components. */
 		readonly probeOverlayTheme: () => ReturnType<typeof probeOverlayTheme>;
-		/** Verify live text preferences across retained UI and native dialogs. */
-		readonly probeTextScaling: () => ReturnType<typeof probeTextScaling>;
+		/** Change the production UI preference for external geometry probes. */
+		readonly setUiScale: (scale: number) => void;
+		/** Verify overall UI scale and additional text enlargement across retained UI and native dialogs. */
+		readonly probeUiScaling: () => ReturnType<typeof probeUiScaling>;
 		/** Verify accepted Settings changes, shortcut presentation, and feature dispatch. */
 		readonly probeBindings: typeof probeBindings;
 		/** Route real browser presses to the production main-panel owner. */
@@ -5548,12 +5554,24 @@
 					commands: interactionCommands,
 				}),
 			probeOverlayTheme: () => probeOverlayTheme(partyProbeContext),
-			probeTextScaling: async () => {
+			setUiScale: (scale) => {
+				userSettings = {
+					...userSettings,
+					ui: clientUiSettingsSchema.parse({
+						...userSettings.ui,
+						uiScale: scale,
+					}),
+				};
+			},
+			probeUiScaling: async () => {
 				const previous = spellCombatMode;
 				spellCombatMode = "magic";
 				await tick();
 				try {
-					return await probeTextScaling(partyProbeContext);
+					return await probeUiScaling(
+						partyProbeContext,
+						() => userSettings.hudLayout,
+					);
 				} finally {
 					spellCombatMode = previous;
 				}
@@ -6127,17 +6145,22 @@
 		bind:this={interactionRoot}
 		class="harness-appearance ui-theme"
 		style:--ui-text-scale={userSettings.ui.textScale}
-		style:--ui-icon-scale={userSettings.ui.iconScale}
+		style:--ui-scale={userSettings.ui.uiScale}
 	>
-		{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
-			<ClientMessageDialog
-				{presentation}
-				onDismiss={(id) => dialogOwner?.dismissPopup(id)}
-				onRespond={(id, accepted, suppress) => {
-					void dialogOwner?.respond(id, accepted, suppress);
-				}}
-			/>
-		{/each}
+		<div
+			class="harness-dialog-scale"
+			use:applyUiScale={userSettings.ui.uiScale}
+		>
+			{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
+				<ClientMessageDialog
+					{presentation}
+					onDismiss={(id) => dialogOwner?.dismissPopup(id)}
+					onRespond={(id, accepted, suppress) => {
+						void dialogOwner?.respond(id, accepted, suppress);
+					}}
+				/>
+			{/each}
+		</div>
 
 		{#if !previewCharacters}
 			<canvas

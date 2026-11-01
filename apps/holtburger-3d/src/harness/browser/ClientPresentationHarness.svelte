@@ -469,17 +469,17 @@
 				),
 				initialSettingsIssue: null,
 				settingsTransport: {
-					loadUser: async () => ({
-						sections: {},
-						hudPlacements: {},
-						unavailable: [],
+					loadUser: async (context) => ({
+						settings: createDefaultClientUserSettings(
+							context.viewport,
+							context.shortcutCount,
+						),
 						repaired: [],
 					}),
 					saveUserPatch: async () => {},
-					resetUser: async () => [],
+					resetUser: async () => undefined,
 					loadCharacter: async () => ({
 						sections: {},
-						unavailable: [],
 						repaired: [],
 					}),
 					saveCharacterPatch: async () => {},

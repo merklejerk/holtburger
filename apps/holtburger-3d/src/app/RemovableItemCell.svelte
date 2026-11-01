@@ -36,7 +36,7 @@
 	@layer components {
 		.removable-item-cell {
 			position: relative;
-			width: calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale));
+			width: var(--ui-item-cell-min-size);
 			flex: none;
 		}
 		.item-cell-remove {

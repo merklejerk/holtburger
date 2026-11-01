@@ -113,12 +113,15 @@ export async function probeClientInventory(options: {
 			throw new Error(`Inventory probe cannot find item ${guid}.`);
 		return found;
 	};
-	const windowRect = () => {
-		const windows = document.querySelectorAll(".hud-window");
-		if (windows.length !== 1)
-			throw new Error("Exactly one system panel must be open.");
-		const rect = windows[0]?.getBoundingClientRect();
-		if (rect === undefined) throw new Error("Floating window is missing.");
+	const windowElement = (title: "Inventory" | "Client diagnostics") => {
+		const panel = document.querySelector<HTMLElement>(
+			`section.hud-window[aria-label="${title}"]:not([hidden])`,
+		);
+		if (panel === null) throw new Error(`${title} window is not visible`);
+		return panel;
+	};
+	const windowRect = (title: "Inventory" | "Client diagnostics") => {
+		const rect = windowElement(title).getBoundingClientRect();
 		return {
 			left: rect.left,
 			top: rect.top,
@@ -794,7 +797,7 @@ export async function probeClientInventory(options: {
 	const initial = squares();
 	if (!cell(32).disabled)
 		throw new Error("Pending description acquired inventory selection.");
-	const placement = windowRect();
+	const placement = windowRect("Inventory");
 	const inputBefore = options.readViewportInput();
 	const globalKeys: string[] = [];
 	const receiveKey = (event: KeyboardEvent) => globalKeys.push(event.key);
@@ -842,7 +845,7 @@ export async function probeClientInventory(options: {
 	button("Inventory").click();
 	await sample();
 	// Switching panels must restore this panel's independently retained geometry.
-	if (JSON.stringify(windowRect()) !== JSON.stringify(placement))
+	if (JSON.stringify(windowRect("Inventory")) !== JSON.stringify(placement))
 		throw new Error("Panel round trip did not preserve inventory placement.");
 
 	const samplesBeforeBurst = options.readSampleCount();
@@ -930,9 +933,12 @@ export async function probeClientInventory(options: {
 	if (cell(32).disabled)
 		throw new Error("Hydration did not enable the pending cell.");
 
-	const resize = async (width: number) => {
-		const rect = windowRect();
-		const handle = document.querySelector(".hud-window .resize-border-left");
+	const resize = async (
+		title: "Inventory" | "Client diagnostics",
+		width: number,
+	) => {
+		const rect = windowRect(title);
+		const handle = windowElement(title).querySelector(".resize-border-left");
 		if (handle === null) throw new Error("Panel resize handle is missing.");
 		handle.dispatchEvent(
 			new PointerEvent("pointerdown", {
@@ -952,14 +958,20 @@ export async function probeClientInventory(options: {
 		);
 		window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 50 }));
 		await sample();
-		return windowRect();
+		return windowRect(title);
 	};
 	const wide = {
-		window: await resize(CLIENT_UI_DEFAULTS.inventory.minSize.width + 200),
+		window: await resize(
+			"Inventory",
+			CLIENT_UI_DEFAULTS.inventory.minSize.width + 200,
+		),
 		...squares(),
 	};
 	const narrow = {
-		window: await resize(CLIENT_UI_DEFAULTS.inventory.minSize.width / 2),
+		window: await resize(
+			"Inventory",
+			CLIENT_UI_DEFAULTS.inventory.minSize.width / 2,
+		),
 		...squares(),
 	};
 	if (narrow.window.width < CLIENT_UI_DEFAULTS.inventory.minSize.width)
@@ -997,13 +1009,16 @@ export async function probeClientInventory(options: {
 			`Inventory grid did not flow with window width: ${JSON.stringify({ wide, narrow })}`,
 		);
 
-	const savedInventory = windowRect();
+	const savedInventory = windowRect("Inventory");
 	button("Debug").click();
 	await sample();
 	const resizedDebug = await resize(
+		"Client diagnostics",
 		CLIENT_UI_DEFAULTS.debug.minSize.width + 200,
 	);
-	const titlebar = document.querySelector(".hud-window-titlebar");
+	const titlebar = windowElement("Client diagnostics").querySelector(
+		".hud-window-titlebar",
+	);
 	if (titlebar === null) throw new Error("Diagnostics titlebar missing.");
 	const start = titlebar.getBoundingClientRect();
 	titlebar.dispatchEvent(
@@ -1024,7 +1039,7 @@ export async function probeClientInventory(options: {
 	);
 	window.dispatchEvent(new PointerEvent("pointerup", { pointerId: 51 }));
 	await sample();
-	const savedDebug = windowRect();
+	const savedDebug = windowRect("Client diagnostics");
 	if (
 		savedDebug.left === resizedDebug.left &&
 		savedDebug.top === resizedDebug.top
@@ -1032,17 +1047,25 @@ export async function probeClientInventory(options: {
 		throw new Error("Diagnostics drag did not move the panel.");
 	button("Inventory").click();
 	await sample();
-	if (JSON.stringify(windowRect()) !== JSON.stringify(savedInventory))
+	if (
+		JSON.stringify(windowRect("Inventory")) !== JSON.stringify(savedInventory)
+	)
 		throw new Error("Editing Diagnostics changed Inventory geometry.");
 	button("Debug").click();
 	await sample();
-	if (JSON.stringify(windowRect()) !== JSON.stringify(savedDebug))
+	if (
+		JSON.stringify(windowRect("Client diagnostics")) !==
+		JSON.stringify(savedDebug)
+	)
 		throw new Error("Diagnostics did not retain its own geometry.");
 	button("Debug").click();
 	await sample();
 	button("Debug").click();
 	await sample();
-	if (JSON.stringify(windowRect()) !== JSON.stringify(savedDebug))
+	if (
+		JSON.stringify(windowRect("Client diagnostics")) !==
+		JSON.stringify(savedDebug)
+	)
 		throw new Error("Closing Diagnostics discarded its geometry.");
 	button("Inventory").click();
 	await sample();
@@ -1300,10 +1323,7 @@ export async function probeClientInventory(options: {
 							trackRect.height,
 							Number.parseFloat(
 								fillStyle.getPropertyValue("--ui-item-structure-min-fill"),
-							) *
-								Number.parseFloat(
-									fillStyle.getPropertyValue("--ui-icon-scale"),
-								),
+							) * Number.parseFloat(fillStyle.getPropertyValue("--ui-scale")),
 						);
 			const expectedHeight = Math.max(
 				(trackRect.height * current) / 50,

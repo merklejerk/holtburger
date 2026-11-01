@@ -45,6 +45,7 @@
 	generics="Action extends string, Item extends PopupMenuItem<Action>"
 >
 	import { onMount, type Snippet } from "svelte";
+	import { uiScale, UI_SCALE_CHANGE_EVENT } from "./ui-scale";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	interface Props {
 		/** Element trigger or captured viewport point; the caller owns trigger accessibility. */
@@ -118,8 +119,8 @@
 		const rect = row.getBoundingClientRect();
 		// Theme font metrics can produce fractional CSS pixels; offsetHeight rounds them.
 		const { width, height } = childSurface.getBoundingClientRect();
-		childSurface.style.left = `${Math.max(0, Math.min(rect.right + width <= window.innerWidth ? rect.right : rect.left - width, window.innerWidth - width))}px`;
-		childSurface.style.top = `${Math.max(0, Math.min(rect.top, window.innerHeight - height))}px`;
+		childSurface.style.left = `${Math.max(0, Math.min(rect.right + width <= window.innerWidth ? rect.right : rect.left - width, window.innerWidth - width)) / uiScale(childSurface)}px`;
+		childSurface.style.top = `${Math.max(0, Math.min(rect.top, window.innerHeight - height)) / uiScale(childSurface)}px`;
 	}
 	const enabled = $derived(items.filter((item) => !item.disabled));
 	const active = $derived(
@@ -228,8 +229,8 @@
 			rect.bottom + height <= window.innerHeight
 				? rect.bottom
 				: rect.top - height;
-		surface.style.left = `${Math.max(0, Math.min(rect.left, window.innerWidth - width))}px`;
-		surface.style.top = `${Math.max(0, Math.min(top, window.innerHeight - height))}px`;
+		surface.style.left = `${Math.max(0, Math.min(rect.left, window.innerWidth - width)) / uiScale(surface)}px`;
+		surface.style.top = `${Math.max(0, Math.min(top, window.innerHeight - height)) / uiScale(surface)}px`;
 		positionChild();
 	}
 	// Exclude the trigger so its click can toggle the menu without reopening after dismissal.
@@ -252,11 +253,13 @@
 		const observer = new ResizeObserver(position);
 		observer.observe(surface);
 		window.addEventListener("resize", dismiss);
+		window.addEventListener(UI_SCALE_CHANGE_EVENT, dismiss);
 		// Run before document-level input ownership can dismiss the menu and start a game press.
 		window.addEventListener("pointerdown", outsidePointer, true);
 		return () => {
 			observer.disconnect();
 			window.removeEventListener("resize", dismiss);
+			window.removeEventListener(UI_SCALE_CHANGE_EVENT, dismiss);
 			window.removeEventListener("pointerdown", outsidePointer, true);
 		};
 	});
@@ -371,9 +374,9 @@
 			inset: auto;
 			margin: 0;
 			padding: var(--ui-menu-padding);
-			min-width: min(var(--ui-menu-min-width), 100vw);
-			max-width: 100vw;
-			max-height: 100vh;
+			min-width: min(var(--ui-menu-min-width), var(--ui-viewport-width));
+			max-width: var(--ui-viewport-width);
+			max-height: var(--ui-viewport-height);
 			overflow: auto;
 		}
 		.popup-menu {
@@ -395,16 +398,13 @@
 		.popup-menu.symbol-grid {
 			box-sizing: border-box;
 			width: min(
-				calc(
-					var(--popup-grid-columns) * var(--ui-menu-grid-cell-size) *
-						var(--ui-icon-scale)
-				),
-				100vw
+				calc(var(--popup-grid-columns) * var(--ui-menu-grid-cell-size)),
+				var(--ui-viewport-width)
 			);
 			min-width: 0;
 			max-height: min(
-				calc(6 * var(--ui-menu-grid-cell-size) * var(--ui-icon-scale)),
-				100vh
+				calc(6 * var(--ui-menu-grid-cell-size)),
+				var(--ui-viewport-height)
 			);
 			overflow-x: hidden;
 		}
@@ -417,7 +417,7 @@
 			--ui-overlay-icon-size: var(--ui-menu-grid-icon-size);
 			justify-content: center;
 			min-width: 0;
-			font-size: calc(1.75rem * var(--ui-icon-scale));
+			font-size: 1.75rem;
 			line-height: 1;
 			aspect-ratio: 1;
 		}
@@ -425,8 +425,8 @@
 			/* Center artwork independently of the menu row's text baseline. */
 			display: grid;
 			place-items: center;
-			width: calc(var(--ui-overlay-icon-size) * var(--ui-icon-scale));
-			height: calc(var(--ui-overlay-icon-size) * var(--ui-icon-scale));
+			width: var(--ui-overlay-icon-size);
+			height: var(--ui-overlay-icon-size);
 			flex: none;
 		}
 	}

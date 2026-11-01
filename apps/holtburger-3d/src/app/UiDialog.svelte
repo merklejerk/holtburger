@@ -59,9 +59,9 @@
 		.ui-dialog {
 			/* Browsers with expanding content can opt into a stable width; viewport limits still apply. */
 			width: var(--ui-dialog-width, fit-content);
-			min-width: min(18rem, calc(100vw - 2rem));
-			max-width: min(34rem, calc(100vw - 2rem));
-			max-height: calc(100vh - 2rem);
+			min-width: min(18rem, calc(var(--ui-viewport-width) - 2rem));
+			max-width: min(34rem, calc(var(--ui-viewport-width) - 2rem));
+			max-height: calc(var(--ui-viewport-height) - 2rem);
 			box-sizing: border-box;
 			overflow: auto;
 			padding: 0;
@@ -74,7 +74,7 @@
 		}
 		.ui-dialog:has(:global(input), :global(select)) {
 			/* Editors keep a useful working width even before a draft or error exists. */
-			min-width: min(22rem, calc(100vw - 2rem));
+			min-width: min(22rem, calc(var(--ui-viewport-width) - 2rem));
 		}
 		.ui-dialog :global(.ui-dialog-actions) {
 			display: flex;

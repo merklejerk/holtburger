@@ -1,9 +1,9 @@
-import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning.js";
 import {
 	normalizedRgbColor,
 	normalizedRgbaColor,
 	type HexRgbColor,
-} from "../../frontend-color";
+} from "../../frontend-color.js";
 import type { MapBlipCategory } from "./map-blip-category";
 import type { MapEnvironment } from "./map-view";
 

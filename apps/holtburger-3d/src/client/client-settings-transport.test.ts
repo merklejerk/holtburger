@@ -9,16 +9,16 @@ function installBridge(overrides: Record<string, unknown> = {}): void {
 	vi.stubGlobal("window", {
 		holtburgerSettings: {
 			loadUser: async () => ({
-				sections: {},
-				hudPlacements: {},
-				unavailable: [],
+				settings: createDefaultClientUserSettings(
+					{ width: 1440, height: 900 },
+					8,
+				),
 				repaired: [],
 			}),
 			saveUserPatch: async () => undefined,
-			resetUser: async () => [],
+			resetUser: async () => undefined,
 			loadCharacter: async () => ({
 				sections: {},
-				unavailable: [],
 				repaired: [],
 			}),
 			saveCharacterPatch: async () => undefined,
@@ -38,9 +38,7 @@ describe("Electron client settings transport", () => {
 		const character = createDefaultClientCharacterSettings();
 		installBridge({
 			loadUser: async () => ({
-				sections: { graphics: user.graphics },
-				hudPlacements: { book: user.hudLayout.book },
-				unavailable: ["user.input uses unsupported version 2"],
+				settings: user,
 				repaired: [],
 			}),
 			loadCharacter: async () => ({
@@ -48,15 +46,17 @@ describe("Electron client settings transport", () => {
 					combatControls: character.combatControls,
 					lastKnownName: "Mira",
 				},
-				unavailable: [],
 				repaired: [],
 			}),
 		});
 		const transport = createElectronClientSettingsTransport();
-		expect(await transport.loadUser(user)).toEqual({
-			sections: { graphics: user.graphics },
-			hudPlacements: { book: user.hudLayout.book },
-			unavailable: ["user.input uses unsupported version 2"],
+		expect(
+			await transport.loadUser({
+				viewport: { width: 1440, height: 900 },
+				shortcutCount: 8,
+			}),
+		).toEqual({
+			settings: user,
 			repaired: [],
 		});
 		expect(await transport.loadCharacter(7)).toEqual({
@@ -64,7 +64,6 @@ describe("Electron client settings transport", () => {
 				combatControls: character.combatControls,
 				lastKnownName: "Mira",
 			},
-			unavailable: [],
 			repaired: [],
 		});
 	});
@@ -101,14 +100,14 @@ describe("Electron client settings transport", () => {
 	it("rejects malformed preload responses", async () => {
 		installBridge({ loadUser: async () => ({ sections: { graphics: {} } }) });
 		await expect(
-			createElectronClientSettingsTransport().loadUser(
-				createDefaultClientUserSettings({ width: 1440, height: 900 }, 8),
-			),
+			createElectronClientSettingsTransport().loadUser({
+				viewport: { width: 1440, height: 900 },
+				shortcutCount: 8,
+			}),
 		).rejects.toThrow("Malformed user settings response");
 		installBridge({
 			loadCharacter: async () => ({
 				sections: { lastKnownName: 42 },
-				unavailable: [],
 				repaired: [],
 			}),
 		});

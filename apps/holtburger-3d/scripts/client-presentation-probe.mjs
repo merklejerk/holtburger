@@ -856,7 +856,8 @@ export async function probeClientPresentation(
             try {
                 screen.style.setProperty('--ui-color-shadow', 'rgb(35, 70, 105)');
                 screen.style.setProperty('--ui-text-scale', '2');
-                screen.style.setProperty('--ui-icon-scale', '1.5');
+                screen.style.setProperty('--ui-scale', '1.5');
+                screen.style.zoom = '1.5';
                 return {
                     themedBackdrop: getComputedStyle(label, '::before').backgroundImage !== before,
                     overflowRows: [...screen.querySelectorAll('.creation-skill-row')].flatMap(row => {

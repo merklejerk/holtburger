@@ -13,7 +13,7 @@ async function probePregameThemeBoundary(read) {
 		const preferences = document.createElement("section");
 		preferences.className = "ui-theme";
 		preferences.style.cssText =
-			"--ui-text-scale:1.4;--ui-icon-scale:1.2;--ui-font-mono:monospace";
+			"--ui-text-scale:1.4;--ui-scale:1.2;--ui-font-mono:monospace";
 		const fixture = document.createElement("main");
 		fixture.className = "client-pregame-screen ui-theme";
 		fixture.style.cssText = "position:fixed;left:-10000px;top:0";
@@ -73,7 +73,7 @@ async function probePregameThemeBoundary(read) {
 			const style = getComputedStyle(fixture);
 			const typography = [
 				"--ui-text-scale",
-				"--ui-icon-scale",
+				"--ui-scale",
 				"--ui-font-mono",
 			].map((property) => style.getPropertyValue(property).trim());
 			return { themed, base, typography };

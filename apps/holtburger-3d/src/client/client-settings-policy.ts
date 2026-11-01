@@ -1,7 +1,7 @@
 import type { FrameSettings } from "../lib/game/renderer/renderer";
 import type { SceneInterestRadii } from "../lib/game/runtime/types";
 import type { ClientGraphicsSettings } from "./client-settings-contract";
-import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings";
+import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings.js";
 
 /** Absence defaults composed from shared rendering policy and client-only view choices. */
 export const CLIENT_GRAPHICS_DEFAULTS = {

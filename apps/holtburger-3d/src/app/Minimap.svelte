@@ -60,7 +60,13 @@
 	import type { ResizeEdges } from "./resize-edges";
 	import LayoutControls from "./LayoutControls.svelte";
 
-	import { trackPointerGesture } from "./pointer-gesture";
+	import {
+		trackUiPointerGesture,
+		pointerUiScale,
+		uiScale,
+		uiLocalSize,
+		UI_SCALE_CHANGE_EVENT,
+	} from "./ui-scale";
 	import { MapRenderer } from "../lib/game/map/map-renderer";
 	import { selectMapBlips } from "../lib/game/map/map-blips";
 	import {
@@ -89,6 +95,7 @@
 		type MinimapFooterExtent,
 		type MinimapGpuDrawState,
 		type MinimapState,
+		type MinimapGeometry,
 		type MinimapSubject,
 	} from "./minimap-frame";
 	import {
@@ -169,13 +176,18 @@
 		readonly viewState: MinimapState;
 		/** Whether shell-owned placement and sizing controls are currently available. */
 		readonly editable: boolean;
-		/** Shell-owned minimum editable diameter in CSS pixels. */
+		/** Shell-owned minimum editable diameter in logical UI units. */
 		readonly minSize: number;
 		/** Shell-authored resize limits; null preserves unrestricted Explorer placement. */
 		readonly resizeBounds: MinimapResizeBounds | null;
 		/** Whether editing exposes the resize handle, independently of moving. */
 		readonly resizable: boolean;
-		readonly onStateChange: (state: MinimapState) => void;
+		/** Explicit move/resize intent; zoom never publishes geometry. */
+		readonly onGeometryChange: (geometry: MinimapGeometry) => void;
+		/** Map zoom changes are independent of saved HUD placement. */
+		readonly onViewDiametersChange: (
+			diameters: MinimapState["viewDiameters"],
+		) => void;
 		/** Apply one completed marker click, or clear selection for an empty click. */
 		readonly onSelectEntity: (guid: number | null) => void;
 		/** Let the mode-owned notice surface confirm a successful clipboard write. */
@@ -197,7 +209,8 @@
 		minSize,
 		resizeBounds,
 		resizable,
-		onStateChange,
+		onGeometryChange,
+		onViewDiametersChange,
 		onSelectEntity,
 		onCoordinatesCopied,
 		coordinateDetails,
@@ -290,6 +303,8 @@
 	let minimapPanGesture: MinimapPanGesture | null = null;
 	let breadcrumbTrail: MinimapBreadcrumbTrail = EMPTY_MINIMAP_BREADCRUMB_TRAIL;
 	let cancelPointerGesture: (() => void) | null = null;
+	/** Cold boundary scale controls sampling density; map projection remains in logical units. */
+	let drawingScale = 1;
 	/** Clipboard promises cannot be cancelled; late completions must not notify a retired shell. */
 	let destroyed = false;
 	onDestroy(() => {
@@ -299,13 +314,14 @@
 	});
 
 	onMount(() => {
+		drawingScale = uiScale(minimapElement);
 		const stopTheme = observeUiTheme(minimapElement, () => {
 			markers = readMinimapMarkers(minimapElement);
 		});
 		const element = footerElement;
 		const observer = new ResizeObserver(() => {
 			if (element !== null) {
-				const { width, height } = element.getBoundingClientRect();
+				const { width, height } = uiLocalSize(element);
 				onFooterExtentChange?.({ width, height });
 			}
 		});
@@ -313,6 +329,12 @@
 		let frameHandle: number | undefined;
 		let lastGpuAttemptedAt = Number.NEGATIVE_INFINITY;
 		let lastGpuDrawn: MinimapGpuDrawState | null = null;
+		const scaleChanged = () => {
+			cancelMinimapPan();
+			drawingScale = uiScale(minimapElement);
+			lastGpuDrawn = null;
+		};
+		window.addEventListener(UI_SCALE_CHANGE_EVENT, scaleChanged);
 		const step = (now: number): void => {
 			frameHandle = window.requestAnimationFrame(step);
 			const frame = readFrame();
@@ -331,19 +353,22 @@
 				);
 			}
 			const parameters = view(frame);
-			const size = discPixelSize();
+			const size = discLogicalSize();
 			drawOverlay(frame, parameters, size);
 			const next = captureMinimapGpuDrawState(frame, viewState, parameters);
 			if (sameMinimapGpuDrawState(lastGpuDrawn, next)) return;
 			if (now - lastGpuAttemptedAt < MINIMUM_GPU_FRAME_INTERVAL_MS) return;
 			lastGpuAttemptedAt = now;
-			if (drawMap(frame, parameters, size)) {
+			if (
+				drawMap(frame, parameters, Math.max(1, Math.round(size * drawingScale)))
+			) {
 				lastGpuDrawn = next;
 			}
 		};
 		frameHandle = window.requestAnimationFrame(step);
 		return () => {
 			observer.disconnect();
+			window.removeEventListener(UI_SCALE_CHANGE_EVENT, scaleChanged);
 			stopTheme();
 			if (frameHandle !== undefined) window.cancelAnimationFrame(frameHandle);
 			renderer?.destroy();
@@ -365,12 +390,12 @@
 	}
 
 	/**
-	 * Pixel size of the map disc, which is the widget inset by the bezel on both sides.
+	 * Logical size of the map disc, which is the widget inset by the bezel on both sides.
 	 *
 	 * The drawn map is square and the disc clips it to a circle, so this is what both canvases are
-	 * sized to. The widget's own size stays the outer diameter, which the resize control changes.
+	 * sampled from at the UI boundary scale. The widget's own size stays the outer diameter, which the resize control changes.
 	 */
-	function discPixelSize(): number {
+	function discLogicalSize(): number {
 		return Math.max(1, Math.round(viewState.size * (1 - 2 * RIM_FRACTION)));
 	}
 
@@ -445,12 +470,14 @@
 	): void {
 		const canvas = overlayCanvas;
 		if (!canvas) return;
-		if (canvas.width !== size || canvas.height !== size) {
-			canvas.width = size;
-			canvas.height = size;
+		const pixels = Math.max(1, Math.round(size * drawingScale));
+		if (canvas.width !== pixels || canvas.height !== pixels) {
+			canvas.width = pixels;
+			canvas.height = pixels;
 		}
 		const context = canvas.getContext("2d");
 		if (!context) return;
+		context.setTransform(pixels / size, 0, 0, pixels / size, 0, 0);
 		context.clearRect(0, 0, size, size);
 		drawMinimapBreadcrumbTrail(context, breadcrumbTrail, overlay, size);
 		const hitTargets: BlipHitTarget[] = [];
@@ -626,9 +653,10 @@
 			return;
 		}
 		const canvasX =
-			((hover.clientX - canvasBounds.left) * canvas.width) / canvasBounds.width;
+			((hover.clientX - canvasBounds.left) * discLogicalSize()) /
+			canvasBounds.width;
 		const canvasY =
-			((hover.clientY - canvasBounds.top) * canvas.height) /
+			((hover.clientY - canvasBounds.top) * discLogicalSize()) /
 			canvasBounds.height;
 		const names = [
 			...new Set(
@@ -646,8 +674,8 @@
 			if (tooltip !== null) tooltip = null;
 			return;
 		}
-		const left = hover.clientX - frameBounds.left;
-		const top = hover.clientY - frameBounds.top;
+		const left = (hover.clientX - frameBounds.left) / uiScale(canvas);
+		const top = (hover.clientY - frameBounds.top) / uiScale(canvas);
 		if (
 			tooltip?.left === left &&
 			tooltip.top === top &&
@@ -845,8 +873,8 @@
 		if (canvas === null) return null;
 		const bounds = canvas.getBoundingClientRect();
 		if (bounds.width <= 0 || bounds.height <= 0) return null;
-		const x = ((clientX - bounds.left) * canvas.width) / bounds.width;
-		const y = ((clientY - bounds.top) * canvas.height) / bounds.height;
+		const x = ((clientX - bounds.left) * discLogicalSize()) / bounds.width;
+		const y = ((clientY - bounds.top) * discLogicalSize()) / bounds.height;
 		return closestMinimapSelectionGuid(blipHitTargets, x, y, BLIP_HIT_RADIUS);
 	}
 
@@ -866,18 +894,19 @@
 		if (event.button !== 0) return;
 		event.preventDefault();
 		event.stopPropagation();
+		const scale = pointerUiScale(event);
 		const startX = event.clientX;
 		const startY = event.clientY;
 		const { left, top } = viewState;
 		cancelPointerGesture?.();
-		cancelPointerGesture = trackPointerGesture(
+		cancelPointerGesture = trackUiPointerGesture(
 			window,
 			event.pointerId,
 			(moved) => {
-				onStateChange({
-					...viewState,
-					left: left + moved.clientX - startX,
-					top: top + moved.clientY - startY,
+				onGeometryChange({
+					size: viewState.size,
+					left: left + (moved.clientX - startX) / scale,
+					top: top + (moved.clientY - startY) / scale,
 				});
 			},
 		);
@@ -887,26 +916,26 @@
 		if (event.button !== 0) return;
 		event.preventDefault();
 		event.stopPropagation();
+		const scale = pointerUiScale(event);
 		const startX = event.clientX;
 		const startY = event.clientY;
 		const start = viewState;
 		const bounds = resizeBounds;
 		cancelPointerGesture?.();
-		cancelPointerGesture = trackPointerGesture(
+		cancelPointerGesture = trackUiPointerGesture(
 			window,
 			event.pointerId,
 			(moved) => {
-				onStateChange({
-					...viewState,
-					...resizeMinimapBounds(
+				onGeometryChange(
+					resizeMinimapBounds(
 						start,
 						minSize,
-						moved.clientX - startX,
-						moved.clientY - startY,
+						(moved.clientX - startX) / scale,
+						(moved.clientY - startY) / scale,
 						edges,
 						bounds,
 					),
-				});
+				);
 			},
 		);
 	}
@@ -921,14 +950,11 @@
 		const frame = readFrame();
 		const anchor = frame.subject?.anchor ?? null;
 		const environment = mapEnvironment(anchor);
-		onStateChange({
-			...viewState,
-			viewDiameters: {
-				...viewState.viewDiameters,
-				[environment]: clampMapViewDiameter(
-					minimapViewDiameter(viewState, anchor) * factor,
-				),
-			},
+		onViewDiametersChange({
+			...viewState.viewDiameters,
+			[environment]: clampMapViewDiameter(
+				minimapViewDiameter(viewState, anchor) * factor,
+			),
 		});
 	}
 </script>
@@ -1238,9 +1264,7 @@
 		.minimap-zoom-in,
 		.minimap-zoom-out {
 			/* Keep a 4px gap between circular buttons along the diagonal rim tangent. */
-			--zoom-offset: calc(
-				(var(--ui-minimap-button-size) * var(--ui-icon-scale) + 4px) * 0.353553
-			);
+			--zoom-offset: calc((var(--ui-minimap-button-size) + 4px) * 0.353553);
 		}
 		.minimap-zoom-in {
 			top: calc(85.355% - var(--zoom-offset));

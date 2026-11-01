@@ -313,7 +313,10 @@
 			gap: 8px;
 		}
 		.journal-filters {
-			max-height: var(--ui-filter-max-height);
+			max-height: var(
+				--ui-filter-max-height,
+				calc(var(--ui-viewport-height) * 0.4)
+			);
 			overflow: auto;
 		}
 		.journal-filters summary {

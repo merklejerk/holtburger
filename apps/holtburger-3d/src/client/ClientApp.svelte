@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { applyUiScale } from "../app/ui-scale";
 	import {
 		ClientRestPostureController,
 		REST_POSTURE_LABELS,
@@ -708,7 +709,7 @@
 				"command",
 				`Character settings could not be loaded: ${formatError(error)}`,
 			),
-		unavailable: (reasons) =>
+		repaired: (reasons) =>
 			toastCenter.publish({
 				message: `Character settings: ${reasons.join("; ")}`,
 				tone: "warning",
@@ -2481,21 +2482,23 @@
 	class="client-appearance-scope ui-theme"
 	use:observeCombatAppearance
 	style:--ui-text-scale={userSettings.ui.textScale}
-	style:--ui-icon-scale={userSettings.ui.iconScale}
+	style:--ui-scale={userSettings.ui.uiScale}
 	style:--ui-font-body={fontCss(userSettings.ui.fonts.body)}
 	style:--ui-font-heading={fontCss(userSettings.ui.fonts.heading)}
 	style:--ui-font-mono={fontCss(userSettings.ui.fonts.mono)}
 >
-	<!-- A mounted dialog receives a non-null item until teardown, including nested snippets. -->
-	{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
-		<ClientMessageDialog
-			{presentation}
-			onDismiss={(id) => dialogs?.dismissPopup(id)}
-			onRespond={(id, accepted, suppress) => {
-				void dialogs?.respond(id, accepted, suppress);
-			}}
-		/>
-	{/each}
+	<div class="client-overlay-ui" use:applyUiScale={userSettings.ui.uiScale}>
+		<!-- A mounted dialog receives a non-null item until teardown, including nested snippets. -->
+		{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
+			<ClientMessageDialog
+				{presentation}
+				onDismiss={(id) => dialogs?.dismissPopup(id)}
+				onRespond={(id, accepted, suppress) => {
+					void dialogs?.respond(id, accepted, suppress);
+				}}
+			/>
+		{/each}
+	</div>
 	<canvas
 		bind:this={canvasElement}
 		class="client-canvas"
@@ -2506,7 +2509,7 @@
 		style:visibility={appState.admission.canvasVisible ? "visible" : "hidden"}
 	></canvas>
 	{#if pregameSelection !== null}
-		<div class="pregame-notices">
+		<div class="pregame-notices" use:applyUiScale={userSettings.ui.uiScale}>
 			<ClientToastOverlay {toast} persistentMessage={null} />
 		</div>
 	{/if}
@@ -2793,98 +2796,115 @@
 			{canvasElement}
 			{interactionRoot}
 		/>
-	{:else if pregameSelection !== null}
-		{#each [pregameSelection] as selection}
-			<ClientCharacterSelect
-				state={selection}
-				entryPending={appState.operation === "enter"}
-				management={characterManagement}
-				creation={creationServices}
-				characterActions={{
-					delete: async (guid) => {
-						if (session === null)
-							throw new Error("Character session is unavailable.");
-						await session.deleteCharacter(guid);
-					},
-					restore: async (guid) => {
-						if (session === null)
-							throw new Error("Character session is unavailable.");
-						await session.restoreCharacter(guid);
-					},
-				}}
-				scene={pregameScene}
-				visualCache={startupVisualCacheTransport}
-				onChoose={chooseCharacter}
-				onEnter={enterWorld}
-				onDisconnect={disconnect}
-			>
-				{#snippet settings()}
-					<ClientPregameSettings
-						{theme}
-						graphics={userSettings.graphics}
-						audio={userSettings.audio}
-						ui={userSettings.ui}
-						{textureFilteringCapabilities}
-						onGraphicsChange={changeGraphics}
-						onAudioChange={changeAudio}
-						onUiChange={changeUi}
-					/>
-				{/snippet}
-			</ClientCharacterSelect>
-		{/each}
-	{:else if page.kind === "loading"}
-		<ClientLoadingPage state={page.content} {contentLocation} {toast}>
-			{#snippet footer()}
-				{#if page.content.kind !== "ended"}
-					<button
-						class="pregame-action pregame-quiet ui-button"
-						type="button"
-						disabled={session === null || !appState.admission.canDisconnect}
-						onclick={() => void disconnect()}
+	{:else}
+		<div class="client-pregame-ui" use:applyUiScale={userSettings.ui.uiScale}>
+			{#if pregameSelection !== null}
+				{#each [pregameSelection] as selection}
+					<ClientCharacterSelect
+						state={selection}
+						entryPending={appState.operation === "enter"}
+						management={characterManagement}
+						creation={creationServices}
+						characterActions={{
+							delete: async (guid) => {
+								if (session === null)
+									throw new Error("Character session is unavailable.");
+								await session.deleteCharacter(guid);
+							},
+							restore: async (guid) => {
+								if (session === null)
+									throw new Error("Character session is unavailable.");
+								await session.restoreCharacter(guid);
+							},
+						}}
+						scene={pregameScene}
+						visualCache={startupVisualCacheTransport}
+						onChoose={chooseCharacter}
+						onEnter={enterWorld}
+						onDisconnect={disconnect}
 					>
-						<span class="pregame-icon" aria-hidden="true"
-							><DisconnectIcon /></span
-						>
-						Disconnect</button
-					>
-				{/if}
-			{/snippet}
-			{#snippet actions()}
-				{#if page.content.kind === "ended" || page.content.kind === "failed"}
-					{#if window.holtburgerLauncher?.enabled !== false}
-						<button
-							class="pregame-primary pregame-action ui-button"
-							type="button"
-							onclick={() => void returnToLauncher().catch(console.error)}
-							>Back to launcher</button
-						>
-					{/if}
-					<button
-						class="pregame-primary pregame-action ui-button"
-						type="button"
-						onclick={() =>
-							void requestElectronClientClose().catch(console.error)}
-						><span class="pregame-icon" aria-hidden="true"><PowerIcon /></span
-						><span>Quit application</span></button
-					>
-				{/if}
-				{#if page.content.kind === "failed" && page.content.retry !== null}
-					<button
-						class="pregame-action ui-button"
-						type="button"
-						onclick={page.content.retry}
-					>
-						<span class="pregame-icon" aria-hidden="true"><RetryIcon /></span>
-						Try again</button
-					>
-				{/if}
-			{/snippet}
-		</ClientLoadingPage>
+						{#snippet settings()}
+							<ClientPregameSettings
+								{theme}
+								graphics={userSettings.graphics}
+								audio={userSettings.audio}
+								ui={userSettings.ui}
+								{textureFilteringCapabilities}
+								onGraphicsChange={changeGraphics}
+								onAudioChange={changeAudio}
+								onUiChange={changeUi}
+							/>
+						{/snippet}
+					</ClientCharacterSelect>
+				{/each}
+			{:else if page.kind === "loading"}
+				<ClientLoadingPage state={page.content} {contentLocation} {toast}>
+					{#snippet footer()}
+						{#if page.content.kind !== "ended"}
+							<button
+								class="pregame-action pregame-quiet ui-button"
+								type="button"
+								disabled={session === null || !appState.admission.canDisconnect}
+								onclick={() => void disconnect()}
+							>
+								<span class="pregame-icon" aria-hidden="true"
+									><DisconnectIcon /></span
+								>
+								Disconnect</button
+							>
+						{/if}
+					{/snippet}
+					{#snippet actions()}
+						{#if page.content.kind === "ended" || page.content.kind === "failed"}
+							{#if window.holtburgerLauncher?.enabled !== false}
+								<button
+									class="pregame-primary pregame-action ui-button"
+									type="button"
+									onclick={() => void returnToLauncher().catch(console.error)}
+									>Back to launcher</button
+								>
+							{/if}
+							<button
+								class="pregame-primary pregame-action ui-button"
+								type="button"
+								onclick={() =>
+									void requestElectronClientClose().catch(console.error)}
+								><span class="pregame-icon" aria-hidden="true"
+									><PowerIcon /></span
+								><span>Quit application</span></button
+							>
+						{/if}
+						{#if page.content.kind === "failed" && page.content.retry !== null}
+							<button
+								class="pregame-action ui-button"
+								type="button"
+								onclick={page.content.retry}
+							>
+								<span class="pregame-icon" aria-hidden="true"
+									><RetryIcon /></span
+								>
+								Try again</button
+							>
+						{/if}
+					{/snippet}
+				</ClientLoadingPage>
+			{/if}
+		</div>
 	{/if}
 </div>
 
 <style>
 	@layer components {
+		.client-overlay-ui,
+		.client-pregame-ui {
+			position: fixed;
+			inset: 0;
+			pointer-events: none;
+		}
+		.client-overlay-ui > :global(*),
+		.client-pregame-ui > :global(*) {
+			pointer-events: auto;
+		}
 		.client-appearance-scope {
 			display: contents;
 		}
@@ -2892,7 +2912,7 @@
 			position: fixed;
 			inset: 24px 24px auto auto;
 			z-index: 2;
-			width: min(420px, calc(100vw - 48px));
+			width: min(420px, calc(var(--ui-viewport-width) - 48px));
 			pointer-events: none;
 		}
 	}

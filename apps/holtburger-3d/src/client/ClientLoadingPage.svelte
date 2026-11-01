@@ -267,7 +267,7 @@
 			text-align: left;
 		}
 		.loading-details pre {
-			max-height: 24dvh;
+			max-height: calc(var(--ui-viewport-height) * 0.24);
 			overflow: auto;
 			margin: 0;
 			white-space: pre-wrap;

@@ -211,10 +211,8 @@
 			gap: 0.6rem;
 		}
 		.loadout-slots {
-			column-gap: calc(
-				2 * calc(var(--ui-item-grid-gap) * var(--ui-icon-scale))
-			);
-			row-gap: calc(3 * calc(var(--ui-item-grid-gap) * var(--ui-icon-scale)));
+			column-gap: calc(2 * var(--ui-item-grid-gap));
+			row-gap: calc(3 * var(--ui-item-grid-gap));
 		}
 		.loadout-slot {
 			min-width: 0;
@@ -233,7 +231,7 @@
 			position: relative;
 			width: 100%;
 			aspect-ratio: 1;
-			padding: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
+			padding: var(--ui-item-cell-padding);
 			overflow: hidden;
 		}
 		.loadout-slot-label {

@@ -124,12 +124,9 @@
 		.equipment-strip {
 			height: 100%;
 			--ui-item-strip-width: calc(
-				calc(
-						var(--ui-inventory-equipment-slot-icon-size) * var(--ui-icon-scale)
-					) +
-					calc(var(--ui-inventory-equipment-slot-gap) * var(--ui-icon-scale)) +
-					calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale)) + 2 *
-					calc(var(--ui-item-strip-inset) * var(--ui-icon-scale))
+				var(--ui-inventory-equipment-slot-icon-size) +
+					var(--ui-inventory-equipment-slot-gap) +
+					var(--ui-item-cell-min-size) + 2 * var(--ui-item-strip-inset)
 			);
 		}
 		.equipment-cell {
@@ -148,12 +145,10 @@
 		.equipment-row {
 			display: grid;
 			grid-template-columns:
-				calc(
-					var(--ui-inventory-equipment-slot-icon-size) * var(--ui-icon-scale)
-				)
+				var(--ui-inventory-equipment-slot-icon-size)
 				minmax(0, 1fr);
 			align-items: center;
-			gap: calc(var(--ui-inventory-equipment-slot-gap) * var(--ui-icon-scale));
+			gap: var(--ui-inventory-equipment-slot-gap);
 		}
 	}
 </style>

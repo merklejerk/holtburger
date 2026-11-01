@@ -44,6 +44,9 @@ function canvasFixture() {
 		height: 0,
 		clientWidth: 600,
 		clientHeight: 400,
+		getBoundingClientRect() {
+			return { width: this.clientWidth, height: this.clientHeight };
+		},
 		getContext: vi.fn(() => context),
 	});
 	const backing = Object.assign(new EventTarget(), {

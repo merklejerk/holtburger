@@ -6,7 +6,7 @@
 	import {
 		CLIENT_FONT_FAMILY_OPTIONS,
 		CLIENT_TEXT_SCALE,
-		CLIENT_ICON_SCALE,
+		CLIENT_UI_SCALE,
 		type ClientFontFamily,
 	} from "./client-settings-values";
 	import "./client-settings-controls.css";
@@ -62,6 +62,21 @@
 		<summary>Scaling</summary>
 		<div class="settings-section ui-disclosure-body">
 			<label
+				>UI scaling: {Math.round(ui.uiScale * 100)}%
+				<UiRange
+					aria-label="UI scaling"
+					min={CLIENT_UI_SCALE.minimum}
+					max={CLIENT_UI_SCALE.maximum}
+					step={CLIENT_UI_SCALE.step}
+					value={ui.uiScale}
+					oninput={(event) =>
+						onUiChange({
+							...ui,
+							uiScale: event.currentTarget.valueAsNumber,
+						})}
+				/>
+			</label>
+			<label
 				>Text scaling: {Math.round(ui.textScale * 100)}%
 				<UiRange
 					aria-label="Text scaling"
@@ -73,21 +88,6 @@
 						onUiChange({
 							...ui,
 							textScale: event.currentTarget.valueAsNumber,
-						})}
-				/>
-			</label>
-			<label
-				>Icon scaling: {Math.round(ui.iconScale * 100)}%
-				<UiRange
-					aria-label="Icon scaling"
-					min={CLIENT_ICON_SCALE.minimum}
-					max={CLIENT_ICON_SCALE.maximum}
-					step={CLIENT_ICON_SCALE.step}
-					value={ui.iconScale}
-					oninput={(event) =>
-						onUiChange({
-							...ui,
-							iconScale: event.currentTarget.valueAsNumber,
 						})}
 				/>
 			</label>

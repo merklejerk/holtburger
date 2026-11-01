@@ -58,7 +58,7 @@
 			grid-template: minmax(0, 1fr) / minmax(0, 1fr);
 			width: 100%;
 			height: 100%;
-			padding-inline: min(24px, 5vw);
+			padding-inline: min(24px, calc(var(--ui-viewport-width) * 0.05));
 			place-items: center;
 			pointer-events: none;
 		}

@@ -245,7 +245,7 @@ export async function probeClientLocks(options: {
 		const cellStyle = getComputedStyle(pickCell);
 		const standardSize =
 			Number.parseFloat(cellStyle.getPropertyValue("--ui-item-cell-min-size")) *
-			Number.parseFloat(cellStyle.getPropertyValue("--ui-icon-scale"));
+			Number.parseFloat(cellStyle.getPropertyValue("--ui-scale"));
 		const assertCellSize = () => {
 			const cell = pickCell.getBoundingClientRect();
 			if (

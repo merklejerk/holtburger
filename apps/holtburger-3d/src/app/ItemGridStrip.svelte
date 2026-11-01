@@ -143,24 +143,19 @@
 			/* Share the grid cell basis; the owning panel adds its own divider. */
 			width: var(
 				--ui-item-strip-width,
-				calc(
-					calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale)) + 2 *
-						calc(var(--ui-item-strip-inset) * var(--ui-icon-scale))
-				)
+				calc(var(--ui-item-cell-min-size) + 2 * var(--ui-item-strip-inset))
 			);
 			height: 100%;
 			min-height: 0;
 			/* Outside the scroll viewport so the end spacing survives scrolling. */
-			padding-block: calc(
-				var(--ui-item-strip-block-inset) * var(--ui-icon-scale)
-			);
+			padding-block: var(--ui-item-strip-block-inset);
 		}
 		.item-grid-strip-viewport {
 			height: 100%;
 			overflow-y: auto;
 			overflow-x: hidden;
 			scrollbar-width: none;
-			padding: 0 calc(var(--ui-item-strip-inset) * var(--ui-icon-scale));
+			padding: 0 var(--ui-item-strip-inset);
 		}
 		.item-grid-strip-viewport::-webkit-scrollbar {
 			display: none;
@@ -168,14 +163,14 @@
 		.item-grid-strip-cells {
 			display: grid;
 			grid-template-columns: minmax(0, 1fr);
-			gap: calc(var(--ui-item-grid-gap) * var(--ui-icon-scale));
+			gap: var(--ui-item-grid-gap);
 		}
 		.strip-arrow {
 			position: absolute;
 			z-index: 1;
-			left: calc(var(--ui-item-strip-inset) * var(--ui-icon-scale));
-			right: calc(var(--ui-item-strip-inset) * var(--ui-icon-scale));
-			height: calc(var(--ui-item-strip-arrow-height) * var(--ui-icon-scale));
+			left: var(--ui-item-strip-inset);
+			right: var(--ui-item-strip-inset);
+			height: var(--ui-item-strip-arrow-height);
 			padding: 0;
 			line-height: 1;
 		}
@@ -189,10 +184,10 @@
 			content: var(--ui-item-strip-down-glyph);
 		}
 		.strip-arrow-up {
-			top: calc(var(--ui-item-strip-block-inset) * var(--ui-icon-scale));
+			top: var(--ui-item-strip-block-inset);
 		}
 		.strip-arrow-down {
-			bottom: calc(var(--ui-item-strip-block-inset) * var(--ui-icon-scale));
+			bottom: var(--ui-item-strip-block-inset);
 		}
 		.strip-arrow[data-attention="true"] {
 			color: var(--ui-item-strip-attention-color, var(--ui-color-active));
@@ -218,7 +213,7 @@
 		.horizontal {
 			width: 100%;
 			height: auto;
-			padding: calc(var(--ui-item-strip-inset) * var(--ui-icon-scale));
+			padding: var(--ui-item-strip-inset);
 		}
 		.horizontal .item-grid-strip-viewport {
 			overflow-x: auto;
@@ -227,25 +222,23 @@
 		}
 		.horizontal .item-grid-strip-cells {
 			grid-auto-flow: column;
-			grid-auto-columns: calc(
-				var(--ui-item-cell-min-size) * var(--ui-icon-scale)
-			);
+			grid-auto-columns: var(--ui-item-cell-min-size);
 			grid-template-columns: none;
 			width: max-content;
 			min-width: 100%;
 		}
 		.horizontal .strip-arrow {
-			top: calc(var(--ui-item-strip-inset) * var(--ui-icon-scale));
-			bottom: calc(var(--ui-item-strip-inset) * var(--ui-icon-scale));
+			top: var(--ui-item-strip-inset);
+			bottom: var(--ui-item-strip-inset);
 			height: auto;
-			width: calc(var(--ui-item-strip-arrow-height) * var(--ui-icon-scale));
+			width: var(--ui-item-strip-arrow-height);
 		}
 		.horizontal .strip-arrow-up {
-			left: calc(var(--ui-item-strip-inset) * var(--ui-icon-scale));
+			left: var(--ui-item-strip-inset);
 			right: auto;
 		}
 		.horizontal .strip-arrow-down {
-			right: calc(var(--ui-item-strip-inset) * var(--ui-icon-scale));
+			right: var(--ui-item-strip-inset);
 			left: auto;
 		}
 		.horizontal .strip-arrow-glyph {

@@ -31,7 +31,7 @@ function ownerFixture() {
 				`${state.kind}:${"characterGuid" in state ? state.characterGuid : "none"}`,
 			),
 		loadFailed: (error) => failures.push(error),
-		unavailable: (reasons) => failures.push(reasons),
+		repaired: (reasons) => failures.push(reasons),
 		saveFailed: (error) => failures.push(error),
 		saveDelayMs: 100,
 	});
@@ -50,7 +50,6 @@ describe("ClientCharacterSettingsOwner", () => {
 				...createDefaultClientCharacterSettings(),
 				lastKnownName: "A",
 			},
-			unavailable: [],
 			repaired: [],
 		});
 		await Promise.resolve();
@@ -58,9 +57,7 @@ describe("ClientCharacterSettingsOwner", () => {
 			kind: "loading",
 			characterGuid: 2,
 		});
-		fixture.loads
-			.get(2)!
-			.resolve({ sections: {}, unavailable: [], repaired: [] });
+		fixture.loads.get(2)!.resolve({ sections: {}, repaired: [] });
 		await vi.waitFor(() =>
 			expect(fixture.owner.state()).toMatchObject({
 				kind: "ready",
@@ -73,7 +70,6 @@ describe("ClientCharacterSettingsOwner", () => {
 		const saving = deferred<void>();
 		const loadCharacter = vi.fn(async () => ({
 			sections: {},
-			unavailable: [],
 			repaired: [],
 		}));
 		const saveCharacterPatch = vi.fn(() => saving.promise);
@@ -81,7 +77,7 @@ describe("ClientCharacterSettingsOwner", () => {
 			transport: { loadCharacter, saveCharacterPatch },
 			publish: () => {},
 			loadFailed: () => {},
-			unavailable: () => {},
+			repaired: () => {},
 			saveFailed: () => {},
 			saveDelayMs: 100,
 		});
@@ -104,9 +100,7 @@ describe("ClientCharacterSettingsOwner", () => {
 		fixture.owner.acceptGuid(7);
 		fixture.owner.acceptName(7, "Mira");
 		await vi.waitFor(() => expect(fixture.loads.size).toBe(1));
-		fixture.loads
-			.get(7)!
-			.resolve({ sections: {}, unavailable: [], repaired: [] });
+		fixture.loads.get(7)!.resolve({ sections: {}, repaired: [] });
 		await vi.waitFor(() =>
 			expect(fixture.owner.state()).toMatchObject({
 				kind: "ready",
@@ -120,9 +114,7 @@ describe("ClientCharacterSettingsOwner", () => {
 		const fixture = ownerFixture();
 		fixture.owner.acceptGuid(1);
 		await vi.waitFor(() => expect(fixture.loads.has(1)).toBe(true));
-		fixture.loads
-			.get(1)!
-			.resolve({ sections: {}, unavailable: [], repaired: [] });
+		fixture.loads.get(1)!.resolve({ sections: {}, repaired: [] });
 		await vi.waitFor(() => expect(fixture.owner.state().kind).toBe("ready"));
 		fixture.owner.change(
 			"combatControls",
@@ -141,7 +133,7 @@ describe("ClientCharacterSettingsOwner", () => {
 			transport: {
 				loadCharacter: async (guid) => {
 					loads.push(guid);
-					return { sections: {}, unavailable: [], repaired: [] };
+					return { sections: {}, repaired: [] };
 				},
 				saveCharacterPatch: async (guid) => {
 					saves.push(guid);
@@ -150,7 +142,7 @@ describe("ClientCharacterSettingsOwner", () => {
 			},
 			publish: () => undefined,
 			loadFailed: (error) => failures.push(error),
-			unavailable: () => undefined,
+			repaired: () => undefined,
 			saveFailed: (error) => failures.push(error),
 			saveDelayMs: 100,
 		});

@@ -66,12 +66,8 @@
 		}
 		.currency-icon {
 			container: vendor-currency-art / inline-size;
-			width: calc(
-				var(--ui-inventory-currency-icon-size) * var(--ui-icon-scale)
-			);
-			height: calc(
-				var(--ui-inventory-currency-icon-size) * var(--ui-icon-scale)
-			);
+			width: var(--ui-inventory-currency-icon-size);
+			height: var(--ui-inventory-currency-icon-size);
 			flex: none;
 		}
 		.currency-icon :global(.ui-icon) {

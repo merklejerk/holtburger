@@ -3,7 +3,7 @@ import {
 	getLandblockCoordinates,
 	isOutdoorLandblock,
 	normalizeLandblockOwner,
-} from "../landblocks";
+} from "../landblocks.js";
 import type { ResolvedSceneInterestTarget } from "./scene-target";
 import type { SceneInterestRadii } from "./types";
 

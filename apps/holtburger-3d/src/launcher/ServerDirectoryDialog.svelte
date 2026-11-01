@@ -300,7 +300,10 @@
 		.directory-filter-disclosure {
 			flex: 1;
 			min-width: 0;
-			max-height: var(--ui-filter-max-height);
+			max-height: var(
+				--ui-filter-max-height,
+				calc(var(--ui-viewport-height) * 0.4)
+			);
 			overflow: auto;
 		}
 		.directory-filter-disclosure summary {

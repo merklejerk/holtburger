@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { uiLocalSize } from "../app/ui-scale";
 	import { presentClientBinding } from "./client-binding-catalog";
 	import { tick, untrack } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
@@ -178,8 +179,8 @@
 		if (scrollbarMetric === null)
 			throw new Error("Missing spell scrollbar metric");
 		const update = () => {
-			const { width, height } = node.getBoundingClientRect();
-			const scrollbar = scrollbarMetric.getBoundingClientRect().height;
+			const { width, height } = uiLocalSize(node);
+			const scrollbar = uiLocalSize(scrollbarMetric).height;
 			if (
 				!Number.isFinite(width) ||
 				width <= 0 ||
@@ -446,13 +447,13 @@
 			position: absolute;
 			visibility: hidden;
 			pointer-events: none;
-			width: calc(var(--ui-shortcut-cell-size) * var(--ui-icon-scale));
-			height: calc(var(--ui-spell-tab-height) * var(--ui-icon-scale));
+			width: var(--ui-shortcut-cell-size);
+			height: var(--ui-spell-tab-height);
 		}
 		.spell-scrollbar-metrics {
 			display: block;
 			width: 0;
-			height: calc(var(--ui-spell-scrollbar-height) * var(--ui-icon-scale));
+			height: var(--ui-spell-scrollbar-height);
 		}
 		.spell-bar-scroll {
 			display: flex;
@@ -465,7 +466,7 @@
 			flex: 0 0 var(--spell-cell-size);
 			width: var(--spell-cell-size);
 			height: var(--spell-cell-size);
-			margin-top: calc(var(--ui-spell-tab-height) * var(--ui-icon-scale));
+			margin-top: var(--ui-spell-tab-height);
 		}
 		.spell-tabs,
 		.spell-cells {
@@ -474,7 +475,7 @@
 		}
 		.spell-tabs {
 			grid-template-columns: repeat(10, calc(var(--spell-cell-size) / 2));
-			height: calc(var(--ui-spell-tab-height) * var(--ui-icon-scale));
+			height: var(--ui-spell-tab-height);
 		}
 		.spell-tabs button {
 			--ui-hud-control-background: var(
@@ -489,7 +490,7 @@
 			min-width: 0;
 			min-height: 0;
 			padding: 0;
-			font-size: calc(var(--ui-spell-tab-font-size) * var(--ui-icon-scale));
+			font-size: calc(var(--ui-spell-tab-font-size) * var(--ui-text-scale));
 			color: var(--ui-spell-tab-color, var(--ui-color-text));
 			border: var(--ui-spell-tab-border, 0);
 			border-radius: var(--ui-spell-tab-radius, 0);
@@ -535,7 +536,7 @@
 			--spell-scrollbar-thumb-opacity: var(--ui-spell-scrollbar-thumb-opacity);
 			display: block;
 			width: calc(100% - 4px);
-			height: calc(var(--ui-spell-scrollbar-height) * var(--ui-icon-scale));
+			height: var(--ui-spell-scrollbar-height);
 			margin: 0 2px;
 			padding: 0;
 			appearance: none;
@@ -560,13 +561,8 @@
 		}
 		.spell-scroll-handle::-webkit-slider-thumb {
 			width: var(--scroll-thumb-width);
-			height: calc(
-				calc(var(--ui-spell-scrollbar-height) * var(--ui-icon-scale)) - 2px
-			);
-			margin-top: calc(
-				(5px - calc(var(--ui-spell-scrollbar-height) * var(--ui-icon-scale))) /
-					2
-			);
+			height: calc(var(--ui-spell-scrollbar-height) - 2px);
+			margin-top: calc((5px - var(--ui-spell-scrollbar-height)) / 2);
 			appearance: none;
 			border-radius: 3px;
 			background: color-mix(
@@ -585,9 +581,7 @@
 		}
 		.spell-scroll-handle::-moz-range-thumb {
 			width: var(--scroll-thumb-width);
-			height: calc(
-				calc(var(--ui-spell-scrollbar-height) * var(--ui-icon-scale)) - 2px
-			);
+			height: calc(var(--ui-spell-scrollbar-height) - 2px);
 			border: 0;
 			border-radius: 3px;
 			background: color-mix(

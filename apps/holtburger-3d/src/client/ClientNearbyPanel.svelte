@@ -571,7 +571,10 @@
 			padding-bottom: var(--ui-filter-gap);
 		}
 		.entity-filters {
-			max-height: var(--ui-filter-max-height);
+			max-height: var(
+				--ui-filter-max-height,
+				calc(var(--ui-viewport-height) * 0.4)
+			);
 			overflow: auto;
 		}
 		.entity-filters summary {
@@ -611,9 +614,9 @@
 		}
 		.category-icon {
 			display: inline-flex;
-			width: calc(var(--ui-entity-category-icon-size) * var(--ui-icon-scale));
-			height: calc(var(--ui-entity-category-icon-size) * var(--ui-icon-scale));
-			flex: 0 0 calc(var(--ui-entity-category-icon-size) * var(--ui-icon-scale));
+			width: var(--ui-entity-category-icon-size);
+			height: var(--ui-entity-category-icon-size);
+			flex: 0 0 var(--ui-entity-category-icon-size);
 			margin-right: var(--ui-list-icon-gap);
 		}
 		.selected {

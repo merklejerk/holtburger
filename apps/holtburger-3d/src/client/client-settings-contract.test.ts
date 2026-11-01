@@ -28,7 +28,7 @@ import {
 	CLIENT_VITAL_WARNING_THRESHOLDS,
 	CLIENT_DEFAULT_THEME_ID,
 	CLIENT_TEXT_SCALE,
-	CLIENT_ICON_SCALE,
+	CLIENT_UI_SCALE,
 } from "./client-settings-values";
 
 const viewport = { width: 1440, height: 900 };
@@ -126,7 +126,7 @@ describe("current client settings values", () => {
 			useUnlockHelper: true,
 			fonts,
 			textScale: CLIENT_TEXT_SCALE.initial,
-			iconScale: CLIENT_ICON_SCALE.initial,
+			uiScale: CLIENT_UI_SCALE.initial,
 			vitalWarningThresholds: CLIENT_VITAL_WARNING_THRESHOLDS,
 		});
 	});
@@ -142,7 +142,7 @@ describe("current client settings values", () => {
 			useUnlockHelper: true,
 			...older,
 			textScale: CLIENT_TEXT_SCALE.initial,
-			iconScale: CLIENT_ICON_SCALE.initial,
+			uiScale: CLIENT_UI_SCALE.initial,
 		});
 		for (const textScale of [
 			CLIENT_TEXT_SCALE.minimum,
@@ -156,7 +156,7 @@ describe("current client settings values", () => {
 				useUnlockHelper: true,
 				...older,
 				textScale,
-				iconScale: CLIENT_ICON_SCALE.initial,
+				uiScale: CLIENT_UI_SCALE.initial,
 			});
 		}
 		for (const textScale of [
@@ -172,33 +172,33 @@ describe("current client settings values", () => {
 			).toBe(false);
 		}
 	});
-	it("evolves text-scaled profiles and validates independent icon scaling", () => {
+	it("evolves text-scaled profiles and validates the overall UI scale", () => {
 		const older = {
 			fonts: { body: "serif", heading: "theme", mono: "mono" },
 			textScale: CLIENT_TEXT_SCALE.maximum,
 		};
 		const evolved = clientUiSettingsSchema.parse(older);
-		expect(evolved.iconScale).toBe(CLIENT_ICON_SCALE.initial);
-		for (const iconScale of [
-			CLIENT_ICON_SCALE.minimum,
+		expect(evolved.uiScale).toBe(CLIENT_UI_SCALE.initial);
+		for (const uiScale of [
+			CLIENT_UI_SCALE.minimum,
 			1.375,
-			CLIENT_ICON_SCALE.maximum,
+			CLIENT_UI_SCALE.maximum,
 		]) {
-			expect(clientUiSettingsSchema.parse({ ...older, iconScale })).toEqual({
+			expect(clientUiSettingsSchema.parse({ ...older, uiScale })).toEqual({
 				...evolved,
-				iconScale,
+				uiScale,
 			});
 		}
-		for (const iconScale of [
-			CLIENT_ICON_SCALE.minimum - 0.01,
-			CLIENT_ICON_SCALE.maximum + 0.01,
+		for (const uiScale of [
+			CLIENT_UI_SCALE.minimum - 0.01,
+			CLIENT_UI_SCALE.maximum + 0.01,
 			NaN,
 			Infinity,
 			null,
 			"1.5",
 		]) {
 			expect(
-				clientUiSettingsSchema.safeParse({ ...older, iconScale }).success,
+				clientUiSettingsSchema.safeParse({ ...older, uiScale }).success,
 			).toBe(false);
 		}
 	});

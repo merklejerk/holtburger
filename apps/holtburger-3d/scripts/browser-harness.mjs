@@ -175,10 +175,10 @@ try {
 			evidence: result.clientEnvironment,
 			browserErrors,
 		};
-	} else if (options.clientTextScaling) {
+	} else if (options.clientUiScaling) {
 		report = {
-			suite: "client-text-scaling",
-			evidence: result.clientTextScaling,
+			suite: "client-ui-scaling",
+			evidence: result.clientUiScaling,
 			browserErrors,
 		};
 	} else if (options.clientSettingsTabs) {
@@ -689,7 +689,7 @@ function parseArgs(args) {
 		clientLoadouts: false,
 		clientPreciseJump: false,
 		clientSettingsTabs: false,
-		clientTextScaling: false,
+		clientUiScaling: false,
 		clientEnvironment: false,
 		clientVitals: false,
 		clientAttention: false,
@@ -933,9 +933,9 @@ function parseArgs(args) {
 			case "--client-hud":
 				parsed.clientHud = true;
 				break;
-			case "--client-text-scaling":
+			case "--client-ui-scaling":
 				parsed.clientHud = true;
-				parsed.clientTextScaling = true;
+				parsed.clientUiScaling = true;
 				break;
 			case "--client-loadouts":
 				parsed.clientHud = true;
@@ -2247,7 +2247,7 @@ Options:
   --client-precise-jump Verify phased aim feedback, cadence, stale progress, and first-success activation.
   --client-nearby       Exercise nearby catalog, name alerts, chat and minimap integration.
   --user-theme-lifecycle Verify real ClientApp theme switches retain the roster/gameplay canvas and runtime.
-  --client-text-scaling Verify text/icon scaling, theme composition, native dialogs, and retained UI.
+  --client-ui-scaling Verify UI/text scaling, theme composition, native dialogs, and retained UI.
   --client-mouse-movement Verify held mouse movement, steering, and cancellation.
   --client-hud-snapping Verify action-bar adjacency, alignment, and pointer release.
   --client-combat-bar   Verify attack controls, projectile supply, and HUD cancellation.
@@ -5017,7 +5017,7 @@ async function runClientHudHarness({ viteUrl }) {
 				state: { error: null, ready: true },
 			};
 
-		if (options.clientTextScaling) {
+		if (options.clientUiScaling) {
 			await probeClientSettingsTabs(client, evaluateExpression, delay);
 			await evaluateExpression(
 				client,
@@ -5025,9 +5025,9 @@ async function runClientHudHarness({ viteUrl }) {
 			);
 			await delay(50);
 			return {
-				clientTextScaling: await evaluate(
+				clientUiScaling: await evaluate(
 					client,
-					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeTextScaling",
+					"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeUiScaling",
 					[],
 				),
 				consoleMessages,
@@ -8414,7 +8414,20 @@ async function probeClientHousing(client) {
 	};
 }
 
+/** Exercise map input and top-layer menus under a nonneutral, fractional UI scale. */
 async function probeClientWorldMap(client) {
+	const api = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__";
+	const scale = 1.25;
+	await evaluateExpression(client, `${api}.setUiScale(${scale})`);
+	await delay(100);
+	try {
+		return { uiScale: scale, ...(await runClientWorldMapScenario(client)) };
+	} finally {
+		await evaluateExpression(client, `${api}.setUiScale(1)`);
+	}
+}
+
+async function runClientWorldMapScenario(client) {
 	const api = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__";
 	const read = (expression) => evaluateExpression(client, expression);
 	const click = async (label) => {
@@ -8564,6 +8577,13 @@ async function probeClientWorldMap(client) {
 	)
 		throw new Error(
 			"Context teleport did not reach the session with map coordinates.",
+		);
+	const actionCoordinates = await read(
+		`import('/src/lib/game/map/map-coordinates.ts').then(({formatWorldMapCoordinates}) => formatWorldMapCoordinates(${JSON.stringify(mapRequests[0].args.position)}))`,
+	);
+	if (actionCoordinates !== hoverPosition.text)
+		throw new Error(
+			"Map context action disagrees with the hovered coordinates.",
 		);
 	await read(`${api}.setMapTeleportPermission(false)`);
 	await delay(20);
@@ -9371,7 +9391,7 @@ async function probeClientWorldMap(client) {
 		throw new Error("Housing clusters did not separate with real map zoom.");
 	const clusterPositions = () =>
 		read(
-			`Array.from(document.querySelectorAll('[data-housing-search-areas]'), node => ({areas:node.dataset.housingSearchAreas, x:node.transform.baseVal.getItem(0).matrix.e, y:node.transform.baseVal.getItem(0).matrix.f}))`,
+			`Array.from(document.querySelectorAll('[data-housing-search-areas]'), node => { const matrix=node.getScreenCTM(); if(!matrix) throw new Error('Visible housing marker has no screen transform'); return {areas:node.dataset.housingSearchAreas, x:matrix.e, y:matrix.f}; })`,
 		);
 	const beforePan = await clusterPositions();
 	const mapCursor = () =>

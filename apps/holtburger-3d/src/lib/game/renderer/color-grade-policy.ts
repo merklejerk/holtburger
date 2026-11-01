@@ -1,5 +1,5 @@
-import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
-import { relativeLuminance } from "../environment/scene-lighting";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning.js";
+import { relativeLuminance } from "../environment/scene-lighting.js";
 
 /**
  * One authored control point on a grading curve.

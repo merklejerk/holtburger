@@ -52,3 +52,9 @@ await import(
 		import.meta.url,
 	).href
 );
+
+// Resolved bootstrap defaults must also be consumable from Electron Node ESM.
+await import(
+	new URL("../dist-electron/electron/client-settings-store.js", import.meta.url)
+		.href
+);

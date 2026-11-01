@@ -22,7 +22,7 @@ const unknownBook = { version: 2, value: { from: "future-build" } };
 const savedUi = {
 	fonts: { body: "mono", heading: "serif", mono: "sans" },
 	textScale: 1.5,
-	iconScale: 1.75,
+	uiScale: 1.75,
 };
 await writeFile(
 	settingsPath,
@@ -42,9 +42,11 @@ await writeFile(
 				characterSheet: { version: 1, value: savedCharacterSheet },
 			},
 		},
-		characters: {},
+		characters: { inactive: { retiredSection: { version: 1, value: true } } },
 	}),
 );
+
+const originalSource = await readFile(settingsPath, "utf8");
 
 const child = spawn(
 	process.platform === "win32" ? "npm.cmd" : "npm",
@@ -124,54 +126,64 @@ try {
 			const defaults = createDefaultClientUserSettings(
 				{ width: window.innerWidth, height: window.innerHeight }, 0
 			);
-			const before = await bridge.loadUser(defaults);
+			const before = await bridge.loadUser({ viewport: { width: window.innerWidth, height: window.innerHeight }, shortcutCount: 0 });
 			if (before.repaired.length !== 0)
 				throw new Error("Startup repair was repeated on the second load");
-			if (before.sections.ui.fonts.heading !== defaults.ui.fonts.heading ||
-				before.sections.ui.fonts.body !== "mono")
+			if (before.settings.ui.fonts.heading !== defaults.ui.fonts.heading ||
+				before.settings.ui.fonts.body !== "mono")
 				throw new Error("Startup repair did not preserve valid sibling preferences");
 			const expectedUi = ${JSON.stringify(savedUi)};
-			if (before.sections.ui.themeId !== defaults.ui.themeId) throw new Error("Older UI preferences did not restore the configured default theme");
-			if (before.sections.ui?.textScale !== expectedUi.textScale)
+			if (before.settings.ui.themeId !== defaults.ui.themeId) throw new Error("Older UI preferences did not restore the configured default theme");
+			if (before.settings.ui?.textScale !== expectedUi.textScale)
 				throw new Error("Saved text scale did not cross the preload bridge");
 			const scope = document.querySelector('.client-appearance-scope');
 			if (!scope || Number(scope.style.getPropertyValue('--ui-text-scale')) !== expectedUi.textScale)
 				throw new Error("Client mounted without the saved appearance scope");
-			if (before.sections.ui?.iconScale !== expectedUi.iconScale)
-				throw new Error('Persisted icon scale did not reach startup settings');
-			if (Number(scope.style.getPropertyValue('--ui-icon-scale')) !== expectedUi.iconScale)
-				throw new Error('Client appearance did not apply persisted icon scale');
+			if (before.settings.ui?.uiScale !== expectedUi.uiScale)
+				throw new Error('Persisted UI scale did not reach startup settings');
+			if (Number(scope.style.getPropertyValue('--ui-scale')) !== expectedUi.uiScale)
+				throw new Error('Client appearance did not apply persisted UI scale');
+			const surface = document.querySelector('.client-pregame-ui');
+			if (!surface || Math.abs(surface.clientWidth * expectedUi.uiScale - innerWidth) > expectedUi.uiScale)
+				throw new Error('Restored UI scale did not produce a logical pregame viewport');
+			const page = document.querySelector('.client-pregame-screen');
+			if (!page || Math.abs(page.getBoundingClientRect().height - innerHeight) > 1)
+				throw new Error('Scaled pregame page does not fit browser height: ' + JSON.stringify({pageHeight:page?.getBoundingClientRect().height, viewportHeight:innerHeight}));
+			const footer = page.querySelector('.pregame-footer').getBoundingClientRect();
+			if (footer.bottom > innerHeight + 1) throw new Error('Scaled pregame footer is outside the native window');
+			if (surface.clientWidth <= 850 && getComputedStyle(page.querySelector('.pregame-content')).overflowY !== 'auto')
+				throw new Error('Pregame responsive layout ignored logical viewport width');
 
 			const authoredSize = Number.parseFloat(getComputedStyle(scope).getPropertyValue('--ui-font-size-body'));
 			if (Math.abs(Number.parseFloat(getComputedStyle(scope).fontSize) - authoredSize * expectedUi.textScale) > 0.02)
 				throw new Error("Client startup did not apply the restored text scale");
-			if (!before.unavailable.some((reason) => reason.includes("hudPlacements.book")))
-				throw new Error("Future book section was not reported");
 			const expectedPanel = ${JSON.stringify(savedCharacterSheet)};
-			if (JSON.stringify(before.hudPlacements.characterSheet) !== JSON.stringify(expectedPanel))
+			if (JSON.stringify(before.settings.hudLayout.characterSheet) !== JSON.stringify(expectedPanel))
 				throw new Error("Character panel placement did not cross the preload bridge");
 			await bridge.saveUserPatch({
 				sections: { chatFilters: defaults.chatFilters },
 				hudPlacements: { characterSheet: { ...expectedPanel, preferredWidth: 700 } }
 			});
-			return { bridgeReady: true, themesReady: true, unavailable: before.unavailable };
+			return { bridgeReady: true, themesReady: true, settingsResolved: true };
 		}`,
 	);
 	const collection = JSON.parse(await readFile(settingsPath, "utf8"));
 	if ("retiredTheme" in collection.user.ui.value)
 		throw new Error("Startup repair left a retired setting on disk");
+	if (
+		"book" in collection.user.hudPlacements ||
+		Object.keys(collection.characters.inactive).length !== 0
+	)
+		throw new Error("Startup retained unsupported sections");
 	const backups = (await readdir(directory)).filter((name) =>
 		name.includes(".backup-"),
 	);
-	if (backups.length !== 1)
-		throw new Error(
-			"Startup repair did not retain exactly one original backup",
-		);
-	if (
-		JSON.stringify(collection.user.hudPlacements.book) !==
-		JSON.stringify(unknownBook)
-	)
-		throw new Error("A save changed the future book placement");
+	const backupSources = await Promise.all(
+		backups.map((name) => readFile(join(directory, name), "utf8")),
+	);
+	if (!backupSources.includes(originalSource))
+		throw new Error("Normalization did not retain the original source");
+
 	if (
 		collection.user.hudPlacements.characterSheet?.value.preferredWidth !== 700
 	)

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { applyUiScale } from "../../app/ui-scale";
+	import { logicalClientHudViewport } from "../../client/client-hud-layout";
 	import type { Snippet } from "svelte";
 	import UiRange from "../../app/UiRange.svelte";
 	import UiDialog from "../../app/UiDialog.svelte";
@@ -17,7 +19,7 @@
 	import type { ClientAppPhase } from "../../client/client-app-lifecycle";
 	import {
 		CLIENT_TEXT_SCALE,
-		CLIENT_ICON_SCALE,
+		CLIENT_UI_SCALE,
 	} from "../../client/client-settings-values";
 	import type { ClientVital } from "../../client/client-host-contract";
 	import {
@@ -63,7 +65,12 @@
 	const settingsAudio = $derived(preferences.audio);
 	let stageWidth = $state(1000);
 	let stageHeight = $state(800);
-	const viewport = $derived({ width: stageWidth, height: stageHeight });
+	const viewport = $derived(
+		logicalClientHudViewport(
+			{ width: stageWidth, height: stageHeight },
+			preferences.ui.uiScale,
+		),
+	);
 	function defaultPlacement(): ClientHudPlacement {
 		return {
 			horizontal: { alignment: "center", offset: 0 },
@@ -185,7 +192,7 @@
 	class="showcase ui-theme"
 	aria-label="UI showcase"
 	style:--ui-text-scale={preferences.ui.textScale}
-	style:--ui-icon-scale={preferences.ui.iconScale}
+	style:--ui-scale={preferences.ui.uiScale}
 	data-showcase-ready={session !== null}
 	data-showcase-pending={pending}
 >
@@ -310,17 +317,17 @@
 				/></label
 			>
 			<label class="ui-label"
-				>Icon scale<UiRange
-					min={CLIENT_ICON_SCALE.minimum}
-					max={CLIENT_ICON_SCALE.maximum}
-					step={CLIENT_ICON_SCALE.step}
-					value={preferences.ui.iconScale}
+				>UI scale<UiRange
+					min={CLIENT_UI_SCALE.minimum}
+					max={CLIENT_UI_SCALE.maximum}
+					step={CLIENT_UI_SCALE.step}
+					value={preferences.ui.uiScale}
 					oninput={(event) =>
 						onSettingsChange({
 							...preferences,
 							ui: {
 								...preferences.ui,
-								iconScale: event.currentTarget.valueAsNumber,
+								uiScale: event.currentTarget.valueAsNumber,
 							},
 						})}
 				/></label
@@ -430,215 +437,222 @@
 				onerror={() => (imageFailed = true)}
 			/>{/if}
 		{@render children()}
-		{#if session !== null}
-			<ClientHudWindow
-				visible={windowOpen}
-				icon="debug"
-				title="Component showcase"
-				{placement}
-				{viewport}
-				minWidth={CLIENT_UI_DEFAULTS.debug.minSize.width}
-				minHeight={CLIENT_UI_DEFAULTS.debug.minSize.height}
-				onClose={() => (windowOpen = false)}
-				onPlacementChange={(next) => (placement = next)}
-			>
-				<div
-					class="ui-body ui-tabbed-panel"
-					use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
+		<div class="showcase-specimens" use:applyUiScale={preferences.ui.uiScale}>
+			{#if session !== null}
+				<ClientHudWindow
+					visible={windowOpen}
+					icon="debug"
+					title="Component showcase"
+					{placement}
+					{viewport}
+					minWidth={CLIENT_UI_DEFAULTS.debug.minSize.width}
+					minHeight={CLIENT_UI_DEFAULTS.debug.minSize.height}
+					onClose={() => (windowOpen = false)}
+					onPlacementChange={(next) => (placement = next)}
 				>
-					<UiTabs
-						label="Showcase pages"
-						tabs={showcaseTabs}
-						selected={tab}
-						onSelect={(value) => (tab = value)}
-					/>
-					<UiTabPanel
-						id="showcase-controls-panel"
-						labelledBy="showcase-controls-tab"
-						active={tab === "controls"}
+					<div
+						class="ui-body ui-tabbed-panel"
+						use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}
 					>
-						<div class="showcase-window-body">
-							<div class="showcase-item-specimens">
-								<span class="ui-muted">Item wells · synthetic artwork</span>
-								<div class="ui-item-grid" aria-label="Item specimens">
-									{#each itemSpecimens as item (item.guid)}
-										<ItemGridCell
-											label={item.name}
-											itemGuid={item.guid}
-											display={{ kind: "ready", url: item.url }}
-											equipped={false}
-											count={item.count}
-											selected={selectedItem === item.guid}
-											disabled={false}
-											onselect={() => (selectedItem = item.guid)}
-										/>
-									{/each}
-									<ItemGridCell
-										label="Empty specimen"
-										itemGuid={null}
-										display={undefined}
-										equipped={false}
-										selected={false}
-										disabled={false}
-										onselect={() => {}}
-									/>
-								</div>
-							</div>
-							<div class="showcase-actions">
-								<button
-									class="ui-button"
-									onclick={() =>
-										requireSession().setJump(initialJumpExtent, true)}
-									>Reset charge</button
-								><button class="ui-button" disabled>Disabled</button>
-							</div>
-							<button class="ui-button" onclick={() => (dialogOpen = true)}
-								>Open dialog</button
-							>
-							<label class="ui-label"
-								>Text input<input
-									class="ui-input"
-									placeholder="Type here"
-								/></label
-							>
-							<label class="ui-label"
-								>Invalid input<input
-									class="ui-input"
-									aria-invalid="true"
-									value="Invalid value"
-								/></label
-							>
-							<ToggleField
-								checked={toggle}
-								label="Example setting"
-								checkedLabel="On"
-								uncheckedLabel="Off"
-								onCheckedChange={(value) => (toggle = value)}
-							/>
-							<div class="showcase-actions">
-								<label class="ui-checkbox"
-									><input type="checkbox" /> Unchecked setting</label
-								>
-								<label class="ui-checkbox"
-									><input type="checkbox" checked disabled /> Disabled setting</label
-								>
-							</div>
-							<label class="ui-label"
-								>Jump charge<UiRange
-									min={0}
-									max={1}
-									step="0.05"
-									value={session?.jumpExtent ?? initialJumpExtent}
-									oninput={(event) =>
-										requireSession().setJump(
-											event.currentTarget.valueAsNumber,
-											true,
-										)}
-								/></label
-							>
-							<label class="ui-label"
-								>Disabled slider<UiRange
-									min={0}
-									max={100}
-									value={50}
-									disabled
-								/></label
-							>
-							<div class="ui-well">
-								<p class="ui-success">Changes saved.</p>
-								<p class="ui-warning">Your pack is almost full.</p>
-								<p class="ui-danger">You are too far away.</p>
-							</div>
-							<h3>Dropdowns</h3>
-							<UiShowcaseDropdowns
-								visible={tab === "controls" && windowOpen}
-								onNotice={notice}
-							/>
-						</div>
-					</UiTabPanel>
-					<UiTabPanel
-						id="showcase-characters-panel"
-						labelledBy="showcase-characters-tab"
-						active={tab === "characters"}
-					>
-						<ClientCharacterSelect
-							visualCache={null}
-							management={{ kind: "idle" }}
-							creation={null}
-							scene={null}
-							state={characters}
-							entryPending={false}
-							onChoose={(guid) =>
-								(characters = { ...characters, selectedGuid: guid })}
-							onEnter={() => {
-								notice("Character entry preview — no connection opened.");
-							}}
-							onDisconnect={() => {
-								characters = { ...characters, selectedGuid: null };
-							}}
-						>
-							{#snippet settings()}
-								<ClientPregameSettings
-									theme={themeSettings}
-									graphics={settingsGraphics}
-									audio={settingsAudio}
-									ui={settingsUi}
-									textureFilteringCapabilities={null}
-									onGraphicsChange={(graphics) =>
-										onSettingsChange({ ...preferences, graphics })}
-									onAudioChange={(audio) =>
-										onSettingsChange({ ...preferences, audio })}
-									onUiChange={(ui) => onSettingsChange({ ...preferences, ui })}
-								/>
-							{/snippet}
-						</ClientCharacterSelect>
-					</UiTabPanel>
-					<UiTabPanel
-						id="showcase-diagnostics-panel"
-						labelledBy="showcase-diagnostics-tab"
-						active={tab === "diagnostics"}
-					>
-						<ClientDebugPanel
-							readDiagnostics={() => null}
-							readSelectedEntity={() => null}
-							entityCollisionDisabled={false}
-							onEntityCollisionDisabledChange={() => {}}
-							{unrestrictedUse}
-							onUnrestrictedUseChange={(enabled) => (unrestrictedUse = enabled)}
-							showRetailHiddenGeometry={showHidden}
-							onShowRetailHiddenGeometryChange={(value) => (showHidden = value)}
+						<UiTabs
+							label="Showcase pages"
+							tabs={showcaseTabs}
+							selected={tab}
+							onSelect={(value) => (tab = value)}
 						/>
-					</UiTabPanel>
-				</div>
-			</ClientHudWindow>
-		{/if}
+						<UiTabPanel
+							id="showcase-controls-panel"
+							labelledBy="showcase-controls-tab"
+							active={tab === "controls"}
+						>
+							<div class="showcase-window-body">
+								<div class="showcase-item-specimens">
+									<span class="ui-muted">Item wells · synthetic artwork</span>
+									<div class="ui-item-grid" aria-label="Item specimens">
+										{#each itemSpecimens as item (item.guid)}
+											<ItemGridCell
+												label={item.name}
+												itemGuid={item.guid}
+												display={{ kind: "ready", url: item.url }}
+												equipped={false}
+												count={item.count}
+												selected={selectedItem === item.guid}
+												disabled={false}
+												onselect={() => (selectedItem = item.guid)}
+											/>
+										{/each}
+										<ItemGridCell
+											label="Empty specimen"
+											itemGuid={null}
+											display={undefined}
+											equipped={false}
+											selected={false}
+											disabled={false}
+											onselect={() => {}}
+										/>
+									</div>
+								</div>
+								<div class="showcase-actions">
+									<button
+										class="ui-button"
+										onclick={() =>
+											requireSession().setJump(initialJumpExtent, true)}
+										>Reset charge</button
+									><button class="ui-button" disabled>Disabled</button>
+								</div>
+								<button class="ui-button" onclick={() => (dialogOpen = true)}
+									>Open dialog</button
+								>
+								<label class="ui-label"
+									>Text input<input
+										class="ui-input"
+										placeholder="Type here"
+									/></label
+								>
+								<label class="ui-label"
+									>Invalid input<input
+										class="ui-input"
+										aria-invalid="true"
+										value="Invalid value"
+									/></label
+								>
+								<ToggleField
+									checked={toggle}
+									label="Example setting"
+									checkedLabel="On"
+									uncheckedLabel="Off"
+									onCheckedChange={(value) => (toggle = value)}
+								/>
+								<div class="showcase-actions">
+									<label class="ui-checkbox"
+										><input type="checkbox" /> Unchecked setting</label
+									>
+									<label class="ui-checkbox"
+										><input type="checkbox" checked disabled /> Disabled setting</label
+									>
+								</div>
+								<label class="ui-label"
+									>Jump charge<UiRange
+										min={0}
+										max={1}
+										step="0.05"
+										value={session?.jumpExtent ?? initialJumpExtent}
+										oninput={(event) =>
+											requireSession().setJump(
+												event.currentTarget.valueAsNumber,
+												true,
+											)}
+									/></label
+								>
+								<label class="ui-label"
+									>Disabled slider<UiRange
+										min={0}
+										max={100}
+										value={50}
+										disabled
+									/></label
+								>
+								<div class="ui-well">
+									<p class="ui-success">Changes saved.</p>
+									<p class="ui-warning">Your pack is almost full.</p>
+									<p class="ui-danger">You are too far away.</p>
+								</div>
+								<h3>Dropdowns</h3>
+								<UiShowcaseDropdowns
+									visible={tab === "controls" && windowOpen}
+									onNotice={notice}
+								/>
+							</div>
+						</UiTabPanel>
+						<UiTabPanel
+							id="showcase-characters-panel"
+							labelledBy="showcase-characters-tab"
+							active={tab === "characters"}
+						>
+							<ClientCharacterSelect
+								visualCache={null}
+								management={{ kind: "idle" }}
+								creation={null}
+								scene={null}
+								state={characters}
+								entryPending={false}
+								onChoose={(guid) =>
+									(characters = { ...characters, selectedGuid: guid })}
+								onEnter={() => {
+									notice("Character entry preview — no connection opened.");
+								}}
+								onDisconnect={() => {
+									characters = { ...characters, selectedGuid: null };
+								}}
+							>
+								{#snippet settings()}
+									<ClientPregameSettings
+										theme={themeSettings}
+										graphics={settingsGraphics}
+										audio={settingsAudio}
+										ui={settingsUi}
+										textureFilteringCapabilities={null}
+										onGraphicsChange={(graphics) =>
+											onSettingsChange({ ...preferences, graphics })}
+										onAudioChange={(audio) =>
+											onSettingsChange({ ...preferences, audio })}
+										onUiChange={(ui) =>
+											onSettingsChange({ ...preferences, ui })}
+									/>
+								{/snippet}
+							</ClientCharacterSelect>
+						</UiTabPanel>
+						<UiTabPanel
+							id="showcase-diagnostics-panel"
+							labelledBy="showcase-diagnostics-tab"
+							active={tab === "diagnostics"}
+						>
+							<ClientDebugPanel
+								readDiagnostics={() => null}
+								readSelectedEntity={() => null}
+								entityCollisionDisabled={false}
+								onEntityCollisionDisabledChange={() => {}}
+								{unrestrictedUse}
+								onUnrestrictedUseChange={(enabled) =>
+									(unrestrictedUse = enabled)}
+								showRetailHiddenGeometry={showHidden}
+								onShowRetailHiddenGeometryChange={(value) =>
+									(showHidden = value)}
+							/>
+						</UiTabPanel>
+					</div>
+				</ClientHudWindow>
+			{/if}
+		</div>
 	</div>
 </main>
-{#if dialogOpen}
-	<UiDialog
-		title="Travel supplies"
-		className="showcase-dialog"
-		initialFocus="input"
-		onCancel={() => (dialogOpen = false)}
-	>
-		<p>Preview a modal over the current theme and backdrop.</p>
-		<label class="ui-label"
-			>Pack label<input class="ui-input" value="Traveler’s kit" /></label
+<div use:applyUiScale={preferences.ui.uiScale}>
+	{#if dialogOpen}
+		<UiDialog
+			title="Travel supplies"
+			className="showcase-dialog"
+			initialFocus="input"
+			onCancel={() => (dialogOpen = false)}
 		>
-		<div class="ui-dialog-actions">
-			<button class="ui-button" onclick={() => (dialogOpen = false)}
-				>Cancel</button
+			<p>Preview a modal over the current theme and backdrop.</p>
+			<label class="ui-label"
+				>Pack label<input class="ui-input" value="Traveler’s kit" /></label
 			>
-			<button
-				class="ui-button"
-				onclick={() => {
-					dialogOpen = false;
-					notice("Dialog accepted — preview only.");
-				}}>Accept</button
-			>
-		</div>
-	</UiDialog>
-{/if}
+			<div class="ui-dialog-actions">
+				<button class="ui-button" onclick={() => (dialogOpen = false)}
+					>Cancel</button
+				>
+				<button
+					class="ui-button"
+					onclick={() => {
+						dialogOpen = false;
+						notice("Dialog accepted — preview only.");
+					}}>Accept</button
+				>
+			</div>
+		</UiDialog>
+	{/if}
+</div>
 
 <style>
 	@layer components {
@@ -658,6 +672,14 @@
 		.showcase-window-body {
 			display: grid;
 			gap: 8px;
+		}
+		.showcase-specimens {
+			position: absolute;
+			inset: 0;
+			pointer-events: none;
+		}
+		.showcase-specimens > :global(*) {
+			pointer-events: auto;
 		}
 		.showcase-stage {
 			grid-column: 1;
@@ -714,10 +736,7 @@
 			gap: 4px;
 		}
 		.showcase-item-specimens .ui-item-grid {
-			grid-template-columns: repeat(
-				4,
-				calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale))
-			);
+			grid-template-columns: repeat(4, calc(var(--ui-item-cell-min-size)));
 		}
 	}
 </style>

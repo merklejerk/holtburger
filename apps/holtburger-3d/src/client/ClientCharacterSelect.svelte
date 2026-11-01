@@ -478,7 +478,7 @@
 			display: grid;
 			grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
 			grid-template-rows: minmax(0, 1fr);
-			gap: 32px clamp(24px, 5vw, 80px);
+			gap: 32px clamp(24px, calc(var(--ui-viewport-width) * 0.05), 80px);
 			min-width: 0;
 			min-height: 0;
 		}
@@ -488,7 +488,7 @@
 			/* The heading and actions retain their size; the list owns the remaining height. */
 			grid-template-rows: auto minmax(0, 1fr) auto;
 			align-self: start;
-			height: min(100%, 50dvh);
+			height: min(100%, calc(var(--ui-viewport-height) * 0.5));
 			gap: 24px;
 			min-width: 0;
 			min-height: 0;
@@ -573,13 +573,13 @@
 			display: grid;
 			gap: 12px;
 		}
-		@media (max-width: 640px) {
+		@container pregame-viewport (max-width: 640px) {
 			.character-roster {
 				grid-template-rows: auto auto auto;
 				height: auto;
 			}
 			.client-character-list {
-				max-height: 40vh;
+				max-height: calc(var(--ui-viewport-height) * 0.4);
 			}
 			.character-roster::before {
 				/* Stacked controls shade their own rows rather than the preview below. */
@@ -595,7 +595,7 @@
 				grid-row: 2;
 			}
 			.character-preview-viewport {
-				height: 50vh;
+				height: calc(var(--ui-viewport-height) * 0.5);
 			}
 		}
 	}

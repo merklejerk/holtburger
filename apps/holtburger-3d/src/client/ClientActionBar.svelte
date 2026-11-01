@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { uiLocalSize } from "../app/ui-scale";
 	import { pulseItemCell } from "../app/item-cell-pulse";
 	import { loadoutLabel } from "./client-loadout";
 	import { presentClientBinding } from "./client-binding-catalog";
@@ -95,8 +96,8 @@
 		const menu = node.firstElementChild;
 		if (menu === null) throw new Error("Missing action bar menu metric");
 		const update = () => {
-			const { width: cell, height: gap } = node.getBoundingClientRect();
-			const menuSize = menu.getBoundingClientRect().width;
+			const { width: cell, height: gap } = uiLocalSize(node);
+			const menuSize = uiLocalSize(menu).width;
 			if (!Number.isFinite(cell) || cell <= 0)
 				throw new Error("Invalid action bar cell size");
 			if (!Number.isFinite(gap) || gap < 0)
@@ -220,7 +221,7 @@
 	<div
 		class="action-bar"
 		class:vertical={bar.orientation === "vertical"}
-		style:--action-menu-strip-size={`calc(${CLIENT_ACTION_BAR_TUNING.menuStripSize}px * var(--ui-icon-scale))`}
+		style:--action-menu-strip-size={`${CLIENT_ACTION_BAR_TUNING.menuStripSize}px`}
 		class:action-bar-focused={focused !== null}
 		tabindex="-1"
 		role="group"
@@ -377,7 +378,7 @@
 	@layer components {
 		.action-bar {
 			display: grid;
-			gap: calc(var(--ui-action-bar-strip-gap) * var(--ui-icon-scale));
+			gap: var(--ui-action-bar-strip-gap);
 			grid-template-columns: var(--action-menu-strip-size) minmax(0, 1fr);
 			grid-template-rows: minmax(0, 1fr);
 			position: relative;
@@ -389,8 +390,8 @@
 			position: absolute;
 			visibility: hidden;
 			pointer-events: none;
-			width: calc(var(--ui-shortcut-cell-size) * var(--ui-icon-scale));
-			height: calc(var(--ui-action-bar-strip-gap) * var(--ui-icon-scale));
+			width: var(--ui-shortcut-cell-size);
+			height: var(--ui-action-bar-strip-gap);
 		}
 		.action-menu-metric {
 			display: block;
@@ -415,7 +416,7 @@
 		}
 		.action-menu-strip {
 			font-size: calc(
-				var(--ui-action-bar-label-font-size) * var(--ui-icon-scale)
+				var(--ui-action-bar-label-font-size) * var(--ui-text-scale)
 			);
 			--ui-button-background-color: color-mix(
 				in srgb,

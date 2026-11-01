@@ -399,8 +399,8 @@
 		}
 		.inventory-currency-icon {
 			container: inventory-pyreal-icon / inline-size;
-			width: calc(var(--ui-inventory-pyreal-icon-size) * var(--ui-icon-scale));
-			height: calc(var(--ui-inventory-pyreal-icon-size) * var(--ui-icon-scale));
+			width: var(--ui-inventory-pyreal-icon-size);
+			height: var(--ui-inventory-pyreal-icon-size);
 			flex: none;
 		}
 		.inventory-currency-icon :global(.ui-icon) {

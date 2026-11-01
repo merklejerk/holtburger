@@ -1,10 +1,10 @@
-import { SPELL_BAR_INDICES } from "./client-spell-bar-state";
-import { CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
-import { COMBAT_GAUGE_SIZE } from "./client-combat-bar-state";
+import { SPELL_BAR_INDICES } from "./client-spell-bar-state.js";
+import { CLIENT_ACTION_BAR_TUNING } from "./client-tuning.js";
+import { COMBAT_GAUGE_SIZE } from "./client-combat-bar-state.js";
 import type { ClientUiDefaults } from "./client-ui-contract";
 
 /**
- * Initial client HUD arrangement, in CSS pixels.
+ * Initial client HUD arrangement, in logical UI units.
  * Edge offsets point inward; centered offsets are signed (positive right/down).
  * Fitting and user edits live in client-hud-layout; visibility stays in Svelte.
  */

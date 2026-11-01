@@ -1,4 +1,4 @@
-import { AABB3, Mat4, Quat, Vec3 } from "./types";
+import { AABB3, Mat4, Quat, Vec3 } from "./types.js";
 
 /** Compose column-major transforms for column-vector multiplication. */
 export function multiplyMat4(

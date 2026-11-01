@@ -1,11 +1,11 @@
-import { SHARED_FRONTEND_TUNING } from "./frontend-tuning";
-import { normalizedRgbaColor } from "./frontend-color";
-import { DEFAULT_AMBIENT_OCCLUSION_PARAMETERS } from "./game/renderer/ambient-occlusion-policy";
-import { DEFAULT_COLOR_GRADE_PARAMETERS } from "./game/renderer/color-grade-policy";
-import { DEFAULT_ENTITY_SHADOW_SETTINGS } from "./game/renderer/entity-shadow-policy";
+import { SHARED_FRONTEND_TUNING } from "./frontend-tuning.js";
+import { normalizedRgbaColor } from "./frontend-color.js";
+import { DEFAULT_AMBIENT_OCCLUSION_PARAMETERS } from "./game/renderer/ambient-occlusion-policy.js";
+import { DEFAULT_COLOR_GRADE_PARAMETERS } from "./game/renderer/color-grade-policy.js";
+import { DEFAULT_ENTITY_SHADOW_SETTINGS } from "./game/renderer/entity-shadow-policy.js";
 import type { NameplateSettings } from "./game/renderer/nameplate-policy";
 import type { FrameSettings } from "./game/renderer/renderer";
-import { LandblockLayerKind } from "./game/runtime/scene-interest";
+import { LandblockLayerKind } from "./game/runtime/scene-interest.js";
 
 const NAMEPLATE_TUNING = SHARED_FRONTEND_TUNING.rendering.nameplates;
 

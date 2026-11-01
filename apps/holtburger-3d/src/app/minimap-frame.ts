@@ -42,19 +42,26 @@ export interface MinimapFooterExtent {
 	readonly height: number;
 }
 
-/** Minimap geometry and view choices, owned by whichever shell mounts the widget. */
-export interface MinimapState {
+/** Logical placement and size, changed only by explicit layout gestures. */
+export interface MinimapGeometry {
+	/** Horizontal offset within the containing logical UI viewport. */
 	readonly left: number;
+	/** Vertical offset within the containing logical UI viewport. */
 	readonly top: number;
+	/** Outer logical diameter, including the bezel. */
 	readonly size: number;
+}
+
+/** Geometry and zoom choices coexist in the view but have separate persistence operations. */
+export interface MinimapState extends MinimapGeometry {
 	readonly viewDiameters: MinimapViewDiameters;
 }
 
 /** Client-shell limits for the disc; viewport height already reserves the footer's height. */
 export interface MinimapResizeBounds {
-	/** Usable horizontal viewport extent in CSS pixels. */
+	/** Usable horizontal viewport extent in logical UI units. */
 	readonly width: number;
-	/** Usable vertical disc extent in CSS pixels. */
+	/** Usable vertical disc extent in logical UI units. */
 	readonly height: number;
 	/** Centered readout width, which can extend beyond a small disc. */
 	readonly footerWidth: number;
@@ -62,13 +69,13 @@ export interface MinimapResizeBounds {
 
 /** Resize the square map, keeping the opposing borders stationary on the dragged axes. */
 export function resizeMinimapBounds(
-	start: Pick<MinimapState, "left" | "top" | "size">,
+	start: MinimapGeometry,
 	minimumSize: number,
 	deltaX: number,
 	deltaY: number,
 	edges: ResizeEdges,
 	bounds: MinimapResizeBounds | null,
-): Pick<MinimapState, "left" | "top" | "size"> {
+): MinimapGeometry {
 	let delta: number;
 	if (edges.horizontal === undefined) {
 		delta = edges.vertical === "top" ? -deltaY : deltaY;

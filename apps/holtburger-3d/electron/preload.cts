@@ -205,8 +205,8 @@ if (process.argv.includes("--holtburger-mode=client")) {
 		},
 	});
 	contextBridge.exposeInMainWorld("holtburgerSettings", {
-		loadUser(defaults: unknown): Promise<unknown> {
-			return invoke("settings:load-user", defaults);
+		loadUser(context: unknown): Promise<unknown> {
+			return invoke("settings:load-user", context);
 		},
 		saveUserPatch(patch: unknown): Promise<void> {
 			return invoke("settings:save-user-patch", patch);

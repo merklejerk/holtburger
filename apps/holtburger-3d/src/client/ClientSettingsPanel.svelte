@@ -740,7 +740,12 @@
 		.settings-panel {
 			position: relative;
 			height: 100%;
-			overflow: hidden;
+			overflow: auto;
+		}
+		.settings-panel > .ui-tabbed-panel {
+			/* Extreme scales can leave less room than the tabs need. Keep a usable body
+			 * and let the outer settings surface scroll instead of collapsing it to zero. */
+			grid-template-rows: auto minmax(3em, 1fr);
 		}
 		.binding-group {
 			display: block;

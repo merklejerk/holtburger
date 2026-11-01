@@ -402,10 +402,7 @@
 		.vendor-offer-row {
 			display: grid;
 			grid-template-columns:
-				calc(var(--ui-vendor-offer-icon-size) * var(--ui-icon-scale)) minmax(
-					0,
-					1fr
-				)
+				var(--ui-vendor-offer-icon-size) minmax(0, 1fr)
 				auto;
 			align-items: center;
 			gap: var(--ui-vendor-offer-column-gap);
@@ -428,8 +425,8 @@
 			cursor: not-allowed;
 		}
 		.offer-icon {
-			width: calc(var(--ui-vendor-offer-icon-size) * var(--ui-icon-scale));
-			height: calc(var(--ui-vendor-offer-icon-size) * var(--ui-icon-scale));
+			width: var(--ui-vendor-offer-icon-size);
+			height: var(--ui-vendor-offer-icon-size);
 			min-width: 0;
 			overflow: hidden;
 		}

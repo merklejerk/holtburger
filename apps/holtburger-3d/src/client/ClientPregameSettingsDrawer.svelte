@@ -53,10 +53,10 @@
 			position: fixed;
 			inset: 0 0 0 auto;
 			margin: 0;
-			width: min(30rem, 100vw);
-			max-width: 100vw;
-			height: 100dvh;
-			max-height: 100dvh;
+			width: min(30rem, var(--ui-viewport-width));
+			max-width: var(--ui-viewport-width);
+			height: var(--ui-viewport-height);
+			max-height: var(--ui-viewport-height);
 			padding: 0;
 			box-sizing: border-box;
 			overflow: hidden;

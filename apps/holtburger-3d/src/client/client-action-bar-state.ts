@@ -5,7 +5,7 @@ import {
 	ACTION_SLOT_INDICES,
 	MAX_ACTION_BARS,
 	type ActionSlotIndex,
-} from "./client-action-bar-contract";
+} from "./client-action-bar-contract.js";
 /** World-produced equivalence retained after a consumable instance disappears. */
 export type ConsumableIdentity = NonNullable<
 	Extract<ClientEntityFacts["description"], { kind: "known" }>["consumable"]

@@ -1,6 +1,6 @@
-import { Vec3 } from "../math/types";
-import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning";
-import { type ResolvedSceneLighting } from "./scene-environment";
+import { Vec3 } from "../math/types.js";
+import { SHARED_FRONTEND_TUNING } from "../../frontend-tuning.js";
+import { type ResolvedSceneLighting } from "./scene-environment.js";
 
 /**
  * Retail scales the sun's magnitude by this and adds it to the ambient level to form the world

@@ -1,14 +1,14 @@
 import type { CombatEffectsTuning } from "../lib/game/systems/combat-effects-system";
-import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning";
-import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings";
-import { hexRgba } from "../lib/frontend-color";
+import { SHARED_FRONTEND_TUNING } from "../lib/frontend-tuning.js";
+import { SHARED_FRAME_SETTINGS } from "../lib/frontend-frame-settings.js";
+import { hexRgba } from "../lib/frontend-color.js";
 import type { FrameSettings } from "../lib/game/renderer/renderer";
 import type { FrontendUiDiagnosticsTuning } from "../lib/frontend-tuning-contract";
 import type {
 	ClientPortalTransitionTuning,
 	ClientTuning,
 } from "./client-tuning-contract";
-import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout";
+import { CLIENT_INSPECTION_PREVIEW_HEIGHT } from "./client-inspection-layout.js";
 
 /** Horizontal proximity suppresses unstable compass bearings without clearing navigation intent. */
 export const CLIENT_WAYPOINT_NEAR_RADIUS_METERS = 25;

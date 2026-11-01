@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { UI_SCALE_CHANGE_EVENT } from "../app/ui-scale";
 	import type { ClientContractsState } from "./client-contracts-state";
 	import { ContractMapOverlay } from "./client-contracts-map-overlay";
 	import { CLIENT_TUNING } from "./client-tuning";
@@ -457,15 +458,15 @@
 			return;
 		}
 		const rect = canvas.getBoundingClientRect();
-		const x = hover.x - rect.left,
-			y = hover.y - rect.top;
+		const x = ((hover.x - rect.left) * canvas.clientWidth) / rect.width,
+			y = ((hover.y - rect.top) * canvas.clientHeight) / rect.height;
 		const position = worldMapPosition(
 			x,
 			y,
 			view,
 			state.manifest.bounds,
-			rect.width,
-			rect.height,
+			canvas.clientWidth,
+			canvas.clientHeight,
 		);
 		positionTooltip.hidden = position === null;
 		const settlement =
@@ -492,11 +493,11 @@
 			positionTooltip.textContent = text;
 		// Flip away from the lower/right edges so the tooltip stays inside the surface.
 		const left =
-			x + 12 + positionTooltip.offsetWidth <= rect.width
+			x + 12 + positionTooltip.offsetWidth <= canvas.clientWidth
 				? x + 12
 				: x - 12 - positionTooltip.offsetWidth;
 		const top =
-			y + 12 + positionTooltip.offsetHeight <= rect.height
+			y + 12 + positionTooltip.offsetHeight <= canvas.clientHeight
 				? y + 12
 				: y - 12 - positionTooltip.offsetHeight;
 		positionTooltip.style.left = `${Math.max(0, left)}px`;
@@ -570,7 +571,8 @@
 		event.stopPropagation();
 		menu = null;
 		const mounted = owner;
-		const scale = view.spanMeters / Math.max(1, canvas.clientWidth);
+		const scale =
+			view.spanMeters / Math.max(1, canvas.getBoundingClientRect().width);
 		cancelPan?.();
 		cancelPan = trackWorldMapGesture(
 			window,
@@ -598,12 +600,12 @@
 		if (!view || (state.kind !== "streaming" && state.kind !== "ready")) return;
 		const rect = canvas.getBoundingClientRect();
 		const position = worldMapPosition(
-			event.clientX - rect.left,
-			event.clientY - rect.top,
+			((event.clientX - rect.left) * canvas.clientWidth) / rect.width,
+			((event.clientY - rect.top) * canvas.clientHeight) / rect.height,
 			view,
 			state.manifest.bounds,
-			rect.width,
-			rect.height,
+			canvas.clientWidth,
+			canvas.clientHeight,
 		);
 		if (!position || contextItems.length === 0) return;
 		const target = waypointFromMapPoint(sceneMapPoint(position.x, position.z));
@@ -654,6 +656,18 @@
 			Math.exp(pixels * SHARED_FRONTEND_TUNING.worldMap.wheelZoomRate),
 		);
 	}
+
+	onMount(() => {
+		const cancel = () => {
+			cancelPan?.();
+			cancelPan = null;
+			menu = null;
+			clearHover();
+			owner?.resize();
+		};
+		window.addEventListener(UI_SCALE_CHANGE_EVENT, cancel);
+		return () => window.removeEventListener(UI_SCALE_CHANGE_EVENT, cancel);
+	});
 </script>
 
 <div

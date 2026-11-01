@@ -6,8 +6,10 @@
 		--ui-font-body: Arimo, sans-serif;
 		/* Authored font lengths remain unscaled; each absolute-size consumer applies this once. */
 		--ui-text-scale: 1;
-		/* Authored icon lengths remain raw; consumers apply this multiplier once. */
-		--ui-icon-scale: 1;
+		/* Overall layout scale is applied once by the client UI boundary. */
+		--ui-scale: 1;
+		--ui-viewport-width: 100vw;
+		--ui-viewport-height: 100dvh;
 		--ui-font-heading: Gelasio, serif;
 		--ui-font-mono: Cousine, monospace;
 	}
@@ -332,7 +334,6 @@
 		--ui-filter-gap: 6px;
 		--ui-filter-pill-radius: 12px;
 		--ui-filter-pill-padding: 2px 8px;
-		--ui-filter-max-height: 40vh;
 		/* Category color contributions over the well surface, as percentages. */
 		--ui-filter-tint: 12%;
 		--ui-filter-active-tint: 38%;
@@ -689,8 +690,8 @@
 	}
 	/* Minimap rim controls share the reset button's compact circular footprint. */
 	.ui-theme .ui-minimap-button {
-		width: calc(var(--ui-minimap-button-size) * var(--ui-icon-scale));
-		height: calc(var(--ui-minimap-button-size) * var(--ui-icon-scale));
+		width: var(--ui-minimap-button-size);
+		height: var(--ui-minimap-button-size);
 		border-radius: var(--ui-minimap-button-radius);
 	}
 	/* Panel action rows share spacing independently of inline forms and icon toolbars. */
@@ -707,12 +708,12 @@
 	.ui-theme .ui-icon-actions {
 		display: flex;
 		align-items: center;
-		gap: calc(var(--ui-icon-action-gap) * var(--ui-icon-scale));
+		gap: var(--ui-icon-action-gap);
 	}
 	.ui-theme .ui-icon-actions .ui-icon-button {
-		width: calc(var(--ui-icon-action-size) * var(--ui-icon-scale));
-		height: calc(var(--ui-icon-action-size) * var(--ui-icon-scale));
-		padding: calc(var(--ui-icon-action-padding) * var(--ui-icon-scale));
+		width: var(--ui-icon-action-size);
+		height: var(--ui-icon-action-size);
+		padding: var(--ui-icon-action-padding);
 	}
 	/* State rules change defaults, not the property vocabulary. Explicit component
 	   variables are consumed in every state; themes select their values with CSS. */
@@ -969,8 +970,8 @@
 	}
 	/* Shared compact character presence for Social relationship and friend rows. */
 	.ui-theme .ui-presence {
-		width: calc(var(--ui-presence-size) * var(--ui-icon-scale));
-		height: calc(var(--ui-presence-size) * var(--ui-icon-scale));
+		width: var(--ui-presence-size);
+		height: var(--ui-presence-size);
 		flex-shrink: 0;
 		color: var(--ui-color-muted);
 	}
@@ -1299,12 +1300,9 @@
 		display: grid;
 		grid-template-columns: repeat(
 			auto-fill,
-			minmax(
-				min(100%, calc(var(--ui-item-cell-min-size) * var(--ui-icon-scale))),
-				1fr
-			)
+			minmax(min(100%, var(--ui-item-cell-min-size)), 1fr)
 		);
-		gap: calc(var(--ui-item-grid-gap) * var(--ui-icon-scale));
+		gap: var(--ui-item-grid-gap);
 	}
 	.ui-theme .ui-item-cell {
 		transition: opacity var(--ui-item-dim-duration, 150ms) ease-out;
@@ -1419,7 +1417,7 @@
 		height: 100%;
 		min-width: 0;
 		min-height: 0;
-		padding: calc(var(--ui-item-cell-padding) * var(--ui-icon-scale));
+		padding: var(--ui-item-cell-padding);
 		user-select: none;
 	}
 	.ui-shortcut-hint {
@@ -1430,7 +1428,7 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
-		font-size: calc(var(--ui-shortcut-hint-font-size) * var(--ui-icon-scale));
+		font-size: calc(var(--ui-shortcut-hint-font-size) * var(--ui-text-scale));
 		color: var(--ui-color-text);
 		text-shadow: 0 1px 2px var(--ui-color-shadow);
 		pointer-events: none;
@@ -1586,10 +1584,9 @@
 	.ui-stat-action {
 		position: relative;
 		flex-shrink: 0;
-		min-width: calc(1.6rem * var(--ui-icon-scale));
-		min-height: max(calc(1.35rem * var(--ui-icon-scale)), 1.5em);
-		padding: calc(0.15rem * var(--ui-icon-scale))
-			calc(0.2rem * var(--ui-icon-scale)) 0;
+		min-width: 1.6rem;
+		min-height: max(1.35rem, 1.5em);
+		padding: 0.15rem 0.2rem 0;
 		border: 0;
 		background: transparent;
 		color: inherit;
@@ -1686,5 +1683,12 @@
 		.ui-theme .ui-item-cell-pulse {
 			animation: none;
 		}
+	}
+}
+
+@layer base {
+	.ui-scale-surface {
+		--ui-viewport-width: calc(100vw / var(--ui-scale));
+		--ui-viewport-height: calc(100dvh / var(--ui-scale));
 	}
 }

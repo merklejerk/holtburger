@@ -9,8 +9,8 @@
 	.pregame-icon {
 		display: inline-grid;
 		place-items: center;
-		width: calc(1.15em * var(--ui-icon-scale));
-		height: calc(1.15em * var(--ui-icon-scale));
+		width: 1.15em;
+		height: 1.15em;
 		flex-shrink: 0;
 		vertical-align: middle;
 	}

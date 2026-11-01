@@ -1,3 +1,4 @@
+import { isolateHudProbe } from "./hud-probe-isolation.mjs";
 import assert from "node:assert/strict";
 import { writeFile } from "node:fs/promises";
 
@@ -7,6 +8,18 @@ export async function probeSpellBar(
 	evaluateExpression,
 	screenshotPath,
 ) {
+	const restore = await isolateHudProbe(
+		(expression) => evaluateExpression(client, expression),
+		"[data-spell-bar-surface], .shortcut-dock",
+	);
+	try {
+		return await runSpellBarProbe(client, evaluateExpression, screenshotPath);
+	} finally {
+		await restore();
+	}
+}
+
+async function runSpellBarProbe(client, evaluateExpression, screenshotPath) {
 	const read = (expression) => evaluateExpression(client, expression);
 	const api = "globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__";
 	const probe = `${api}.spellBarProbe`;
@@ -331,6 +344,13 @@ export async function probeSpellBar(
 	);
 	const toggleShape = async () => {
 		const handle = await point('[aria-label="Toggle spell bar shape"]');
+		const hit = await read(
+			`(() => { const node=document.elementFromPoint(${handle.x}, ${handle.y}); return {matches:!!node?.closest('[aria-label="Toggle spell bar shape"]'), target:node?.outerHTML.slice(0,1000), owner:node?.closest('section[aria-label]')?.getAttribute('aria-label')}; })()`,
+		);
+		assert.ok(
+			hit.matches,
+			"Spell shape control is occluded: " + JSON.stringify(hit),
+		);
 		await mouse("mousePressed", handle, 1);
 		await mouse("mouseReleased", handle, 0);
 		await settled();

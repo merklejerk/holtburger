@@ -7,39 +7,32 @@ import {
 } from "./client-settings-contract";
 import {
 	clientCharacterSectionsSchema,
-	clientHudPlacementsSchema,
-	clientUserSectionsSchema,
+	clientUserSettingsContextSchema,
+	type ClientUserSettingsContext,
 	clientUserSettingsPatchSchema,
 	type ClientCharacterSettingsPatch,
 	type ClientUserSettingsPatch,
 	type ClientCharacterSectionValues,
-	type ClientUserSectionValues,
 } from "./client-settings-sections";
-import type { ClientHudLayout } from "./client-hud-layout";
 import { createDefaultClientCharacterSettings } from "./client-settings-defaults";
 
-/** Validated, independently loaded user sections. */
+/** Complete, scale-aware bootstrap assembled by the app-local settings adapter. */
 interface ClientUserSettingsLoad {
-	readonly sections: Partial<ClientUserSectionValues>;
-	readonly hudPlacements: Partial<ClientHudLayout>;
-	readonly unavailable: readonly string[];
-	/** Persisted repairs, reported once after successful replacement. */
+	readonly settings: ClientUserSettings;
+	/** Persisted repairs, reported only after successful replacement. */
 	readonly repaired: readonly string[];
 }
 
 /** Validated, independently loaded character sections. */
 export interface ClientCharacterSettingsLoad {
 	readonly sections: Partial<ClientCharacterSectionValues>;
-	readonly unavailable: readonly string[];
 	/** Persisted repairs for this character, reported once after replacement. */
 	readonly repaired: readonly string[];
 }
 
 const userLoadSchema = z
 	.object({
-		sections: clientUserSectionsSchema,
-		hudPlacements: clientHudPlacementsSchema,
-		unavailable: z.array(z.string()),
+		settings: clientUserSettingsSchema,
 		repaired: z.array(z.string()),
 	})
 	.strict();
@@ -47,13 +40,12 @@ const userLoadSchema = z
 const characterLoadSchema = z
 	.object({
 		sections: clientCharacterSectionsSchema,
-		unavailable: z.array(z.string()),
 		repaired: z.array(z.string()),
 	})
 	.strict();
 
 interface ElectronSettingsBridge {
-	loadUser(defaults: ClientUserSettings): Promise<unknown>;
+	loadUser(context: ClientUserSettingsContext): Promise<unknown>;
 	saveUserPatch(patch: ClientUserSettingsPatch): Promise<void>;
 	resetUser(settings: ClientUserSettings): Promise<unknown>;
 	loadCharacter(
@@ -74,9 +66,9 @@ declare global {
 
 /** Renderer-facing local settings capability, separate from sidecar host transport. */
 export interface ClientSettingsTransport {
-	loadUser(defaults: ClientUserSettings): Promise<ClientUserSettingsLoad>;
+	loadUser(context: ClientUserSettingsContext): Promise<ClientUserSettingsLoad>;
 	saveUserPatch(patch: ClientUserSettingsPatch): Promise<void>;
-	resetUser(settings: ClientUserSettings): Promise<readonly string[]>;
+	resetUser(settings: ClientUserSettings): Promise<void>;
 	loadCharacter(characterGuid: number): Promise<ClientCharacterSettingsLoad>;
 	saveCharacterPatch(
 		characterGuid: number,
@@ -90,20 +82,16 @@ export function createElectronClientSettingsTransport(): ClientSettingsTransport
 	if (bridge === undefined)
 		throw new Error("Electron settings bridge is unavailable");
 	return {
-		async loadUser(defaults) {
+		async loadUser(context) {
 			return parseUserSettingsLoad(
-				await bridge.loadUser(clientUserSettingsSchema.parse(defaults)),
+				await bridge.loadUser(clientUserSettingsContextSchema.parse(context)),
 			);
 		},
 		saveUserPatch(patch) {
 			return bridge.saveUserPatch(clientUserSettingsPatchSchema.parse(patch));
 		},
 		async resetUser(settings) {
-			return z
-				.array(z.string())
-				.parse(
-					await bridge.resetUser(clientUserSettingsSchema.parse(settings)),
-				);
+			await bridge.resetUser(clientUserSettingsSchema.parse(settings));
 		},
 		async loadCharacter(characterGuid) {
 			return parseCharacterSettingsLoad(

@@ -7,7 +7,7 @@ export type HudSurfaceId = string;
 interface HudSurface {
 	/** Stable key for exclusion and mount-lifetime cleanup. */
 	readonly id: HudSurfaceId;
-	/** Pull resolved CSS-pixel geometry; null explicitly marks a hidden surface. */
+	/** Pull resolved logical UI geometry; null explicitly marks a hidden surface. */
 	readonly readBounds: () => ResolvedClientHudPlacement | null;
 }
 

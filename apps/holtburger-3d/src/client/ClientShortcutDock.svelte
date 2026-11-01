@@ -212,7 +212,7 @@
 			width: 100%;
 			height: 100%;
 			grid-template-columns: repeat(var(--shortcut-count), minmax(0, 1fr));
-			gap: calc(var(--ui-hud-icon-gap) * var(--ui-icon-scale));
+			gap: var(--ui-hud-icon-gap);
 		}
 		.shortcut-dock.vertical {
 			grid-template-columns: minmax(0, 1fr);
@@ -222,7 +222,7 @@
 			pointer-events: auto;
 			min-width: 0;
 			min-height: 0;
-			padding: calc(8px * var(--ui-icon-scale));
+			padding: 8px;
 		}
 	}
 </style>

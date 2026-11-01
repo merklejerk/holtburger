@@ -8,7 +8,7 @@
 		type LayoutMoveInset,
 	} from "../app/LayoutControls.svelte";
 	import type { ResizeEdges } from "../app/resize-edges";
-	import { trackPointerGesture } from "../app/pointer-gesture";
+	import { trackUiPointerGesture, pointerUiScale } from "../app/ui-scale";
 	import {
 		anchorClientHudPlacement,
 		moveClientHudRectangle,
@@ -79,6 +79,7 @@
 		if (event.button !== 0) return;
 		event.preventDefault();
 		event.stopPropagation();
+		const scale = pointerUiScale(event);
 		const startX = event.clientX;
 		const startY = event.clientY;
 		const start = resolved;
@@ -88,7 +89,7 @@
 			height: sizedPlacement.preferredHeight,
 		};
 		cancelPointerGesture?.();
-		cancelPointerGesture = trackPointerGesture(
+		cancelPointerGesture = trackUiPointerGesture(
 			window,
 			event.pointerId,
 			(moved) => {
@@ -97,7 +98,10 @@
 					startViewport,
 					minimum,
 					preferred,
-					{ x: moved.clientX - startX, y: moved.clientY - startY },
+					{
+						x: (moved.clientX - startX) / scale,
+						y: (moved.clientY - startY) / scale,
+					},
 				);
 				onPlacementChange(
 					anchorClientHudPlacement(
@@ -121,12 +125,13 @@
 		if (event.button !== 0) return;
 		event.preventDefault();
 		event.stopPropagation();
+		const scale = pointerUiScale(event);
 		const startX = event.clientX;
 		const startY = event.clientY;
 		const start = resolved;
 		const startViewport = viewport;
 		cancelPointerGesture?.();
-		cancelPointerGesture = trackPointerGesture(
+		cancelPointerGesture = trackUiPointerGesture(
 			window,
 			event.pointerId,
 			(moved) => {
@@ -134,7 +139,10 @@
 					start,
 					startViewport,
 					minimum,
-					{ x: moved.clientX - startX, y: moved.clientY - startY },
+					{
+						x: (moved.clientX - startX) / scale,
+						y: (moved.clientY - startY) / scale,
+					},
 					edges,
 				);
 				onPlacementChange(

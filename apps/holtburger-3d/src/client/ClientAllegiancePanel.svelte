@@ -258,15 +258,13 @@
 			/* Branches meet the first-line presence icon, independent of row height. */
 			--relationship-inset: var(--ui-list-row-padding-block);
 			--relationship-junction: calc(
-				var(--relationship-inset) +
-					max(0.5lh, calc(var(--ui-presence-size) * var(--ui-icon-scale)) / 2)
+				var(--relationship-inset) + max(0.5lh, var(--ui-presence-size) / 2)
 			);
 			position: relative;
 			/* Taller themed actions must not move the first-line tree junction. */
 			align-items: flex-start;
 			padding-inline-start: calc(
-				var(--relationship-depth) *
-					calc(var(--ui-list-tree-indent) * var(--ui-icon-scale))
+				var(--relationship-depth) * var(--ui-list-tree-indent)
 			);
 		}
 		.relationship-row .ui-list-actions {
@@ -277,9 +275,8 @@
 			content: "";
 			position: absolute;
 			left: calc(
-				(var(--relationship-depth) - 1) *
-					calc(var(--ui-list-tree-indent) * var(--ui-icon-scale)) +
-					calc(var(--ui-presence-size) * var(--ui-icon-scale)) / 2
+				(var(--relationship-depth) - 1) * var(--ui-list-tree-indent) +
+					var(--ui-presence-size) / 2
 			);
 			border-color: var(--ui-color-border);
 		}
@@ -290,23 +287,16 @@
 		}
 		.relationship-child::after {
 			top: var(--relationship-junction);
-			width: calc(
-				calc(var(--ui-list-tree-indent) * var(--ui-icon-scale)) -
-					calc(var(--ui-presence-size) * var(--ui-icon-scale)) / 2
-			);
+			width: calc(var(--ui-list-tree-indent) - var(--ui-presence-size) / 2);
 			border-top: 1px solid var(--ui-color-border);
 		}
 		.relationship-stem {
 			position: absolute;
 			left: calc(
-				var(--relationship-depth) *
-					calc(var(--ui-list-tree-indent) * var(--ui-icon-scale)) +
-					calc(var(--ui-presence-size) * var(--ui-icon-scale)) / 2
+				var(--relationship-depth) * var(--ui-list-tree-indent) +
+					var(--ui-presence-size) / 2
 			);
-			top: calc(
-				var(--relationship-junction) +
-					calc(var(--ui-presence-size) * var(--ui-icon-scale)) / 2
-			);
+			top: calc(var(--relationship-junction) + var(--ui-presence-size) / 2);
 			bottom: -1px;
 			border-left: 1px solid var(--ui-color-border);
 		}
@@ -323,10 +313,7 @@
 		.ancestry-marker {
 			position: absolute;
 			top: 0;
-			left: calc(
-				var(--relationship-depth) *
-					calc(var(--ui-list-tree-indent) * var(--ui-icon-scale))
-			);
+			left: calc(var(--relationship-depth) * var(--ui-list-tree-indent));
 			color: var(--ui-color-muted);
 		}
 		.self .ui-list-name {
@@ -336,7 +323,7 @@
 			display: grid;
 			/* Reserve the presence-icon column on every line, keeping stems clear. */
 			grid-template-columns:
-				calc(var(--ui-presence-size) * var(--ui-icon-scale))
+				var(--ui-presence-size)
 				minmax(0, 1fr);
 			gap: var(--ui-list-detail-gap) var(--ui-list-icon-gap);
 		}

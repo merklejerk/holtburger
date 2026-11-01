@@ -149,10 +149,10 @@
 			position-try-fallbacks: flip-block;
 			position-visibility: anchors-visible;
 			inset: auto;
-			margin: 0 0 calc(var(--ui-action-alternate-gap) * var(--ui-icon-scale));
+			margin: 0 0 var(--ui-action-alternate-gap);
 			padding: 0;
-			width: calc(var(--ui-action-alternate-width) * var(--ui-icon-scale));
-			height: calc(var(--ui-action-alternate-height) * var(--ui-icon-scale));
+			width: var(--ui-action-alternate-width);
+			height: var(--ui-action-alternate-height);
 			border: 0;
 			overflow: visible;
 			background: transparent;

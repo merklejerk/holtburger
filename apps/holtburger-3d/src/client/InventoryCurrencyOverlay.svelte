@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, type Snippet } from "svelte";
+	import { uiScale, UI_SCALE_CHANGE_EVENT } from "../app/ui-scale";
 	import UiIcon from "../app/UiIcon.svelte";
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
@@ -35,9 +36,12 @@
 	}
 	function position() {
 		const rect = trigger.getBoundingClientRect();
-		popup.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - popup.offsetWidth - 8))}px`;
-		popup.style.top = `${Math.max(8, Math.min(rect.top - popup.offsetHeight - 4, window.innerHeight - popup.offsetHeight - 8))}px`;
+		const bounds = popup.getBoundingClientRect();
+		const scale = uiScale(popup);
+		popup.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - bounds.width - 8)) / scale}px`;
+		popup.style.top = `${Math.max(8, Math.min(rect.top - bounds.height - 4, window.innerHeight - bounds.height - 8)) / scale}px`;
 	}
+
 	function open() {
 		cancelClose();
 		popup.showPopover();
@@ -64,6 +68,7 @@
 		observer.observe(popup);
 		observer.observe(trigger);
 		window.addEventListener("resize", reposition);
+		window.addEventListener(UI_SCALE_CHANGE_EVENT, close);
 		window.addEventListener("scroll", reposition, true);
 		return () => {
 			cancelClose();
@@ -71,6 +76,7 @@
 			escapeContext = null;
 			observer.disconnect();
 			window.removeEventListener("resize", reposition);
+			window.removeEventListener(UI_SCALE_CHANGE_EVENT, close);
 			window.removeEventListener("scroll", reposition, true);
 		};
 	});
@@ -138,8 +144,8 @@
 			margin: 0;
 			padding: var(--ui-overlay-padding);
 			width: max-content;
-			max-width: min(360px, calc(100vw - 16px));
-			max-height: min(360px, calc(100vh - 16px));
+			max-width: min(360px, calc(var(--ui-viewport-width) - 16px));
+			max-height: min(360px, calc(var(--ui-viewport-height) - 16px));
 			overflow: auto;
 		}
 		p,
@@ -165,12 +171,8 @@
 		}
 		.currency-icon {
 			container: currency-art / inline-size;
-			width: calc(
-				var(--ui-inventory-currency-icon-size) * var(--ui-icon-scale)
-			);
-			height: calc(
-				var(--ui-inventory-currency-icon-size) * var(--ui-icon-scale)
-			);
+			width: var(--ui-inventory-currency-icon-size);
+			height: var(--ui-inventory-currency-icon-size);
 			flex: none;
 		}
 		.currency-icon :global(.ui-icon) {

@@ -35,7 +35,7 @@ export class ClientCharacterSettingsOwner {
 	>;
 	readonly #publish: (state: ClientCharacterSettingsState) => void;
 	readonly #loadFailed: (error: unknown) => void;
-	readonly #unavailable: (reasons: readonly string[]) => void;
+	readonly #repaired: (reasons: readonly string[]) => void;
 	readonly #persistence: ClientSettingsPersistence<CharacterSettingsSave>;
 	#state: ClientCharacterSettingsState = { kind: "absent" };
 	#generation = 0;
@@ -51,14 +51,14 @@ export class ClientCharacterSettingsOwner {
 		>;
 		readonly publish: (state: ClientCharacterSettingsState) => void;
 		readonly loadFailed: (error: unknown) => void;
-		readonly unavailable: (reasons: readonly string[]) => void;
+		readonly repaired: (reasons: readonly string[]) => void;
 		readonly saveFailed: (error: unknown) => void;
 		readonly saveDelayMs: number;
 	}) {
 		this.#transport = options.transport;
 		this.#publish = options.publish;
 		this.#loadFailed = options.loadFailed;
-		this.#unavailable = options.unavailable;
+		this.#repaired = options.repaired;
 		this.#persistence = new ClientSettingsPersistence({
 			delayMs: options.saveDelayMs,
 			save: (snapshot: CharacterSettingsSave) =>
@@ -150,8 +150,8 @@ export class ClientCharacterSettingsOwner {
 			return;
 		}
 		if (!this.#isCurrentLoad(characterGuid, generation)) return;
-		const notices = [...loaded.repaired, ...loaded.unavailable];
-		if (notices.length > 0) this.#unavailable(notices);
+		const notices = loaded.repaired;
+		if (notices.length > 0) this.#repaired(notices);
 		const defaults = createDefaultClientCharacterSettings();
 		const { lastKnownName, ...savedSettings } = loaded.sections;
 		this.#set({

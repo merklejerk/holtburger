@@ -224,6 +224,7 @@ export async function probeClientHud(
 		statModValue: powerLevel,
 	});
 	const enchantmentFixture = {
+		cooldowns: [],
 		instances: [
 			enchantmentInstance(beneficialKey, "beneficial", 8, 40),
 			enchantmentInstance(overriddenKey, "beneficial", 6, 90),
@@ -520,6 +521,7 @@ export async function probeClientHud(
 		"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.setEnchantments",
 		[
 			{
+				cooldowns: [],
 				instances: enchantmentFixture.instances.slice(1),
 				groups: enchantmentFixture.groups.map((group) =>
 					group.spellCategory === 7
@@ -573,6 +575,7 @@ export async function probeClientHud(
 	);
 	const vitaeKey = { spellId: 666, layer: 0 };
 	const vitaeOnly = {
+		cooldowns: [],
 		instances: [
 			{
 				...enchantmentInstance(vitaeKey, "vitae", 30, null),
@@ -1436,8 +1439,13 @@ export async function probeClientHud(
 			panel.querySelector('#settings-tab-input').click();
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 			const button = panel.querySelector('#settings-section-input .binding-actions button');
+			button.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+			await new Promise((resolve) => requestAnimationFrame(resolve));
 			const bounds = button.getBoundingClientRect();
-			return { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+			const point = { x: bounds.left + bounds.width / 2, y: bounds.top + bounds.height / 2 };
+			const hit = document.elementFromPoint(point.x, point.y);
+			if (!hit || !button.contains(hit)) throw new Error('Add key is obscured: ' + JSON.stringify({ point, hit: hit?.outerHTML.slice(0, 300) }));
+			return point;
 		})()`,
 	);
 	await client.send("Input.dispatchMouseEvent", {
@@ -1505,7 +1513,7 @@ export async function probeClientHud(
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 			const row = panel.querySelector('#settings-section-input .binding-row');
 			if (![...row.querySelectorAll('kbd')].some((key) => key.textContent === 'p')) throw new Error('Pointer-armed binding did not capture a real key');
-			panel.querySelector('#settings-section-input > button').click();
+			panel.querySelector('#settings-section-input .settings-section > button').click();
 			await new Promise((resolve) => requestAnimationFrame(resolve));
 			panel.querySelector('#settings-tab-graphics').click();
 			await new Promise((resolve) => requestAnimationFrame(resolve));
@@ -1532,13 +1540,13 @@ export async function probeClientHud(
 			fonts[0].dispatchEvent(new Event('change', { bubbles: true }));
 			await frame();
 			if (fonts[0].value !== 'serif') throw new Error('UI font edit did not stick');
-			const textScaling = await globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeTextScaling();
+			const uiScaling = await globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeUiScaling();
 			panel = document.querySelector('.hud-window[aria-label="Settings"]');
 			panel.querySelector('#settings-tab-input').click();
 			await frame();
 			const movement = [...panel.querySelectorAll('#settings-section-input .binding-group')].find((group) => group.querySelector('summary')?.textContent === 'Movement');
 			if (!movement || !movement.open) throw new Error('Input movement group did not open');
-			const mouse = [...panel.querySelectorAll('#settings-section-input .binding-group')].find((group) => group.querySelector('summary')?.textContent === 'Mouse');
+			const mouse = [...panel.querySelectorAll('#settings-section-input details')].find((group) => group.querySelector('summary')?.textContent === 'Mouse');
 			const mouseControl = [...mouse.querySelectorAll('label')].find(label => label.textContent.includes('Use mouse movement/steering')).querySelector('input');
 			const mouseBefore = mouseControl.checked;
 			mouseControl.click(); await frame();
@@ -1601,7 +1609,7 @@ export async function probeClientHud(
 			await frame();
 			const focusTwoRow = [...actionBarsGroup.querySelectorAll('.binding-row')].find((row) => row.querySelector('.binding-label')?.textContent === 'Focus action bar 2');
 			if (!focusTwoRow?.textContent.includes('Unbound') || ![...focusRow.querySelectorAll('kbd')].some((key) => key.textContent === 'Ctrl+2')) throw new Error('Replacing digit conflict did not reassign the action-bar chord');
-			panel.querySelector('#settings-section-input > button').click();
+			panel.querySelector('#settings-section-input .settings-section > button').click();
 			await frame();
 			const tabRow = [...spellGroups[0].querySelectorAll('.binding-row')].find((row) => row.querySelector('.binding-label')?.textContent === 'Select spell tab 1');
 			tabRow.querySelector('.binding-key').click();
@@ -1664,15 +1672,16 @@ export async function probeClientHud(
 			conflict.querySelector('button:last-child').click();
 			await frame();
 			if (!movement.querySelectorAll('.binding-row')[1].textContent.includes('Unbound')) throw new Error('Conflict replacement did not clear the old action');
-			panel.querySelector('#settings-section-input > button').click();
+			panel.querySelector('#settings-section-input .settings-section > button').click();
 			await frame();
 			panel.querySelector('#settings-tab-graphics').click();
-			return { fonts: fonts.length, groups: panel.querySelectorAll('#settings-section-input .binding-group').length, captured: true, textScaling };
+			return { fonts: fonts.length, groups: panel.querySelectorAll('#settings-section-input .binding-group').length, captured: true, uiScaling };
 		})()`,
 	);
 	const staleKey = { spellId: 2100, layer: 1 };
 	const replacementKey = { spellId: 2101, layer: 1 };
 	const isolatedFixture = (key) => ({
+		cooldowns: [],
 		instances: [
 			{
 				...enchantmentInstance(key, "beneficial", 8, 40),

@@ -35,7 +35,9 @@ after copying the app into Applications, first launch succeeded through System
 Settings → Privacy & Security → Open Anyway, without a Terminal workaround.
 Windows [diagnostic run 41261883335](https://github.com/merklejerk/holtburger/actions/runs/41261883335)
 passed native setup, uninstall, upgrade, repair, retained-profile startup, and
-app/host deletion-lock refusal checks. Windows visual acceptance remains pending.
+app/host deletion-lock refusal checks. The user also verified the Windows installer
+worked after transferring it via USB. Direct browser download and SmartScreen prompts
+remain unverified.
 Automated build/resource/identity/startup and installer checks do
 not establish GPU, audio, input, scaling, Gatekeeper, or SmartScreen acceptance.
 

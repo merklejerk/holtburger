@@ -29,7 +29,7 @@ use super::selection::{
 };
 use super::sequence::{CurrentSequenceClip, MotionClipCompletion};
 use super::sequence::{MotionSequenceRuntime, SequenceTick};
-use super::state::{MotionCommand, MotionOrder, MotionState};
+use super::state::{MotionCommand, MotionOrder, MotionState, RestPosture};
 
 /// Retail bounds active plus pending authored actions to six.
 pub const MAX_AUTHORED_ACTIONS: usize = 6;
@@ -287,6 +287,8 @@ pub struct MotionPlaybackLayer {
 /// Both available playback descriptions; this contract does not choose the displayed layer.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MotionPlayback {
+    /// Accepted resting target, including entry; independent locomotion reports standing.
+    pub rest_posture: Option<RestPosture>,
     /// Active independent movement intent; retained idle and stop clips do not imply a command.
     pub locomotion_command_active: bool,
     /// Current accepted command/action playback, if it has animation content.
@@ -630,11 +632,17 @@ impl BodyMotionRuntime {
         } else {
             OrdinaryMotionActivity::Locomotion
         };
+        let locomotion_command_active = self
+            .locomotion
+            .as_ref()
+            .is_some_and(|track| track.command_active);
         Some(MotionPlayback {
-            locomotion_command_active: self
-                .locomotion
-                .as_ref()
-                .is_some_and(|track| track.command_active),
+            rest_posture: if locomotion_command_active {
+                Some(RestPosture::Standing)
+            } else {
+                RestPosture::from_command(self.state.substate)
+            },
+            locomotion_command_active,
             ordinary,
             locomotion,
             activity,

@@ -71,6 +71,7 @@ pub mod precise_jump_prediction;
 mod precise_jump_runtime;
 pub mod progression;
 pub mod recall;
+mod rest_posture;
 mod runtime;
 pub mod runtime_body_view_cache;
 #[cfg(feature = "runtime-fixture")]
@@ -247,6 +248,8 @@ pub struct ClientRuntime {
     equipment_operation: Option<equipment_runtime::EquipmentOperation>,
     /// One peace prerequisite plus bounded recent equipment-set error attribution.
     equipment_set: equipment_set::EquipmentSetState,
+    /// Latest silent posture request waiting for a confirmed peace stance.
+    pending_rest_posture: Option<rest_posture::PendingRestPosture>,
     /// One successfully sent stance request; mode updates retire it, never equipment receipts.
     pending_combat_mode: Option<holtburger_protocol::messages::combat::CombatMode>,
     /// Outstanding P2P item acknowledgments shared by all frontends.
@@ -594,6 +597,7 @@ impl ClientRuntime {
     }
 
     pub(crate) fn bump_world_generation(&mut self) -> u64 {
+        self.cancel_rest_posture();
         self.combat_attribution.clear();
         self.world_generation = self.world_generation.saturating_add(1);
         self.precise_jump.invalidate();

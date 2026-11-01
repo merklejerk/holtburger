@@ -99,9 +99,15 @@ const dynamicEntityMotionLayerSchema = z.object({
 	clip: dynamicEntityClipSchema,
 });
 
+/** Gameplay postures are distinct from social emote substates. */
+const restPostureSchema = z.enum(["standing", "crouching", "sitting", "lying"]);
+export type RestPosture = z.infer<typeof restPostureSchema>;
+
 /** Both available tracks and source-owned activity; the frontend selects visibility. */
 export const dynamicEntityMotionSchema = z
 	.object({
+		/** Accepted gameplay resting target, independent of similarly named social animations. */
+		restPosture: restPostureSchema.nullable(),
 		/** Source-owned movement intent; idle/stop playback alone does not enable blending. */
 		locomotionCommandActive: z.boolean(),
 		ordinary: dynamicEntityMotionLayerSchema.nullable(),

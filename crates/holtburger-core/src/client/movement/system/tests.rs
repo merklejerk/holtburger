@@ -3014,3 +3014,77 @@ fn relative_facing_is_retired_by_reset_server_takeover_and_world_epoch() {
         assert_eq!(movement.take_relative_facing_delta(), 0.0);
     }
 }
+
+#[tokio::test]
+async fn resting_packets_publish_forward_state_and_survive_replacing_a_stopped_pose() {
+    use holtburger_world::motion::RestPosture;
+    let postures = [
+        RestPosture::Crouching,
+        RestPosture::Sitting,
+        RestPosture::Lying,
+        RestPosture::Standing,
+    ];
+    let mut world = WorldState::synthetic();
+    let guid = Guid(1);
+    seed_local_player(
+        &mut world,
+        guid,
+        WorldPosition {
+            landblock_id: Guid(0xda55_0001),
+            ..WorldPosition::default()
+        },
+    );
+    seed_authored_manual_motion_world(&mut world, guid);
+    world.set_motion_sequences(explicit_motion_catalog(
+        FIXTURE_MOTION_TABLE_ID,
+        MotionStance::NonCombat as u32,
+        postures.map(|posture| FixtureCycle {
+            command: posture.command().raw(),
+            velocity: None,
+            omega: None,
+        }),
+        [],
+    ));
+    let mut movement = MovementSystem::new();
+    let mut session = Session::new_test();
+    let capture = tempfile::NamedTempFile::new().unwrap();
+    session
+        .set_capture(capture.path().to_str().unwrap())
+        .unwrap();
+    let now = Instant::now();
+    let pose = world.local_player_runtime_pose().unwrap();
+    movement.admit_server_controlled_motion(Some(test_server_approach(pose)), now, &mut world);
+    for posture in postures {
+        movement.enqueue_drive_intent(PlayerDriveIntent::Stop, now);
+        movement.enqueue_authored_motion(
+            InterpretedMotionCommand(posture.command().raw() as u16),
+            MotionStyle::PreserveServer,
+        );
+        movement.tick(now, &mut world, &mut session).await.unwrap();
+        assert!(!movement.pending_manual_playback_stop);
+        assert!(world.has_local_authored_motion(guid));
+        movement
+            .advance_local_authored_motion(&mut world, Duration::from_millis(100))
+            .unwrap();
+        movement
+            .tick(now + Duration::from_millis(100), &mut world, &mut session)
+            .await
+            .unwrap();
+        assert_eq!(
+            world.motion_runtimes.state(guid).unwrap().substate,
+            posture.command()
+        );
+    }
+    let actions = captured_actions(&capture);
+    assert_eq!(actions.len(), postures.len());
+    for (action, posture) in actions.iter().zip(postures) {
+        let GameAction::MoveToState(packet) = action else {
+            panic!("resting must emit only movement");
+        };
+        assert_eq!(
+            packet.raw_motion_state.forward_command,
+            Some(posture.command().raw())
+        );
+        assert!(packet.raw_motion_state.commands.is_empty());
+    }
+}

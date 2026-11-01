@@ -186,6 +186,13 @@ impl ClientRuntime {
             for event in &pending_events {
                 match event {
                     WorldEvent::SelfServerControlledMotion(data) => {
+                        if holtburger_world::entity::EntityMotionDirective::from_movement_event(
+                            data,
+                        )
+                        .is_some()
+                        {
+                            self.cancel_rest_posture();
+                        }
                         if self.server_motion_interrupts_combat(data) {
                             self.interrupt_combat_for_movement(std::time::Instant::now());
                         }

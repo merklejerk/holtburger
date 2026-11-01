@@ -24,6 +24,12 @@
 	import "../../client/client-canvas.css";
 	import { createClientMouseMovementFixture } from "./client-mouse-movement-fixture";
 	import { soulEmoteFixture } from "../../client/client-soul-emotes.test-support";
+	import {
+		ClientRestPostureController,
+		REST_POSTURE_LABELS,
+		handleRestPostureKeydown,
+	} from "../../client/client-rest-posture-controller";
+	import type { RestPosture } from "../../lib/game/runtime/dynamic-entity-feed";
 	import { ClientEmoteController } from "../../client/client-emote-controller";
 	import { emotePlaybackFixture } from "./client-emote-fixture";
 	import { decodeClientCombatMode } from "../../client/client-host-contract";
@@ -1280,6 +1286,10 @@
 		readonly probeTargeting: () => ReturnType<typeof probeClientTargeting>;
 		/** Install a real DOM fixture for CDP keyboard and pointer events. */
 		readonly beginKeyboardProbe: () => void;
+		/** Production posture input and toast fixture for native browser events. */
+		readonly beginRestPostureProbe: () => ReturnType<
+			typeof beginRestPostureProbe
+		>;
 		/** Read the currently installed keyboard fixture. */
 		readonly keyboardProbe: () => ReturnType<
 			typeof installKeyboardPolicyFixture
@@ -4001,6 +4011,74 @@
 		keyboard,
 		(error) => appendChat({ kind: "error", message: String(error) }),
 	);
+	/** Exercise production cycle input and toast publication through real keyboard scopes. */
+	function beginRestPostureProbe() {
+		emitInteractionBaseline();
+		emoteController.cancel();
+		const commandStart = interactionCommands.length;
+		const previousToast = toast;
+		const center = new ClientToastCenter({
+			durationMs: CLIENT_TOAST_DURATION_MS,
+			scheduler: {
+				cancel: (handle) => window.clearTimeout(handle),
+				schedule: (callback, delay) => window.setTimeout(callback, delay),
+			},
+		});
+		const unsubscribe = center.subscribe((next) => {
+			toast = next;
+		});
+		const controller = new ClientRestPostureController(
+			interactionLifecycle,
+			keyboard,
+			(error) => center.publish({ message: String(error), tone: "warning" }),
+			(posture) =>
+				center.publish({
+					message: REST_POSTURE_LABELS[posture],
+					tone: "status",
+				}),
+		);
+		let dispatch = Promise.resolve();
+		const releaseKeys = keyboard.bindGame({
+			keydown: (event) => {
+				handleRestPostureKeydown(clientInput, event, () => {
+					dispatch = controller
+						.cycle(dispatch)
+						.catch((error) =>
+							center.publish({ message: String(error), tone: "warning" }),
+						);
+				});
+			},
+			keyup: () => {},
+			cancel: () => {},
+		});
+		keyboard.returnToGame();
+		return {
+			read: () => ({
+				commands: interactionCommands
+					.slice(commandStart)
+					.filter((entry) => entry.command.endsWith("rest_posture")),
+				toast: center.snapshot(),
+			}),
+			observe: (posture: RestPosture) => {
+				const entity = emotePlaybackFixture(1, "explicit");
+				if (entity.motion === null)
+					throw new Error("Posture fixture requires motion");
+				entity.motion.restPosture = posture;
+				emitInteractionEvent("client-dynamic-entity", {
+					kind: "upserted",
+					entity,
+				});
+			},
+			dispose: () => {
+				controller.destroy();
+				releaseKeys();
+				unsubscribe();
+				center.destroy();
+				toast = previousToast;
+			},
+		};
+	}
+
 	const chatRequests: ClientChatRequest[] = [];
 	let sentChatHistory = $state<readonly string[]>([]);
 	let messages = $state<readonly ClientChatLine[]>([
@@ -5390,6 +5468,7 @@
 				sceneOrbits: orbitDeltas.length,
 			}),
 			probeTargeting: () => probeClientTargeting(keyboard),
+			beginRestPostureProbe,
 			beginKeyboardProbe: () => {
 				keyboardFixture = installKeyboardPolicyFixture(keyboard, inputGate);
 			},

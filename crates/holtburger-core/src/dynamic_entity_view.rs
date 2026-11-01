@@ -376,6 +376,8 @@ pub struct DynamicEntityAdvance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DynamicEntityMotion {
+    /// Accepted gameplay resting target, distinct from social emotes.
+    pub rest_posture: Option<holtburger_world::motion::RestPosture>,
     /// Whether independent movement is commanded now, rather than merely retaining an idle/stop clip.
     pub locomotion_command_active: bool,
     /// Accepted ordinary command/action playback.
@@ -421,6 +423,7 @@ impl From<MotionPlaybackLayer> for DynamicEntityMotionLayer {
 impl From<MotionPlayback> for DynamicEntityMotion {
     fn from(playback: MotionPlayback) -> Self {
         Self {
+            rest_posture: playback.rest_posture,
             locomotion_command_active: playback.locomotion_command_active,
             ordinary: playback.ordinary.map(Into::into),
             locomotion: playback.locomotion.map(Into::into),

@@ -34,6 +34,27 @@ const ctrlDigitTwo = {
 };
 
 describe("client binding catalog", () => {
+	it("defaults resting to unmodified N and fills missing saved bindings", () => {
+		const { cycleRestPosture, ...savedClient } =
+			CLIENT_KEYBOARD_DEFAULTS.client;
+		expect(cycleRestPosture).toEqual([
+			{ key: "n", shift: false, ctrl: false, alt: false, meta: false },
+		]);
+		const restored = clientKeyboardSettingsSchema.parse({
+			...CLIENT_KEYBOARD_DEFAULTS,
+			client: savedClient,
+		});
+		expect(restored.client.cycleRestPosture).toEqual(cycleRestPosture);
+		const binding = CLIENT_BINDING_ROWS.find(
+			(row) =>
+				row.reference.kind === "client" &&
+				row.reference.action === "cycleRestPosture",
+		);
+		expect(binding).toMatchObject({
+			label: "Cycle rest posture",
+			group: "Movement",
+		});
+	});
 	it("captures physical Space consistently when its logical key is unidentified", () => {
 		for (const key of [" ", "Unidentified"]) {
 			expect(

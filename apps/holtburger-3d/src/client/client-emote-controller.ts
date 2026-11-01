@@ -1,8 +1,8 @@
+import { playerMotionUpdate } from "./client-player-motion-update";
 import type { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
 import type {
 	DynamicEntityEvent,
 	DynamicEntityMirror,
-	DynamicEntityView,
 } from "../lib/game/runtime/dynamic-entity-feed";
 import type {
 	ClientChatRequest,
@@ -63,33 +63,6 @@ interface EmoteIntent {
 	run: EmoteRun | null;
 	/** Composed emote submissions that must enqueue before this intent can return to combat. */
 	submissions: number;
-}
-
-/** Read only this player's update; absence from a delta is not a playback completion. */
-function playerUpdate(
-	event: DynamicEntityEvent,
-	guid: number,
-): DynamicEntityView | "removed" | null {
-	switch (event.kind) {
-		case "snapshot":
-			return (
-				event.snapshot.entities.find(
-					(entity) => entity.identity.guid === guid,
-				) ?? "removed"
-			);
-		case "upserted":
-			return event.entity.identity.guid === guid ? event.entity : null;
-		case "removed":
-			return event.guid === guid ? "removed" : null;
-		case "ticked":
-			return (
-				event.batch.updates.find((entity) => entity.identity.guid === guid) ??
-				event.batch.advances.find(
-					(advance) => advance.entity.identity.guid === guid,
-				)?.entity ??
-				null
-			);
-	}
 }
 
 /**
@@ -271,16 +244,15 @@ export class ClientEmoteController {
 	#observePlayback(event: DynamicEntityEvent): void {
 		const run = this.#intent.run;
 		if (run === null || run.phase.kind !== "playback") return;
-		const entity = playerUpdate(event, run.character);
+		const entity = playerMotionUpdate(
+			event,
+			run.character,
+			this.#session.mirror,
+		);
 		if (entity === "removed") {
 			this.cancel();
 			return;
 		}
-		if (
-			entity !== null &&
-			this.#session.mirror.entity(run.character, entity.generation) !== entity
-		)
-			return;
 		if (entity?.motion?.activity === "emote") {
 			run.phase.status = "active";
 			run.stopTimeout();

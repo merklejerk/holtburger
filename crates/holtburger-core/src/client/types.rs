@@ -1649,6 +1649,10 @@ pub enum ClientCommand {
         accepted: bool,
     },
     /// Toggle peace and the equipped default stance using current authoritative facts.
+    /// Silent gameplay posture; core establishes peace before entering a resting pose.
+    SetRestPosture(holtburger_world::motion::RestPosture),
+    /// Invalidate a posture request still waiting for its prerequisite.
+    CancelRestPosture,
     ToggleCombatMode,
     SetCombatMode(CombatMode),
     CancelAttack,

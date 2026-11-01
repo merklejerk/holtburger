@@ -80,6 +80,7 @@ impl ClientRuntime {
 
     /// Stop request plans as soon as the character can no longer submit their next step.
     pub(super) fn stop_character_actions(&mut self) {
+        self.cancel_rest_posture();
         self.reset_combat_engagement();
         self.clear_busy_operation();
         self.stop_pack_exchange("Character lifecycle changed; the last request may still complete");

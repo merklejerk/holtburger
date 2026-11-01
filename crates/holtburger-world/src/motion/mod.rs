@@ -61,5 +61,5 @@ pub use sequence::{
 };
 pub use state::{
     ActiveMotion, CharacterMotionPresentation, MotionCommand, MotionContact, MotionGesture,
-    MotionOrder, MotionState,
+    MotionOrder, MotionState, RestPosture,
 };

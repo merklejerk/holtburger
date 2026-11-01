@@ -346,6 +346,7 @@ impl ClientRuntime {
         }
         if active_world {
             let prepared_movement = self.movement.prepare_tick(now, &mut self.world);
+            self.advance_rest_posture(now);
             self.prepare_combat_movement(now, dt_duration);
             let movement_events = self
                 .movement

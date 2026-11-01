@@ -116,6 +116,7 @@ export const CLIENT_TUNING = {
 	},
 	/** Marker clustering stays in CSS pixels independently of render density. */
 	housingSearch: { clusterSpacingCssPixels: 28 },
+	resting: { acknowledgementTimeoutMs: 10_000 },
 	emotes: {
 		/** Maximum distinct queued poses retained on this local user profile. */
 		recentLimit: 6,

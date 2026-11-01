@@ -66,6 +66,7 @@ const keyboardSettingsBaseSchema = z
 					nextHostile: INPUT_DEFAULTS.client.nextHostile,
 					previousHostile: INPUT_DEFAULTS.client.previousHostile,
 					splitStack: INPUT_DEFAULTS.client.splitStack,
+					cycleRestPosture: INPUT_DEFAULTS.client.cycleRestPosture,
 					toggleChatHistory: INPUT_DEFAULTS.client.toggleChatHistory,
 					holdChatHistory: INPUT_DEFAULTS.client.holdChatHistory,
 					...value,

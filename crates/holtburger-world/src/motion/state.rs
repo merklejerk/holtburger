@@ -90,6 +90,39 @@ const INTERPRETED_COMMAND_PREFIX_RUNS: &[(u16, u16, u16)] = &[
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct MotionCommand(pub u32);
 
+/// Gameplay resting postures, distinct from similarly named social animations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RestPosture {
+    Standing,
+    Crouching,
+    Sitting,
+    Lying,
+}
+
+impl RestPosture {
+    /// Retail motion identities (ACE MotionCommand.cs); Crouch is the resting kneel.
+    pub const fn command(self) -> MotionCommand {
+        MotionCommand(match self {
+            Self::Standing => 0x4100_0003,
+            Self::Crouching => 0x4100_0012,
+            Self::Sitting => 0x4100_0013,
+            Self::Lying => 0x4100_0014,
+        })
+    }
+
+    /// Only actual resting commands qualify; social SitState/KneelState do not.
+    pub const fn from_command(command: MotionCommand) -> Option<Self> {
+        match command.raw() {
+            0x4100_0003 => Some(Self::Standing),
+            0x4100_0012 => Some(Self::Crouching),
+            0x4100_0013 => Some(Self::Sitting),
+            0x4100_0014 => Some(Self::Lying),
+            _ => None,
+        }
+    }
+}
+
 /// Recognized gesture families eligible for independent manual movement.
 /// Unknown and custom commands deliberately retain ordinary motion policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

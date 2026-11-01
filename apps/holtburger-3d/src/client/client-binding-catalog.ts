@@ -93,6 +93,7 @@ const CLIENT_LABELS: Readonly<Record<ClientShortcut, string>> = {
 	splitStack: "Split stack",
 	toggleCombat: "Toggle combat",
 	toggleAutoRun: "Toggle auto-run",
+	cycleRestPosture: "Cycle rest posture",
 	preciseJump: "Aim precise jump",
 	cancel: "Cancel / clear selection",
 	chat: "Open chat",
@@ -131,7 +132,9 @@ function clientRow(action: ClientShortcut): BindingDefinition {
 		action === "toggleNearby" ||
 		CLIENT_PANEL_SHORTCUT_ACTIONS.some((panelAction) => panelAction === action)
 			? "System panels"
-			: action === "toggleAutoRun" || action === "preciseJump"
+			: action === "toggleAutoRun" ||
+				  action === "preciseJump" ||
+				  action === "cycleRestPosture"
 				? "Movement"
 				: action === "toggleCombat"
 					? "Combat"

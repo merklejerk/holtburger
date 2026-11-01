@@ -55,6 +55,7 @@ export function emotePlaybackFixture(
 		},
 		motion: {
 			activity,
+			restPosture: null,
 			locomotionCommandActive: false,
 			locomotion: null,
 			ordinary: {

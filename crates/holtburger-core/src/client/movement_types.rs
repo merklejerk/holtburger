@@ -241,6 +241,20 @@ pub enum PlayerDriveIntent {
 }
 
 impl PlayerDriveIntent {
+    /// A fresh movement owner supersedes both retained authored playback and queued posture work.
+    /// Passive reconciliation/releases do not acquire control, even if they carry nonzero axes.
+    pub fn supersedes_local_motion(self) -> bool {
+        match self {
+            Self::ManualHeld(_)
+            | Self::ManualPulse { .. }
+            | Self::Stop
+            | Self::SnapFacing { .. }
+            | Self::RotateFacing { .. } => true,
+            Self::ClientDirected(command) => command.acquires_control(),
+            Self::SynchronizeHeld(_) | Self::ReleaseManual => false,
+        }
+    }
+
     /// Whether this intent takes manual movement authority from an active combat engagement.
     pub fn interrupts_combat(self) -> bool {
         match self {

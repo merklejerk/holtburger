@@ -59,6 +59,8 @@ export interface ClientTuning {
 		/** CSS-pixel width of a bucket merging available housing areas. */
 		readonly clusterSpacingCssPixels: number;
 	};
+	/** Bound the local pending-cycle cursor; core independently bounds peace admission. */
+	readonly resting: { readonly acknowledgementTimeoutMs: number };
 	/** App-owned emote submission timing and user-profile history. */
 	readonly emotes: {
 		/** Maximum distinct queued poses retained in Recent. */

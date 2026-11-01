@@ -230,6 +230,8 @@ const clientEntityFactsSchema = z
 		scenePlacement: z.enum(["available", "unavailable"]),
 		/** World-owned acquisition category, independent of rendering and disposition. */
 		targeting: z.enum(["ineligible", "creature", "non-creature"]),
+		/** World-resolved ability of another player to harm us under current PvP statuses. */
+		playerThreat: z.boolean(),
 		/** Session-local confirmed-open state; null identifies every non-corpse entity. */
 		corpse: z.enum(["unopened", "opened"]).nullable(),
 		storage: z.discriminatedUnion("kind", [

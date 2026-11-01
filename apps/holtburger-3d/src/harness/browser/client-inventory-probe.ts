@@ -18,6 +18,7 @@ export function inventoryFixtureItem(
 ): ClientEntityFacts {
 	return {
 		guid,
+		playerThreat: false,
 		nearby: null,
 		canPickUp: false,
 		worldContainerContent: false,

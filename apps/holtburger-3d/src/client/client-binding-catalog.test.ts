@@ -98,47 +98,27 @@ describe("client binding catalog", () => {
 		expect(restored.character.jump).toEqual([{ code: "Space", ctrl: false }]);
 	});
 
-	it("renames saved creature shortcuts without losing remaps or overriding explicit interactable bindings", () => {
-		const savedClient = { ...CLIENT_KEYBOARD_DEFAULTS.client };
-		Reflect.deleteProperty(savedClient, "nextInteractable");
-		Reflect.deleteProperty(savedClient, "previousInteractable");
-		Reflect.set(savedClient, "nextCreature", [{ key: "F8" }]);
-		Reflect.set(savedClient, "previousCreature", []);
-		const saved = { ...CLIENT_KEYBOARD_DEFAULTS, client: savedClient };
-		const restored = clientKeyboardSettingsSchema.parse(saved);
-		expect(restored.client.nextInteractable).toEqual([{ key: "F8" }]);
-		expect(restored.client.previousInteractable).toEqual([]);
-		const explicit = clientKeyboardSettingsSchema.parse({
-			...saved,
-			client: { ...savedClient, nextInteractable: [] },
-		});
-		expect(explicit.client.nextInteractable).toEqual([]);
-	});
-
-	it("fills new hostile shortcuts in saved settings and preserves explicit remaps", () => {
-		const savedClient = { ...CLIENT_KEYBOARD_DEFAULTS.client };
-		Reflect.deleteProperty(savedClient, "nextHostile");
-		Reflect.deleteProperty(savedClient, "previousHostile");
-		const restored = clientKeyboardSettingsSchema.parse({
-			...CLIENT_KEYBOARD_DEFAULTS,
-			client: savedClient,
-		});
-		expect(restored.client.nextHostile).toEqual(
-			CLIENT_KEYBOARD_DEFAULTS.client.nextHostile,
-		);
-		expect(restored.client.previousHostile).toEqual(
-			CLIENT_KEYBOARD_DEFAULTS.client.previousHostile,
-		);
-		const remapped = replaceClientBinding(
-			restored,
-			{ kind: "client", action: "nextHostile" },
-			[{ key: "F8" }],
-		);
-		expect(
-			clientKeyboardSettingsSchema.parse(remapped).client.nextHostile,
-		).toEqual([{ key: "F8" }]);
-		expect(row("client.nextHostile").group).toBe("Targeting & interaction");
-	});
+	it.each(["Interactable", "Creature"])(
+		"renames saved %s shortcuts without losing remaps or overriding smart combat bindings",
+		(legacy) => {
+			const savedClient = { ...CLIENT_KEYBOARD_DEFAULTS.client };
+			Reflect.deleteProperty(savedClient, "nextSmartCombat");
+			Reflect.deleteProperty(savedClient, "previousSmartCombat");
+			Reflect.set(savedClient, `next${legacy}`, [{ key: "F8" }]);
+			Reflect.set(savedClient, `previous${legacy}`, []);
+			Reflect.set(savedClient, "nextHostile", [{ key: "F9" }]);
+			Reflect.set(savedClient, "previousHostile", []);
+			const saved = { ...CLIENT_KEYBOARD_DEFAULTS, client: savedClient };
+			const restored = clientKeyboardSettingsSchema.parse(saved);
+			expect(restored.client.nextSmartCombat).toEqual([{ key: "F8" }]);
+			expect(restored.client.previousSmartCombat).toEqual([]);
+			const explicit = clientKeyboardSettingsSchema.parse({
+				...saved,
+				client: { ...savedClient, nextSmartCombat: [] },
+			});
+			expect(explicit.client.nextSmartCombat).toEqual([]);
+		},
+	);
 
 	it("checks panel toggles against every overlapping keyboard context", () => {
 		const panel = row("client.toggleInventory");

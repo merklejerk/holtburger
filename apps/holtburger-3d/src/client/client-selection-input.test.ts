@@ -22,14 +22,12 @@ const TEST_INPUT = {
 	client: {
 		...INPUT_DEFAULTS.client,
 		selectSelf: [],
-		nextInteractable: [{ key: "Tab", shift: false, ctrl: false }],
-		previousInteractable: [{ key: "Tab", shift: true, ctrl: false }],
+		nextSmartCombat: [{ key: "Tab", shift: false, ctrl: false }],
+		previousSmartCombat: [{ key: "Tab", shift: true, ctrl: false }],
 		nextNonCreature: [{ key: "Tab", shift: false, ctrl: true }],
 		previousNonCreature: [{ key: "Tab", shift: true, ctrl: true }],
 		nextUnopenedCorpse: [{ key: "v", shift: false, ctrl: false }],
 		previousUnopenedCorpse: [{ key: "v", shift: true, ctrl: false }],
-		nextHostile: [{ key: "v", shift: false, ctrl: true }],
-		previousHostile: [{ key: "v", shift: true, ctrl: true }],
 		cancel: [{ key: "Escape" }],
 	},
 } satisfies InputConfiguration;
@@ -67,57 +65,49 @@ function fixture() {
 		presentation: () => null,
 	});
 	const candidates: Record<
-		"interactable" | "non-creature",
+		"smartCombat" | "non-creature",
 		readonly CycleCandidate[]
 	> = {
-		interactable: [
+		smartCombat: [
 			{
-				filters: ["interactable"],
+				filters: { "smart-combat": "cycle" },
 				guid: 2,
 				distanceBand: 0,
-				angularSector: 0,
+				forwardAlignment: 1,
 				distanceSquared: 1,
 			},
 			{
-				filters: ["interactable"],
+				filters: { "smart-combat": "cycle" },
 				guid: 3,
 				distanceBand: 0,
-				angularSector: 0,
+				forwardAlignment: 1,
 				distanceSquared: 4,
 			},
 		],
 		"non-creature": [
 			{
-				filters: ["non-creature"],
+				filters: { "non-creature": "cycle" },
 				guid: 8,
 				distanceBand: 0,
-				angularSector: 0,
+				forwardAlignment: 1,
 				distanceSquared: 9,
 			},
 			{
 				guid: 9,
 				distanceBand: 0,
-				angularSector: 0,
+				forwardAlignment: 1,
 				distanceSquared: 4,
-				filters: ["non-creature", "unopened-corpse"],
+				filters: { "non-creature": "cycle", "unopened-corpse": "cycle" },
 			},
 		],
 	};
 	const sample = vi.fn(() => [
-		...candidates.interactable,
+		...candidates.smartCombat,
 		...candidates["non-creature"],
 	]);
 	const cycle = new ClientCycleSelectionController({
 		selection,
 		sample,
-		policy: {
-			radiusMeters: 50,
-			distanceBandMeters: 5,
-			angularSectorCount: 8,
-			resetDivergence: 0.5,
-			adjacentRegionWeight: 0.25,
-			viewMarginMeters: 2,
-		},
 	});
 	const keyboard = new KeyboardInputPolicy(new ViewportInputGate());
 	const input = new ClientSelectionInput({
@@ -144,57 +134,11 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("selection press lifecycle", () => {
-	it.each([false, true])(
-		"Ctrl+V cycles hostiles with Shift=%s, while holding acquires nearest hostile",
-		(shiftKey) => {
-			const f = fixture();
-			f.candidates.interactable = [
-				{
-					filters: ["interactable"],
-					guid: 2,
-					distanceBand: 0,
-					angularSector: 0,
-					distanceSquared: 1,
-				},
-				{
-					filters: ["interactable", "hostile"],
-					guid: 4,
-					distanceBand: 0,
-					angularSector: 0,
-					distanceSquared: 4,
-				},
-				{
-					filters: ["interactable", "hostile"],
-					guid: 6,
-					distanceBand: 0,
-					angularSector: 0,
-					distanceSquared: 9,
-				},
-			];
-			f.selection.select(2);
-			const chord = () =>
-				key({
-					key: shiftKey ? "V" : "v",
-					code: "KeyV",
-					ctrlKey: true,
-					shiftKey,
-				});
-			f.input.keydown(chord(), 0);
-			f.input.keyup(chord(), HOLD_MS - 1);
-			expect(f.selection.selectedGuid()).toBe(shiftKey ? 6 : 4);
-			f.input.keydown(chord(), HOLD_MS);
-			vi.advanceTimersByTime(HOLD_MS);
-			expect(f.selection.selectedGuid()).toBe(4);
-			f.input.keyup(chord(), HOLD_MS * 2);
-			f.input.destroy();
-		},
-	);
-
 	it.each([
 		[false, false, 2],
-		[false, true, 3],
+		[false, true, 2],
 		[true, false, 9],
-		[true, true, 8],
+		[true, true, 9],
 	] as const)(
 		"cycles only on release for Control=%s Shift=%s",
 		(ctrlKey, shiftKey, expected) => {
@@ -210,26 +154,26 @@ describe("selection press lifecycle", () => {
 			f.input.destroy();
 		},
 	);
-	it("acquires current nearest once at the threshold without intermediate cycling or a release action", () => {
+	it("acquires current immediate once at the threshold without intermediate cycling or a release action", () => {
 		const f = fixture();
 		f.selection.select(2);
 		f.input.keydown(key(), 0);
 		expect(f.selection.selectedGuid()).toBe(2);
 		vi.advanceTimersByTime(HOLD_MS - 1);
 		expect(f.sample).not.toHaveBeenCalled();
-		f.candidates.interactable = [
+		f.candidates.smartCombat = [
 			{
-				filters: ["interactable"],
+				filters: { "smart-combat": "cycle" },
 				guid: 4,
 				distanceBand: 0,
-				angularSector: 0,
+				forwardAlignment: 1,
 				distanceSquared: 1,
 			},
 			{
-				filters: ["interactable"],
+				filters: { "smart-combat": "cycle" },
 				guid: 2,
 				distanceBand: 0,
-				angularSector: 0,
+				forwardAlignment: 1,
 				distanceSquared: 4,
 			},
 		];
@@ -243,7 +187,7 @@ describe("selection press lifecycle", () => {
 		expect(f.sample).toHaveBeenCalledTimes(1);
 		f.input.destroy();
 	});
-	it("holding Ctrl+Tab selects nearest non-creature without waiting for release", () => {
+	it("holding Ctrl+Tab selects immediate non-creature without waiting for release", () => {
 		const f = fixture();
 		f.selection.select(3);
 		f.input.keydown(key({ ctrlKey: true }), 0);
@@ -268,7 +212,7 @@ describe("selection press lifecycle", () => {
 		},
 	);
 	it.each([false, true])(
-		"Shift holds select nearest once before release with Control=%s",
+		"Shift holds select immediate once before release with Control=%s",
 		(ctrlKey) => {
 			const f = fixture();
 			f.input.keydown(key({ shiftKey: true, ctrlKey }), 0);
@@ -350,42 +294,42 @@ describe("selection press lifecycle", () => {
 		const f = fixture();
 		f.selection.select(2);
 		f.input.keydown(key(), 0);
-		f.candidates.interactable = [];
+		f.candidates.smartCombat = [];
 		vi.advanceTimersByTime(HOLD_MS);
 		f.input.keyup(key(), HOLD_MS);
 		expect(f.selection.selectedGuid()).toBe(2);
 		expect(f.sample).toHaveBeenCalledTimes(1);
 		f.input.destroy();
 	});
-	it("nearest acquisition ignores stable cycle order and breaks distance ties by GUID", () => {
+	it("immediate acquisition breaks equal-alignment distance ties by GUID", () => {
 		const f = fixture();
-		f.cycle.cycle("interactable", 1);
-		f.candidates.interactable = [
+		f.cycle.cycle("smart-combat", 1);
+		f.candidates.smartCombat = [
 			{
-				filters: ["interactable"],
+				filters: { "smart-combat": "cycle" },
 				guid: 5,
 				distanceBand: 0,
-				angularSector: 0,
+				forwardAlignment: 1,
 				distanceSquared: 1,
 			},
 			{
-				filters: ["interactable"],
+				filters: { "smart-combat": "cycle" },
 				guid: 4,
 				distanceBand: 0,
-				angularSector: 0,
+				forwardAlignment: 1,
 				distanceSquared: 1,
 			},
 			{
-				filters: ["interactable"],
+				filters: { "smart-combat": "cycle" },
 				guid: 2,
 				distanceBand: 0,
-				angularSector: 0,
+				forwardAlignment: 1,
 				distanceSquared: 4,
 			},
 		];
-		f.cycle.selectNearest("interactable");
+		f.cycle.selectImmediate("smart-combat");
 		expect(f.selection.selectedGuid()).toBe(4);
-		f.cycle.cycle("interactable", 1);
+		f.cycle.cycle("smart-combat", 1);
 		expect(f.selection.selectedGuid()).toBe(5);
 		f.input.destroy();
 	});

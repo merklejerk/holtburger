@@ -195,16 +195,14 @@ export const CLIENT_TUNING = {
 	/** Keep the combat arrow inward of the selected-target arrow, including artwork and glow. */
 	combatTargetIndicator: { safeInsetCssPixels: 128 },
 	entitySelection: {
-		/** Hold any cycle binding to acquire the nearest target once. */
+		/** Hold any cycle binding to acquire the immediate target once. */
 		holdDelayMs: 500,
 		/** Input-only candidate admission and ordering. */
 		cycle: {
 			radiusMeters: 125,
 			viewMarginMeters: 2,
-			distanceBandMeters: 5,
-			angularSectorCount: 8,
-			resetDivergence: 0.5,
-			adjacentRegionWeight: 0.25,
+			/** First band width; subsequent widths double with distance. */
+			initialDistanceBandMeters: 2.5,
 		},
 		/** Modest staleness is sufficient for cursor feedback and selection range expiry. */
 		sampleIntervalMs: 1_000 / 15,

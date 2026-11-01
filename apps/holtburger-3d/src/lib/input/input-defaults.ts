@@ -82,37 +82,29 @@ export const INPUT_DEFAULTS = {
 
 		/** Select the authoritative local player identity. */
 		selectSelf: [{ key: "x", ctrl: false, alt: false, meta: false }],
-		/** Forward traversal over creatures and usable non-corpse objects, honoring the target view preference. */
-		nextInteractable: [
+		/** Forward smart combat traversal with stance-aware player admission and a broad immediate target. */
+		nextSmartCombat: [
 			{ key: "Tab", shift: false, ctrl: false, alt: false, meta: false },
 		],
-		/** Reverse traversal over creatures and usable non-corpse objects, honoring the target view preference. */
-		previousInteractable: [
+		/** Reverse smart combat traversal with the same immediate target and stance policy. */
+		previousSmartCombat: [
 			{ key: "Tab", shift: true, ctrl: false, alt: false, meta: false },
 		],
 		/** World objects can be acquired behind the camera. */
 		nextNonCreature: [
 			{ key: "Tab", shift: false, ctrl: true, alt: false, meta: false },
 		],
-		/** Stable reverse world-object traversal, including behind the camera. */
+		/** Reverse world-object traversal, including behind the camera. */
 		previousNonCreature: [
 			{ key: "Tab", shift: true, ctrl: true, alt: false, meta: false },
 		],
-		/** Stable forward traversal over unopened corpses in the world-object ring. */
+		/** Forward traversal over unopened corpses. */
 		nextUnopenedCorpse: [
 			{ key: "v", shift: false, ctrl: false, alt: false, meta: false },
 		],
-		/** Stable reverse traversal over unopened corpses in the world-object ring. */
+		/** Reverse traversal over unopened corpses. */
 		previousUnopenedCorpse: [
 			{ key: "v", shift: true, ctrl: false, alt: false, meta: false },
-		],
-		/** Forward traversal restricted to world-classified hostile creatures. */
-		nextHostile: [
-			{ key: "e", shift: false, ctrl: true, alt: false, meta: false },
-		],
-		/** Reverse traversal restricted to world-classified hostile creatures. */
-		previousHostile: [
-			{ key: "e", shift: true, ctrl: true, alt: false, meta: false },
 		],
 		/** Use the currently selected entity. */
 		interact: [{ key: "r", ctrl: false, alt: false, meta: false }],

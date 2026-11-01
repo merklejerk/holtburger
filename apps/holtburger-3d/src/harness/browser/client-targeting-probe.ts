@@ -30,7 +30,10 @@ import {
 	TARGETING_TEST_VIEW,
 } from "../../client/client-targeting.test-support";
 import type { ClientLifecycleSessionEvent } from "../../client/client-lifecycle-session";
-import type { ClientEntitySelectionQueryRequest } from "../../client/client-host-contract";
+import type {
+	ClientCombatMode,
+	ClientEntitySelectionQueryRequest,
+} from "../../client/client-host-contract";
 import {
 	DynamicEntityMirror,
 	cellId,
@@ -42,10 +45,7 @@ import { Quat, Vec3 } from "../../lib/game/math/types";
 /** Fixture-owned geometry policy; changing production tuning must not rewrite targeting scenarios. */
 const CYCLE_POLICY: CycleSelectionPolicy = {
 	radiusMeters: 75,
-	distanceBandMeters: 5,
-	angularSectorCount: 8,
-	resetDivergence: 0.5,
-	adjacentRegionWeight: 0.25,
+	initialDistanceBandMeters: 5,
 	viewMarginMeters: 2,
 };
 
@@ -104,9 +104,10 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	let scans = 0;
 	let view = TARGETING_TEST_VIEW;
 	let targetOnlyInView = true;
+	let combatMode: ClientCombatMode = "peace";
+	let partyMembers = new Set<number>();
 	const cycle = new ClientCycleSelectionController({
 		selection,
-		policy: CYCLE_POLICY,
 		sample: () => {
 			scans++;
 			return sampleCycleCandidates(
@@ -115,6 +116,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 				view,
 				CYCLE_POLICY,
 				targetOnlyInView,
+				{ combatMode, partyMembers },
 			);
 		},
 	});
@@ -133,20 +135,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		onAutoRunChanged() {},
 	});
 	let nowMs = 0;
-	// The scenarios below press these fixture chords independently of editable product defaults.
-	const targetingInput = {
-		...INPUT_DEFAULTS,
-		client: {
-			...INPUT_DEFAULTS.client,
-			nextHostile: [
-				{ key: "v", ctrl: true, shift: false, alt: false, meta: false },
-			],
-			previousHostile: [
-				{ key: "v", ctrl: true, shift: true, alt: false, meta: false },
-			],
-		},
-	};
-	const appInput = new AppInput(targetingInput);
+	const appInput = new AppInput(INPUT_DEFAULTS);
 	const character = appInput.characterContext(() => {});
 	const input = new ClientSelectionInput({
 		keyboard,
@@ -202,9 +191,18 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	const replace = (
 		records: readonly {
 			guid: number;
+			/** Forward displacement in AC coordinates. */
 			distance: number;
+			/** Sideways displacement for 3D alignment scenarios. */
+			lateral?: number;
+			/** Height above the player. */
+			height?: number;
 			creature: boolean;
-			hostile?: boolean;
+			/** Player identity, independent of whether PvP permits harm. */
+			player?: boolean;
+			/** World-produced PvP relationship; fixtures never reconstruct it from radar style. */
+			playerThreat?: boolean;
+			monster?: boolean;
 			usable?: boolean;
 			corpse?: "unopened" | "opened";
 		}[],
@@ -213,6 +211,8 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		const dynamic = records.map((record) => {
 			const entity = targetingEntity(record.guid, 1);
 			entity.placement.pose.coords.y = record.distance;
+			entity.placement.pose.coords.x = record.lateral ?? 0;
+			entity.placement.pose.coords.z = record.height ?? 0;
 			entity.placement.pose.landblockId = cellId(0x00000123);
 			entity.placement.spatialMembership = {
 				reachesOutdoors: false,
@@ -229,6 +229,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 						...records.map((record): ClientEntityFacts => {
 							const facts = entityFacts(record.guid, {
 								corpse: record.corpse ?? null,
+								playerThreat: record.playerThreat ?? false,
 								targeting: record.creature ? "creature" : "non-creature",
 							});
 							if (facts.description.kind !== "known")
@@ -241,11 +242,13 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 									...facts.description,
 									useCapability:
 										record.creature || record.usable ? "direct" : "unsupported",
-									mapCategory: record.hostile
-										? "mob"
-										: record.creature
-											? "npc"
-											: "other",
+									mapCategory: record.player
+										? "player"
+										: record.monster
+											? "mob"
+											: record.creature
+												? "npc"
+												: "other",
 								},
 							};
 						}),
@@ -261,7 +264,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	};
 	try {
 		keyboard.returnToGame();
-		const bandWidth = CYCLE_POLICY.distanceBandMeters;
+		const bandWidth = CYCLE_POLICY.initialDistanceBandMeters;
 		const base: Parameters<typeof replace>[0] = [
 			{ guid: 2, distance: bandWidth * 1.2, creature: true },
 			{ guid: 3, distance: bandWidth * 1.4, creature: true },
@@ -272,164 +275,75 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		replace(base);
 		press("Tab");
 		expectSelected(2, "cross-EnvCell acquisition without realization");
-		replace(
-			base.map((record) => ({
-				...record,
-				distance:
-					record.guid === 2
-						? bandWidth * 1.5
-						: record.guid === 3
-							? bandWidth * 1.1
-							: record.distance,
-			})),
-		);
 		press("Tab");
-		expectSelected(3, "distance crossing preserves order");
+		expectSelected(3, "forward traversal");
+		press("Tab", false, true);
+		expectSelected(2, "reverse traversal");
 		replace([...base, { guid: 5, distance: bandWidth * 1.05, creature: true }]);
-		press("Tab");
-		expectSelected(4, "newcomer does not reorder survivors");
-		press("Tab");
-		expectSelected(5, "newcomer admitted immediately");
 		press("Tab", false, true);
-		expectSelected(4, "reverse traversal");
-		replace(base.filter((record) => record.guid !== 4));
-		press("Tab", false, true);
-		expectSelected(3, "removed cursor retains reverse gap");
+		expectSelected(5, "new immediate interrupts reverse traversal");
+		press("Tab");
+		expectSelected(2, "unchanged immediate permits traversal");
 		press("Tab", true);
-		expectSelected(10, "object traversal continues from the creature cursor");
-		press("Tab", true, true);
-		expectSelected(9, "reverse non-creature traversal");
+		expectSelected(9, "first object operation acquires its immediate");
 		press("v");
-		expectSelected(10, "corpse filter shares forward traversal cursor");
+		expectSelected(10, "already selected corpse immediate advances");
 		press("V", false, true);
-		expectSelected(9, "corpse filter shares reverse traversal cursor");
+		expectSelected(9, "reverse corpse traversal");
+
 		selection.select(null);
 		replace([
-			{ guid: 30, distance: bandWidth * 1.2, creature: false },
-			{ guid: 31, distance: bandWidth * 1.4, creature: true },
-			{
-				guid: 32,
-				distance: bandWidth * 1.6,
-				creature: false,
-				corpse: "unopened",
-			},
-			{ guid: 33, distance: bandWidth * 1.8, creature: true },
-		]);
-		press("Tab");
-		expectSelected(31, "interleaved ring starts at nearest interactable B");
-		press("Tab", true);
-		expectSelected(
-			32,
-			"switching to objects advances to C rather than restarting at A",
-		);
-		press("Tab");
-		expectSelected(33, "switching back to creatures advances to D");
-		press("v");
-		expectSelected(32, "corpse filter wraps from the shared creature cursor");
-		selection.select(null);
-		replace([
-			{ guid: 40, distance: bandWidth * 1.2, creature: true },
-			{ guid: 41, distance: bandWidth * 1.4, creature: true, hostile: true },
-			{ guid: 42, distance: bandWidth * 1.6, creature: false },
-			{ guid: 43, distance: bandWidth * 1.8, creature: true, hostile: true },
-			{ guid: 44, distance: -bandWidth * 1.1, creature: true, hostile: true },
-		]);
-		press("Tab");
-		expectSelected(40, "interactable traversal includes friendly NPCs");
-		press("v", true);
-		expectSelected(
-			41,
-			"Ctrl+V advances to the next hostile in the shared ring",
-		);
-		press("v", true);
-		expectSelected(43, "Ctrl+V skips world objects and offscreen hostiles");
-		press("V", true, true);
-		expectSelected(41, "Ctrl+Shift+V reverses hostile traversal");
-		press("Tab", true);
-		expectSelected(42, "object traversal continues from the hostile cursor");
-		selection.select(null);
-		replace([
-			{ guid: 50, distance: bandWidth * 1.4, creature: true, hostile: true },
-			{ guid: 51, distance: bandWidth * 1.2, creature: false, usable: true },
-			{ guid: 52, distance: bandWidth * 1.3, creature: false },
-			{ guid: 53, distance: bandWidth * 1.6, creature: false, usable: true },
-			{ guid: 54, distance: -bandWidth * 1.1, creature: false, usable: true },
-			{ guid: 57, distance: -bandWidth * 1.05, creature: true, hostile: true },
+			{ guid: 50, distance: 7, creature: true, monster: true },
+			{ guid: 51, distance: 6, creature: false, usable: true },
+			{ guid: 52, distance: 6.5, creature: false },
+			{ guid: 53, distance: 8, creature: false, usable: true },
+			{ guid: 54, distance: -5.5, creature: false, usable: true },
 			{
 				guid: 55,
-				distance: bandWidth * 0.8,
+				distance: 4,
 				creature: false,
 				usable: true,
 				corpse: "opened",
 			},
 			{
 				guid: 56,
-				distance: bandWidth * 0.9,
+				distance: 4.5,
 				creature: false,
 				usable: true,
 				corpse: "unopened",
 			},
+			{ guid: 57, distance: -5.25, creature: true, monster: true },
 		]);
-		press("Tab");
-		expectSelected(
-			51,
-			"Tab selects the nearest usable non-corpse object in view",
-		);
-		press("Tab");
-		expectSelected(
-			50,
-			"Tab interleaves creatures with usable objects and skips unsupported objects",
-		);
-		press("Tab");
-		expectSelected(53, "Tab continues to the next usable object");
-		press("Tab", false, true);
-		expectSelected(50, "Shift+Tab reverses the expanded interactable ring");
+		for (const guid of [51, 50, 53]) {
+			press("Tab");
+			expectSelected(
+				guid,
+				"smart combat traverses usable objects and creatures when the immediate is usable",
+			);
+		}
 		press("Tab", true);
-		expectSelected(53, "object traversal shares the interactable cursor");
-		press("Tab", true, true);
-		expectSelected(
-			52,
-			"object-only cycling still includes unsupported world objects",
-		);
-		press("Tab", true, true);
-		expectSelected(
-			51,
-			"reverse object traversal reaches the preceding usable object",
-		);
-		press("Tab", true, true);
-		expectSelected(
-			54,
-			"object-only cycling retains usable objects behind the camera",
-		);
+		expectSelected(55, "object acquisition includes opened corpses");
+		press("Tab", true);
+		expectSelected(56, "object traversal includes unopened corpses");
+		press("Tab", true);
+		expectSelected(51, "object traversal crosses distance bands");
+		press("Tab", true);
+		expectSelected(52, "object traversal includes unsupported uses");
 		press("v");
-		expectSelected(56, "corpse cycling still selects unopened usable corpses");
-		press("Tab");
-		expectSelected(
-			51,
-			"interactable cycling skips the corpse selected by another filter",
-		);
+		expectSelected(56, "corpse filter excludes opened corpses");
 		targetOnlyInView = false;
 		selection.select(null);
-		press("Tab");
-		expectSelected(57, "unrestricted target cycling admits a rear creature");
-		press("Tab");
-		expectSelected(
-			54,
-			"unrestricted target cycling admits a rear usable object",
-		);
-		selection.select(null);
-		press("v", true);
-		expectSelected(
-			50,
-			"hostile cycling remains view restricted when target cycling is unrestricted",
-		);
+		for (const guid of [51, 50, 53, 57, 54]) {
+			press("Tab");
+			expectSelected(
+				guid,
+				"unrestricted traversal ranks rear targets after forward targets in a band",
+			);
+		}
 		targetOnlyInView = true;
 		selection.select(null);
 		press("Tab");
-		expectSelected(
-			51,
-			"restoring the target view restriction excludes rear targets",
-		);
+		expectSelected(51, "restoring view restriction excludes rear targets");
 		replace(base);
 		press("x");
 		expectSelected(1, "self binding");
@@ -450,7 +364,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		expectSelected(1, "remapped self without rendered presentation");
 		keyboard.cancel();
 		character.replaceBindings(CLIENT_KEYBOARD_DEFAULTS.character);
-		appInput.replaceConfiguration(targetingInput);
+		appInput.replaceConfiguration(INPUT_DEFAULTS);
 		pointer.acquireViewportPoint(0, 0);
 		const request = requests.at(-1);
 		if (request === undefined)
@@ -537,7 +451,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 				await waitForHold();
 				expectSelected(
 					ctrlKey ? 9 : 2,
-					"held chord selects nearest in its category",
+					"held chord selects immediate in its category",
 				);
 				dispatchHeld("keyup", ctrlKey, shiftKey);
 				expectSelected(ctrlKey ? 9 : 2, "completed hold consumes release");
@@ -560,7 +474,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		const remappedCycle = clientKeyboardSettingsSchema.parse(
 			replaceClientBinding(
 				CLIENT_KEYBOARD_DEFAULTS,
-				{ kind: "client", action: "nextInteractable" },
+				{ kind: "client", action: "nextSmartCombat" },
 				[{ key: "q" }],
 			),
 		);
@@ -574,7 +488,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		dispatchHeld("keyup", false, false);
 		expectSelected(3, "old key release after remap cannot select");
 		press("q");
-		expectSelected(4, "new cycle binding reaches selection owner");
+		expectSelected(2, "new cycle binding acquires immediate");
 		keyboard.cancel();
 		character.replaceBindings(CLIENT_KEYBOARD_DEFAULTS.character);
 		appInput.replaceConfiguration(INPUT_DEFAULTS);
@@ -605,40 +519,34 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		if (systemMenuRequests !== beforeMenu + 1)
 			throw new Error("Empty Escape stack did not reach the system menu.");
 
-		// Spatial changes, rather than elapsed time, start a fresh nearest acquisition.
+		// Ranking includes vertical displacement, with no cell or renderer dependency.
 		selection.select(null);
-		replace(base);
-		press("Tab");
-		press("Tab");
-		expectSelected(3, "spatial baseline cursor");
-		replace(
-			base.map((record) => ({
-				...record,
-				distance: record.creature
-					? record.distance + bandWidth * 2
-					: record.distance,
-			})),
-		);
+		replace([
+			{ guid: 20, distance: 8, lateral: 2, creature: true },
+			{ guid: 21, distance: 8, height: 6, creature: true },
+			{ guid: 22, distance: 16, creature: true },
+		]);
 		press("Tab");
 		expectSelected(
-			2,
-			"radial divergence reacquires nearest instead of advancing",
-		);
-		replace(
-			base.map((record) => ({
-				...record,
-				distance: record.creature
-					? record.distance + bandWidth * 4
-					: record.distance,
-			})),
+			20,
+			"same-floor target outranks upstairs target in the same band",
 		);
 		press("Tab");
-		expectSelected(3, "radial reset skips the already selected nearest target");
+		expectSelected(21, "nearest band outranks farther straight-ahead target");
 		replace([
-			...base,
-			{ guid: 20, distance: -bandWidth * 1.2, creature: true },
-			{ guid: 21, distance: -bandWidth * 1.4, creature: true },
+			{ guid: 20, distance: 8, lateral: 4, creature: true },
+			{ guid: 21, distance: 8, height: 6, creature: true },
+			{ guid: 22, distance: 8, creature: true },
 		]);
+		press("Tab");
+		expectSelected(
+			22,
+			"changed alignment immediately reacquires preferred target",
+		);
+		press("Tab");
+		expectSelected(20, "already selected immediate advances");
+
+		// Camera sees behind the player; only the unrestricted filters may acquire there.
 		view = {
 			...TARGETING_TEST_VIEW,
 			camera: {
@@ -649,11 +557,62 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 				},
 			},
 		};
+		replace([{ guid: 23, distance: -8, creature: true, monster: true }]);
 		press("Tab");
-		expectSelected(20, "camera turn reacquires nearest in the new view");
+		expectSelected(
+			20,
+			"camera visibility cannot admit targets behind the player",
+		);
+		targetOnlyInView = false;
 		press("Tab");
-		expectSelected(21, "new view continues outward");
+		expectSelected(23, "unrestricted targets ignore the forward half-space");
 		view = TARGETING_TEST_VIEW;
+		targetOnlyInView = true;
+
+		const combatTargets: Parameters<typeof replace>[0] = [
+			{ guid: 2, distance: 1, creature: false },
+			{ guid: 3, distance: 2, creature: true, player: true },
+			{ guid: 4, distance: 3, creature: true, monster: true },
+			{ guid: 5, distance: 4, creature: true },
+			{ guid: 6, distance: 6, creature: true, player: true },
+			{
+				guid: 7,
+				distance: 7,
+				creature: true,
+				player: true,
+				playerThreat: true,
+			},
+			{ guid: 8, distance: 8, creature: false, usable: true },
+			{ guid: 9, distance: 9, creature: false, corpse: "unopened" },
+		];
+		replace(combatTargets);
+		partyMembers = new Set([6]);
+		for (const [mode, expected] of [
+			["peace", [2, 3, 4, 5, 6, 7, 8, 2]],
+			["melee", [2, 4, 5, 7, 8, 2]],
+			["missile", [2, 4, 5, 7, 8, 2]],
+			["magic", [2, 4, 5, 6, 7, 8, 2]],
+		] as const) {
+			combatMode = mode;
+			selection.select(null);
+			for (const guid of expected) {
+				press("Tab");
+				expectSelected(guid, `${mode} smart combat player and NPC admission`);
+			}
+		}
+		replace(combatTargets.filter((record) => record.guid !== 2));
+		press("Tab");
+		expectSelected(
+			3,
+			"non-threatening player wins immediate before stance filtering",
+		);
+		press("Tab");
+		expectSelected(
+			4,
+			"selected non-threatening immediate advances into combat traversal",
+		);
+		combatMode = "peace";
+		partyMembers = new Set();
 
 		// Explicit population measurement, not a general renderer performance claim.
 		const population = 1000;
@@ -676,10 +635,11 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			combatTargetIndicator,
 			holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,
 			holdAndFocusChecks: true,
-			spatialResetChecks: true,
-			sharedFilterTraversal: true,
-			hostileTraversal: true,
-			interactableObjectTraversal: true,
+			immediateTargetChecks: true,
+			sharedCursorChecks: true,
+			smartCombatObjectTraversal: true,
+			smartCombatStances: true,
+			immediateOnlyAdmission: true,
 			targetViewOption: true,
 			escapeFallbackOrdering: true,
 			remapCancellation: true,

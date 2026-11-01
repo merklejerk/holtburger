@@ -135,9 +135,9 @@ export interface ClientTuning {
 
 	/** Client-local entity acquisition feedback policy. */
 	readonly entitySelection: {
-		/** One-shot nearest acquisition threshold for all held Tab chords. */
+		/** One-shot immediate acquisition threshold for all held targeting bindings. */
 		readonly holdDelayMs: number;
-		/** Keyboard acquisition range, stable traversal, and approximate view policy. */
+		/** Keyboard acquisition range, exponential distance bands, and approximate view policy. */
 		readonly cycle: CycleSelectionPolicy;
 		/** Maximum cadence for hover acquisition and selected-target validity sampling. */
 		readonly sampleIntervalMs: number;

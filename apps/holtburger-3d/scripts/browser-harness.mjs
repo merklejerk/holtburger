@@ -392,6 +392,12 @@ try {
 			...result.itemCooldowns,
 			browserErrors,
 		};
+	} else if (options.clientTargeting) {
+		report = {
+			suite: "client-targeting",
+			...result.clientTargeting,
+			browserErrors,
+		};
 	} else if (options.clientCombatBar) {
 		report = {
 			suite: "client-combat-bar",
@@ -679,6 +685,7 @@ function parseArgs(args) {
 		clientHousing: false,
 		clientHud: false,
 		clientCombatBar: false,
+		clientTargeting: false,
 		clientHudSnapping: false,
 		uiShowcase: false,
 		itemCooldowns: false,
@@ -877,6 +884,10 @@ function parseArgs(args) {
 				break;
 			case "--world-map":
 				parsed.worldMap = true;
+				break;
+			case "--client-targeting":
+				parsed.clientHud = true;
+				parsed.clientTargeting = true;
 				break;
 			case "--client-combat-bar":
 				parsed.clientHud = true;
@@ -4795,6 +4806,20 @@ async function runClientHudHarness({ viteUrl }) {
 			};
 		}
 		await waitForClientHudHarnessApi(client);
+		if (options.clientTargeting) {
+			const targeting = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeTargeting",
+				[],
+			);
+			if (!targeting?.passed)
+				throw new Error("Client targeting probe did not pass.");
+			return {
+				clientTargeting: targeting,
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
 		if (options.clientCombatBar)
 			return {
 				clientHud: {

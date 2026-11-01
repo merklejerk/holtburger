@@ -1,27 +1,39 @@
 import type { SceneVec3 } from "../lib/assets/ac-frame";
-import { rotateRenderVector } from "../lib/game/math/camera-orientation";
+import {
+	createEntityFacingCameraYaw,
+	rotateRenderVector,
+} from "../lib/game/math/camera-orientation";
 import { Vec3 } from "../lib/game/math/types";
-import type { DynamicEntityMirror } from "../lib/game/runtime/dynamic-entity-feed";
+import type {
+	DynamicEntityMirror,
+	DynamicEntityWorldPlacement,
+} from "../lib/game/runtime/dynamic-entity-feed";
 import { dynamicEntityWorldOrigin } from "../lib/game/runtime/dynamic-entity-presentation";
 import type { PrimaryCameraView } from "../lib/game/runtime/types";
-import type { ClientEntityMirror } from "./client-entity-mirror";
+import type { ClientCombatMode } from "./client-host-contract";
+import type {
+	ClientEntityFacts,
+	ClientEntityMirror,
+} from "./client-entity-mirror";
 import type { ClientEntitySelection } from "./client-entity-selection";
 
-/** Binding-specific views over one shared target ring; memberships may overlap. */
-export type CycleFilter =
-	"interactable" | "hostile" | "non-creature" | "unopened-corpse";
+/** Binding-specific eligibility over one shared traversal cursor; memberships may overlap. */
+export type CycleFilter = "smart-combat" | "non-creature" | "unopened-corpse";
+/** Whether a filter admits ordinary traversal or only its best-ranked candidate. */
+type CycleMembership = "cycle" | "immediate-only";
+/** Cold gameplay facts sampled with each acquisition, independent of panel visibility. */
+export interface CycleSelectionContext {
+	/** Confirmed stance; unknown uses unrestricted player admission until confirmation. */
+	readonly combatMode: ClientCombatMode;
+	/** Accepted fellowship roster, including members without rendered bodies. */
+	readonly partyMembers: ReadonlySet<number>;
+}
 /** App-local acquisition knobs, sampled only on input. */
 export interface CycleSelectionPolicy {
-	/** Player-to-origin acquisition radius in meters for both categories. */
+	/** Player-to-origin acquisition radius in meters for every filter. */
 	readonly radiusMeters: number;
-	/** Radial region width; traversal preserves prior order within each band. */
-	readonly distanceBandMeters: number;
-	/** Number of equal azimuth sectors around the camera's horizontal heading. */
-	readonly angularSectorCount: number;
-	/** Fraction of spatial change needed to start a fresh acquisition, in (0, 1]. */
-	readonly resetDivergence: number;
-	/** Contribution of a one-region shift relative to admission/removal, in [0, 1]. */
-	readonly adjacentRegionWeight: number;
+	/** Width of the innermost radial band; each subsequent band doubles in width. */
+	readonly initialDistanceBandMeters: number;
 	/** Extra horizontal/vertical half-width in meters; no behind-camera admission. */
 	readonly viewMarginMeters: number;
 }
@@ -29,14 +41,14 @@ export interface CycleSelectionPolicy {
 export interface CycleCandidate {
 	/** Stable identity used for membership and final selection. */
 	readonly guid: number;
-	/** Squared player-to-origin distance; used for fresh nearest acquisition. */
+	/** Squared player-to-origin distance; breaks equal-band, equal-angle ties. */
 	readonly distanceSquared: number;
 	/** Player-relative radial band, computed by the candidate sampler. */
 	readonly distanceBand: number;
-	/** Wrapped view-relative horizontal sector, computed by the candidate sampler. */
-	readonly angularSector: number;
-	/** Nonempty sampler-owned memberships, including view eligibility and world use capability. */
-	readonly filters: readonly [CycleFilter, ...CycleFilter[]];
+	/** Cosine of the 3D angle to horizontal player forward; larger values rank first. */
+	readonly forwardAlignment: number;
+	/** Sampler-owned admission per filter; absence means ineligible for that filter. */
+	readonly filters: Readonly<Partial<Record<CycleFilter, CycleMembership>>>;
 }
 
 /** Cheap origin-based camera test; intentionally ignores portal scopes and occlusion. */
@@ -78,6 +90,7 @@ export function sampleCycleCandidates(
 	view: PrimaryCameraView | null,
 	policy: CycleSelectionPolicy,
 	targetOnlyInView: boolean,
+	context: CycleSelectionContext,
 ): readonly CycleCandidate[] | null {
 	const read = entities.read();
 	if (
@@ -86,27 +99,23 @@ export function sampleCycleCandidates(
 		read.level.playerGuid === null
 	)
 		return null;
-	const origins = new Map<number, SceneVec3>();
+	const placements = new Map<number, DynamicEntityWorldPlacement>();
 	// A borrowed, unsorted iteration avoids making mirror/UI ordering part of this hot input path.
 	for (const entity of motion.currentEntities()) {
 		if (entity.placement.kind === "world")
-			origins.set(
-				entity.identity.guid,
-				dynamicEntityWorldOrigin(entity.placement),
-			);
+			placements.set(entity.identity.guid, entity.placement);
 	}
-	const player = origins.get(read.level.playerGuid);
-	if (player === undefined) return null;
+	const playerPlacement = placements.get(read.level.playerGuid);
+	if (playerPlacement === undefined) return null;
+	const player = dynamicEntityWorldOrigin(playerPlacement);
+	const yaw = createEntityFacingCameraYaw(playerPlacement.pose.rotation);
+	const forward = new Vec3(Math.sin(yaw), 0, -Math.cos(yaw));
 	const inView =
 		view === null ? null : approximateTargetView(view, policy.viewMarginMeters);
-	// Canonical scene Y is up. Camera right gives a stable yaw even when looking vertically.
-	const right =
-		view === null
-			? new Vec3(1, 0, 0)
-			: rotateRenderVector(new Vec3(1, 0, 0), view.camera.placement.rotation);
 	const candidates: CycleCandidate[] = [];
 	const radiusSquared = policy.radiusMeters * policy.radiusMeters;
-	for (const [guid, position] of origins) {
+	for (const [guid, placement] of placements) {
+		const position = dynamicEntityWorldOrigin(placement);
 		if (guid === read.level.playerGuid) continue;
 		const facts = read.level.entities.get(guid);
 		if (facts === undefined || facts.targeting === "ineligible") continue;
@@ -115,50 +124,38 @@ export function sampleCycleCandidates(
 			(position.y - player.y) ** 2 +
 			(position.z - player.z) ** 2;
 		if (distanceSquared <= radiusSquared) {
-			const visible = inView !== null && inView(position);
+			const forwardDistance =
+				(position.x - player.x) * forward.x +
+				(position.z - player.z) * forward.z;
+			const visible =
+				forwardDistance >= 0 && inView !== null && inView(position);
+			const distance = Math.sqrt(distanceSquared);
 			const inTargetView = !targetOnlyInView || visible;
-			let filters: [CycleFilter, ...CycleFilter[]];
+			const filters: Partial<Record<CycleFilter, CycleMembership>> = {};
 			if (facts.targeting === "creature") {
 				if (!inTargetView) continue;
-				filters = ["interactable"];
-				// World classification excludes players/vendors before applying ACE's Attackable flag.
-				if (
-					visible &&
-					facts.description.kind === "known" &&
-					facts.description.mapCategory === "mob"
-				)
-					filters.push("hostile");
+				filters["smart-combat"] = smartCombatMembership(facts, context);
 			} else {
-				filters = ["non-creature"];
-				if (facts.corpse === "unopened") filters.push("unopened-corpse");
-				// Corpses retain dedicated acquisition even when their authored use is supported.
-				if (
-					facts.corpse === null &&
-					inTargetView &&
-					facts.description.kind === "known" &&
-					(facts.description.useCapability === "direct" ||
-						facts.description.useCapability === "targeted" ||
-						facts.description.useCapability === "salvage-tool")
-				)
-					filters.push("interactable");
+				filters["non-creature"] = "cycle";
+				if (facts.corpse === "unopened") filters["unopened-corpse"] = "cycle";
+				if (facts.corpse === null && inTargetView) {
+					const usable =
+						facts.description.kind === "known" &&
+						(facts.description.useCapability === "direct" ||
+							facts.description.useCapability === "targeted" ||
+							facts.description.useCapability === "salvage-tool");
+					filters["smart-combat"] = usable ? "cycle" : "immediate-only";
+				}
 			}
-			const bearing = Math.atan2(
-				(position.x - player.x) * right.x + (position.z - player.z) * right.z,
-				(position.x - player.x) * right.z - (position.z - player.z) * right.x,
-			);
-			const sector = Math.round(
-				(bearing * policy.angularSectorCount) / (2 * Math.PI),
-			);
 			candidates.push({
 				guid,
 				distanceSquared,
+				// Boundaries are w, 3w, 7w, ...; a boundary belongs to the outer band.
 				distanceBand: Math.floor(
-					Math.sqrt(distanceSquared) / policy.distanceBandMeters,
+					Math.log2(1 + distance / policy.initialDistanceBandMeters),
 				),
-				// Center sector zero on the view heading and wrap the rear seam.
-				angularSector:
-					((sector % policy.angularSectorCount) + policy.angularSectorCount) %
-					policy.angularSectorCount,
+				// Coincident origins have no direction: rank them like a perpendicular target.
+				forwardAlignment: distance === 0 ? 0 : forwardDistance / distance,
 				filters,
 			});
 		}
@@ -166,188 +163,127 @@ export function sampleCycleCandidates(
 	return candidates;
 }
 
-function nearestFirst(left: CycleCandidate, right: CycleCandidate): number {
-	return left.distanceSquared - right.distanceSquared || left.guid - right.guid;
+/** Only player identities are stance-restricted; NPCs and monsters remain ordinary targets. */
+function smartCombatMembership(
+	facts: ClientEntityFacts,
+	context: CycleSelectionContext,
+): CycleMembership {
+	if (
+		facts.description.kind !== "known" ||
+		facts.description.mapCategory !== "player" ||
+		facts.playerThreat ||
+		context.combatMode === "peace" ||
+		context.combatMode === "unknown" ||
+		(context.combatMode === "magic" && context.partyMembers.has(facts.guid))
+	)
+		return "cycle";
+	return "immediate-only";
 }
 
-/** Mean change over the union of identities; the acquisition snapshot never drifts with taps. */
-function spatialDivergence(
-	baseline: readonly CycleCandidate[],
-	current: readonly CycleCandidate[],
-	policy: CycleSelectionPolicy,
-): number {
-	const remaining = new Map(
-		current.map((candidate) => [candidate.guid, candidate]),
+/** One total ordering shared by cycling and immediate acquisition. */
+function preferredFirst(left: CycleCandidate, right: CycleCandidate): number {
+	return (
+		left.distanceBand - right.distanceBand ||
+		right.forwardAlignment - left.forwardAlignment ||
+		left.distanceSquared - right.distanceSquared ||
+		left.guid - right.guid
 	);
-	let change = 0;
-	for (const before of baseline) {
-		const after = remaining.get(before.guid);
-		if (after === undefined) {
-			change += 1;
-			continue;
-		}
-		remaining.delete(before.guid);
-		const sectorDifference = Math.abs(
-			after.angularSector - before.angularSector,
-		);
-		// Diagonal neighbors count as one region; angular distance wraps across the rear seam.
-		const steps = Math.max(
-			Math.abs(after.distanceBand - before.distanceBand),
-			Math.min(sectorDifference, policy.angularSectorCount - sectorDifference),
-		);
-		change += steps === 0 ? 0 : steps === 1 ? policy.adjacentRegionWeight : 1;
-	}
-	const unionSize = baseline.length + remaining.size;
-	return unionSize === 0 ? 0 : (change + remaining.size) / unionSize;
 }
 
-/** Input-owned spatial traversal; movement is sampled only when acquiring a target. */
+/** Input-owned traversal; the entire ordering is rebuilt only when acquiring a target. */
 export class ClientCycleSelectionController {
 	readonly #selection: ClientEntitySelection;
 	readonly #sample: () => readonly CycleCandidate[] | null;
-	readonly #policy: CycleSelectionPolicy;
 	readonly #unsubscribe: () => void;
-	#cycle: {
-		/** Current distance-band order with stable ordering inside each band. */
-		guids: readonly number[];
-		/** Last cycle winner, retained independently of selection maintenance. */
-		cursor: number | null;
-		/** Each binding compares only its own eligible targets, captured on first use or reset. */
-		baselines: Map<CycleFilter, readonly CycleCandidate[]>;
-	} | null = null;
+	/** Last acquisition winner, shared by all binding filters. */
+	#cursor: number | null = null;
+	/** Each filter interrupts traversal only when its own immediate target changes. */
+	readonly #immediates = new Map<CycleFilter, number | null>();
 	#destroyed = false;
 
 	constructor(options: {
 		readonly selection: ClientEntitySelection;
 		readonly sample: () => readonly CycleCandidate[] | null;
-		readonly policy: CycleSelectionPolicy;
 	}) {
 		this.#selection = options.selection;
 		this.#sample = options.sample;
-		this.#policy = options.policy;
-		this.#unsubscribe = options.selection.subscribeExternalIntent(() => {
-			this.#cycle = null;
-		});
+		this.#unsubscribe = options.selection.subscribeExternalIntent(() =>
+			this.#reset(),
+		);
 	}
 
 	cycle(filter: CycleFilter, direction: 1 | -1): void {
 		if (this.#destroyed) return;
 		const intent = this.#selection.beginAcquisition("cycle");
-		const candidates = this.#sample();
-		if (candidates === null) {
-			this.#cycle = null;
-			return;
-		}
-		const previous = this.#cycle;
-		const matching = candidates.filter((candidate) =>
-			candidate.filters.includes(filter),
-		);
-		const baselines =
-			previous === null
-				? new Map<CycleFilter, readonly CycleCandidate[]>()
-				: previous.baselines;
-		const baseline = baselines.get(filter);
-		const reset =
-			baseline !== undefined &&
-			spatialDivergence(baseline, matching, this.#policy) >=
-				this.#policy.resetDivergence;
-		if (baseline === undefined || reset) baselines.set(filter, matching);
-		const continuing = previous !== null && !reset;
-		const byGuid = new Map(
-			candidates.map((candidate) => [candidate.guid, candidate]),
-		);
-		const eligible = new Set(byGuid.keys());
-		const survivors = continuing
-			? previous.guids.flatMap((guid) => {
-					const candidate = byGuid.get(guid);
-					return candidate === undefined ? [] : [candidate];
-				})
-			: [];
-		const oldMembership = new Set(survivors.map((candidate) => candidate.guid));
-		const newcomers = candidates
-			.filter((candidate) => !oldMembership.has(candidate.guid))
-			.sort(nearestFirst);
-		// Stable sort preserves survivor order inside bands; newcomers follow their band peers.
-		const guids = [...survivors, ...newcomers]
-			.sort((left, right) => left.distanceBand - right.distanceBand)
-			.map((candidate) => candidate.guid);
-		const selectable = new Set(matching.map((candidate) => candidate.guid));
-		// Keep the full traversal ring, but a tap must change selection when its filter allows it.
+		const matching = this.#candidates(filter);
+		if (matching === null) return;
+		const immediate = matching[0];
+		const changed = this.#immediates.get(filter) !== (immediate?.guid ?? null);
+		this.#immediates.set(filter, immediate?.guid ?? null);
+		if (immediate === undefined) return;
 		const selected = this.#selection.selectedGuid();
-		if (selectable.size > 1 && selected !== null) selectable.delete(selected);
-		let next: number | null = null;
-		if (guids.length > 0) {
-			const cursor =
-				continuing && survivors.length > 0
-					? previous.cursor
-					: previous === null
-						? selected
-						: null;
-			const index = cursor === null ? -1 : guids.indexOf(cursor);
-			let startIndex: number | null = null;
-			if (index >= 0) {
-				startIndex = index + direction;
-			} else if (continuing && survivors.length > 0 && cursor !== null) {
-				// Preserve the removed cursor's logical gap in the old ring, in either direction.
-				const oldIndex = previous.guids.indexOf(cursor);
-				for (let step = 1; step <= previous.guids.length; step++) {
-					const successor = this.#at(
-						previous.guids,
-						oldIndex + direction * step,
-					);
-					if (eligible.has(successor)) {
-						startIndex = guids.indexOf(successor);
-						break;
-					}
-				}
-			} else {
-				startIndex = direction === 1 ? 0 : -1;
-			}
-			if (startIndex !== null) {
-				for (let step = 0; step < guids.length; step += 1) {
-					const candidate = this.#at(guids, startIndex + direction * step);
-					if (selectable.has(candidate)) {
-						next = candidate;
-						break;
-					}
+		const cursorIndex = matching.findIndex(
+			(candidate) => candidate.guid === this.#cursor,
+		);
+		let next = immediate;
+		if ((!changed && cursorIndex >= 0) || immediate.guid === selected) {
+			const start = changed || cursorIndex < 0 ? 0 : cursorIndex;
+			for (let step = 1; step <= matching.length; step++) {
+				const index =
+					(((start + direction * step) % matching.length) + matching.length) %
+					matching.length;
+				const candidate = matching[index];
+				if (candidate === undefined)
+					throw new Error("Cycle index must name an eligible target.");
+				if (candidate.guid !== selected || matching.length === 1) {
+					next = candidate;
+					break;
 				}
 			}
 		}
-		this.#cycle = {
-			guids,
-			cursor:
-				next === null ? (previous === null ? selected : previous.cursor) : next,
-			baselines,
-		};
-		if (next !== null) this.#selection.commitAcquisition(intent, next);
+		this.#cursor = next.guid;
+		this.#selection.commitAcquisition(intent, next.guid);
 	}
 
-	/** Fresh nearest acquisition resets stable traversal and never advances past an existing target. */
-	selectNearest(filter: CycleFilter): void {
+	/** Hold acquisition uses the same preference as taps and seeds subsequent traversal. */
+	selectImmediate(filter: CycleFilter): void {
 		if (this.#destroyed) return;
 		const intent = this.#selection.beginAcquisition("external");
-		const candidates = this.#sample();
-		if (candidates === null) return;
-		let nearest: CycleCandidate | null = null;
-		for (const candidate of candidates) {
-			if (!candidate.filters.includes(filter)) continue;
-			if (nearest === null || nearestFirst(candidate, nearest) < 0)
-				nearest = candidate;
-		}
-		if (nearest !== null)
-			this.#selection.commitAcquisition(intent, nearest.guid);
+		const matching = this.#candidates(filter);
+		if (matching === null) return;
+		const immediate = matching[0];
+		this.#immediates.set(filter, immediate?.guid ?? null);
+		if (immediate === undefined) return;
+		this.#cursor = immediate.guid;
+		this.#selection.commitAcquisition(intent, immediate.guid);
 	}
 
 	destroy(): void {
 		this.#destroyed = true;
-		this.#cycle = null;
+		this.#reset();
 		this.#unsubscribe();
 	}
 
-	#at(guids: readonly number[], index: number): number {
-		const guid = guids[((index % guids.length) + guids.length) % guids.length];
-		if (guid === undefined)
-			throw new Error("Cycle cursor requires a nonempty candidate list.");
-		return guid;
+	#candidates(filter: CycleFilter): CycleCandidate[] | null {
+		const candidates = this.#sample();
+		if (candidates === null) {
+			this.#reset();
+			return null;
+		}
+		const ranked = candidates
+			.filter((candidate) => candidate.filters[filter] !== undefined)
+			.sort(preferredFirst);
+		// Resolve immediate from the broad pool before restricting traversal. The winning
+		// immediate-only entity stays in the ring; all other immediate-only entities are skipped.
+		const immediate = ranked[0];
+		return ranked.filter(
+			(candidate) =>
+				candidate === immediate || candidate.filters[filter] === "cycle",
+		);
+	}
+
+	#reset(): void {
+		this.#cursor = null;
+		this.#immediates.clear();
 	}
 }

@@ -1637,6 +1637,7 @@
 						reason: "Fixture item cannot be salvaged.",
 					},
 					targeting: "non-creature",
+					playerThreat: false,
 					corpse: null,
 					scenePlacement: "available",
 					storage:
@@ -1904,6 +1905,7 @@
 						location: { kind: "none" },
 						scenePlacement: "available",
 						targeting: "creature",
+						playerThreat: false,
 						corpse: null,
 						description: {
 							...recipient.description,

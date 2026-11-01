@@ -39,7 +39,7 @@ export class ClientSelectionInput {
 		readonly keyboard: KeyboardInputPolicy;
 		readonly selection: ClientEntitySelection;
 		readonly cycle: ClientCycleSelectionController;
-		/** Duration before a held cycle binding acquires its nearest target. */
+		/** Duration before a held cycle binding acquires its immediate target. */
 		readonly holdDelayMs: number;
 	}) {
 		this.#input = options.input;
@@ -76,10 +76,8 @@ export class ClientSelectionInput {
 		const action = (
 			[
 				"selectSelf",
-				"nextInteractable",
-				"previousInteractable",
-				"nextHostile",
-				"previousHostile",
+				"nextSmartCombat",
+				"previousSmartCombat",
 				"nextNonCreature",
 				"previousNonCreature",
 				"nextUnopenedCorpse",
@@ -105,17 +103,11 @@ export class ClientSelectionInput {
 			case "cancel":
 				this.#selection.select(null);
 				break;
-			case "nextInteractable":
-				this.#beginPress(event, "interactable", 1, nowMs);
+			case "nextSmartCombat":
+				this.#beginPress(event, "smart-combat", 1, nowMs);
 				break;
-			case "previousInteractable":
-				this.#beginPress(event, "interactable", -1, nowMs);
-				break;
-			case "nextHostile":
-				this.#beginPress(event, "hostile", 1, nowMs);
-				break;
-			case "previousHostile":
-				this.#beginPress(event, "hostile", -1, nowMs);
+			case "previousSmartCombat":
+				this.#beginPress(event, "smart-combat", -1, nowMs);
 				break;
 			case "nextNonCreature":
 				this.#beginPress(event, "non-creature", 1, nowMs);
@@ -141,7 +133,7 @@ export class ClientSelectionInput {
 			if (event.isComposing) return;
 			// Event-loop delays must not turn a completed hold into a short press.
 			if (nowMs - pending.startedAtMs >= this.#holdDelayMs)
-				this.#cycle.selectNearest(pending.filter);
+				this.#cycle.selectImmediate(pending.filter);
 			else this.#cycle.cycle(pending.filter, pending.direction);
 		} else if (["Shift", "Control", "Alt", "Meta"].includes(event.key))
 			this.cancel();
@@ -176,7 +168,7 @@ export class ClientSelectionInput {
 			timer: setTimeout(() => {
 				if (this.#press !== pending) return;
 				this.#press = null;
-				this.#cycle.selectNearest(filter);
+				this.#cycle.selectImmediate(filter);
 			}, this.#holdDelayMs),
 		};
 		this.#press = pending;

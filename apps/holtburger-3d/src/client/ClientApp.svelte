@@ -2259,7 +2259,6 @@
 		pointerSelection = pointer;
 		const cycle = new ClientCycleSelectionController({
 			selection,
-			policy: CLIENT_TUNING.entitySelection.cycle,
 			sample: () =>
 				sampleCycleCandidates(
 					owner.entities,
@@ -2267,6 +2266,12 @@
 					gameplayPresentation?.targetingView() ?? null,
 					CLIENT_TUNING.entitySelection.cycle,
 					userSettings.input.targetOnlyInView,
+					{
+						combatMode: owner.state().combatMode,
+						partyMembers: new Set(
+							owner.partySnapshot()?.members.map((member) => member.guid) ?? [],
+						),
+					},
 				),
 		});
 		const input = new ClientSelectionInput({

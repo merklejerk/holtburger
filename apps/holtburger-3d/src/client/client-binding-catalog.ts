@@ -79,10 +79,8 @@ const CLIENT_LABELS: Readonly<Record<ClientShortcut, string>> = {
 	toggleNearby: "Toggle entity list",
 
 	selectSelf: "Select self",
-	nextInteractable: "Select next target",
-	previousInteractable: "Select previous target",
-	nextHostile: "Next hostile",
-	previousHostile: "Previous hostile",
+	nextSmartCombat: "Next smart combat target",
+	previousSmartCombat: "Previous smart combat target",
 	nextNonCreature: "Next world object",
 	previousNonCreature: "Previous world object",
 	nextUnopenedCorpse: "Next unopened corpse",

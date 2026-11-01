@@ -10,6 +10,7 @@ use crate::spatial::{
 use anyhow::Context;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::WorldObjectExt as _;
+use holtburger_common::properties::WorldObjectPropertyAccessors as _;
 use holtburger_protocol::messages::movement::{
     PositionPack, PositionType, ServerAutonomousPositionData, UpdatePositionFlag,
 };
@@ -722,6 +723,17 @@ impl WorldState {
             );
         }
         self.bootstrap_player_entity_from_description(data);
+        // Installing private properties directly bypasses the ordinary flag/contact updates.
+        // Reuse their mutation owner so PvP consumers observe the latest login baseline too.
+        if let Some(status) = data
+            .properties
+            .get_int_prop(PropertyInt::PlayerKillerStatus)
+        {
+            self.apply_property_update_to_target(
+                data.guid,
+                &PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, status),
+            );
+        }
     }
 
     pub(crate) fn apply_entity_position_pack(

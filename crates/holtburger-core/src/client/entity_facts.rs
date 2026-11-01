@@ -2,7 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use holtburger_common::Guid;
+use holtburger_common::{Guid, properties::ObjectDescriptionFlag};
 use holtburger_protocol::messages::{GameAction, IdentifyObjectActionData};
 use holtburger_world::crafting::salvage::SalvageContext;
 use holtburger_world::{
@@ -195,6 +195,16 @@ impl EntityFactsPublication {
         }
         let storage_changed = !storage_changes.is_empty();
         self.dirty.extend(storage_changes);
+        // Every player threat relationship depends on our own current PvP flags. Refresh peers
+        // when the local record changes, including replacement descriptions and private updates.
+        if self.dirty.contains(&world.player.guid) {
+            self.dirty.extend(
+                world
+                    .iter_visible_entities()
+                    .filter(|entity| entity.flags.contains(ObjectDescriptionFlag::PLAYER))
+                    .map(|entity| entity.guid),
+            );
+        }
         // Prepare before mutating the published cache so invalid world graphs fail coherently.
         let mut prepared = Vec::new();
         for guid in &self.dirty {
@@ -359,6 +369,114 @@ mod tests {
                 equipped_objects: Vec::new(),
             },
         )))
+    }
+
+    #[test]
+    fn login_descriptions_republish_threats_from_the_latest_private_pvp_status() {
+        use holtburger_common::properties::{ItemType, WorldObjectPropertyAccessorsMut};
+        use holtburger_world::entity::Entity;
+        let peer = Guid(7);
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        world.entities.get_mut(PLAYER).unwrap().flags = ObjectDescriptionFlag::PLAYER;
+        let mut other = Entity::new(peer, "Peer".into(), Default::default());
+        other.flags = ObjectDescriptionFlag::PLAYER | ObjectDescriptionFlag::PLAYER_KILLER;
+        other.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        world.entities.insert(other);
+        let mut publication = EntityFactsPublication::default();
+        publication.collect(&mut world).unwrap();
+        for (status, threat) in [(4, true), (2, false), (4, true)] {
+            let mut message = player_baseline();
+            let GameMessage::GameEvent(event) = &mut message else {
+                unreachable!()
+            };
+            let GameEvent::PlayerDescription(data) = &mut event.event else {
+                unreachable!()
+            };
+            data.properties
+                .set_int_prop(PropertyInt::PlayerKillerStatus, status);
+            for event in world.handle_message(&message) {
+                publication.observe(&event);
+            }
+            let delta = publication.collect(&mut world).unwrap();
+            assert_eq!(
+                delta
+                    .upserts
+                    .iter()
+                    .find(|record| record.guid == peer)
+                    .map(|record| record.player_threat),
+                Some(threat)
+            );
+            let snapshot = ClientEntitySnapshot::from_world(&world).unwrap();
+            assert_eq!(
+                snapshot
+                    .entities
+                    .iter()
+                    .find(|record| record.guid == peer)
+                    .unwrap()
+                    .player_threat,
+                threat
+            );
+        }
+    }
+
+    #[test]
+    fn pvp_changes_republish_peer_threats_when_either_player_changes_status() {
+        use holtburger_common::properties::{
+            ItemType, PropertyUpdate, WorldObjectPropertyAccessorsMut,
+        };
+        use holtburger_world::entity::Entity;
+        let peer = Guid(7);
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        world.entities.get_mut(PLAYER).unwrap().flags = ObjectDescriptionFlag::PLAYER;
+        let mut other = Entity::new(peer, "Peer".into(), Default::default());
+        other.flags = ObjectDescriptionFlag::PLAYER;
+        other.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        other.set_property(PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, 4));
+        world.entities.insert(other);
+        let mut publication = EntityFactsPublication::default();
+        let initial = publication.collect(&mut world).unwrap();
+        assert!(
+            !initial
+                .upserts
+                .iter()
+                .find(|record| record.guid == peer)
+                .unwrap()
+                .player_threat
+        );
+        // First change our private status, then change the remote public status, then restore it.
+        for (guid, status, expected) in [
+            (PLAYER, 4, true),
+            (peer, 0x40, false),
+            (peer, 4, true),
+            (PLAYER, 2, false),
+        ] {
+            let update = PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, status);
+            world
+                .entities
+                .get_mut(guid)
+                .unwrap()
+                .set_property(update.clone());
+            publication.observe(&WorldEvent::PropertiesUpdated {
+                guid,
+                updates: vec![update],
+            });
+            let delta = publication.collect(&mut world).unwrap();
+            assert_eq!(
+                delta
+                    .upserts
+                    .iter()
+                    .find(|record| record.guid == peer)
+                    .unwrap()
+                    .player_threat,
+                expected
+            );
+            assert_eq!(
+                publication.collect(&mut world).unwrap(),
+                ClientEntityDelta::default()
+            );
+        }
     }
 
     #[test]

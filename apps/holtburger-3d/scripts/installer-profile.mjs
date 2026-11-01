@@ -33,6 +33,7 @@ if (operation === "seed") {
 		id: randomUUID(),
 		name: "Installer retained profile",
 		serverId: server.id,
+		contentPath: null,
 		credentials: { account: "upgrade-probe", password: "synthetic-password" },
 	};
 	await store.saveServer(server);

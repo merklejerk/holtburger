@@ -5,9 +5,10 @@ from pathlib import Path
 import shutil
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from alpha_release import digest, target_named, verify_host_origin, verify_payload
-from desktop_installers import dmg_layout, numeric_version, verify_dmg
+from desktop_installers import dmg_documents, dmg_layout, numeric_version, verify_dmg
 
 
 class InstallerContracts(unittest.TestCase):
@@ -71,10 +72,27 @@ class InstallerContracts(unittest.TestCase):
             (app / "program").write_bytes(b"signed bytes")
             (app / "Contents/Resources/host-provenance.json").write_text("receipt")
             (native / "THIRD_PARTY_NOTICES.html").write_text("notices")
+            (native / "h3d/version").write_text("electron version")
+            (native / "version").write_text("conflicting document")
+            with self.assertRaisesRegex(ValueError, "names collide"):
+                dmg_documents(native)
+            (native / "version").unlink()
+            (native / "h3d/unexpected directory").mkdir()
+            with self.assertRaisesRegex(ValueError, "regular files"):
+                dmg_documents(native)
+            (native / "h3d/unexpected directory").rmdir()
             staging.mkdir()
             dmg_layout(native, staging)
             self.assertEqual((staging / "Applications").readlink(), Path("/Applications"))
             self.assertEqual((staging / "holtburger-3d.app/Contents/Resources/host-provenance.json").read_text(), "receipt")
+            self.assertEqual((staging / "version").read_text(), "electron version")
+            installed = root / "installed"
+            # Substitute only native OS commands; compare the complete copied inventory.
+            def ditto(command, **_kwargs):
+                shutil.copytree(command[1], command[2], symlinks=True)
+            with patch("desktop_installers.subprocess.run", side_effect=ditto), patch("desktop_installers.verify_bundle"):
+                verify_dmg(native, staging, installed)
+            verify_payload(native, installed)
             (staging / "holtburger-3d.app/program").write_bytes(b"substituted")
             with self.assertRaisesRegex(ValueError, "file differs"):
                 verify_dmg(native, staging, root / "installed")

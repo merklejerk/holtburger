@@ -42,12 +42,22 @@ def compile_windows(native: Path, version: str, destination: Path, compiler: Pat
     ], check=True)
 
 
+def dmg_documents(native: Path) -> dict[str, Path]:
+    """Preserve release documents and Electron's package-level version marker."""
+    documents = [path for path in native.iterdir() if path.name != "h3d"]
+    documents.extend(path for path in (native / "h3d").iterdir() if path.name != "holtburger-3d.app")
+    if any(not path.is_file() or path.is_symlink() for path in documents):
+        raise ValueError("DMG companion documents must be regular files")
+    if len({path.name for path in documents}) != len(documents):
+        raise ValueError("DMG companion document names collide")
+    return {path.name: path for path in documents}
+
+
 def dmg_layout(native: Path, staging: Path) -> None:
     """Flatten only the app location; all original release documents remain available."""
     shutil.copytree(native / "h3d/holtburger-3d.app", staging / "holtburger-3d.app", symlinks=True)
-    for path in native.iterdir():
-        if path.name != "h3d":
-            shutil.copy2(path, staging / path.name)
+    for name, path in dmg_documents(native).items():
+        shutil.copy2(path, staging / name)
     (staging / "Applications").symlink_to("/Applications", target_is_directory=True)
 
 
@@ -64,15 +74,15 @@ def mounted_dmg(image: Path, mount: Path):
 
 def verify_dmg(native: Path, mounted: Path, installed: Path) -> None:
     """Check the explicit DMG layout, then copy back to the native probe's layout."""
-    documents = {path.name for path in native.iterdir() if path.name != "h3d"}
-    expected = documents | {"holtburger-3d.app", "Applications"}
+    documents = dmg_documents(native)
+    expected = documents.keys() | {"holtburger-3d.app", "Applications"}
     if {path.name for path in mounted.iterdir()} != expected:
         raise ValueError("DMG contains unexpected or missing entries")
     if not (mounted / "Applications").is_symlink() or os.readlink(mounted / "Applications") != "/Applications":
         raise ValueError("DMG Applications shortcut is incorrect")
     verify_payload(native / "h3d/holtburger-3d.app", mounted / "holtburger-3d.app")
-    for name in documents:
-        if digest(native / name) != digest(mounted / name):
+    for name, source in documents.items():
+        if digest(source) != digest(mounted / name):
             raise ValueError(f"DMG document differs from its native input: {name}")
     # Whole-app replacement, rather than ditto merging, removes obsolete files.
     app = installed / "h3d/holtburger-3d.app"
@@ -80,8 +90,8 @@ def verify_dmg(native: Path, mounted: Path, installed: Path) -> None:
         shutil.rmtree(app)
     app.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["ditto", str(mounted / "holtburger-3d.app"), str(app)], check=True)
-    for name in documents:
-        shutil.copy2(mounted / name, installed / name)
+    for name, source in documents.items():
+        shutil.copy2(mounted / name, installed / source.relative_to(native))
     verify_payload(native, installed)
     verify_bundle(installed)
 

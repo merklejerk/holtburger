@@ -761,9 +761,6 @@
 								>
 									Skills
 								</h3>
-								{#if startingStats !== null}<p class="ui-muted">
-										Starting skill levels
-									</p>{/if}
 								<div class="creation-skill-groups">
 									{#each advancements.toReversed() as group}
 										{@const rows = buildControls.skills.filter(
@@ -778,80 +775,83 @@
 											>
 												{group.label}
 											</h4>
-											{#if rows.length === 0}<p class="ui-muted">None</p>{/if}
-											{#each rows as row (row.skill.id)}
-												{@const formula = creationSkillFormulaText(
-													row.skill.formula,
-												)}
-												<ClientPregameExpandableRow
-													className="creation-skill-row"
-												>
-													{#snippet summary()}<span class="creation-skill-name"
-															>{row.skill.name}</span
-														>
-														{#if startingStats !== null}
-															{@const startingLevel = startingSkillLevel(
-																row.skill.id,
-															)}
-															<span
-																class="creation-skill-level ui-mono"
-																data-starting-skill={row.skill.id}
-																aria-label={`${row.skill.name} starting level: ${startingLevel}`}
-																title={startingLevel}
-																>{startingLevel === "Unavailable"
-																	? "—"
-																	: startingLevel}</span
+											<div class="creation-skill-group-content">
+												{#if rows.length === 0}<p class="ui-muted">None</p>{/if}
+												{#each rows as row (row.skill.id)}
+													{@const formula = creationSkillFormulaText(
+														row.skill.formula,
+													)}
+													<ClientPregameExpandableRow
+														className="creation-skill-row"
+													>
+														{#snippet summary()}<span
+																class="creation-skill-name"
+																>{row.skill.name}</span
 															>
-														{/if}
-													{/snippet}
-													{#snippet actions()}
-														{#each ["downgrade", "upgrade"] as direction}
-															{@const action =
-																direction === "upgrade"
-																	? row.upgrade
-																	: row.downgrade}
-															{@const caption =
-																action.kind === "blocked"
-																	? action.reason
-																	: `${Math.abs(action.credits)} credits ${direction === "upgrade" ? "cost" : "refunded"}`}
-															<button
-																class="ui-stat-action"
-																class:active={action.kind === "available"}
-																type="button"
-																data-direction={direction === "upgrade"
-																	? "up"
-																	: "down"}
-																disabled={action.kind === "blocked"}
-																aria-label={`${row.skill.name}: ${action.label}. ${caption}`}
-																title={`${action.label}: ${caption}`}
-																onclick={() =>
-																	changeSkill(
-																		row.skill.id,
-																		direction === "upgrade"
-																			? "upgrade"
-																			: "downgrade",
-																	)}
-															>
+															{#if startingStats !== null}
+																{@const startingLevel = startingSkillLevel(
+																	row.skill.id,
+																)}
 																<span
-																	class="ui-stat-action-shape"
-																	aria-hidden="true"><UpgradeTriangle /></span
-																><span class="ui-stat-action-label"
-																	>{action.credits === null
+																	class="creation-skill-level ui-mono"
+																	data-starting-skill={row.skill.id}
+																	aria-label={`${row.skill.name} starting level: ${startingLevel}`}
+																	title={startingLevel}
+																	>{startingLevel === "Unavailable"
 																		? "—"
-																		: Math.abs(action.credits)}</span
+																		: startingLevel}</span
 																>
-															</button>
-														{/each}
-													{/snippet}
+															{/if}
+														{/snippet}
+														{#snippet actions()}
+															{#each ["downgrade", "upgrade"] as direction}
+																{@const action =
+																	direction === "upgrade"
+																		? row.upgrade
+																		: row.downgrade}
+																{@const caption =
+																	action.kind === "blocked"
+																		? action.reason
+																		: `${Math.abs(action.credits)} credits ${direction === "upgrade" ? "cost" : "refunded"}`}
+																<button
+																	class="ui-stat-action"
+																	class:active={action.kind === "available"}
+																	type="button"
+																	data-direction={direction === "upgrade"
+																		? "up"
+																		: "down"}
+																	disabled={action.kind === "blocked"}
+																	aria-label={`${row.skill.name}: ${action.label}. ${caption}`}
+																	title={`${action.label}: ${caption}`}
+																	onclick={() =>
+																		changeSkill(
+																			row.skill.id,
+																			direction === "upgrade"
+																				? "upgrade"
+																				: "downgrade",
+																		)}
+																>
+																	<span
+																		class="ui-stat-action-shape"
+																		aria-hidden="true"><UpgradeTriangle /></span
+																	><span class="ui-stat-action-label"
+																		>{action.credits === null
+																			? "—"
+																			: Math.abs(action.credits)}</span
+																	>
+																</button>
+															{/each}
+														{/snippet}
 
-													{#if row.skill.description.length > 0}<p>
-															{row.skill.description}
-														</p>{/if}
-													{#if formula !== null}<p class="ui-mono">
-															Formula: {formula}
-														</p>{/if}
-												</ClientPregameExpandableRow>
-											{/each}
+														{#if row.skill.description.length > 0}<p>
+																{row.skill.description}
+															</p>{/if}
+														{#if formula !== null}<p class="ui-mono">
+																Formula: {formula}
+															</p>{/if}
+													</ClientPregameExpandableRow>
+												{/each}
+											</div>
 										</section>
 									{/each}
 								</div>
@@ -1258,6 +1258,16 @@
 		.creation-skill-groups {
 			display: grid;
 			gap: 20px;
+		}
+		.creation-skill-group-heading {
+			margin: 0 0 8px;
+			font-family: var(--ui-font-body);
+			font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
+			font-weight: 600;
+			line-height: var(--ui-line-height-heading);
+		}
+		.creation-skill-group-content {
+			padding-inline-start: 16px;
 		}
 		.creation-description {
 			display: grid;

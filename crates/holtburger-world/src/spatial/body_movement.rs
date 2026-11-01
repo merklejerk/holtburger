@@ -26,37 +26,51 @@ pub struct StickyBodyTarget {
     pub heading: f32,
 }
 
+/// Sticky spacing resolved together with the direction of its requested travel.
+struct StickyTravel {
+    /// Bounded translation from the supplied actual or predicted origin.
+    displacement: Vector3,
+    /// Spacing is too close; the physical consumer must preserve any existing footing.
+    retreating: bool,
+}
+
 impl StickyBodyTarget {
     fn project(
         self,
-        reference: holtburger_common::position::WorldPosition,
+        origin: holtburger_common::position::WorldPosition,
         interval: f32,
     ) -> anyhow::Result<ResolvedAuthoredMotion> {
-        let displacement = self.displacement(reference, interval, false)?;
-        // Pursuit is ordinary reference-origin travel. Recomputing it from a blocked actual body
-        // would advance the reference indefinitely past its target.
+        let travel = self.displacement(origin, interval, false)?;
+        // Each origin approaches its own clearance point. Actual pursuit must not inherit a
+        // predicted origin on the opposite side of the target, or vice versa after a blockage.
         Ok(ResolvedAuthoredMotion {
             source_offset: RigidTransform::identity(),
-            velocity: displacement / interval,
+            velocity: travel.displacement / interval,
             heading: self.heading,
+            // RETAIL DIVERGENCE: retail permits signed sticky backoff and gates edge sliding
+            // on EDGE_SLIDE (301354). Retaining that gate here lets crowding drive unflagged
+            // actors off ledges. Preserve backoff footing instead; the synthetic
+            // ledge/approach/reset and launch fixtures bound the tested surface, not a full
+            // content census. Authoritative positions still win.
+            preserve_footing: travel.retreating,
         })
     }
 
     /// Full-XYZ proposal for a position-only consumer; no pose is committed or path swept here.
     pub fn spatial_displacement(
         self,
-        reference: holtburger_common::position::WorldPosition,
+        origin: holtburger_common::position::WorldPosition,
         interval: f32,
     ) -> anyhow::Result<Vector3> {
-        self.displacement(reference, interval, true)
+        Ok(self.displacement(origin, interval, true)?.displacement)
     }
 
     fn displacement(
         self,
-        reference: holtburger_common::position::WorldPosition,
+        origin: holtburger_common::position::WorldPosition,
         interval: f32,
         spatial: bool,
-    ) -> anyhow::Result<Vector3> {
+    ) -> anyhow::Result<StickyTravel> {
         ensure!(
             self.clearance.is_finite() && self.clearance >= 0.0,
             "sticky clearance must be finite and nonnegative"
@@ -71,34 +85,37 @@ impl StickyBodyTarget {
         );
         let target = self
             .position
-            .reanchor_to_landblock_owner(holtburger_common::Guid(
-                reference.landblock_id.0 | 0xffff,
-            ))?;
-        let mut difference = target.coords - reference.coords;
+            .reanchor_to_landblock_owner(holtburger_common::Guid(origin.landblock_id.0 | 0xffff))?;
+        let mut difference = target.coords - origin.coords;
         if !spatial {
             difference.z = 0.0;
         }
         let distance = difference.length();
-        Ok(if distance > 0.0 {
-            difference / distance
-                * (distance - self.clearance)
-                    .clamp(-self.speed_mps * interval, self.speed_mps * interval)
-        } else {
-            Vector3::zero()
+        let spacing_error = distance - self.clearance;
+        Ok(StickyTravel {
+            displacement: if distance > 0.0 {
+                difference / distance
+                    * spacing_error.clamp(-self.speed_mps * interval, self.speed_mps * interval)
+            } else {
+                Vector3::zero()
+            },
+            retreating: spacing_error < 0.0,
         })
     }
 }
 
-/// One source offset projected for actual movement and grounded reference prediction.
+/// One source offset projected for a particular movement origin.
 /// Free flight alone also needs the local offset for its independent nominal orientation.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ResolvedAuthoredMotion {
     /// Original authored contribution consumed by free-flight nominal prediction only.
     pub source_offset: RigidTransform,
-    /// Prepared world velocity shared by actual and nominal grounded motion.
+    /// Prepared world velocity; sticky actual and nominal motion use their respective origins.
     pub velocity: Vector3,
     /// Absolute source heading consumed by actual actuation.
     pub heading: f32,
+    /// Source movement requests retaining existing walkable support for the current tick.
+    pub preserve_footing: bool,
 }
 
 impl ResolvedAuthoredMotion {
@@ -108,12 +125,13 @@ impl ResolvedAuthoredMotion {
             source_offset: offset,
             velocity: rotation.rotate_vector(offset.translation) / interval,
             heading: rotation.multiply(&offset.rotation).to_heading(),
+            preserve_footing: false,
         }
     }
 }
 
 impl PhysicalBodyInput {
-    /// Prepares ordinary travel once, then resolves authority policy in the transaction's copy.
+    /// Resolves actual travel and independent prediction in the transaction's copy.
     /// Only ordinary input advances the reference; the accepted body never supplies return intent.
     pub(crate) fn step(
         &self,
@@ -149,27 +167,34 @@ impl PhysicalBodyInput {
             Some(state) => state.physical_reference()?,
             None => body.pose,
         };
-        let authored = match self.reference {
-            Some(PhysicalReferenceInput::Sticky(target)) if support.is_some() => {
-                Some(target.project(reference, interval)?)
-            }
-            _ => self
-                .reference
-                .and_then(PhysicalReferenceInput::authored_offset)
-                .map(|offset| {
-                    ResolvedAuthoredMotion::project(
-                        offset,
-                        remote.unwrap_or(body.pose.rotation),
-                        interval,
-                    )
-                }),
-        };
-        let sticky_heading = match self.reference {
-            Some(PhysicalReferenceInput::Sticky(_)) => authored.map(|motion| motion.heading),
+        let supported_sticky = match self.reference {
+            Some(PhysicalReferenceInput::Sticky(target)) if support.is_some() => Some(target),
             _ => None,
         };
+        let (actual_authored, nominal_authored) = match supported_sticky {
+            Some(target) => (
+                Some(target.project(body.pose, interval)?),
+                Some(target.project(reference, interval)?),
+            ),
+            None => {
+                let authored = self
+                    .reference
+                    .and_then(PhysicalReferenceInput::authored_offset)
+                    .map(|offset| {
+                        ResolvedAuthoredMotion::project(
+                            offset,
+                            remote.unwrap_or(body.pose.rotation),
+                            interval,
+                        )
+                    });
+                (authored, authored)
+            }
+        };
+        let sticky_heading = supported_sticky.map(|target| target.heading);
         let mut heading = sticky_heading.or_else(|| {
-            remote.map(|rotation| authored.map_or(rotation.to_heading(), |motion| motion.heading))
+            remote.map(|rotation| {
+                actual_authored.map_or(rotation.to_heading(), |motion| motion.heading)
+            })
         });
         let ordinary = match self.reference {
             Some(_) => Some(predict_reference_motion(
@@ -177,7 +202,7 @@ impl PhysicalBodyInput {
                 &self.actuation,
                 interval,
                 body.nominal,
-                authored,
+                nominal_authored,
                 reference,
                 ground,
             )?),
@@ -196,7 +221,7 @@ impl PhysicalBodyInput {
             physical,
             body.retained.acceleration,
             ground,
-            authored,
+            actual_authored,
         )?;
         let mut external_drive = false;
         if let (Some(state), Some(ordinary)) = (correction.as_mut(), ordinary) {
@@ -225,14 +250,29 @@ impl PhysicalBodyInput {
                 }
                 PhysicalBodyActuation::Grounded(input) if input.launch().is_none() => match support
                 {
+                    // Retail sticky replaces interpolation's translation, rather than adding
+                    // return drive. Keep observing the independent reference for recovery, but
+                    // actual pursuit owns clearance.
+                    Some(_) if supported_sticky.is_some() => actuation,
                     Some(support) => {
                         let correction_velocity =
                             reference_velocity(error - support.normal * error.dot(&support.normal));
-                        external_drive |= correction_velocity != Vector3::zero();
-                        actuation.with_supported_drive(
+                        let returning = correction_velocity != Vector3::zero();
+                        external_drive |= returning;
+                        let drive = actuation.with_supported_drive(
                             nominal_velocity + correction_velocity,
                             support.normal,
-                        )?
+                        )?;
+                        // RETAIL DIVERGENCE: retail's edge gate would let return-only movement
+                        // resume a blocked backoff when sticky ends. Keep that automatic
+                        // correction supported; ordinary travel retains its authored policy.
+                        // The ledge idle-handoff/approach/reset and existing return fixtures
+                        // cover this change, not a full content census.
+                        if returning && nominal_velocity == Vector3::zero() {
+                            drive.with_preserved_footing()
+                        } else {
+                            drive
+                        }
                     }
                     None => actuation,
                 },
@@ -245,6 +285,9 @@ impl PhysicalBodyInput {
         }
         if let Some(heading) = heading {
             actuation = actuation.with_control_heading(heading)?;
+        }
+        if actual_authored.is_some_and(|motion| motion.preserve_footing) {
+            actuation = actuation.with_preserved_footing();
         }
         Ok(PreparedBodyMovement {
             actuation,

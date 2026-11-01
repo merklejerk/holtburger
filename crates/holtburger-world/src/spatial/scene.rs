@@ -1782,11 +1782,12 @@ mod physical_body_tests {
         DynamicPhysicalBodyConfiguration, DynamicPhysicalBodyDefinition, EdgeProtection,
         EntityCollisionParticipation, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
         GroundSupport, GroundedBodyActuation, GroundedConfig, GroundedLaunch,
-        LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand, PhysicalBodyDefinition,
-        PhysicalBodyResponsePolicy, PhysicalBodyResponseState, PhysicalBodySceneResidency,
-        PhysicalElasticity, PhysicalFriction, PhysicalRestitution, PhysicalSphereSet,
-        PhysicalSurfaceMotion, PreparedEntityBspPart, PreparedEntityTargetGeometry,
-        RETAIL_WALKABLE_NORMAL_Z, SpatialMembership,
+        LocalIntegrationDemand, LocalPhysicalDemand, LocalTargetDemand,
+        MOBILE_CONTACT_TICK_SECONDS, PhysicalBodyDefinition, PhysicalBodyResponsePolicy,
+        PhysicalBodyResponseState, PhysicalBodySceneResidency, PhysicalElasticity,
+        PhysicalFriction, PhysicalRestitution, PhysicalSphereSet, PhysicalSurfaceMotion,
+        PreparedEntityBspPart, PreparedEntityTargetGeometry, RETAIL_WALKABLE_NORMAL_Z,
+        SpatialMembership,
     };
     use holtburger_common::properties::PhysicsState;
     use holtburger_common::{Plane, Quaternion, Sphere};
@@ -3450,7 +3451,8 @@ mod physical_body_tests {
             "airborne return must not add steering"
         );
 
-        // At the same XY on another floor, grounded return completes without altering support.
+        // A corroborated target below solid terrain must fail checked placement, even after
+        // multiple watchdog windows. The horizontal motor never drives through the floor.
         scene.apply_authoritative_body_effect(
             id,
             AuthoritativePoseEffect::Reset {
@@ -3482,19 +3484,27 @@ mod physical_body_tests {
             },
             now,
         );
-        for tick in 1..=30 {
-            tick_collection(
-                &mut scene,
-                &collision,
-                dt,
-                now + Duration::from_millis(tick * 100),
-            );
+        let ticks = (crate::spatial::pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS * 3.0
+            / MOBILE_CONTACT_TICK_SECONDS)
+            .ceil() as u32;
+        for tick in 1..=ticks {
+            let result = scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    MOBILE_CONTACT_TICK_SECONDS,
+                    now + Duration::from_secs_f32(tick as f32 * MOBILE_CONTACT_TICK_SECONDS),
+                    collection_input,
+                )
+                .unwrap();
             let body = scene.body(id).unwrap();
             assert!(
                 body.pose.coords.z
                     >= supported.coords.z - crate::spatial::bsp_query::CONTACT_EPSILON
             );
-            assert!(!body.has_pose_reconciliation_work());
+            assert!(result.outcomes.iter().all(|outcome| !matches!(
+                outcome,
+                DynamicEntityBodyOutcome::RecoveredPlacement(_)
+            )));
         }
     }
 

@@ -113,6 +113,17 @@ pub struct AuthoritativeBodyVectors {
     pub omega: Vector3,
 }
 
+/// Which retained authority may authorize a checked placement recovery for one source interval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RecoveryAuthority {
+    /// An autonomous source has no remote destination to restore.
+    Disabled,
+    /// Ordinary remote motion retains the existing latest-sample recovery policy.
+    LatestSample,
+    /// Target-relative intent may use the sample only while nominal prediction still agrees.
+    MatchingReference,
+}
+
 /// One producer sample shared by physical actuation and independent reference prediction.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PhysicalBodyInput {
@@ -121,8 +132,8 @@ pub struct PhysicalBodyInput {
     capture_contact_return: bool,
     /// Authored target pose proposed with this input and committed with the body transaction.
     collision_pose: Option<crate::motion::AuthoredCollisionPose>,
-    /// Source-owned suspension survives unavailable target geometry; consumed by recovery admission.
-    pub(super) recovery_suspended: bool,
+    /// Source-owned restriction survives unavailable sticky geometry; world validates the reference.
+    pub(super) recovery_authority: RecoveryAuthority,
     /// Controller/response command for the actual body, sampled once per admitted collection.
     pub actuation: super::PhysicalBodyActuation,
     /// Independent authority/authored travel; absent when an autonomous input supplies neither.
@@ -146,7 +157,7 @@ impl PhysicalBodyInput {
         Self {
             collision_pose: None,
             capture_contact_return: false,
-            recovery_suspended: true,
+            recovery_authority: RecoveryAuthority::Disabled,
             actuation,
             reference: None,
         }
@@ -163,7 +174,11 @@ impl PhysicalBodyInput {
             actuation,
             reference: Some(reference),
             collision_pose: None,
-            recovery_suspended: matches!(reference, PhysicalReferenceInput::Sticky(_)),
+            recovery_authority: if matches!(reference, PhysicalReferenceInput::Sticky(_)) {
+                RecoveryAuthority::MatchingReference
+            } else {
+                RecoveryAuthority::LatestSample
+            },
             capture_contact_return,
         }
     }
@@ -174,10 +189,13 @@ impl PhysicalBodyInput {
         self
     }
 
-    /// Suppresses placement recovery while a source command owns pursuit, including intervals
-    /// where unavailable target geometry makes its physical input fall back to ordinary motion.
-    pub fn suspend_recovery(mut self) -> Self {
-        self.recovery_suspended = true;
+    /// Requires the latest sample to agree with nominal prediction before placement recovery.
+    /// Retained sticky intent needs this even when its target geometry is unavailable this tick.
+    /// This restriction never enables recovery on an autonomous source.
+    pub fn require_matching_recovery_reference(mut self) -> Self {
+        if self.recovery_authority != RecoveryAuthority::Disabled {
+            self.recovery_authority = RecoveryAuthority::MatchingReference;
+        }
         self
     }
 

@@ -42,6 +42,8 @@ pub struct ContactStepActuation {
     motion: ContactStepMotion,
     /// Optional controller heading, below authored body-facing overrides.
     control_heading: Option<f32>,
+    /// Movement-owner request to retain existing walkable support for this tick only.
+    preserve_footing: bool,
 }
 
 /// Velocity operation preceding this tick's acceleration.
@@ -87,6 +89,7 @@ impl ContactStepActuation {
             acceleration,
             motion: ContactStepMotion::Ballistic,
             control_heading: None,
+            preserve_footing: false,
         })
     }
 
@@ -105,35 +108,33 @@ impl ContactStepActuation {
     /// Adds bounded motor recovery tangent to a proved support plane.
     /// The caller owns support eligibility, including disabling ordinary air steering.
     pub fn driven(acceleration: Vector3, target: Vector3, normal: Vector3) -> Result<Self> {
-        let mut input = Self::ballistic(acceleration)?;
+        Self::ballistic(acceleration)?.with_supported_drive(target, normal)
+    }
+
+    /// Replaces the supported motor while preserving facing, footing intent and drive response.
+    /// The caller must have admitted support and excluded a one-shot launch.
+    pub(crate) fn with_supported_drive(mut self, target: Vector3, normal: Vector3) -> Result<Self> {
         ensure!(finite_vector(target), "contact motor target must be finite");
         ensure!(
             finite_vector(normal) && (normal.length_squared() - 1.0).abs() <= 0.0001,
             "contact motor requires a unit support normal"
         );
-        input.motion = ContactStepMotion::Driven {
+        let response = match self.motion {
+            ContactStepMotion::Driven { response, .. } => response,
+            _ => SupportedDriveResponse::Accelerated,
+        };
+        self.motion = ContactStepMotion::Driven {
             target,
             normal,
-            response: SupportedDriveResponse::Accelerated,
+            response,
         };
-        Ok(input)
+        Ok(self)
     }
 
-    /// Installs the movement owner's resolved supported velocity while preserving drive response
-    /// and facing. The caller must have admitted support and excluded a one-shot launch.
-    pub(crate) fn with_supported_drive(self, target: Vector3, normal: Vector3) -> Result<Self> {
-        let mut input = Self::driven(self.acceleration, target, normal)?;
-        if let (
-            ContactStepMotion::Driven { response, .. },
-            ContactStepMotion::Driven {
-                response: prepared, ..
-            },
-        ) = (self.motion, &mut input.motion)
-        {
-            *prepared = response;
-        }
-        input.control_heading = self.control_heading;
-        Ok(input)
+    /// Preserve existing support through navigation; flight and launches have no footing to hold.
+    pub(crate) fn with_preserved_footing(mut self) -> Self {
+        self.preserve_footing = true;
+        self
     }
 
     /// Adds movement-owner travel without changing physical continuation. Free flight sweeps
@@ -539,7 +540,7 @@ struct WorkingBody<'a> {
     mobile: MobileContactBody,
     /// Authored free-flight drive for this tick, clipped by hard contacts and never retained.
     kinematic_velocity: Vector3,
-    /// Definition-owned grounded policy and its current support state, absent for free flight.
+    /// Tick-local grounded policy and its current support state, absent for free flight.
     grounded: Option<GroundedContactState>,
     /// Authored response shared by grounded and free-flight hard impacts.
     policy: crate::spatial::PhysicalBodyResponsePolicy,
@@ -1130,6 +1131,13 @@ fn integrate_mobile_actuation(
     delta_seconds: f32,
 ) -> Result<()> {
     body.control_heading = actuation.control_heading;
+    if actuation.preserve_footing
+        && let Some(grounded) = body.grounded.as_mut()
+    {
+        // Only the private tick's navigation policy changes. The next tick starts from the
+        // authored body definition again; launch releases support before navigation below.
+        grounded.config.edge_protection = crate::spatial::EdgeProtection::Creature;
+    }
     if let ContactStepMotion::FreeFlight { kinematic_velocity } = actuation.motion {
         ensure!(
             body.grounded.is_none(),
@@ -1329,7 +1337,7 @@ fn advance_hard_motion(
     movement: HardMovement,
 ) -> Result<()> {
     let motion_start = body.motion.len();
-    let protected = stairs::ProtectedFooting::capture(body);
+    let protected = stairs::ProtectedFooting::capture(body, movement);
     let mut footing = advance_hard_candidate(collision, hard, anchor, body, movement)?;
     if matches!(footing, stairs::NavigationFooting::Unsupported)
         && let Some(start) = protected

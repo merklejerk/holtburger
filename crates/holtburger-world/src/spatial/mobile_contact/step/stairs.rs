@@ -77,7 +77,7 @@ pub(super) enum NavigationFooting {
     Settled(GroundState),
 }
 
-/// Last supported ordinary pose, saved only for creature edge protection.
+/// Supported navigation origin, retained when movement must preserve footing.
 pub(super) struct ProtectedFooting {
     /// Geometry and residency must be restored together when a walking candidate is rejected.
     cursor: StairCursor,
@@ -85,17 +85,20 @@ pub(super) struct ProtectedFooting {
     root: Vector3,
     /// Velocity before private route impacts; rejected paths cannot alter continuation.
     velocity: Vector3,
-    /// Current proved support and authored grounded configuration.
+    /// Current proved support and tick-local navigation policy.
     grounded: super::GroundedContactState,
-    /// Index separating already accepted work from the ordinary candidate's private paths.
+    /// Index separating already accepted work from the navigation candidate's private paths.
     motion_start: usize,
 }
 
 impl ProtectedFooting {
-    pub(super) fn capture(body: &WorkingBody<'_>) -> Option<Self> {
+    pub(super) fn capture(body: &WorkingBody<'_>, movement: HardMovement) -> Option<Self> {
         let grounded = body.grounded?;
-        if grounded.config.edge_protection != crate::spatial::EdgeProtection::Creature
-            || grounded.ground.walkable_support().is_none()
+        // Crowd correction may leave residual overlap, but cannot cause a supported body to
+        // fall. Timed movement uses this tick's edge policy; launches are airborne.
+        if grounded.ground.walkable_support().is_none()
+            || (matches!(movement, HardMovement::Timed(_))
+                && grounded.config.edge_protection != crate::spatial::EdgeProtection::Creature)
         {
             return None;
         }

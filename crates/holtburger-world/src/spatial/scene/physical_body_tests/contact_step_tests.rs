@@ -8,6 +8,7 @@ use crate::spatial::{
     ContactBodyUpdate, ContactStepActuation, MOBILE_CONTACT_CORRECTION_TRAVEL_RADIUS_RATIO,
     MOBILE_CONTACT_TICK_SECONDS, PlacedMotionPath, advance_body_contacts,
 };
+use holtburger_common::RigidTransform;
 
 fn contact_stair_scene(step_height: f32, ceiling: bool) -> CollisionScene {
     let mut collision = flat_collision_scene();
@@ -413,6 +414,130 @@ fn contact_correction_preserves_protected_ledge_footing() {
         );
         assert_eq!(update.velocity, Vector3::zero());
         publish_contact_updates(&mut scene, updates);
+    }
+}
+
+#[test]
+fn separation_keeps_unprotected_creature_supported_but_ordinary_motion_can_leave_ledge() {
+    let height = GROUNDED_CONFIG.step_down_height * 4.0;
+    let edge_x = 92.5;
+    let collision = collision_with_polygons(HashMap::from([(
+        0,
+        CollisionPolygon {
+            vertices: vec![
+                Vector3::new(90.0, 94.0, height),
+                Vector3::new(edge_x, 94.0, height),
+                Vector3::new(edge_x, 100.0, height),
+                Vector3::new(90.0, 100.0, height),
+            ],
+            normal: Vector3::new(0.0, 0.0, 1.0),
+            d: -height,
+        },
+    )]));
+    let mut config = GROUNDED_CONFIG;
+    config.edge_protection = EdgeProtection::None;
+    let definition =
+        PhysicalBodyDefinition::grounded(grounded_definition().spheres(), config).unwrap();
+    let primary = definition.spheres().primary();
+    let floor_z = primary.radius - primary.center.z;
+    let creature = SpatialBodyId::Entity(Guid(1));
+    let player = SpatialBodyId::LocalPlayer(Guid(2));
+    let initial = pose(Vector3::new(
+        edge_x - CONTACT_EPSILON,
+        96.0,
+        height + floor_z,
+    ));
+    let coast = GroundedBodyActuation::coast();
+    for tangent in [false, true] {
+        let now = Instant::now();
+        let mut scene = SpatialScene::new();
+        let mut peer = initial;
+        peer.coords.x -= primary.radius * 0.5;
+        if tangent {
+            peer.coords.y -= primary.radius * 0.25;
+        }
+        for (id, position) in [(creature, initial), (player, peer)] {
+            scene.register_body(SpatialBody::new(id, position, now));
+            scene
+                .set_dynamic_physical_body(
+                    id,
+                    Some(dynamic_definition(definition, false)),
+                    PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+            acquire_support(&mut scene, &collision, id, now);
+        }
+        let mut overlap_while_held = false;
+        let mut slid_along_edge = false;
+        let ticks = (2.0 * (2.0 * height / -config.gravity).sqrt() / MOBILE_CONTACT_TICK_SECONDS)
+            .ceil() as usize;
+        for _ in 0..ticks {
+            let bodies = [
+                scene.body(creature).unwrap().clone(),
+                scene.body(player).unwrap().clone(),
+            ];
+            let updates = advance_body_contacts(
+                &collision,
+                &bodies,
+                Guid(0xda55_ffff),
+                MOBILE_CONTACT_TICK_SECONDS,
+                |body, ground| grounded_step_input(body, ground, &coast),
+            )
+            .unwrap();
+            let update = updates
+                .iter()
+                .find(|update| update.body_id == creature)
+                .unwrap();
+            assert!(update.unavailable_owner.is_none());
+            assert!(
+                update.ground.walkable_support().is_some(),
+                "separation caused a ledge departure: {update:?}"
+            );
+            assert!(update.displacement.z.abs() < CONTACT_EPSILON);
+            assert_eq!(update.velocity, Vector3::zero());
+            let held_outward = update.displacement.x.abs() <= CONTACT_EPSILON;
+            slid_along_edge |= held_outward && update.displacement.y > CONTACT_EPSILON;
+            publish_contact_updates(&mut scene, updates);
+            let actual = scene.body(creature).unwrap().pose;
+            let peer = scene.body(player).unwrap().pose;
+            overlap_while_held |=
+                held_outward && actual.distance_to(&peer) < primary.radius * 2.0 - CONTACT_EPSILON;
+        }
+        assert!(
+            overlap_while_held,
+            "footing protection must tolerate unresolved overlap"
+        );
+        if tangent {
+            assert!(
+                slid_along_edge,
+                "support-preserving movement along the edge must remain available"
+            );
+        }
+
+        // The same unflagged creature can leave through ordinary drive, without its peer.
+        let drive = GroundedBodyActuation::drive(Vector3::new(3.0, 0.0, 0.0)).unwrap();
+        let mut departed = false;
+        for _ in 0..ticks {
+            let updates = advance_body_contacts(
+                &collision,
+                &[scene.body(creature).unwrap().clone()],
+                Guid(0xda55_ffff),
+                MOBILE_CONTACT_TICK_SECONDS,
+                |body, ground| grounded_step_input(body, ground, &drive),
+            )
+            .unwrap();
+            departed |= matches!(updates[0].ground, GroundState::Airborne);
+            publish_contact_updates(&mut scene, updates);
+        }
+        assert!(
+            departed,
+            "separation protection must not enable ordinary EDGE_SLIDE"
+        );
+        assert!(
+            scene.body(creature).unwrap().pose.coords.z
+                < initial.coords.z - config.step_down_height
+        );
     }
 }
 
@@ -1491,9 +1616,11 @@ fn clipped_body_paths_retain_only_accepted_upper_sphere_domains() {
     }
 }
 
+const BSP_STAIR_FRONT_X: f32 = 90.5;
+
 fn bsp_stair_scene() -> CollisionScene {
     let mut polygons = HashMap::new();
-    for (index, (front, end, height)) in [(90.5, 91.5, 0.3), (91.5, 100.0, 0.6)]
+    for (index, (front, end, height)) in [(BSP_STAIR_FRONT_X, 91.5, 0.3), (91.5, 100.0, 0.6)]
         .into_iter()
         .enumerate()
     {
@@ -4449,6 +4576,78 @@ fn nominal_free_acceleration_accumulates_across_admitted_ticks() {
 }
 
 #[test]
+fn short_stair_ascent_does_not_recover_to_a_historical_lower_floor() {
+    let collision = bsp_stair_scene();
+    let now = Instant::now();
+    let mut scene = SpatialScene::new();
+    let id = SpatialBodyId::Entity(Guid(1));
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let floor_z = primary.radius - primary.center.z;
+    scene.register_body(SpatialBody::new(
+        id,
+        pose(Vector3::new(
+            BSP_STAIR_FRONT_X - primary.radius - CONTACT_EPSILON,
+            96.0,
+            floor_z,
+        )),
+        now,
+    ));
+    scene
+        .set_dynamic_physical_body(
+            id,
+            Some(dynamic_definition(definition, false)),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    scene.apply_authoritative_body_effect(
+        id,
+        AuthoritativePoseEffect::Interpolate {
+            pose: scene.body(id).unwrap().pose,
+            keep_heading: true,
+            adjusted_max_speed_mps: None,
+        },
+        AuthoritativeBodyVectors::default(),
+        now,
+    );
+    for tick in 0..300 {
+        let speed = if tick == 0 {
+            crate::spatial::PHYSICAL_RETURN_START_THRESHOLD_M * 0.5 / MOBILE_CONTACT_TICK_SECONDS
+        } else {
+            0.0
+        };
+        let result = scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                now + Duration::from_secs_f32(tick as f32 * MOBILE_CONTACT_TICK_SECONDS),
+                |_| {
+                    Ok(PhysicalBodyInput::referenced(
+                        PhysicalBodyActuation::grounded_drive(Vector3::new(speed, 0.0, 0.0))?,
+                        PhysicalReferenceInput::body(None),
+                        true,
+                    ))
+                },
+            )
+            .unwrap();
+        assert!(
+            result
+                .outcomes
+                .iter()
+                .all(|outcome| !matches!(outcome, DynamicEntityBodyOutcome::RecoveredPlacement(_))),
+            "ordinary stair travel must not snap to its historical origin"
+        );
+    }
+    let body = scene.body(id).unwrap();
+    assert!(
+        body.pose.coords.z > floor_z + CONTACT_EPSILON,
+        "short motion must exercise stair ascent: {:?}",
+        body.pose
+    );
+}
+
+#[test]
 fn reference_retires_after_stair_travel_and_return_to_lower_floor() {
     let collision = bsp_stair_scene();
     let now = Instant::now();
@@ -4470,9 +4669,19 @@ fn reference_retires_after_stair_travel_and_return_to_lower_floor() {
             None,
         )
         .unwrap();
+    scene.apply_authoritative_body_effect(
+        id,
+        AuthoritativePoseEffect::Interpolate {
+            pose: scene.body(id).unwrap().pose,
+            keep_heading: true,
+            adjusted_max_speed_mps: None,
+        },
+        AuthoritativeBodyVectors::default(),
+        now,
+    );
     for tick in 0..300 {
         let speed = if tick < 45 { 5.0 } else { 0.0 };
-        scene
+        let result = scene
             .advance_dynamic_entity_collection(
                 &collision,
                 MOBILE_CONTACT_TICK_SECONDS,
@@ -4486,6 +4695,13 @@ fn reference_retires_after_stair_travel_and_return_to_lower_floor() {
                 },
             )
             .unwrap();
+        assert!(
+            result
+                .outcomes
+                .iter()
+                .all(|outcome| !matches!(outcome, DynamicEntityBodyOutcome::RecoveredPlacement(_))),
+            "ordinary stair travel must not snap to its historical origin"
+        );
     }
     let body = scene.body(id).unwrap();
     assert!(body.pose.coords.x > 92.0);
@@ -5189,11 +5405,13 @@ fn sticky_reference_cannot_replace_launch_or_airborne_continuation() {
         .unwrap();
     acquire_support(&mut scene, &collision, id, now);
     let launch_velocity = Vector3::new(0.0, 0.0, 5.0);
+    // Even a backoff request that preserves footing cannot hold an admitted launch down.
+    let clearance = 1.3;
     let mut target = start;
-    target.coords.x += 10.0;
+    target.coords.x += clearance * 0.5;
     let pursuit = crate::spatial::StickyBodyTarget {
         position: target,
-        clearance: 1.3,
+        clearance,
         speed_mps: 5.0,
         heading: start.heading_to(&target),
     };
@@ -5235,14 +5453,272 @@ fn sticky_reference_cannot_replace_launch_or_airborne_continuation() {
 }
 
 #[test]
+fn sticky_retreat_preserves_footing_through_idle_but_allows_approach_and_server_reset() {
+    use crate::spatial::pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS;
+
+    let now = Instant::now();
+    let height = GROUNDED_CONFIG.step_down_height * 4.0;
+    let collision = contact_stair_scene(height, false);
+    let mut config = GROUNDED_CONFIG;
+    config.edge_protection = EdgeProtection::None;
+    let definition =
+        PhysicalBodyDefinition::grounded(grounded_definition().spheres(), config).unwrap();
+    let primary = definition.spheres().primary();
+    let floor_z = primary.radius - primary.center.z;
+    let id = SpatialBodyId::Entity(Guid(1));
+    let start = pose(Vector3::new(92.5 - CONTACT_EPSILON, 96.0, height + floor_z));
+    let mut scene = SpatialScene::new();
+    scene.register_body(SpatialBody::new(id, start, now));
+    scene
+        .set_dynamic_physical_body(
+            id,
+            Some(dynamic_definition(definition, false)),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    acquire_support(&mut scene, &collision, id, now);
+    let clearance = primary.radius * 3.0;
+    let mut target = start;
+    target.coords.x -= clearance * 0.25;
+    let speed = crate::motion::RETAIL_RUN_FORWARD_BASE_SPEED_MPS * 5.0;
+    let advance = |scene: &mut SpatialScene, target: WorldPosition, tick: usize| {
+        let actual = scene.body(id).unwrap().pose;
+        scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                now + Duration::from_secs_f32(tick as f32 * MOBILE_CONTACT_TICK_SECONDS),
+                |_| {
+                    Ok(PhysicalBodyInput::referenced(
+                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                        PhysicalReferenceInput::Sticky(crate::spatial::StickyBodyTarget {
+                            position: target,
+                            clearance,
+                            speed_mps: speed,
+                            heading: actual.heading_to(&target),
+                        }),
+                        true,
+                    ))
+                },
+            )
+            .unwrap()
+    };
+    let ticks = (RECOVERY_WINDOW_SECONDS * 2.0 / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize;
+    for tick in 0..ticks {
+        let result = advance(&mut scene, target, tick);
+        assert!(
+            result
+                .outcomes
+                .iter()
+                .all(|outcome| !matches!(outcome, DynamicEntityBodyOutcome::RecoveredPlacement(_))),
+            "retreat must preserve footing without a snap"
+        );
+        let body = scene.body(id).unwrap();
+        assert_eq!(
+            body.contact,
+            ContactState::Grounded,
+            "sticky backoff left its support"
+        );
+        assert!((body.pose.coords.z - start.coords.z).abs() < CONTACT_EPSILON);
+    }
+    let held = scene.body(id).unwrap();
+    assert!(
+        held.pose.distance_to(&target) < clearance - CONTACT_EPSILON,
+        "ledge safety must allow unmet melee clearance"
+    );
+    assert_eq!(held.retained.velocity, Vector3::zero());
+
+    // Sticky can expire or finish its action while prediction is still beyond the edge.
+    // Idle return must not carry out the retreat that navigation deliberately held back.
+    for tick in ticks..ticks * 2 {
+        let result = scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                now + Duration::from_secs_f32(tick as f32 * MOBILE_CONTACT_TICK_SECONDS),
+                |_| {
+                    Ok(PhysicalBodyInput::referenced(
+                        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                        PhysicalReferenceInput::remote(None, start.rotation),
+                        true,
+                    ))
+                },
+            )
+            .unwrap();
+        let recovered = result
+            .outcomes
+            .iter()
+            .any(|outcome| matches!(outcome, DynamicEntityBodyOutcome::RecoveredPlacement(_)));
+        if recovered {
+            // Checked placement clears contact for next-tick reacquisition at the server pose.
+            assert!(scene.body(id).unwrap().pose.distance_to(&start) < CONTACT_EPSILON);
+        } else {
+            assert_eq!(
+                scene.body(id).unwrap().contact,
+                ContactState::Grounded,
+                "idle return resumed a blocked sticky retreat over the ledge at tick {tick}"
+            );
+        }
+        assert!((scene.body(id).unwrap().pose.coords.z - start.coords.z).abs() < CONTACT_EPSILON);
+    }
+
+    // Changing to approach uses this same body and source, exposing a leaked edge override.
+    target.coords.x = start.coords.x + clearance * 4.0;
+    let mut departed = false;
+    for tick in ticks * 2..ticks * 3 {
+        advance(&mut scene, target, tick);
+        if scene.body(id).unwrap().contact == ContactState::Airborne {
+            departed = true;
+            break;
+        }
+    }
+    assert!(
+        departed,
+        "sticky approach must keep the actor's ordinary edge policy"
+    );
+
+    // A server reset below the platform remains authoritative, including its following tick.
+    let mut below = start;
+    below.coords.x += clearance * 2.0;
+    below.coords.z -= height * 0.5;
+    scene.apply_authoritative_body_effect(
+        id,
+        AuthoritativePoseEffect::Reset {
+            pose: below,
+            cause: AuthoritativePoseResetCause::Teleport,
+        },
+        AuthoritativeBodyVectors::default(),
+        now,
+    );
+    assert_eq!(scene.body(id).unwrap().pose, below);
+    advance(&mut scene, target, ticks * 3);
+    assert_eq!(scene.body(id).unwrap().contact, ContactState::Airborne);
+    assert!(scene.body(id).unwrap().pose.coords.z <= below.coords.z);
+}
+
+#[test]
+fn sticky_drive_approaches_actual_clearance_when_reference_is_across_target() {
+    let collision = flat_collision_scene();
+    let now = Instant::now();
+    let id = SpatialBodyId::Entity(Guid(1));
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let target = pose(Vector3::new(96.0, 96.0, primary.radius - primary.center.z));
+    let clearance = 1.3;
+    let reference_gap = clearance * 4.0;
+    let speed = crate::motion::RETAIL_RUN_FORWARD_BASE_SPEED_MPS * 5.0;
+    let ticks = (reference_gap / speed / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize * 4;
+    for side in [-1.0, 1.0] {
+        for initial_gap in [reference_gap, clearance, clearance * 0.5] {
+            let mut start = target;
+            start.coords.x += side * initial_gap;
+            let mut reference = target;
+            reference.coords.x -= side * reference_gap;
+            let mut scene = SpatialScene::new();
+            scene.register_body(SpatialBody::new(id, start, now));
+            scene
+                .set_dynamic_physical_body(
+                    id,
+                    Some(dynamic_definition(definition, false)),
+                    PhysicalCollisionFilter::ALL,
+                    None,
+                )
+                .unwrap();
+            acquire_support(&mut scene, &collision, id, now);
+            // A retained reference can straddle the target after contact or fresh target travel.
+            // Keep the historical server anchor at the start, not at the predicted reference.
+            let mut reconciliation = PoseReconciliationState::default();
+            reconciliation.correct(reference, true);
+            scene.body_mut(id).unwrap().reconciliation = Some(Box::new(reconciliation));
+            let mut desired = target;
+            desired.coords.x += side * clearance;
+            let mut nominal_arrived = false;
+            for tick in 0..ticks {
+                let before = scene.body(id).unwrap().pose;
+                let result = scene
+                    .advance_dynamic_entity_collection(
+                        &collision,
+                        MOBILE_CONTACT_TICK_SECONDS,
+                        now + Duration::from_secs_f32(tick as f32 * MOBILE_CONTACT_TICK_SECONDS),
+                        |_| {
+                            Ok(PhysicalBodyInput::referenced(
+                                PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                                PhysicalReferenceInput::Sticky(crate::spatial::StickyBodyTarget {
+                                    position: target,
+                                    clearance,
+                                    speed_mps: speed,
+                                    heading: before.heading_to(&target),
+                                }),
+                                true,
+                            ))
+                        },
+                    )
+                    .unwrap();
+                assert!(result.outcomes.iter().all(|outcome| !matches!(
+                    outcome,
+                    DynamicEntityBodyOutcome::RecoveredPlacement(_)
+                )));
+                let body = scene.body(id).unwrap();
+                assert!(
+                    body.pose.distance_to(&desired)
+                        <= before.distance_to(&desired) + CONTACT_EPSILON,
+                    "sticky drive moved away from actual clearance: {:?} -> {:?}, desired {:?}",
+                    before.coords,
+                    body.pose.coords,
+                    desired.coords
+                );
+                assert!(
+                    body.pose.distance_to(&before)
+                        <= speed * MOBILE_CONTACT_TICK_SECONDS + CONTACT_EPSILON,
+                    "return drive must not add speed to sticky pursuit"
+                );
+                assert!(
+                    (body.pose.coords.x - target.coords.x) * side
+                        >= clearance.min(initial_gap) - CONTACT_EPSILON,
+                    "sticky drive must not cross its clearance destination"
+                );
+                let nominal = body
+                    .reconciliation
+                    .as_ref()
+                    .unwrap()
+                    .physical_reference()
+                    .unwrap();
+                assert!(
+                    (nominal.coords.x - target.coords.x) * -side >= clearance - CONTACT_EPSILON,
+                    "prediction must approach clearance from its own side"
+                );
+                nominal_arrived |= ((nominal.coords.x - target.coords.x).abs() - clearance).abs()
+                    < CONTACT_EPSILON;
+            }
+            assert!(scene.body(id).unwrap().pose.distance_to(&desired) < CONTACT_EPSILON);
+            assert!(scene.body(id).unwrap().retained.velocity.length() < CONTACT_EPSILON);
+            assert!(
+                nominal_arrived,
+                "prediction must continue independently of actual pursuit"
+            );
+        }
+    }
+}
+
+#[test]
 fn blocked_sticky_pursuit_keeps_reference_at_moving_target_clearance() {
+    use crate::spatial::pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS;
+
     let collision = contact_stair_scene(2.0, false);
     let now = Instant::now();
     let mut scene = SpatialScene::new();
     let id = SpatialBodyId::Entity(Guid(1));
     let definition = grounded_definition();
     let primary = definition.spheres().primary();
-    let start = pose(Vector3::new(90.0, 96.0, primary.radius - primary.center.z));
+    // Begin clear of the wall so legitimate pursuit first leaves the old authority anchor.
+    // Starting against the wall would not expose a stale-anchor snap backward.
+    let approach_distance = 4.0;
+    let start = pose(Vector3::new(
+        90.0 - approach_distance,
+        96.0,
+        primary.radius - primary.center.z,
+    ));
     scene.register_body(SpatialBody::new(id, start, now));
     scene
         .set_dynamic_physical_body(
@@ -5266,7 +5742,10 @@ fn blocked_sticky_pursuit_keeps_reference_at_moving_target_clearance() {
     let mut target = start;
     target.coords.x += 10.0;
     let clearance = 1.3;
-    for tick in 0..900 {
+    let pursuit_speed = 5.0;
+    let pursuit_ticks = 900;
+    let mut maximum_progress: f32 = 0.0;
+    for tick in 0..pursuit_ticks {
         if tick == 120 {
             target.coords.x += 2.0;
         }
@@ -5276,12 +5755,12 @@ fn blocked_sticky_pursuit_keeps_reference_at_moving_target_clearance() {
             PhysicalReferenceInput::Sticky(crate::spatial::StickyBodyTarget {
                 position: target,
                 clearance,
-                speed_mps: 5.0,
+                speed_mps: pursuit_speed,
                 heading: actual.heading_to(&target),
             }),
             true,
         );
-        scene
+        let outcome = scene
             .advance_dynamic_entity_collection(
                 &collision,
                 MOBILE_CONTACT_TICK_SECONDS,
@@ -5290,6 +5769,16 @@ fn blocked_sticky_pursuit_keeps_reference_at_moving_target_clearance() {
             )
             .unwrap();
         let body = scene.body(id).unwrap();
+        assert!(
+            outcome.outcomes.iter().all(|outcome| !matches!(
+                outcome,
+                DynamicEntityBodyOutcome::RecoveredPlacement(body_id) if *body_id == id
+            )),
+            "current pursuit intent must not snap the actor back to its obsolete starting anchor at tick {tick}: {:?} -> {:?}",
+            actual.coords,
+            body.pose.coords,
+        );
+        maximum_progress = maximum_progress.max(body.pose.coords.x - start.coords.x);
         assert_eq!(body.contact, ContactState::Grounded);
         assert!(
             body.pose.coords.x < 91.0,
@@ -5312,10 +5801,50 @@ fn blocked_sticky_pursuit_keeps_reference_at_moving_target_clearance() {
         .unwrap();
     assert!((reference.coords.x - (target.coords.x - clearance)).abs() < CONTACT_EPSILON);
     assert!(body.nominal.velocity.length() < CONTACT_EPSILON);
+    assert!(
+        maximum_progress >= approach_distance - primary.radius,
+        "fixture must demonstrate actual travel away from the old server anchor"
+    );
+
+    // Core retains the same destination restriction if sticky target geometry disappears and
+    // authored input supplies travel instead. Losing preparation must not revive the old anchor.
+    let unavailable_target_ticks =
+        (2.0 * RECOVERY_WINDOW_SECONDS / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize;
+    let input = PhysicalBodyInput::referenced(
+        PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+        PhysicalReferenceInput::remote(
+            Some(RigidTransform {
+                translation: Vector3::new(pursuit_speed * MOBILE_CONTACT_TICK_SECONDS, 0.0, 0.0),
+                rotation: Quaternion::identity(),
+            }),
+            Quaternion::identity(),
+        ),
+        true,
+    )
+    .require_matching_recovery_reference();
+    for tick in 0..unavailable_target_ticks {
+        let outcome = scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                now + Duration::from_secs_f32(
+                    (pursuit_ticks + tick) as f32 * MOBILE_CONTACT_TICK_SECONDS,
+                ),
+                |_| Ok(input.clone()),
+            )
+            .unwrap();
+        assert!(
+            outcome.outcomes.iter().all(|outcome| !matches!(
+                outcome,
+                DynamicEntityBodyOutcome::RecoveredPlacement(body_id) if *body_id == id
+            )),
+            "unavailable sticky geometry must not authorize a return to the old anchor"
+        );
+    }
 }
 
 #[test]
-fn sticky_attack_keeps_its_hook_and_replaces_root_travel_in_collection() {
+fn sticky_attack_keeps_its_hook_across_recovery_reanchor() {
     use crate::entity::{
         EntityMotionAction, EntityMotionAdmission, EntityMotionCommandSource, EntityMotionSnapshot,
         OrderedMotionScalar,
@@ -5453,6 +5982,7 @@ fn sticky_attack_keeps_its_hook_and_replaces_root_travel_in_collection() {
     acquire_support(&mut scene, &collision, id, now);
     let mut hooks = 0;
     let mut completed = false;
+    let mut reanchored = false;
     for step in 0..30 {
         let before = scene.body(id).unwrap().pose;
         let tick = registry
@@ -5520,8 +6050,24 @@ fn sticky_attack_keeps_its_hook_and_replaces_root_travel_in_collection() {
             assert!((after.coords.y - before.coords.y).abs() < CONTACT_EPSILON);
         }
         completed |= tick.action_completed;
+        if !tick.hooks.is_empty() {
+            let action = registry.get(guid).unwrap().active_action();
+            assert!(action.is_some(), "the hook must precede action completion");
+            // Checked recovery uses this exact source reset after placement. Reanchoring must
+            // preserve the active action and its cursor rather than replaying its hook.
+            registry.apply_remote_pose_effect(
+                guid,
+                AuthoritativePoseEffect::Reset {
+                    pose: after,
+                    cause: AuthoritativePoseResetCause::ForcedReposition,
+                },
+            );
+            assert_eq!(registry.get(guid).unwrap().active_action(), action);
+            reanchored = true;
+        }
     }
     assert!(completed);
+    assert!(reanchored);
     assert_eq!(hooks, 1);
     assert_eq!(registry.get(guid).unwrap().sticky_target(), None);
 }
@@ -5699,6 +6245,10 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
         Case::UnpreparedSticky,
     ] {
         let occupied = case == Case::Occupied;
+        let expects_recovery = matches!(
+            case,
+            Case::Clear | Case::PredictedInsideWall | Case::Sticky | Case::UnpreparedSticky
+        );
         let now = Instant::now();
         let mut collision = flat_collision_scene();
         let mut asset = flat_collision_asset(0);
@@ -5760,7 +6310,7 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
             true,
         );
         let input = if case == Case::UnpreparedSticky {
-            input.suspend_recovery()
+            input.require_matching_recovery_reference()
         } else {
             input
         };
@@ -5822,25 +6372,160 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
                 )
                 .unwrap();
             if tick.outcomes.iter().any(|outcome| matches!(outcome, DynamicEntityBodyOutcome::RecoveredPlacement(body_id) if *body_id == id)) {
-                assert!(matches!(case, Case::Clear | Case::PredictedInsideWall));
+                assert!(expects_recovery, "{case:?}");
                 assert_eq!(tick.outcomes.iter().filter(|outcome| outcome.body_id() == id).count(), 1);
                 let body = scene.body(id).unwrap();
-                assert!((body.pose.coords - target.coords).length() < 0.001);
+                assert!((body.pose.coords - target.coords).length() < CONTACT_EPSILON);
                 assert!(body.reconciliation.is_none());
                 assert_eq!(body.retained.velocity, Vector3::zero());
                 assert_eq!(body.nominal.velocity, Vector3::zero());
+                assert!(!recovered, "{case:?}: recovery must not repeat at its accepted destination");
                 recovered = true;
-                break;
+                if !matches!(case, Case::Sticky | Case::UnpreparedSticky) {
+                    break;
+                }
+            }
+            if recovered {
+                assert!(
+                    (world.scene.body(id).unwrap().pose.coords - target.coords).length()
+                        < CONTACT_EPSILON,
+                    "{case:?}: sticky recovery must stay converged"
+                );
             }
         }
-        assert_eq!(
-            recovered,
-            matches!(case, Case::Clear | Case::PredictedInsideWall),
-            "{case:?}"
-        );
+        assert_eq!(recovered, expects_recovery, "{case:?}");
         if occupied {
             assert!(world.scene.body(id).unwrap().pose.coords.x < 92.0);
         }
+    }
+}
+
+#[test]
+fn vertical_recovery_distinguishes_wrong_floor_from_nominal_flight() {
+    use crate::spatial::pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS;
+
+    // Two walkable floors share XY; reaching the upper floor requires placement, not steering.
+    let height = GROUNDED_CONFIG.step_down_height * 4.0;
+    let collision = collision_with_polygons(HashMap::from([(
+        0,
+        CollisionPolygon {
+            vertices: vec![
+                Vector3::new(88.0, 94.0, height),
+                Vector3::new(94.0, 94.0, height),
+                Vector3::new(94.0, 98.0, height),
+                Vector3::new(88.0, 98.0, height),
+            ],
+            normal: Vector3::new(0.0, 0.0, 1.0),
+            d: -height,
+        },
+    )]));
+    #[derive(Debug, Clone, Copy)]
+    enum Case {
+        Stranded,
+        StickyStranded,
+        Falling,
+        Jumping,
+    }
+    let flat = flat_collision_scene();
+    for case in [
+        Case::Stranded,
+        Case::StickyStranded,
+        Case::Falling,
+        Case::Jumping,
+    ] {
+        let stranded = matches!(case, Case::Stranded | Case::StickyStranded);
+        let jumping = matches!(case, Case::Jumping);
+        let now = Instant::now();
+        let id = SpatialBodyId::Entity(Guid(1));
+        let definition = grounded_definition();
+        let primary = definition.spheres().primary();
+        let lower = pose(Vector3::new(90.0, 96.0, primary.radius - primary.center.z));
+        let mut upper = lower;
+        upper.coords.z += height;
+        let start = if stranded || jumping { lower } else { upper };
+        let authority = if jumping { lower } else { upper };
+        let mut scene = SpatialScene::new();
+        scene.register_body(SpatialBody::new(id, start, now));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(definition, false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        if stranded || jumping {
+            acquire_support(
+                &mut scene,
+                if stranded { &collision } else { &flat },
+                id,
+                now,
+            );
+        }
+        scene.apply_authoritative_body_effect(
+            id,
+            AuthoritativePoseEffect::Interpolate {
+                pose: authority,
+                keep_heading: true,
+                adjusted_max_speed_mps: None,
+            },
+            AuthoritativeBodyVectors::default(),
+            now,
+        );
+        let ticks = (RECOVERY_WINDOW_SECONDS * 3.0 / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize;
+        let mut recovered = false;
+        for tick in 0..ticks {
+            // The flight counterexample has no platform: authority is a historical airborne pose.
+            let result = scene
+                .advance_dynamic_entity_collection(
+                    if stranded { &collision } else { &flat },
+                    MOBILE_CONTACT_TICK_SECONDS,
+                    now + Duration::from_secs_f32(tick as f32 * MOBILE_CONTACT_TICK_SECONDS),
+                    |_| {
+                        Ok(PhysicalBodyInput::referenced(
+                            PhysicalBodyActuation::Grounded(if jumping && tick == 0 {
+                                // Exercise ascent and descent during a flight longer than one watchdog window.
+                                GroundedBodyActuation::coast().with_launch(
+                                    GroundedLaunch::new(Vector3::new(
+                                        0.0,
+                                        0.0,
+                                        (-GROUNDED_CONFIG.gravity * height * 4.0).sqrt(),
+                                    ))
+                                    .unwrap(),
+                                )
+                            } else {
+                                GroundedBodyActuation::coast()
+                            }),
+                            if matches!(case, Case::StickyStranded) {
+                                PhysicalReferenceInput::Sticky(crate::spatial::StickyBodyTarget {
+                                    position: authority,
+                                    clearance: 0.0,
+                                    speed_mps: 2.0,
+                                    heading: start.rotation.to_heading(),
+                                })
+                            } else {
+                                PhysicalReferenceInput::remote(None, start.rotation)
+                            },
+                            true,
+                        ))
+                    },
+                )
+                .unwrap();
+            if result.outcomes.iter().any(|outcome| {
+                matches!(outcome,
+                DynamicEntityBodyOutcome::RecoveredPlacement(body_id) if *body_id == id)
+            }) {
+                assert!(
+                    stranded,
+                    "{case:?}: nominal flight must not snap to a historical pose"
+                );
+                assert!(!recovered, "accepted recovery must remain converged");
+                recovered = true;
+            }
+        }
+        assert_eq!(recovered, stranded, "{case:?}");
+        let expected = if stranded { upper } else { lower };
+        assert!(scene.body(id).unwrap().pose.distance_to(&expected) < CONTACT_EPSILON);
     }
 }
 
@@ -5942,10 +6627,34 @@ fn player_contact_suspends_recovery_without_preserving_an_expired_window() {
     let target = pose(mob.pose.coords + Vector3::new(10.0, 0.0, 0.0));
     let mut state = PoseReconciliationState::default();
     state.correct(target, false);
-    assert!(!state.observe_recovery(mob.pose, target, RECOVERY_WINDOW_SECONDS * 0.75, true));
-    assert!(!state.observe_recovery(mob.pose, target, RECOVERY_WINDOW_SECONDS, !contact));
-    assert!(!state.observe_recovery(mob.pose, target, RECOVERY_WINDOW_SECONDS * 0.5, true));
-    assert!(state.observe_recovery(mob.pose, target, RECOVERY_WINDOW_SECONDS * 0.5, true));
+    assert!(!state.observe_recovery(
+        mob.pose,
+        target,
+        RECOVERY_WINDOW_SECONDS * 0.75,
+        true,
+        crate::spatial::pose_reconciliation::PhysicalReferenceDomain::Horizontal
+    ));
+    assert!(!state.observe_recovery(
+        mob.pose,
+        target,
+        RECOVERY_WINDOW_SECONDS,
+        !contact,
+        crate::spatial::pose_reconciliation::PhysicalReferenceDomain::Horizontal
+    ));
+    assert!(!state.observe_recovery(
+        mob.pose,
+        target,
+        RECOVERY_WINDOW_SECONDS * 0.5,
+        true,
+        crate::spatial::pose_reconciliation::PhysicalReferenceDomain::Horizontal
+    ));
+    assert!(state.observe_recovery(
+        mob.pose,
+        target,
+        RECOVERY_WINDOW_SECONDS * 0.5,
+        true,
+        crate::spatial::pose_reconciliation::PhysicalReferenceDomain::Horizontal
+    ));
 }
 
 #[test]

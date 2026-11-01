@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::spatial::contact_profile::ContactPhaseProfile;
+use crate::spatial::types::RecoveryAuthority;
 use crate::spatial::{
     AcceptedBodyMotion, ContactBodyUpdate, SupportedBodyMotion, advance_body_contact_collection,
 };
@@ -37,7 +38,43 @@ impl CollectionActuator {
         } else {
             self.reconciliation
         };
-        if let Some(state) = reconciliation.as_mut() {
+        if let (Some(state), Some(destination)) = (reconciliation.as_mut(), body.authoritative_pose)
+        {
+            let eligible = matches!(body.id, SpatialBodyId::Entity(_))
+                && body.physical.as_ref().is_some_and(|physical| {
+                    matches!(physical.definition, PhysicalBodyDefinition::Grounded { .. })
+                        && physical
+                            .dynamic
+                            .as_ref()
+                            .is_some_and(|dynamic| dynamic.collision.contact_response.yields())
+                });
+            let permitted = eligible
+                && match self.input.recovery_authority {
+                    RecoveryAuthority::Disabled => false,
+                    RecoveryAuthority::LatestSample => true,
+                    RecoveryAuthority::MatchingReference => {
+                        state.reference_matches_authority(destination)
+                    }
+                }
+                && !super::super::mobile_contact::has_player_contact(body, player_before)?
+                && !super::super::mobile_contact::has_player_contact(body, player_after)?;
+            let requested = state.finish_recovery_tick(
+                body.pose,
+                body.retained.velocity - self.nominal_velocity,
+                super::super::PhysicalReferenceDomain::for_definition(
+                    body.physical
+                        .as_ref()
+                        .context("physical publication lost its definition")?
+                        .definition,
+                ),
+                destination,
+                delta_seconds,
+                permitted,
+            );
+            if requested {
+                recovery = Some(destination);
+            }
+        } else if let Some(state) = reconciliation.as_mut() {
             state.finish_physical_tick(
                 body.pose,
                 body.retained.velocity - self.nominal_velocity,
@@ -48,23 +85,6 @@ impl CollectionActuator {
                         .definition,
                 ),
             );
-        }
-        if let (Some(state), Some(destination)) = (reconciliation.as_mut(), body.authoritative_pose)
-        {
-            let permitted = matches!(body.id, SpatialBodyId::Entity(_))
-                && body.physical.as_ref().is_some_and(|physical| {
-                    matches!(physical.definition, PhysicalBodyDefinition::Grounded { .. })
-                        && physical
-                            .dynamic
-                            .as_ref()
-                            .is_some_and(|dynamic| dynamic.collision.contact_response.yields())
-                })
-                && !self.input.recovery_suspended
-                && !super::super::mobile_contact::has_player_contact(body, player_before)?
-                && !super::super::mobile_contact::has_player_contact(body, player_after)?;
-            if state.observe_recovery(body.pose, destination, delta_seconds, permitted) {
-                recovery = Some(destination);
-            }
         }
         body.reconciliation = reconciliation
             .filter(|state| !state.is_empty())

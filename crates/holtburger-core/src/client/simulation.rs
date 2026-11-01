@@ -698,16 +698,14 @@ fn tick_physical_entities(
                 },
                 !entity.physics.is_authoritative_projectile(),
             );
-            Ok(
-                if motion_runtimes
-                    .get(guid)
-                    .is_some_and(|runtime| runtime.sticky_target().is_some())
-                {
-                    input.suspend_recovery()
-                } else {
-                    input
-                },
-            )
+            let sticky_target = motion_runtimes
+                .get(guid)
+                .and_then(|runtime| runtime.sticky_target());
+            Ok(if sticky_target.is_some() {
+                input.require_matching_recovery_reference()
+            } else {
+                input
+            })
         },
     )?;
     let mut events = Vec::new();

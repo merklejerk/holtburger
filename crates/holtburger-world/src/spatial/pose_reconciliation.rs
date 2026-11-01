@@ -1,11 +1,11 @@
 //! Actor-neutral authoritative-pose reconciliation composed inside a body's spatial tick.
 //!
-//! Retail orders these mechanics after ordinary motion has produced an offset: retail
-//! interpolation adjustment may replace translation, then retail constraint adjustment damps
-//! the survivor. Authority adapters decide whether a received pose confirms, interpolates,
-//! snaps, or resets; this module only executes the selected spatial mechanics. Mobile physical
-//! bodies instead compose bounded additive correction with ordinary motion and let collision
-//! determine accepted progress.
+//! Retail orders these mechanics after ordinary motion has produced an offset: interpolation
+//! may replace translation, sticky targeting may replace it again, then constraints damp the
+//! survivor. Authority adapters decide whether a received pose confirms, interpolates, snaps,
+//! or resets; this module only executes the selected spatial mechanics. Mobile physical bodies
+//! instead compose bounded additive correction with ordinary motion and let collision determine
+//! accepted progress.
 
 pub(super) mod recovery;
 
@@ -18,9 +18,9 @@ use holtburger_common::{Guid, Vector3};
 pub enum PhysicalReferenceDomain {
     /// RETAIL DIVERGENCE: retail tests full target distance. Grounded navigation owns height;
     /// restoring 3D completion leaves the two-step round-trip fixture correcting forever after
-    /// a 0.6 m ascent. A different solid floor at the same XY is deliberately not repaired. The
-    /// asset-free stair/slope cases cover the known failure; no census of multilevel placements
-    /// has been performed.
+    /// a 0.6 m ascent. Corroborated height disagreement uses the separate recovery watchdog.
+    /// The asset-free stair/slope cases cover the known failure; no census of multilevel
+    /// placements has been performed.
     Horizontal,
     /// Free-flight return can correct all three coordinates.
     Spatial,
@@ -237,6 +237,9 @@ struct PhysicalCorrection {
     activity: PhysicalReturnActivity,
     /// Reference position in its original landblock frame; it need not be a placed body.
     reference: WorldPosition,
+    /// Nominal travel since retargeting makes the anchor insufficient proof of current height.
+    /// Retain the history: a stair journey can return to the anchor's XY on another floor.
+    reference_has_traveled: bool,
     /// Fresh authority facing, consumed by one accepted physical tick independently
     /// of position return. Later ordinary turning must not replay this old facing.
     pending_heading: Option<holtburger_common::Quaternion>,
@@ -263,6 +266,7 @@ impl PhysicalCorrection {
         let anchor = Guid(current.landblock_id.0 | 0xffff);
         let error = self.reference.reanchor_to_landblock_owner(anchor)?.coords - current.coords;
         self.reference.coords = self.reference.coords + ordinary;
+        self.reference_has_traveled |= ordinary != Vector3::zero();
         Ok(error)
     }
 }
@@ -312,7 +316,7 @@ impl PoseReconciliationState {
         self.mode = ReconciliationMode::Retail(state);
     }
 
-    /// Replaces only the reference when authority updates a mobile physical body.
+    /// Retargets the reference and renews height evidence while preserving return/watchdog state.
     pub(crate) fn correct(&mut self, reference: WorldPosition, keep_heading: bool) {
         let activity = match self.mode {
             ReconciliationMode::Physical(target) => target.activity,
@@ -326,6 +330,7 @@ impl PoseReconciliationState {
             recovery,
             activity,
             reference,
+            reference_has_traveled: false,
             pending_heading: (!keep_heading).then_some(reference.rotation),
         });
     }
@@ -458,13 +463,26 @@ impl PoseReconciliationState {
         relative_velocity: Vector3,
         domain: PhysicalReferenceDomain,
     ) {
+        self.finish_return_motor(accepted, relative_velocity, domain, false);
+    }
+
+    /// Height recovery can retain a reference after its horizontal motor has finished.
+    fn finish_return_motor(
+        &mut self,
+        accepted: WorldPosition,
+        relative_velocity: Vector3,
+        domain: PhysicalReferenceDomain,
+        retain_recovery: bool,
+    ) {
         if let ReconciliationMode::Physical(target) = &mut self.mode {
             let distance = domain.distance(target.reference, accepted);
             let settled = distance <= RETAIL_INTERPOLATION_TARGET_THRESHOLD_M
                 && domain.project(relative_velocity).length()
                     <= super::PHYSICAL_RETURN_GAIN * RETAIL_INTERPOLATION_TARGET_THRESHOLD_M;
             match target.activity {
-                PhysicalReturnActivity::Continuous if settled => {
+                PhysicalReturnActivity::Continuous
+                    if settled && (!retain_recovery || target.recovery.is_none()) =>
+                {
                     self.mode = ReconciliationMode::Empty
                 }
                 PhysicalReturnActivity::Returning if settled => {
@@ -505,6 +523,7 @@ impl PoseReconciliationState {
             ReconciliationMode::Physical(target) => {
                 target.activity != PhysicalReturnActivity::Watching
                     || target.pending_heading.is_some()
+                    || target.recovery.is_some()
             }
         }
     }

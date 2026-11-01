@@ -11,7 +11,12 @@
 //! remove that approved behavior. Scope: all admitted mobile pairs; the retained synthetic
 //! census covers 45-body swarm/pinned/hard-corner workloads, not the complete content
 //! population. Template/setup preparation was audited separately; crowded live acceptance
-//! remains open.
+//! remains open. Supported separation preserves footing independently of EDGE_SLIDE; retail
+//! gates ordinary edge protection on that flag and has no symmetric peer shove. Applying the
+//! ordinary gate to our added shove lets unflagged peers fall. The synthetic high ledge cases
+//! cover normal/tangent crowd correction and subsequent ordinary departure; existing short-drop
+//! and airborne fixtures retain their navigation contracts. No live-content census establishes
+//! equivalence across all support geometry.
 
 mod step;
 pub use step::{
@@ -213,10 +218,10 @@ pub fn resolve_mobile_contact(
     })
 }
 
-/// Grounded definition policy and the response-owned support at the accepted pose.
+/// Tick-local grounded navigation policy and the response-owned support at the accepted pose.
 #[derive(Debug, Clone, Copy)]
 pub struct GroundedContactState {
-    /// Existing stair, slope, gravity, and edge policy.
+    /// Authored stair, slope and gravity policy, with any tick-local footing protection.
     pub config: super::GroundedConfig,
     /// Accepted support; the step validates world ownership or re-queries its hard entity.
     pub ground: super::GroundState,

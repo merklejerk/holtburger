@@ -232,3 +232,110 @@ fn social_activity_tracks_queued_actions_and_held_poses_until_they_are_left() {
         OrdinaryMotionActivity::Locomotion
     );
 }
+
+#[test]
+fn gameplay_postures_retain_their_target_and_transition_to_each_other() {
+    use crate::motion::RestPosture;
+    let postures = [
+        RestPosture::Standing,
+        RestPosture::Crouching,
+        RestPosture::Sitting,
+        RestPosture::Lying,
+    ];
+    let data = |id| motion(vec![clip(id, 4.0)], None, None);
+    let catalog = MotionSequenceCatalog::assemble(
+        [MotionTable {
+            id: TABLE,
+            default_style: STYLE,
+            style_defaults: HashMap::from([(STYLE, RestPosture::Standing.command().raw())]),
+            cycles: postures
+                .into_iter()
+                .map(|posture| {
+                    (
+                        MotionTable::cycle_key(STYLE, posture.command().raw()),
+                        data(STAND_ANIM),
+                    )
+                })
+                .chain([(MotionTable::cycle_key(STYLE, WALK), data(WALK_ANIM))])
+                .collect(),
+            modifiers: HashMap::new(),
+            links: postures
+                .map(|from| {
+                    (
+                        MotionTable::cycle_key(STYLE, from.command().raw()),
+                        postures
+                            .into_iter()
+                            .filter(|to| *to != from)
+                            .map(|to| (to.command().raw(), data(LINK_ANIM)))
+                            .collect(),
+                    )
+                })
+                .into(),
+        }],
+        [
+            animation(STAND_ANIM, 4, 0.0),
+            animation(LINK_ANIM, 4, 0.0),
+            animation(WALK_ANIM, 4, 0.0),
+        ],
+        [],
+    )
+    .unwrap();
+    let table = catalog.table(TABLE).unwrap();
+    let mut registry = MotionRuntimeRegistry::new();
+    for (index, posture) in postures
+        .into_iter()
+        .chain([RestPosture::Standing])
+        .enumerate()
+    {
+        assert_eq!(
+            submit(&mut registry, table, posture.command(), index as u16 + 1),
+            MotionCommandAdmissionOutcome::Accepted
+        );
+        for _ in 0..20 {
+            registry.advance_local_command(table, BODY, 0.5);
+        }
+        let runtime = registry.get(BODY).unwrap();
+        assert_eq!(
+            runtime.has_local_command(),
+            posture != RestPosture::Standing
+        );
+        assert_eq!(runtime.state().substate, posture.command());
+        let playback = runtime.motion_playback().unwrap();
+        assert_eq!(playback.rest_posture, Some(posture));
+        assert_ne!(playback.activity, OrdinaryMotionActivity::Emote);
+    }
+    // Check movement takeover separately so the loop above really exercises posture-to-posture links.
+    for posture in postures
+        .into_iter()
+        .filter(|posture| *posture != RestPosture::Standing)
+    {
+        assert_eq!(
+            submit(&mut registry, table, posture.command(), 20),
+            MotionCommandAdmissionOutcome::Accepted
+        );
+        registry.drive_manual(
+            table,
+            BODY,
+            MotionOrder {
+                forward: Some((MotionCommand::WALK_FORWARD, 1.0)),
+                ..MotionOrder::default()
+            },
+            CharacterMotionPresentation::Grounded,
+            0.5,
+        );
+        let runtime = registry.get(BODY).unwrap();
+        assert!(!runtime.has_local_command());
+        assert_eq!(runtime.state().substate, MotionCommand::WALK_FORWARD);
+    }
+    assert_eq!(RestPosture::from_command(BOW), None);
+    assert_eq!(
+        RestPosture::from_command(MotionCommand(0x4300_00f7)),
+        None,
+        "social kneel is not a rest posture"
+    );
+    assert_eq!(
+        RestPosture::from_command(MotionCommand(0x4300_013d)),
+        None,
+        "social sit is not a rest posture"
+    );
+}

@@ -1,4 +1,9 @@
 <script lang="ts">
+	import {
+		ClientRestPostureController,
+		REST_POSTURE_LABELS,
+		handleRestPostureKeydown,
+	} from "./client-rest-posture-controller";
 	import { formatError } from "../lib/format-error";
 	import { clientMinimapLandmark } from "./client-minimap-policy";
 	import { launcherTransport } from "../launcher/launcher-transport";
@@ -320,6 +325,7 @@
 	const debugEnabled = clientDebugEnabled(window.location.search);
 	let deathCommands: ClientDeathCommands | null = null;
 	let emoteController: ClientEmoteController | null = null;
+	let postureController: ClientRestPostureController | null = null;
 	let session = $state<ClientLifecycleSession | null>(null);
 	const navigationWaypoint = new ClientNavigationWaypointOwner(
 		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
@@ -410,6 +416,7 @@
 	}
 	function selectCombatProfile(profile: ClientAttackProfile): void {
 		if (!persistCombatProfile(profile)) return;
+		postureController?.cancel();
 		emoteController?.cancel();
 		combatProfileSelectionRevision += 1;
 		if (selectedEntityGuid === null && combatStatus.desired !== null) {
@@ -465,6 +472,7 @@
 			return;
 		}
 		// Selection is sampled only for this explicit begin; core retains the engaged target.
+		postureController?.cancel();
 		emoteController?.cancel();
 		retireCombatEscapeContext();
 		const sequence = nextCombatIntentSequence();
@@ -1010,7 +1018,10 @@
 			facingInput?.cancel();
 			cameraController?.setTranslationIntent(false, performance.now());
 		}
-		if (edge.kind !== "reset") facingInput?.flush();
+		if (edge.kind !== "reset") {
+			postureController?.forget();
+			facingInput?.flush();
+		}
 		if (edge.kind === "begin-jump") {
 			activeJumpBeginSequence = edge.sequence;
 		} else {
@@ -1060,6 +1071,13 @@
 		intent: CharacterDriveIntent,
 		active: () => boolean,
 	): void {
+		if (
+			intent === "acquire" ||
+			drive.longitudinal !== null ||
+			drive.lateral !== null ||
+			drive.turn !== null
+		)
+			postureController?.forget();
 		facingInput?.flush();
 		cameraController?.setTranslationIntent(
 			drive.longitudinal !== null ||
@@ -1341,6 +1359,7 @@
 	async function castSpell(spellId: number): Promise<void> {
 		const currentSession = session;
 		if (currentSession === null) return;
+		postureController?.cancel();
 		emoteController?.cancel();
 		const selection = entitySelection?.selectedGuid() ?? null;
 		try {
@@ -1360,6 +1379,7 @@
 
 	async function toggleCombatMode(): Promise<void> {
 		if (session === null || lifecycle.kind !== "in-world") return;
+		postureController?.cancel();
 		emoteController?.cancel();
 		try {
 			await session.toggleCombatMode();
@@ -1398,10 +1418,13 @@
 				lifecycle.kind !== "in-world"
 			)
 				throw new Error("Chat session is not in the world.");
-			await emotes.sendAll(
-				resolution.kind === "send" ? [resolution.request] : resolution.requests,
-				chatComposer,
-			);
+			const requests =
+				resolution.kind === "send"
+					? ([resolution.request] as const)
+					: resolution.requests;
+			if (requests.some((request) => request.kind === "soul-emote"))
+				postureController?.cancel();
+			await emotes.sendAll(requests, chatComposer);
 			return;
 		}
 		if (isLogopolisCommand(message)) {
@@ -1555,6 +1578,20 @@
 			if (!event.repeat) inputArbiter.toggleAutoRun();
 			return;
 		}
+		if (
+			handleRestPostureKeydown(clientInput, event, () => {
+				locks?.cancel();
+				inputArbiter?.reset();
+				emoteController?.cancel();
+				// Flush preceding movement releases without delaying ownership of this key edge.
+				const posture = postureController;
+				if (posture !== null)
+					inputDispatch = posture
+						.cycle(inputDispatch)
+						.catch(reportCommandFailure);
+			})
+		)
+			return;
 		if (clientInput.shortcut("toggleCombat", event) && !event.isComposing) {
 			event.preventDefault();
 			if (!event.repeat) void toggleCombatMode();
@@ -1963,6 +2000,7 @@
 		let cancelled = false;
 		const isActive = (): boolean => !cancelled && session === currentSession;
 		const facing = new ClientFacingInputDispatch((deltaRadians, current) => {
+			postureController?.forget();
 			inputDispatch = inputDispatch
 				.then(async () => {
 					if (isActive() && current())
@@ -2082,6 +2120,17 @@
 			reportCommandFailure,
 		);
 		emoteController = emoteOwner;
+		const postureOwner = new ClientRestPostureController(
+			owner,
+			keyboard,
+			reportCommandFailure,
+			(posture) =>
+				toastCenter.publish({
+					message: REST_POSTURE_LABELS[posture],
+					tone: "status",
+				}),
+		);
+		postureController = postureOwner;
 		chatComposer.reset();
 		chatCharacterGuid = null;
 		partyHudPresent = owner.partyHudPresent();
@@ -2333,6 +2382,8 @@
 			// Include synchronous controller cleanup in the same retained failure outcome.
 			retirement.add("barber-editor", () => barberOwner.destroy());
 			retirement.add("client-controllers", () => {
+				postureOwner.destroy();
+				if (postureController === postureOwner) postureController = null;
 				emoteOwner.destroy();
 				if (emoteController === emoteOwner) emoteController = null;
 				spellState.destroy();

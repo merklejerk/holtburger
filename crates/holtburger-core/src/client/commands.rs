@@ -97,6 +97,7 @@ impl ClientRuntime {
         if let Some(capture) = &mut self.runtime_fixture {
             capture.record_command(&cmd)?;
         }
+        self.cancel_rest_for_command(&cmd);
         match &cmd {
             ClientCommand::GetAndWield { item, .. }
             | ClientCommand::SplitToWield { item, .. }
@@ -157,6 +158,11 @@ impl ClientRuntime {
             return Ok(());
         }
         match cmd {
+            ClientCommand::SetRestPosture(posture) => self.request_rest_posture(posture).await,
+            ClientCommand::CancelRestPosture => {
+                self.cancel_rest_posture();
+                Ok(())
+            }
             ClientCommand::Barber(request) => self.handle_barber_request(request).await,
             ClientCommand::ApplyEquipmentSet(bindings) => self.apply_equipment_set(bindings).await,
             ClientCommand::SubmitHousingManagement(request) => {

@@ -1,6 +1,7 @@
 use crate::entity::{
     EntityManager, EntityMotionAdmission, EntityMotionSnapshot, OrderedMotionScalar,
 };
+use crate::motion::RestPosture;
 use crate::motion::{
     CharacterMotionPresentation, LocomotionPresentationSource, MotionCommand, MotionOrder,
     MotionRuntimeRegistry, ObservedCharacterMotion, RemoteFramePolicy, RemoteMotionInput,
@@ -16,6 +17,7 @@ use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::{Guid, RigidTransform, Vector3};
 use holtburger_content::{MotionHookEffect, MotionSequenceTable};
 use holtburger_dat::file_type::MotionTable;
+use holtburger_protocol::errors::WeenieError;
 use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 use std::time::Duration;
 use thiserror::Error;
@@ -628,12 +630,13 @@ impl WorldState {
     ///
     /// The later autonomous server echo is intentionally filtered at packet admission; predicting
     /// here is therefore the only local presentation edge and cannot double-enqueue the action.
+    /// Returns the admitted gameplay posture, or `None` for other authored commands.
     pub fn submit_local_authored_motion_command(
         &mut self,
         command: InterpretedMotionCommand,
         speed: f32,
         action_sequence: u16,
-    ) -> Result<(), LocalAuthoredMotionCommandError> {
+    ) -> Result<Option<RestPosture>, LocalAuthoredMotionCommandError> {
         let action_sequence = action_sequence & 0x7FFF;
         let guid = self.player.guid;
         let admission = EntityMotionAdmission {
@@ -647,6 +650,19 @@ impl WorldState {
                 command: command.raw(),
             },
         )?;
+        let rest_posture = RestPosture::from_command(command);
+        // A peace acknowledgement may arrive after authoritative death. Resting must not
+        // replace that death state while the character is still in the same placement epoch.
+        if rest_posture.is_some()
+            && self
+                .player_entity()
+                .and_then(|entity| entity.network_motion.snapshot())
+                .is_some_and(|snapshot| snapshot.indicates_death_motion())
+        {
+            return Err(LocalAuthoredMotionCommandError::Refused {
+                reason: WeenieError::Dead,
+            });
+        }
         let speed = OrderedMotionScalar::from_f32(speed)
             .ok_or(LocalAuthoredMotionCommandError::NonFiniteSpeed)?;
         let source = self.motion_table_source_for_guid(guid).ok_or(
@@ -661,18 +677,24 @@ impl WorldState {
                 motion_table_id,
             },
         )?;
-        // Retail DoMotion rejects social animations before interpreted playback dispatch (ACE
-        // MotionInterp.DoMotion). Use the authoritative style: ordinary playback may still
-        // retain a peace pose while manual locomotion owns combat.
-        if command.is_chat_emote()
-            && self
-                .reported_player_motion_style()
-                .unwrap_or(table.default_style)
-                != MotionStance::NonCombat as u32
+        // Retail DoMotion rejects resting and social animations before interpreted playback
+        // dispatch (ACE MotionInterp.DoMotion). Use the authoritative style: ordinary playback
+        // may still retain a peace pose while manual locomotion owns combat.
+        if self
+            .reported_player_motion_style()
+            .unwrap_or(table.default_style)
+            != MotionStance::NonCombat as u32
         {
-            return Err(LocalAuthoredMotionCommandError::Refused {
-                reason: holtburger_protocol::errors::WeenieError::CantChatEmoteInCombat,
-            });
+            let refusal = match rest_posture {
+                Some(RestPosture::Crouching) => Some(WeenieError::CantCrouchInCombat),
+                Some(RestPosture::Sitting) => Some(WeenieError::CantSitInCombat),
+                Some(RestPosture::Lying) => Some(WeenieError::CantLieDownInCombat),
+                _ if command.is_chat_emote() => Some(WeenieError::CantChatEmoteInCombat),
+                _ => None,
+            };
+            if let Some(reason) = refusal {
+                return Err(LocalAuthoredMotionCommandError::Refused { reason });
+            }
         }
         match self
             .motion_runtimes
@@ -690,7 +712,7 @@ impl WorldState {
                 });
             }
         }
-        Ok(())
+        Ok(rest_posture)
     }
 
     /// Whether a client-authored command still owns the local retained playback order.

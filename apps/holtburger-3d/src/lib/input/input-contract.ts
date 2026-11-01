@@ -106,6 +106,7 @@ export const CLIENT_SHORTCUT_ACTIONS = [
 	"splitStack",
 	"toggleCombat",
 	"toggleAutoRun",
+	"cycleRestPosture",
 	"preciseJump",
 	"cancel",
 	"chat",

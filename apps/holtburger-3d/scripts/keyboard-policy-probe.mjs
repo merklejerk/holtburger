@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { probeClientLogopolis } from "./client-logopolis-probe.mjs";
 import { probeClientEmotes } from "./client-emote-probe.mjs";
+import { probeClientRestPostures } from "./client-rest-posture-probe.mjs";
 import { probeClientChat } from "./client-chat-probe.mjs";
 
 /** Shared real-browser input operations for keyboard and focused select regressions. */
@@ -915,6 +916,7 @@ export async function probeKeyboardPolicy(client, evaluateExpression) {
 		return {
 			chatComposer: await probeClientChat(client, evaluateExpression),
 			soulEmotes: await probeClientEmotes(client, evaluateExpression),
+			restPostures: await probeClientRestPostures(driver),
 			logopolis: await probeClientLogopolis(driver),
 			contextualEscape: true,
 			nativeControls: true,

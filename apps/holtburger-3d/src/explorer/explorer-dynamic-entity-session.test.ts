@@ -457,6 +457,7 @@ describe("possession", () => {
 		const transport = new RecordingTransport();
 		transport.responses.set("explorer_possession_motion_probe", {
 			motion: {
+				restPosture: null,
 				locomotionCommandActive: true,
 				activity: "locomotion",
 				locomotion: null,

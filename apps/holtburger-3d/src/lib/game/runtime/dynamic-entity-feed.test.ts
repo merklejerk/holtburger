@@ -240,6 +240,7 @@ describe("dynamic-entity view contract", () => {
 						completion: "loop",
 					},
 				},
+				restPosture: null,
 				locomotionCommandActive: true,
 				activity,
 			};

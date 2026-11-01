@@ -2414,6 +2414,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			if (entity.motion?.ordinary) {
 				entity.motion = {
 					...entity.motion,
+					restPosture: null,
 					locomotionCommandActive: true,
 					activity: "gesture",
 					locomotion: { ...entity.motion.ordinary, playbackId: "2" },
@@ -3008,6 +3009,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			const entity: DynamicEntityView = {
 				...motionDrivenEntity(1, null),
 				motion: {
+					restPosture: null,
 					locomotionCommandActive: true,
 					activity: "gesture",
 					ordinary,
@@ -3045,6 +3047,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			const updated: DynamicEntityView = {
 				...entity,
 				motion: {
+					restPosture: null,
 					locomotionCommandActive: true,
 					activity: "gesture",
 					ordinary,
@@ -3069,6 +3072,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 						activity: "gesture",
 						ordinary,
 						locomotion: changed,
+						restPosture: null,
 						locomotionCommandActive: false,
 					},
 				},
@@ -3087,6 +3091,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 							activity: "gesture",
 							ordinary,
 							locomotion: changed,
+							restPosture: null,
 							locomotionCommandActive: false,
 						},
 					},
@@ -3103,6 +3108,7 @@ describe("GamePresentationRuntime dynamic-entity presentation", () => {
 			const revealed: DynamicEntityView = {
 				...entity,
 				motion: {
+					restPosture: null,
 					locomotionCommandActive: true,
 					activity: "locomotion",
 					ordinary: null,
@@ -4626,6 +4632,7 @@ function motionDrivenEntity(
 				: {
 						ordinary: { playbackId: "1", clip: motion },
 						locomotion: null,
+						restPosture: null,
 						locomotionCommandActive: true,
 						activity: "explicit",
 					},

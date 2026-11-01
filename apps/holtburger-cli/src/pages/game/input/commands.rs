@@ -6,6 +6,7 @@ use holtburger_core::client::recall::RecallDestination;
 use holtburger_core::client::types::{ChatChannelDestination, ChatTellTarget};
 use holtburger_world::context::WorldContextExt;
 use holtburger_world::context::normalize_name_for_lookup;
+use holtburger_world::motion::RestPosture;
 use std::borrow::Cow;
 
 fn parse_option_value(raw: &str) -> Option<bool> {
@@ -256,7 +257,7 @@ impl GameState {
     fn log_command_help_overview(&mut self) {
         self.chat.log(
             ChatMessageTags::system(),
-            "Available commands: /?, /help, /version, /quit, /exit, /clear, /combat, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /corpse, /corpses, /consent, /die, /rip, /logopolis, /script, /scripts, /run, /unrun, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /promote, /leave, /uninvite, /options, /option"
+            "Available commands: /?, /help, /version, /quit, /exit, /clear, /combat, /lie, /sit, /kneel, /stand, /scoot, /ls, /lifestone, /arena, /mp, /pkl, /hq, /swear, /unswear, /permit, /unpermit, /corpse, /corpses, /consent, /die, /rip, /logopolis, /script, /scripts, /run, /unrun, /t, /tell, /r, /reply, /g, /guild, /p, /party, /create-party, /invite, /promote, /leave, /uninvite, /options, /option"
                 .to_string(),
         );
         self.chat.log(
@@ -410,6 +411,11 @@ impl GameState {
             "clear" => vec![
                 "Usage: /clear".to_string(),
                 "Clear the chat log and current input line.".to_string(),
+            ],
+            "lie" | "sit" | "kneel" | "stand" => vec![
+                "Usage: /lie, /sit, /kneel, /stand".to_string(),
+                "Change gameplay posture silently. Resting leaves combat and stays peaceful.".to_string(),
+                "/kneel uses the resting crouch, rather than the social kneel emote.".to_string(),
             ],
             "combat" => vec![
                 "Usage: /combat".to_string(),
@@ -901,6 +907,18 @@ impl GameState {
                 self.chat_input.input.clear();
                 result.with_redraw(true)
             }
+            "/lie" | "/sit" | "/kneel" | "/stand" => {
+                let posture = match command {
+                    "/lie" => RestPosture::Lying,
+                    "/sit" => RestPosture::Sitting,
+                    "/kneel" => RestPosture::Crouching,
+                    "/stand" => RestPosture::Standing,
+                    _ => unreachable!(),
+                };
+                result.commands.push(ClientCommand::SetRestPosture(posture));
+                result.merge(self.finish_input_command_submission(submitted_command));
+                result.with_redraw(true)
+            }
             "/combat" => {
                 result.actions.push(crate::types::AppAction::SetCombatMode {
                     on: !crate::pages::game::state::domains::is_in_combat_mode(self),
@@ -950,6 +968,25 @@ mod tests {
     use holtburger_common::CharacterOption;
     use holtburger_common::{CharacterOptions1, CharacterOptions2, Guid};
     use holtburger_core::PlayerCharacterOptions;
+
+    #[test]
+    fn resting_commands_request_gameplay_postures_without_chat() {
+        for (command, expected) in [
+            ("/lie", RestPosture::Lying),
+            ("/sit", RestPosture::Sitting),
+            ("/kneel", RestPosture::Crouching),
+            ("/stand", RestPosture::Standing),
+        ] {
+            let mut state = GameState::new(Guid(1), "Player".into(), "World".into());
+            let result = state.handle_prefixed_command(command);
+            assert!(
+                matches!(result.commands.as_slice(), [ClientCommand::SetRestPosture(posture)] if *posture == expected)
+            );
+            assert!(result.actions.iter().any(|action| matches!(action,
+                AppAction::UiAction { action: AppUiAction::FinishInputCommandSubmission { command: submitted } }
+                    if submitted == command)));
+        }
+    }
 
     #[test]
     fn both_prefixes_dispatch_local_commands_and_preserve_submitted_text() {

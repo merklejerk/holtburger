@@ -431,6 +431,13 @@ pub enum ClientHostCommand {
     },
     /// Toggle peace and the current equipment-derived stance in core.
     ToggleClientCombatMode,
+    /// Silent posture request; shared core establishes peace before resting.
+    SetClientRestPosture {
+        /// Gameplay resting target; social aliases are not accepted here.
+        posture: holtburger_world::motion::RestPosture,
+    },
+    /// Cancel an uncompleted peace prerequisite without changing combat mode.
+    CancelClientRestPosture,
     /// Explicit stance request for app-owned workflows; independent of toggle timing.
     SetClientCombatMode {
         /// Explicit family captured by the frontend; unknown hydration state is not an intent.
@@ -668,6 +675,8 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "teleport_client_to_map_position",
     "toggle_client_combat_mode",
     "set_client_combat_mode",
+    "set_client_rest_posture",
+    "cancel_client_rest_posture",
     "set_client_appearance_option",
     "set_client_gameplay_option",
     "cast_client_spell",
@@ -1157,6 +1166,16 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        SetClientRestPosture { posture } => runtime
+            .send_command(ClientCommand::SetRestPosture(posture))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        CancelClientRestPosture => runtime
+            .send_command(ClientCommand::CancelRestPosture)
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         SetClientCombatMode { mode } => runtime
             .send_command(ClientCommand::SetCombatMode(mode.into()))
             .await
@@ -1522,6 +1541,31 @@ mod tests {
         }
         assert!(
             serde_json::from_value::<RequestedCombatMode>(serde_json::json!("unknown")).is_err()
+        );
+    }
+
+    #[test]
+    fn posture_host_requests_decode_gameplay_targets_and_reject_social_aliases() {
+        use holtburger_world::motion::RestPosture;
+        for (name, expected) in [
+            ("standing", RestPosture::Standing),
+            ("crouching", RestPosture::Crouching),
+            ("sitting", RestPosture::Sitting),
+            ("lying", RestPosture::Lying),
+        ] {
+            let request: ClientHostCommand = serde_json::from_value(
+                serde_json::json!({ "command": "set_client_rest_posture", "posture": name }),
+            )
+            .unwrap();
+            assert!(
+                matches!(request, ClientHostCommand::SetClientRestPosture { posture } if posture == expected)
+            );
+        }
+        assert!(
+            serde_json::from_value::<ClientHostCommand>(
+                serde_json::json!({ "command": "set_client_rest_posture", "posture": "kneel" })
+            )
+            .is_err()
         );
     }
 

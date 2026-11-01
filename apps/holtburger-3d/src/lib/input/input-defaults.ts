@@ -129,6 +129,10 @@ export const INPUT_DEFAULTS = {
 		splitStack: [
 			{ key: "y", shift: false, ctrl: false, alt: false, meta: false },
 		],
+		/** Settle progressively: crouch, sit, lie, then stand. */
+		cycleRestPosture: [
+			{ key: "n", shift: false, ctrl: false, alt: false, meta: false },
+		],
 		/** Toggle persistent forward movement while gameplay owns the keyboard. */
 		toggleAutoRun: [{ key: "q", ctrl: false, alt: false, meta: false }],
 		/** Physical Space keeps Ctrl+Space usable when the logical key is unidentified. */

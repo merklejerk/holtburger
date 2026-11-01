@@ -1,3 +1,4 @@
+import type { RestPosture } from "../lib/game/runtime/dynamic-entity-feed";
 import type {
 	ClientGameplayOption,
 	ClientGameplayPreferences,
@@ -310,6 +311,8 @@ type ClientCommandName = Extract<
 	| "recall_client"
 	| "toggle_client_combat_mode"
 	| "set_client_combat_mode"
+	| "set_client_rest_posture"
+	| "cancel_client_rest_posture"
 	| "set_client_appearance_option"
 	| "set_client_gameplay_option"
 	| "cast_client_spell"
@@ -1308,6 +1311,19 @@ export class ClientLifecycleSession {
 		if (this.#state.lifecycle?.kind !== "in-world")
 			throw new Error("Combat stance session is unavailable.");
 		await this.#transport.invoke("set_client_combat_mode", { mode });
+	}
+
+	/** Silent gameplay posture; enqueue is separate from observed motion confirmation. */
+	async setRestPosture(posture: RestPosture): Promise<void> {
+		if (this.#state.lifecycle?.kind !== "in-world")
+			throw new Error("Resting session is unavailable.");
+		await this.#transport.invoke("set_client_rest_posture", { posture });
+	}
+
+	/** Explicit cancellation cannot leave a queued peace prerequisite behind. */
+	async cancelRestPosture(): Promise<void> {
+		if (this.#state.lifecycle?.kind !== "in-world") return;
+		await this.#transport.invoke("cancel_client_rest_posture");
 	}
 
 	async beginCombatEngagement(

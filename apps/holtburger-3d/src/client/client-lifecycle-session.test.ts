@@ -970,6 +970,32 @@ describe("ClientLifecycleSession", () => {
 		session.stop();
 	});
 
+	it("forwards silent posture targets and cancellation without optimistic stance changes", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await expect(session.setRestPosture("lying")).rejects.toThrow(
+			"unavailable",
+		);
+		await session.start();
+		transport.emit("client-current-state", {
+			...currentState(1),
+			combatMode: "magic",
+		});
+		transport.invocations.length = 0;
+		await session.setRestPosture("lying");
+		await session.cancelRestPosture();
+		expect(
+			transport.invocations.filter(({ command }) =>
+				command.endsWith("rest_posture"),
+			),
+		).toEqual([
+			{ command: "set_client_rest_posture", args: { posture: "lying" } },
+			{ command: "cancel_client_rest_posture", args: undefined },
+		]);
+		expect(session.state().combatMode).toBe("magic");
+		session.stop();
+	});
+
 	it("requests peace explicitly and leaves confirmation to server events", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);

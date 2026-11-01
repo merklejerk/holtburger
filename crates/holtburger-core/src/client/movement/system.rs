@@ -459,6 +459,20 @@ impl MovementSystem {
             .push(QueuedControlCommand::CharacterMotion(event));
     }
 
+    /// Drop only unsent posture targets when a newer input supersedes them.
+    pub(crate) fn cancel_queued_rest_posture(&mut self) {
+        let is_posture = |intent: &AuthoredMotionIntent| {
+            MotionCommand::from_interpreted(intent.command)
+                .and_then(holtburger_world::motion::RestPosture::from_command)
+                .is_some()
+        };
+        self.pending_authored_commands
+            .retain(|intent| !is_posture(intent));
+        self.queued_control_commands.retain(|command| {
+            !matches!(command, QueuedControlCommand::Authored(intent) if is_posture(intent))
+        });
+    }
+
     pub(crate) fn enqueue_authored_motion(
         &mut self,
         command: InterpretedMotionCommand,
@@ -760,14 +774,7 @@ impl MovementSystem {
                         PlayerDriveIntent::ClientDirected(command) => command.acquires_control(),
                         _ => false,
                     };
-                    let supersedes_local_command = matches!(
-                        command,
-                        PlayerDriveIntent::ManualHeld(_)
-                            | PlayerDriveIntent::ManualPulse { .. }
-                            | PlayerDriveIntent::Stop
-                            | PlayerDriveIntent::SnapFacing { .. }
-                            | PlayerDriveIntent::RotateFacing { .. }
-                    ) || acquires_client_directed_control;
+                    let supersedes_local_command = command.supersedes_local_motion();
                     if supersedes_local_command {
                         world.admit_entity_sticky_target(world.player.guid, None);
                     }
@@ -1231,6 +1238,8 @@ impl MovementSystem {
 
     fn note_authored_motion_sent(&mut self) {
         self.published_motion = Some(PublishedMotion::Authored);
+        // This packet already notified ACE of the takeover; a deferred stop would erase it.
+        self.movement_publication_required = false;
     }
 
     fn note_stop_published(&mut self) {
@@ -1311,8 +1320,12 @@ impl MovementSystem {
         now: Instant,
     ) -> Result<()> {
         let movement_sequence = world.player.next_move_seq();
-        match world.submit_local_authored_motion_command(intent.command, 1.0, movement_sequence) {
-            Ok(()) => {}
+        let rest_posture = match world.submit_local_authored_motion_command(
+            intent.command,
+            1.0,
+            movement_sequence,
+        ) {
+            Ok(posture) => posture,
             Err(holtburger_world::state::LocalAuthoredMotionCommandError::Refused { reason }) => {
                 self.authored_motion_rejections.push(reason);
                 return Ok(());
@@ -1322,9 +1335,21 @@ impl MovementSystem {
                     "local authored motion command failed: {error}"
                 ));
             }
-        }
-        let raw_motion_state = raw_motion_state_with_motion_style(
-            world,
+        };
+        // A newer accepted command supersedes an unsimulated stop of the previous pose.
+        self.pending_manual_playback_stop = false;
+        // Resting is retained forward state, which ACE uses for regeneration and defense
+        // (Player_Networking.BroadcastMovement, Creature_Vitals.GetStanceMod).
+        // Social animations retain their separate sequenced command-list contract.
+        let raw_state = if let Some(posture) = rest_posture {
+            RawMotionState {
+                flags: holtburger_protocol::messages::movement::RawMotionFlags::FORWARD_COMMAND
+                    | holtburger_protocol::messages::movement::RawMotionFlags::FORWARD_SPEED,
+                forward_command: Some(posture.command().raw()),
+                forward_speed: Some(1.0),
+                ..Default::default()
+            }
+        } else {
             RawMotionState {
                 commands: vec![MotionItem::new(
                     intent.command,
@@ -1333,9 +1358,10 @@ impl MovementSystem {
                     1.0,
                 )],
                 ..Default::default()
-            },
-            intent.motion_style,
-        );
+            }
+        };
+        let raw_motion_state =
+            raw_motion_state_with_motion_style(world, raw_state, intent.motion_style);
         self.send_motion_packet(
             world,
             session,

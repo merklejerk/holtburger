@@ -12,6 +12,7 @@ import {
 	sampleCycleCandidates,
 	type CycleCandidate,
 	type CycleFilter,
+	type CycleSelectionContext,
 } from "./client-cycle-selection-controller";
 import {
 	DynamicEntityMirror,
@@ -24,34 +25,37 @@ import {
 import { sceneVec3 } from "../lib/assets/ac-frame";
 import { Quat, Vec3 } from "../lib/game/math/types";
 
+const PEACE_CONTEXT: CycleSelectionContext = {
+	combatMode: "peace",
+	partyMembers: new Set(),
+};
 const POLICY = {
 	radiusMeters: 20,
 	viewMarginMeters: 2,
-	distanceBandMeters: 5,
-	angularSectorCount: 8,
-	resetDivergence: 0.5,
-	adjacentRegionWeight: 0.25,
+	initialDistanceBandMeters: 5,
 };
 function candidate(
 	guid: number,
 	distance: number,
-	angularSector = 0,
-	filter: CycleFilter = "interactable",
+	forwardAlignment = 1,
+	filter: CycleFilter = "smart-combat",
 ): CycleCandidate {
 	return {
 		guid,
-		filters: filter === "hostile" ? ["interactable", "hostile"] : [filter],
 		distanceSquared: distance ** 2,
-		distanceBand: Math.floor(distance / POLICY.distanceBandMeters),
-		angularSector,
+		distanceBand: Math.floor(
+			Math.log2(1 + distance / POLICY.initialDistanceBandMeters),
+		),
+		forwardAlignment,
+		filters: { [filter]: "cycle" },
 	};
 }
 function worldObject(
 	guid: number,
 	distance: number,
-	sector = 0,
+	alignment = 1,
 ): CycleCandidate {
-	return candidate(guid, distance, sector, "non-creature");
+	return candidate(guid, distance, alignment, "non-creature");
 }
 function fixture() {
 	const entities = new ClientEntityMirror();
@@ -62,11 +66,7 @@ function fixture() {
 	});
 	let candidates: readonly CycleCandidate[] | null = [];
 	const sample = vi.fn(() => candidates);
-	const cycle = new ClientCycleSelectionController({
-		selection,
-		policy: POLICY,
-		sample,
-	});
+	const cycle = new ClientCycleSelectionController({ selection, sample });
 	return {
 		selection,
 		cycle,
@@ -77,335 +77,436 @@ function fixture() {
 	};
 }
 
-describe("spatial cycle acquisition", () => {
-	it("cycles creatures and usable objects together while preserving other filter memberships", () => {
-		const f = fixture();
-		f.set([
-			candidate(2, 1),
-			{ ...worldObject(3, 6), filters: ["non-creature", "interactable"] },
-			worldObject(4, 11),
-			candidate(5, 16, 0, "hostile"),
-		]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(2);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(5);
-		f.cycle.cycle("interactable", -1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.cycle.cycle("non-creature", 1);
-		expect(f.selection.selectedGuid()).toBe(4);
-		f.cycle.selectNearest("interactable");
-		expect(f.selection.selectedGuid()).toBe(2);
-	});
-
-	it("shares the cursor between interactable and hostile-only filters in both directions", () => {
-		const f = fixture();
-		f.set([
-			candidate(2, 1),
-			candidate(3, 6, 0, "hostile"),
-			worldObject(4, 11),
-			candidate(5, 16, 0, "hostile"),
-		]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(2);
-		f.cycle.cycle("hostile", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.cycle.cycle("hostile", 1);
-		expect(f.selection.selectedGuid()).toBe(5);
-		f.cycle.cycle("hostile", -1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.cycle.cycle("non-creature", 1);
-		expect(f.selection.selectedGuid()).toBe(4);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(5);
-	});
-	it("keeps hostile resets independent of friendly creature churn and preserves selection without hostiles", () => {
-		const f = fixture();
-		const hostiles = [
-			candidate(2, 1, 0, "hostile"),
-			candidate(3, 6, 0, "hostile"),
-			candidate(4, 11, 0, "hostile"),
-		];
-		f.set([...hostiles, candidate(5, 2)]);
-		f.cycle.cycle("hostile", 1);
-		f.cycle.cycle("hostile", 1);
-		f.set([...hostiles, candidate(6, 3), candidate(7, 4), candidate(8, 5)]);
-		f.cycle.cycle("hostile", 1);
-		expect(f.selection.selectedGuid()).toBe(4);
-		f.set([candidate(6, 3)]);
-		f.cycle.cycle("hostile", 1);
-		expect(f.selection.selectedGuid()).toBe(4);
-	});
-
-	it.each([1, -1] as const)(
-		"skips the selected endpoint after spatial resets in direction %s",
-		(direction) => {
-			const f = fixture();
-			f.set([candidate(2, 1), candidate(3, 6), candidate(4, 11)]);
-			f.cycle.cycle("interactable", direction);
-			expect(f.selection.selectedGuid()).toBe(direction === 1 ? 2 : 4);
-			f.set([candidate(2, 1, 2), candidate(3, 6, 2), candidate(4, 11, 2)]);
-			f.cycle.cycle("interactable", direction);
-			expect(f.selection.selectedGuid()).toBe(3);
-		},
-	);
-	it("retains a sole target on reset and then advances when an alternative arrives", () => {
-		const f = fixture();
-		f.set([candidate(2, 1)]);
-		f.cycle.cycle("interactable", 1);
-		f.set([candidate(2, 1, 2)]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(2);
-		f.set([candidate(2, 1, 2), candidate(3, 6, 2)]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-	});
-	it("skips the selected corpse on reset but keeps it when it is the only unopened corpse", () => {
-		const f = fixture();
-		f.set([
-			{ ...worldObject(2, 1), filters: ["non-creature", "unopened-corpse"] },
-			{ ...worldObject(3, 6), filters: ["non-creature", "unopened-corpse"] },
-			worldObject(4, 11),
-		]);
-		f.cycle.cycle("unopened-corpse", 1);
-		f.set([
-			{ ...worldObject(2, 1, 2), filters: ["non-creature", "unopened-corpse"] },
-			{ ...worldObject(3, 6, 2), filters: ["non-creature", "unopened-corpse"] },
-			worldObject(4, 11, 2),
-		]);
-		f.cycle.cycle("unopened-corpse", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.set([
-			worldObject(2, 1, 4),
-			{ ...worldObject(3, 6, 4), filters: ["non-creature", "unopened-corpse"] },
-			worldObject(4, 11, 4),
-		]);
-		f.cycle.cycle("unopened-corpse", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-	});
-
-	it("preserves crowd order within bands despite nearest changes", () => {
-		const f = fixture();
-		f.set([candidate(2, 1), candidate(3, 2), candidate(4, 3)]);
-		f.cycle.cycle("interactable", 1);
-		f.set([candidate(4, 1), candidate(3, 2), candidate(2, 3)]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(4);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(2);
-	});
-	it("orders survivors and newcomers by current band", () => {
-		const f = fixture();
-		f.set([candidate(2, 1), candidate(3, 6), candidate(4, 11)]);
-		f.cycle.cycle("interactable", 1);
-		f.set([
-			candidate(2, 1),
-			candidate(3, 6),
-			candidate(4, 11),
-			candidate(5, 7),
-		]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(5);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(4);
-	});
-	it("moves targets between bands without resetting for one moving crowd member", () => {
-		const f = fixture();
-		f.set([candidate(2, 1), candidate(3, 6), candidate(4, 11)]);
-		f.cycle.cycle("interactable", 1);
-		f.set([candidate(2, 1), candidate(3, 16), candidate(4, 11)]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(4);
-	});
-	it("resets to nearest when half the original group shifts substantially", () => {
-		const f = fixture();
-		f.set([candidate(2, 1), candidate(3, 6)]);
-		f.cycle.cycle("interactable", 1);
-		f.set([candidate(2, 12), candidate(3, 6)]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-	});
-	it("tolerates adjacent boundaries and compares cumulative rotation with the acquisition snapshot", () => {
-		const f = fixture();
-		f.set([candidate(2, 1), candidate(3, 2)]);
-		f.cycle.cycle("interactable", 1);
-		f.set([candidate(2, 1, 7), candidate(3, 2, 7)]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.set([candidate(2, 2, 6), candidate(3, 1, 6)]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(2);
-		// A fresh baseline was captured at sector six.
-		f.set([candidate(2, 2, 5), candidate(3, 1, 5)]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-	});
-	it("tolerates one replacement in a crowd but resets for a new group", () => {
-		const f = fixture();
-		f.set([candidate(2, 1), candidate(3, 2), candidate(4, 3), candidate(5, 4)]);
-		f.cycle.cycle("interactable", 1);
-		f.set([
-			candidate(6, 0.5),
-			candidate(3, 2),
-			candidate(4, 3),
-			candidate(5, 4),
-		]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.set([candidate(8, 1), candidate(9, 2)]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(8);
-	});
-	it.each([1, -1] as const)(
-		"preserves a removed cursor's gap in direction %s",
-		(direction) => {
+describe("immediate target traversal", () => {
+	it.each(["smart-combat", "non-creature", "unopened-corpse"] as const)(
+		"orders %s by band, alignment, distance, and GUID, wrapping in either direction",
+		(filter) => {
 			const f = fixture();
 			f.set([
-				candidate(2, 1),
-				candidate(3, 2),
-				candidate(4, 3),
-				candidate(5, 4),
+				candidate(5, 8, 0.9, filter),
+				candidate(4, 7, 0.9, filter),
+				candidate(3, 7, 0.9, filter),
+				candidate(2, 6, 0.5, filter),
+				candidate(6, 16, 1, filter),
+				candidate(7, 4, -1, filter),
 			]);
-			f.selection.select(direction === 1 ? 2 : 4);
-			f.cycle.cycle("interactable", direction);
+			for (const guid of [7, 3, 4, 5, 2, 6, 7]) {
+				f.cycle.cycle(filter, 1);
+				expect(f.selection.selectedGuid()).toBe(guid);
+			}
+			f.cycle.cycle(filter, -1);
+			expect(f.selection.selectedGuid()).toBe(6);
+		},
+	);
+	it.each([1, -1] as const)(
+		"new immediate wins in direction %s unless already selected",
+		(direction) => {
+			const f = fixture();
+			f.set([candidate(2, 6), candidate(3, 8), candidate(4, 10)]);
+			f.cycle.cycle("smart-combat", direction);
+			expect(f.selection.selectedGuid()).toBe(2);
+			f.set([candidate(2, 6, 0.5), candidate(3, 8), candidate(4, 10)]);
+			f.cycle.cycle("smart-combat", direction);
 			expect(f.selection.selectedGuid()).toBe(3);
-			f.set([candidate(2, 1), candidate(4, 3), candidate(5, 4)]);
-			f.cycle.cycle("interactable", direction);
+			f.selection.select(4);
+			f.set([candidate(2, 6, 0.5), candidate(3, 8, 0.5), candidate(4, 10)]);
+			f.cycle.cycle("smart-combat", direction);
+			expect(f.selection.selectedGuid()).toBe(direction === 1 ? 2 : 3);
+		},
+	);
+	it.each([1, -1] as const)(
+		"advances when the changed immediate is already selected, direction %s",
+		(direction) => {
+			const f = fixture();
+			f.set([candidate(2, 6), candidate(3, 8), candidate(4, 10)]);
+			f.cycle.cycle("smart-combat", 1);
+			f.cycle.cycle("smart-combat", 1);
+			f.set([candidate(2, 6, 0.5), candidate(3, 8), candidate(4, 10)]);
+			f.cycle.cycle("smart-combat", direction);
 			expect(f.selection.selectedGuid()).toBe(direction === 1 ? 4 : 2);
 		},
 	);
-	it("shares corpse traversal with the non-creature ring", () => {
+	it("rebuilds non-immediate ordering without resetting for movement", () => {
 		const f = fixture();
-		f.set([
-			worldObject(2, 1),
-			{ ...worldObject(3, 2), filters: ["non-creature", "unopened-corpse"] },
-			worldObject(4, 3),
-		]);
+		f.set([candidate(2, 6), candidate(3, 8, 0.8), candidate(4, 10, 0.6)]);
+		f.cycle.cycle("smart-combat", 1);
+		f.set([candidate(2, 6), candidate(3, 8, 0.6), candidate(4, 10, 0.8)]);
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(4);
+		f.set([candidate(2, 16), candidate(3, 18, 0.6), candidate(4, 20, 0.8)]);
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(3);
+	});
+	it("remembers immediates per filter and shares the cursor for overlapping memberships", () => {
+		const f = fixture();
+		const objects: CycleCandidate[] = [
+			{
+				...worldObject(2, 6),
+				filters: { "non-creature": "cycle", "smart-combat": "cycle" },
+			},
+			{
+				...worldObject(3, 8),
+				filters: { "non-creature": "cycle", "smart-combat": "cycle" },
+			},
+			worldObject(4, 10),
+		];
+		f.set(objects);
+		f.cycle.cycle("smart-combat", 1);
 		f.cycle.cycle("non-creature", 1);
-		f.cycle.cycle("unopened-corpse", 1);
 		expect(f.selection.selectedGuid()).toBe(3);
 		f.cycle.cycle("non-creature", 1);
 		expect(f.selection.selectedGuid()).toBe(4);
-	});
-	it("starts reverse at farthest and preserves selection for empty or unavailable samples", () => {
-		const f = fixture();
-		f.set([candidate(2, 1), candidate(3, 6)]);
-		f.cycle.cycle("interactable", -1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.set([]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.set(null);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.cycle.destroy();
-		f.cycle.cycle("interactable", 1);
-		expect(f.sample).toHaveBeenCalledTimes(3);
-	});
-	it("continues across interactable, object, and corpse filters from the shared cursor", () => {
-		const f = fixture();
-		f.set([
-			worldObject(2, 1),
-			candidate(3, 6),
-			{ ...worldObject(4, 11), filters: ["non-creature", "unopened-corpse"] },
-			candidate(5, 16),
-		]);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.cycle.cycle("non-creature", 1);
-		expect(f.selection.selectedGuid()).toBe(4);
-		f.cycle.cycle("interactable", 1);
+		f.set([...objects, candidate(5, 4)]);
+		f.cycle.cycle("smart-combat", 1);
 		expect(f.selection.selectedGuid()).toBe(5);
-		f.cycle.cycle("non-creature", -1);
-		expect(f.selection.selectedGuid()).toBe(4);
-		f.cycle.cycle("unopened-corpse", 1);
-		expect(f.selection.selectedGuid()).toBe(4);
+		f.cycle.cycle("non-creature", 1);
+		expect(f.selection.selectedGuid()).toBe(2);
+		f.cycle.cycle("non-creature", 1);
+		expect(f.selection.selectedGuid()).toBe(3);
+	});
+	it("reacquires immediate when the cursor disappears", () => {
+		const f = fixture();
+		f.set([candidate(2, 6), candidate(3, 8), candidate(4, 10)]);
+		f.cycle.cycle("smart-combat", 1);
+		f.cycle.cycle("smart-combat", 1);
+		f.set([candidate(2, 6), candidate(4, 10)]);
+		f.cycle.cycle("smart-combat", -1);
+		expect(f.selection.selectedGuid()).toBe(2);
+	});
+	it("retains selection for empty or unavailable samples and reacquires a returning immediate", () => {
+		const f = fixture();
+		f.set([candidate(2, 6), candidate(3, 8)]);
+		f.cycle.cycle("smart-combat", 1);
+		f.cycle.cycle("smart-combat", 1);
+		for (const empty of [[], null] as const) {
+			f.set(empty);
+			f.cycle.cycle("smart-combat", 1);
+			expect(f.selection.selectedGuid()).toBe(3);
+		}
+		f.set([candidate(2, 6), candidate(3, 8)]);
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(2);
+	});
+	it("retains a sole target and advances after an alternative arrives", () => {
+		const f = fixture();
+		f.set([candidate(2, 6)]);
+		f.cycle.cycle("smart-combat", 1);
+		f.cycle.cycle("smart-combat", -1);
+		expect(f.selection.selectedGuid()).toBe(2);
+		f.set([candidate(2, 6), candidate(3, 8)]);
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(3);
+	});
+	it("external intent restarts acquisition without changing selection", () => {
+		const f = fixture();
+		f.set([candidate(2, 6), candidate(3, 8), candidate(4, 10)]);
+		f.cycle.cycle("smart-combat", 1);
+		f.cycle.cycle("smart-combat", 1);
 		f.selection.select(3);
-		f.cycle.cycle("non-creature", 1);
-		expect(f.selection.selectedGuid()).toBe(4);
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(2);
 	});
-	it("keeps interactable reset detection independent of unusable object churn", () => {
+	it("hold selects immediate rather than nearest and seeds the next tap", () => {
 		const f = fixture();
-		f.set([candidate(2, 1), candidate(3, 6), worldObject(4, 11)]);
-		f.cycle.cycle("interactable", 1);
-		f.set([
-			candidate(2, 1),
-			candidate(3, 6),
-			worldObject(5, 2),
-			worldObject(6, 3),
-			worldObject(7, 4),
-		]);
-		f.cycle.cycle("non-creature", 1);
+		f.set([candidate(2, 6, 0.5), candidate(3, 8), candidate(4, 10)]);
+		f.cycle.selectImmediate("smart-combat");
+		expect(f.selection.selectedGuid()).toBe(3);
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(4);
+		f.cycle.destroy();
+		f.cycle.selectImmediate("smart-combat");
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(4);
+		expect(f.sample).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("smart combat stance policy", () => {
+	const records = [
+		{ guid: 2, category: "other", use: "unsupported", distance: 1 },
+		{ guid: 3, category: "player", use: "direct", distance: 2 },
+		{ guid: 4, category: "mob", use: "direct", distance: 3 },
+		{ guid: 5, category: "npc", use: "direct", distance: 4 },
+		{ guid: 6, category: "player", use: "direct", distance: 6 },
+		{ guid: 7, category: "player", use: "direct", distance: 7 },
+		{ guid: 8, category: "other", use: "direct", distance: 8 },
+		{ guid: 9, category: "other", use: "direct", distance: 9 },
+	] as const;
+	function scenario(combatMode: CycleSelectionContext["combatMode"]) {
+		const f = fixture();
+		const entities = new ClientEntityMirror();
+		entities.commit(
+			entities.prepareSnapshot(
+				{
+					...playerEntitySnapshot(1),
+					entities: [
+						entityFacts(1),
+						...records.map((record) => {
+							const facts = entityFacts(record.guid, {
+								playerThreat: record.guid === 7,
+								targeting:
+									record.category === "other" ? "non-creature" : "creature",
+								corpse: record.guid === 9 ? "unopened" : null,
+							});
+							if (facts.description.kind !== "known")
+								throw new Error("Fixture needs known facts.");
+							return {
+								...facts,
+								description: {
+									...facts.description,
+									mapCategory: record.category,
+									useCapability: record.use,
+								},
+							};
+						}),
+					],
+				},
+				1,
+			),
+		);
+		const motion = new DynamicEntityMirror();
+		motion.prepareSnapshot({
+			entities: [
+				targetingEntity(1, 1),
+				...records.map((record) => {
+					const entity = targetingEntity(record.guid, 1);
+					entity.placement.pose.coords.y = record.distance;
+					return entity;
+				}),
+			],
+			hostTime: { seconds: 0 },
+		})();
+		const context: CycleSelectionContext = {
+			combatMode,
+			partyMembers: new Set([6]),
+		};
+		const refresh = (next = context) =>
+			f.set(
+				sampleCycleCandidates(
+					entities,
+					motion,
+					TARGETING_TEST_VIEW,
+					POLICY,
+					true,
+					next,
+				),
+			);
+		refresh();
+		return { ...f, context, refresh, motion };
+	}
+	it.each([
+		["peace", [2, 3, 4, 5, 6, 7, 8, 2]],
+		["unknown", [2, 3, 4, 5, 6, 7, 8, 2]],
+		["melee", [2, 4, 5, 7, 8, 2]],
+		["missile", [2, 4, 5, 7, 8, 2]],
+		["magic", [2, 4, 5, 6, 7, 8, 2]],
+	] as const)(
+		"%s preserves NPCs, usable objects and threats while restricting other players",
+		(mode, expected) => {
+			const f = scenario(mode);
+			for (const guid of expected) {
+				f.cycle.cycle("smart-combat", 1);
+				expect(f.selection.selectedGuid()).toBe(guid);
+			}
+		},
+	);
+	it("a non-threatening player becomes immediate before traversal restrictions apply", () => {
+		const f = scenario("melee");
+		f.cycle.cycle("smart-combat", 1);
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(4);
+		const moved = targetingEntity(2, 1);
+		moved.placement.pose.coords.y = 10;
+		f.motion.apply({ kind: "upserted", entity: moved });
+		f.refresh();
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(3);
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(4);
+		f.cycle.selectImmediate("smart-combat");
+		expect(f.selection.selectedGuid()).toBe(3);
+	});
+	it("stance changes alter traversal on the next operation", () => {
+		const f = scenario("melee");
+		f.cycle.cycle("smart-combat", 1);
+		f.cycle.cycle("smart-combat", 1);
+		f.cycle.cycle("smart-combat", 1);
+		f.refresh();
+		const magic: CycleSelectionContext = {
+			combatMode: "magic",
+			partyMembers: new Set([6]),
+		};
+		f.refresh(magic);
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(6);
+		// Re-sampling melee drops the party exception again without changing immediate.
+		f.refresh();
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(2);
+	});
+	it("party membership changes alter magic traversal without resetting the immediate", () => {
+		const f = scenario("magic");
+		f.cycle.cycle("smart-combat", 1);
+		f.cycle.cycle("smart-combat", 1);
+		f.cycle.cycle("smart-combat", 1);
 		expect(f.selection.selectedGuid()).toBe(5);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
-	});
-	it("compares each filter with its own last acquisition even after another filter resets", () => {
-		const f = fixture();
-		f.set([
-			worldObject(2, 1),
-			candidate(3, 6),
-			worldObject(4, 11),
-			candidate(5, 16),
-		]);
-		f.cycle.cycle("interactable", 1); // 3
-		f.cycle.cycle("non-creature", 1); // 4; capture object baseline
-		f.set([
-			worldObject(2, 1),
-			candidate(3, 6, 2),
-			worldObject(4, 11),
-			candidate(5, 16, 2),
-		]);
-		f.cycle.cycle("interactable", 1); // interactable reset: 3
-		expect(f.selection.selectedGuid()).toBe(3);
-		f.cycle.cycle("non-creature", 1); // no object reset: continue to 4, not 2
-		expect(f.selection.selectedGuid()).toBe(4);
-		f.set([
-			worldObject(2, 1, 2),
-			candidate(3, 6, 2),
-			worldObject(4, 11, 2),
-			candidate(5, 16, 2),
-		]);
-		f.cycle.cycle("non-creature", 1); // object reset: nearest other is 2
-		expect(f.selection.selectedGuid()).toBe(2);
-	});
-	it("does not let non-corpse object churn reset corpse traversal", () => {
-		const f = fixture();
-		const corpses: CycleCandidate[] = [2, 3, 4].map((guid, index) => ({
-			...worldObject(guid, index * 5 + 1),
-			filters: ["non-creature", "unopened-corpse"],
-		}));
-		f.set([...corpses, worldObject(5, 2)]);
-		f.cycle.cycle("unopened-corpse", 1); // 2
-		f.cycle.cycle("unopened-corpse", 1); // 3
-		f.set([
-			...corpses,
-			worldObject(6, 3),
-			worldObject(7, 4),
-			worldObject(8, 5),
-		]);
-		f.cycle.cycle("unopened-corpse", 1);
-		expect(f.selection.selectedGuid()).toBe(4);
-	});
-	it("preserves the shared cursor when a filter has no matching candidates", () => {
-		const f = fixture();
-		f.set([candidate(2, 1), candidate(3, 6)]);
-		f.cycle.cycle("interactable", 1);
-		f.cycle.cycle("non-creature", 1);
-		expect(f.selection.selectedGuid()).toBe(2);
-		f.cycle.cycle("interactable", 1);
-		expect(f.selection.selectedGuid()).toBe(3);
+		f.refresh({ combatMode: "magic", partyMembers: new Set() });
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(7);
+		f.refresh({ combatMode: "magic", partyMembers: new Set([6]) });
+		f.cycle.cycle("smart-combat", -1);
+		expect(f.selection.selectedGuid()).toBe(6);
 	});
 });
 
 describe("on-demand accepted candidate geometry", () => {
-	it("can acquire interactables behind the camera without broadening hostile or corpse eligibility", () => {
+	it("samples exponential boundaries and 3D alignment independently of the camera", () => {
+		const entities = new ClientEntityMirror();
+		const positions = [
+			{ x: 0, y: 0, z: 0 },
+			{ x: 0, y: 4.99, z: 0 },
+			{ x: 0, y: 5, z: 0 },
+			{ x: 0, y: 14.99, z: 0 },
+			{ x: 0, y: 15, z: 0 },
+			{ x: 2, y: 8, z: 0 },
+			{ x: 0, y: 8, z: 6 },
+			{ x: 0, y: 0, z: -8 },
+		];
+		entities.commit(
+			entities.prepareSnapshot(
+				{
+					...playerEntitySnapshot(1),
+					entities: [
+						entityFacts(1),
+						...positions.map((_, index) => entityFacts(index + 2)),
+					],
+				},
+				1,
+			),
+		);
+		const player = targetingEntity(1, 1);
+		const motion = new DynamicEntityMirror();
+		motion.prepareSnapshot({
+			entities: [
+				player,
+				...positions.map((coords, index) => {
+					const entity = targetingEntity(index + 2, 1);
+					entity.placement.pose.coords = coords;
+					return entity;
+				}),
+			],
+			hostTime: { seconds: 0 },
+		})();
+		const sample = (view: typeof TARGETING_TEST_VIEW | null) =>
+			sampleCycleCandidates(
+				entities,
+				motion,
+				view,
+				POLICY,
+				false,
+				PEACE_CONTEXT,
+			);
+		const candidates = sample(null);
+		expect(candidates?.map((candidate) => candidate.distanceBand)).toEqual([
+			0, 0, 1, 1, 2, 1, 1, 1,
+		]);
+		expect(candidates?.map((candidate) => candidate.forwardAlignment)).toEqual([
+			0,
+			1,
+			1,
+			1,
+			1,
+			8 / Math.hypot(2, 8),
+			0.8,
+			0,
+		]);
+		expect(sample(TARGETING_TEST_VIEW)).toEqual(candidates);
+		const turned = targetingEntity(1, 1);
+		// AC +90 degrees turns local north toward west, i.e. scene -X.
+		turned.placement.pose.rotation = {
+			w: Math.SQRT1_2,
+			x: 0,
+			y: 0,
+			z: Math.SQRT1_2,
+		};
+		motion.apply({ kind: "upserted", entity: turned });
+		const angled = sample(null)?.find((candidate) => candidate.guid === 7);
+		expect(angled?.forwardAlignment).toBeCloseTo(-2 / Math.hypot(2, 8));
+	});
+	it("intersects the camera view with player forward while preserving unrestricted filters", () => {
+		const entities = new ClientEntityMirror();
+		const facts = entityFacts(2, { targeting: "creature" });
+		if (facts.description.kind !== "known")
+			throw new Error("Fixture requires known description.");
+		entities.commit(
+			entities.prepareSnapshot(
+				{
+					...playerEntitySnapshot(1),
+					entities: [
+						entityFacts(1),
+						{
+							...facts,
+							description: { ...facts.description, mapCategory: "mob" },
+						},
+						entityFacts(3, { corpse: "unopened" }),
+					],
+				},
+				1,
+			),
+		);
+		const rear = targetingEntity(2, 1),
+			corpse = targetingEntity(3, 1);
+		rear.placement.pose.coords.y = -5;
+		corpse.placement.pose.coords.y = -6;
+		const motion = new DynamicEntityMirror();
+		motion.prepareSnapshot({
+			entities: [targetingEntity(1, 1), rear, corpse],
+			hostTime: { seconds: 0 },
+		})();
+		const view = {
+			...TARGETING_TEST_VIEW,
+			camera: {
+				...TARGETING_TEST_VIEW.camera,
+				placement: {
+					...TARGETING_TEST_VIEW.camera.placement,
+					rotation: new Quat(0, 0, 1, 0),
+				},
+			},
+		};
+		expect(
+			sampleCycleCandidates(
+				entities,
+				motion,
+				view,
+				POLICY,
+				true,
+				PEACE_CONTEXT,
+			),
+		).toEqual([
+			{
+				...worldObject(3, 6, -1),
+				filters: { "non-creature": "cycle", "unopened-corpse": "cycle" },
+			},
+		]);
+		expect(
+			sampleCycleCandidates(
+				entities,
+				motion,
+				view,
+				POLICY,
+				false,
+				PEACE_CONTEXT,
+			),
+		).toEqual([
+			candidate(2, 5, -1),
+			{
+				...worldObject(3, 6, -1),
+				filters: { "non-creature": "cycle", "unopened-corpse": "cycle" },
+			},
+		]);
+	});
+
+	it("can acquire smart combat targets behind the camera without broadening corpse eligibility", () => {
 		const entities = new ClientEntityMirror();
 		const source = entityFacts(2);
 		if (source.description.kind !== "known")
@@ -458,13 +559,20 @@ describe("on-demand accepted candidate geometry", () => {
 				TARGETING_TEST_VIEW,
 				POLICY,
 				false,
+				PEACE_CONTEXT,
 			),
 		).toEqual([
-			candidate(2, 5, 4),
-			candidate(3, 10, 4),
-			{ ...worldObject(4, 15, 4), filters: ["non-creature", "interactable"] },
-			{ ...worldObject(5, 1, 4), filters: ["non-creature", "unopened-corpse"] },
-			candidate(6, 8, 0, "hostile"),
+			candidate(2, 5, -1),
+			candidate(3, 10, -1),
+			{
+				...worldObject(4, 15, -1),
+				filters: { "non-creature": "cycle", "smart-combat": "cycle" },
+			},
+			{
+				...worldObject(5, 1, -1),
+				filters: { "non-creature": "cycle", "unopened-corpse": "cycle" },
+			},
+			candidate(6, 8, 1),
 		]);
 		const selection = new ClientEntitySelection({
 			lifecycle: { entities, subscribe: () => () => {} },
@@ -473,7 +581,6 @@ describe("on-demand accepted candidate geometry", () => {
 		let targetOnlyInView = true;
 		const cycle = new ClientCycleSelectionController({
 			selection,
-			policy: POLICY,
 			sample: () =>
 				sampleCycleCandidates(
 					entities,
@@ -481,15 +588,14 @@ describe("on-demand accepted candidate geometry", () => {
 					TARGETING_TEST_VIEW,
 					POLICY,
 					targetOnlyInView,
+					PEACE_CONTEXT,
 				),
 		});
-		cycle.cycle("interactable", 1);
+		cycle.cycle("smart-combat", 1);
 		expect(selection.selectedGuid()).toBe(6);
 		targetOnlyInView = false;
-		cycle.cycle("interactable", 1);
+		cycle.cycle("smart-combat", 1);
 		expect(selection.selectedGuid()).toBe(2);
-		cycle.cycle("hostile", 1);
-		expect(selection.selectedGuid()).toBe(6);
 		cycle.destroy();
 		selection.destroy();
 	});
@@ -501,7 +607,7 @@ describe("on-demand accepted candidate geometry", () => {
 		"unsupported",
 		"unavailable",
 	] as const)(
-		"admits %s use capability to interactable cycling only in view",
+		"admits %s use capability to smart combat cycling only in view",
 		(useCapability) => {
 			const entities = new ClientEntityMirror();
 			const facts = entityFacts(2);
@@ -532,8 +638,8 @@ describe("on-demand accepted candidate geometry", () => {
 			})();
 			const filters: CycleCandidate["filters"] =
 				useCapability === "unsupported" || useCapability === "unavailable"
-					? ["non-creature"]
-					: ["non-creature", "interactable"];
+					? { "non-creature": "cycle", "smart-combat": "immediate-only" }
+					: { "non-creature": "cycle", "smart-combat": "cycle" };
 			expect(
 				sampleCycleCandidates(
 					entities,
@@ -541,6 +647,7 @@ describe("on-demand accepted candidate geometry", () => {
 					TARGETING_TEST_VIEW,
 					POLICY,
 					true,
+					PEACE_CONTEXT,
 				),
 			).toEqual([{ ...worldObject(2, 10), filters }]);
 			const rear = targetingEntity(2, 1);
@@ -553,12 +660,13 @@ describe("on-demand accepted candidate geometry", () => {
 					TARGETING_TEST_VIEW,
 					POLICY,
 					true,
+					PEACE_CONTEXT,
 				),
-			).toEqual([worldObject(2, 10, 4)]);
+			).toEqual([worldObject(2, 10, -1)]);
 		},
 	);
 	it.each(["unopened", "opened"] as const)(
-		"excludes %s corpses and pending use facts from interactable cycling",
+		"excludes %s corpses from smart combat and admits pending objects only as immediate",
 		(corpseState) => {
 			const entities = new ClientEntityMirror();
 			entities.commit(
@@ -591,69 +699,24 @@ describe("on-demand accepted candidate geometry", () => {
 					TARGETING_TEST_VIEW,
 					POLICY,
 					true,
+					PEACE_CONTEXT,
 				),
 			).toEqual([
 				{
 					...worldObject(2, 5),
 					filters:
 						corpseState === "unopened"
-							? ["non-creature", "unopened-corpse"]
-							: ["non-creature"],
+							? { "non-creature": "cycle", "unopened-corpse": "cycle" }
+							: { "non-creature": "cycle" },
 				},
-				worldObject(3, 10),
-			]);
-		},
-	);
-
-	it.each(["mob", "player", "npc", "other"] as const)(
-		"uses world-owned %s classification for hostile eligibility",
-		(mapCategory) => {
-			const entities = new ClientEntityMirror();
-			const facts = entityFacts(2, { targeting: "creature" });
-			if (facts.description.kind !== "known")
-				throw new Error("Fixture must have a known description.");
-			entities.commit(
-				entities.prepareSnapshot(
-					{
-						...playerEntitySnapshot(1),
-						entities: [
-							entityFacts(1),
-							{ ...facts, description: { ...facts.description, mapCategory } },
-						],
+				{
+					...worldObject(3, 10),
+					filters: {
+						"non-creature": "cycle",
+						"smart-combat": "immediate-only",
 					},
-					1,
-				),
-			);
-			const player = targetingEntity(1, 1);
-			const creature = targetingEntity(2, 1);
-			creature.placement.pose.coords.y = 10;
-			const motion = new DynamicEntityMirror();
-			motion.prepareSnapshot({
-				entities: [player, creature],
-				hostTime: { seconds: 0 },
-			})();
-			expect(
-				sampleCycleCandidates(
-					entities,
-					motion,
-					TARGETING_TEST_VIEW,
-					POLICY,
-					true,
-				),
-			).toEqual([
-				candidate(2, 10, 0, mapCategory === "mob" ? "hostile" : "interactable"),
+				},
 			]);
-			creature.placement.pose.coords.y = -10;
-			motion.apply({ kind: "upserted", entity: creature });
-			expect(
-				sampleCycleCandidates(
-					entities,
-					motion,
-					TARGETING_TEST_VIEW,
-					POLICY,
-					true,
-				),
-			).toEqual([]);
 		},
 	);
 
@@ -694,8 +757,9 @@ describe("on-demand accepted candidate geometry", () => {
 				TARGETING_TEST_VIEW,
 				POLICY,
 				true,
+				PEACE_CONTEXT,
 			);
-		expect(sample()).toEqual([candidate(2, 10), worldObject(3, 5, 4)]);
+		expect(sample()).toEqual([candidate(2, 10), worldObject(3, 5, -1)]);
 		const reversedView = {
 			...TARGETING_TEST_VIEW,
 			camera: {
@@ -707,14 +771,19 @@ describe("on-demand accepted candidate geometry", () => {
 			},
 		};
 		expect(
-			sampleCycleCandidates(entities, motion, reversedView, POLICY, true),
-		).toEqual([
-			{ ...worldObject(3, 5), filters: ["non-creature", "interactable"] },
-		]);
+			sampleCycleCandidates(
+				entities,
+				motion,
+				reversedView,
+				POLICY,
+				true,
+				PEACE_CONTEXT,
+			),
+		).toEqual([worldObject(3, 5, -1)]);
 		const moved = targetingEntity(2, 1);
 		moved.placement.pose.coords.y = -1;
 		motion.apply({ kind: "upserted", entity: moved });
-		expect(sample()).toEqual([worldObject(3, 5, 4)]);
+		expect(sample()).toEqual([worldObject(3, 5, -1)]);
 		motion.awaitSnapshot();
 		expect(sample()).toBeNull();
 	});
@@ -739,16 +808,30 @@ describe("on-demand accepted candidate geometry", () => {
 			entities: [player, object],
 			hostTime: { seconds: 0 },
 		})();
-		expect(sampleCycleCandidates(entities, motion, null, POLICY, true)).toEqual(
-			[worldObject(2, POLICY.radiusMeters)],
-		);
+		expect(
+			sampleCycleCandidates(
+				entities,
+				motion,
+				null,
+				POLICY,
+				true,
+				PEACE_CONTEXT,
+			),
+		).toEqual([worldObject(2, POLICY.radiusMeters, 0)]);
 		const moved = targetingEntity(2, 1);
 		moved.placement.pose.coords.x = 100;
 		moved.placement.pose.coords.z = POLICY.radiusMeters + 1;
 		motion.apply({ kind: "upserted", entity: moved });
-		expect(sampleCycleCandidates(entities, motion, null, POLICY, true)).toEqual(
-			[],
-		);
+		expect(
+			sampleCycleCandidates(
+				entities,
+				motion,
+				null,
+				POLICY,
+				true,
+				PEACE_CONTEXT,
+			),
+		).toEqual([]);
 	});
 	it("compares origins across landblock boundaries without comparing cell identities", () => {
 		const entities = new ClientEntityMirror();
@@ -771,12 +854,26 @@ describe("on-demand accepted candidate geometry", () => {
 			entities: [player, object],
 			hostTime: { seconds: 0 },
 		})();
-		expect(sampleCycleCandidates(entities, motion, null, POLICY, true)).toEqual(
-			[worldObject(2, 2, 2)],
-		);
+		expect(
+			sampleCycleCandidates(
+				entities,
+				motion,
+				null,
+				POLICY,
+				true,
+				PEACE_CONTEXT,
+			),
+		).toEqual([worldObject(2, 2, 0)]);
 		entities.awaitSnapshot();
 		expect(
-			sampleCycleCandidates(entities, motion, null, POLICY, true),
+			sampleCycleCandidates(
+				entities,
+				motion,
+				null,
+				POLICY,
+				true,
+				PEACE_CONTEXT,
+			),
 		).toBeNull();
 	});
 

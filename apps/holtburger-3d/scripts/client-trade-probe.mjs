@@ -126,7 +126,7 @@ export async function probeTrade(client, evaluateExpression) {
 		`${api}.bindingSettings.replace({...${JSON.stringify(inputSettings)}, client: {...${JSON.stringify(inputSettings.client)}, examine: [{key: "F8"}]}})`,
 	);
 	await wait(
-		`document.querySelector('[data-trade-item="6002"]')?.title.includes('Examine (F8)')`,
+		`document.querySelector('[data-trade-item="6002"]')?.dataset.uiTooltip.includes('Examine (F8)')`,
 	);
 	await read(`${api}.selectInventoryItem(6001)`);
 	// Pointer selection intentionally keeps game ownership until the click task retires.

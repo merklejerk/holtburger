@@ -9,6 +9,10 @@ stylesheet changes.
 Client `ui.uiScale` scales complete interface surfaces through `applyUiScale`. Theme lengths
 stay authored and `--ui-scale` is consumed by the boundary, not by individual icon rules.
 Native top-layer dialogs and nested popovers inherit the effective layout scale once.
+The delegated `UiTooltipHost` moves its surface between the app root and native modals.
+Its DOM owner matches the anchor's effective CSS zoom, converts browser coordinates to
+surface units, and caps content against the logical viewport. Scale changes dismiss
+engaged tooltips; individual cells only publish their `data-ui-tooltip` text.
 `--ui-text-scale` is additional text enlargement; apply it once to absolute font roles,
 including item counts and shortcut hints. Relative typography inherits that result.
 

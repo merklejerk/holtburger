@@ -556,7 +556,7 @@
 					>Restore default input settings</button
 				>
 				<details class="ui-disclosure ui-disclosure-section" open>
-					<summary>Targeting</summary>
+					<summary>Smart tab targeting</summary>
 					<div class="settings-section">
 						<label class="ui-checkbox"
 							><input

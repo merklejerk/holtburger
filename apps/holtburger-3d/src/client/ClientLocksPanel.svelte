@@ -81,7 +81,7 @@
 				{@const description =
 					item?.description.kind === "known" ? item.description : null}
 				{@const presentation = itemCellPresentation({
-					label: `${pick.item.name} · ${pick.item.bonus === null ? "Bonus unknown" : `Bonus: ${pick.item.bonus >= 0 ? "+" : ""}${pick.item.bonus}`}`,
+					label: `${pick.item.name}\n${pick.item.bonus === null ? "Bonus unknown" : `Bonus: ${pick.item.bonus >= 0 ? "+" : ""}${pick.item.bonus}`}`,
 					count: description?.stackCount ?? null,
 					structure: description?.structure ?? null,
 					capacity: null,
@@ -112,13 +112,14 @@
 							<span
 								class="preferred-pick-cell ui-item-cell"
 								data-item-guid={pick.item.guid}
-								title={presentation.label}
+								title=""
+								data-ui-tooltip={presentation.label}
+								role="img"
+								aria-label={presentation.label}
 							>
 								<ItemCellVisual
-									name={pick.item.name}
 									display={key === undefined ? undefined : displays.get(key)}
 									{presentation}
-									tooltipLabel={presentation.label}
 									cooldownAnimation={cooldown.animation}
 								/>
 							</span>

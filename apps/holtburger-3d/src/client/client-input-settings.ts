@@ -63,8 +63,6 @@ const keyboardSettingsBaseSchema = z
 					toggleSettings: INPUT_DEFAULTS.client.toggleSettings,
 					toggleNearby: INPUT_DEFAULTS.client.toggleNearby,
 
-					nextHostile: INPUT_DEFAULTS.client.nextHostile,
-					previousHostile: INPUT_DEFAULTS.client.previousHostile,
 					splitStack: INPUT_DEFAULTS.client.splitStack,
 					cycleRestPosture: INPUT_DEFAULTS.client.cycleRestPosture,
 					toggleChatHistory: INPUT_DEFAULTS.client.toggleChatHistory,
@@ -73,13 +71,18 @@ const keyboardSettingsBaseSchema = z
 				};
 				// Rename saved actions without replacing explicit new-name bindings (including unbound lists).
 				for (const [oldAction, action] of [
-					["nextCreature", "nextInteractable"],
-					["previousCreature", "previousInteractable"],
+					["nextInteractable", "nextSmartCombat"],
+					["previousInteractable", "previousSmartCombat"],
+					["nextCreature", "nextSmartCombat"],
+					["previousCreature", "previousSmartCombat"],
 				] as const) {
-					if (!Reflect.has(current, action))
+					if (!Reflect.has(current, action) && Reflect.has(current, oldAction))
 						Reflect.set(current, action, Reflect.get(current, oldAction));
 					Reflect.deleteProperty(current, oldAction);
 				}
+				// Retired acquisition actions must not invalidate an otherwise usable saved profile.
+				Reflect.deleteProperty(current, "nextHostile");
+				Reflect.deleteProperty(current, "previousHostile");
 				Reflect.deleteProperty(current, "preciseJumpPowerUp");
 				Reflect.deleteProperty(current, "preciseJumpPowerDown");
 				return current;

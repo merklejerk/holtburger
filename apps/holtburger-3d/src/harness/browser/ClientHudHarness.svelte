@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { applyUiScale } from "../../app/ui-scale";
+	import UiTooltipHost from "../../app/UiTooltipHost.svelte";
 	import { provideClientHudGeometry } from "../../client/client-hud-geometry-context";
 	import { clientMinimapLandmark } from "../../client/client-minimap-policy";
 	import { CameraLookController } from "../../lib/game/controls/camera-look-controller";
@@ -1643,6 +1644,7 @@
 						reason: "Fixture item cannot be salvaged.",
 					},
 					targeting: "non-creature",
+					playerThreat: false,
 					corpse: null,
 					scenePlacement: "available",
 					storage:
@@ -1910,6 +1912,7 @@
 						location: { kind: "none" },
 						scenePlacement: "available",
 						targeting: "creature",
+						playerThreat: false,
 						corpse: null,
 						description: {
 							...recipient.description,
@@ -6147,6 +6150,9 @@
 		style:--ui-text-scale={userSettings.ui.textScale}
 		style:--ui-scale={userSettings.ui.uiScale}
 	>
+		{#if !showcase && interactionRoot !== null}<UiTooltipHost
+				root={interactionRoot}
+			/>{/if}
 		<div
 			class="harness-dialog-scale"
 			use:applyUiScale={userSettings.ui.uiScale}

@@ -10,6 +10,11 @@ import type { FrontendTuning } from "./frontend-tuning-contract";
  * here.
  */
 export const SHARED_FRONTEND_TUNING = {
+	tooltips: {
+		openDelayMs: 250,
+		switchGraceMs: 300,
+		closeDelayMs: 150,
+	},
 	/** Positive multiplier for the authored minimum distance between particle births. */
 	particleDistanceSpacingMultiplier: 3,
 	animationPresentation: {

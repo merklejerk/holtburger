@@ -8,9 +8,7 @@ export function showUiDragGhost(
 	fallback: string,
 ): void {
 	const preview = source.querySelector("[data-drag-preview]");
-	const artwork = (preview ?? source).querySelector(
-		"[data-drag-artwork], .ui-icon, .ui-icon-fallback, svg",
-	);
+	const artwork = (preview ?? source).querySelector("[data-drag-artwork], svg");
 	const visual = preview ?? artwork ?? source;
 	const bounds = visual.getBoundingClientRect();
 	ghost.style.width = `${bounds.width}px`;

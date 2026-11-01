@@ -27,7 +27,7 @@ export interface ItemCooldownAnimation {
 
 const ITEM_COOLDOWNS = Symbol("item-cooldowns");
 
-/** Native tooltips need reading time; inspection can show a finer countdown. */
+/** Cell labels use a bounded reading cadence; inspection shows a finer countdown. */
 export const ITEM_COOLDOWN_CADENCE_SECONDS = {
 	tooltip: 5,
 	inspection: 1,

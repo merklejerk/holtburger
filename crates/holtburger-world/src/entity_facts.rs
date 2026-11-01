@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 use holtburger_common::{
     Guid,
     properties::{
-        PropertyBool, PropertyDataId, PropertyInt, PropertyString, WorldObjectExt,
-        WorldObjectPropertyAccessors,
+        ObjectDescriptionFlag, PropertyBool, PropertyDataId, PropertyInt, PropertyString,
+        WorldObjectExt, WorldObjectPropertyAccessors,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -356,10 +356,27 @@ pub struct ClientEntityFacts {
     pub scene_placement: SceneAvailability,
     /// Consumed by keyboard acquisition; not a renderer visibility decision.
     pub targeting: EntityTargetingCategory,
+    /// Another player whose public PvP status permits harming us; ignores range and temporary protections.
+    /// Consumed by stance-aware frontend targeting.
+    pub player_threat: bool,
     /// Corpse identity and this session's confirmed-open state; absent for other entities.
     pub corpse: Option<CorpseState>,
     /// Section existence and loading state.
     pub storage: StorageCoverage,
+}
+
+/// ACE Player_Combat.cs CheckPKStatusVsTarget permits harmful player actions for matching
+/// PK/PKLite types, or either Free participant. Missing player identity cannot establish a threat.
+fn player_pvp_threat(player: ObjectDescriptionFlag, target: ObjectDescriptionFlag) -> bool {
+    if !player.contains(ObjectDescriptionFlag::PLAYER)
+        || !target.contains(ObjectDescriptionFlag::PLAYER)
+    {
+        return false;
+    }
+    let free = ObjectDescriptionFlag::FREE_PK_STATUS;
+    let types = ObjectDescriptionFlag::PLAYER_KILLER | ObjectDescriptionFlag::PK_LITE_STATUS;
+    (player | target).intersects(free)
+        || (!(player & types).is_empty() && player & types == target & types)
 }
 
 impl WorldState {
@@ -568,6 +585,11 @@ impl WorldState {
             is_locked: entity.and_then(|entity| entity.get_bool_prop_opt(PropertyBool::Locked)),
             scene_placement,
             targeting,
+            player_threat: guid != self.player.guid
+                && entity.is_some_and(|target| {
+                    self.get_visible_entity(self.player.guid)
+                        .is_some_and(|player| player_pvp_threat(player.flags, target.flags))
+                }),
             corpse: entity.and_then(|entity| {
                 entity
                     .flags
@@ -979,6 +1001,66 @@ mod tests {
             };
             assert_eq!(map_category, expected);
         }
+    }
+
+    #[test]
+    fn player_threat_uses_both_pvp_statuses_and_excludes_self_and_nonplayers() {
+        use holtburger_common::properties::PropertyUpdate;
+        let mut world = WorldState::synthetic();
+        let player = Guid(1);
+        let peer = Guid(2);
+        world.seed_local_player_entity(player, "Player", Default::default());
+        world.entities.get_mut(player).unwrap().flags = ObjectDescriptionFlag::PLAYER;
+        let mut other = Entity::new(peer, "Peer".into(), Default::default());
+        other.flags = ObjectDescriptionFlag::PLAYER;
+        other.set_int_prop(PropertyInt::ItemType, ItemType::CREATURE.bits() as i32);
+        world.entities.insert(other);
+        let statuses = [0x02, 0x04, 0x40, 0x20]; // ACE NPK, PK, PKLite, Free.
+        for local in statuses {
+            world
+                .entities
+                .get_mut(player)
+                .unwrap()
+                .set_property(PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, local));
+            for remote in statuses {
+                world
+                    .entities
+                    .get_mut(peer)
+                    .unwrap()
+                    .set_property(PropertyUpdate::Int(PropertyInt::PlayerKillerStatus, remote));
+                let expected =
+                    local == 0x20 || remote == 0x20 || (local == remote && local != 0x02);
+                assert_eq!(
+                    world
+                        .client_entity_facts(peer)
+                        .unwrap()
+                        .unwrap()
+                        .player_threat,
+                    expected,
+                    "local {local:#x}, remote {remote:#x}"
+                );
+                assert!(
+                    !world
+                        .client_entity_facts(player)
+                        .unwrap()
+                        .unwrap()
+                        .player_threat
+                );
+            }
+        }
+        world
+            .entities
+            .get_mut(peer)
+            .unwrap()
+            .flags
+            .remove(ObjectDescriptionFlag::PLAYER);
+        assert!(
+            !world
+                .client_entity_facts(peer)
+                .unwrap()
+                .unwrap()
+                .player_threat
+        );
     }
 
     #[test]

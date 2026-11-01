@@ -343,6 +343,15 @@ export interface DistantAnimationSamplingPolicy {
 
 /** Exhaustive contract for values shared by the browser frontend compositions. */
 export interface FrontendTuning {
+	/** Disclosure timing shared by app-owned cell tooltips. */
+	readonly tooltips: {
+		/** Initial pointer dwell before revealing a label. */
+		readonly openDelayMs: number;
+		/** Time after leaving an open hint during which another cell opens immediately. */
+		readonly switchGraceMs: number;
+		/** Time to cross the gap between a cell and its hoverable hint. */
+		readonly closeDelayMs: number;
+	};
 	/** Finite positive multiplier for the authored minimum distance between particle births. */
 	readonly particleDistanceSpacingMultiplier: number;
 	/** Visual sampling policy for selected and offscreen animated roots. */

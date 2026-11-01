@@ -40,9 +40,7 @@
 	aria-label={summary.label}
 	title={name}
 >
-	<span class="currency-icon"
-		><UiIcon {display} name="¤" tooltipLabel={name} /></span
-	>
+	<span class="currency-icon"><UiIcon {display} /></span>
 	<span
 		>{summary.current}{#if summary.change !== null}
 			→ <span class:negative={summary.change.afterNegative}

@@ -229,11 +229,7 @@
 						>
 							<span class="spell-icon" data-drag-preview>
 								{#if row.artwork.kind === "icon"}
-									<UiIcon
-										display={displays.get(row.artwork.key)}
-										name="…"
-										tooltipLabel={row.name}
-									/>
+									<UiIcon display={displays.get(row.artwork.key)} />
 								{:else}
 									<span title={row.artwork.detail}>?</span>
 								{/if}

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { probeBarber } from "./client-barber-probe.mjs";
+import { probeCellTooltips } from "./cell-tooltip-probe.mjs";
 import { extractContentArguments } from "./entry-paths.mjs";
 import { probeCombatBar } from "./client-combat-bar-probe.mjs";
 import { probeSalvage } from "./client-salvage-probe.mjs";
@@ -128,7 +129,13 @@ try {
 		}
 	}
 	let report;
-	if (options.uiShowcase) {
+	if (options.cellTooltips) {
+		report = {
+			suite: "cell-tooltips",
+			evidence: result.cellTooltips,
+			browserErrors,
+		};
+	} else if (options.uiShowcase) {
 		report = {
 			suite: "ui-showcase",
 			evidence: result.uiShowcase,
@@ -390,6 +397,12 @@ try {
 		report = {
 			suite: "item-cooldowns",
 			...result.itemCooldowns,
+			browserErrors,
+		};
+	} else if (options.clientTargeting) {
+		report = {
+			suite: "client-targeting",
+			...result.clientTargeting,
 			browserErrors,
 		};
 	} else if (options.clientCombatBar) {
@@ -679,9 +692,11 @@ function parseArgs(args) {
 		clientHousing: false,
 		clientHud: false,
 		clientCombatBar: false,
+		clientTargeting: false,
 		clientHudSnapping: false,
 		uiShowcase: false,
 		itemCooldowns: false,
+		cellTooltips: false,
 		clientNearby: false,
 		clientSpells: false,
 		clientInventory: false,
@@ -878,6 +893,10 @@ function parseArgs(args) {
 			case "--world-map":
 				parsed.worldMap = true;
 				break;
+			case "--client-targeting":
+				parsed.clientHud = true;
+				parsed.clientTargeting = true;
+				break;
 			case "--client-combat-bar":
 				parsed.clientHud = true;
 				parsed.clientCombatBar = true;
@@ -932,6 +951,10 @@ function parseArgs(args) {
 				break;
 			case "--client-hud":
 				parsed.clientHud = true;
+				break;
+			case "--cell-tooltips":
+				parsed.clientHud = true;
+				parsed.cellTooltips = true;
 				break;
 			case "--client-ui-scaling":
 				parsed.clientHud = true;
@@ -2013,6 +2036,7 @@ function printHelp() {
 Options:
   --landblock <hex>     Outdoor landblock to render. Default: ${DEFAULT_LANDBLOCK_ID}
   --client-spells       Exercise the character spellbook tab and spell-bar interactions.
+  --cell-tooltips       Verify cell hover/focus disclosure and synthetic artwork failures without DATs.
   --brief               Print summary evidence (the default for --client-hud).
   --client-contracts    Exercise Journal and outdoor contract map markers, tooltips, timers, and removal.
   --client-book         Exercise the book reader through the client HUD fixture.
@@ -4713,11 +4737,13 @@ async function runClientHudHarness({ viteUrl }) {
 		join(tmpdir(), "holtburger-3d-client-hud-harness-"),
 	);
 	tempDirectories.push(userDataDirectory);
-	const page = options.uiShowcase
-		? "ui-showcase"
-		: options.itemCooldowns
-			? "item-cooldowns"
-			: "client-hud";
+	const page = options.cellTooltips
+		? "cell-tooltips"
+		: options.uiShowcase
+			? "ui-showcase"
+			: options.itemCooldowns
+				? "item-cooldowns"
+				: "client-hud";
 	const pageUrl = `${viteUrl}/harness/browser/?${page}=1`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
@@ -4755,6 +4781,12 @@ async function runClientHudHarness({ viteUrl }) {
 			});
 		});
 		await client.send("Runtime.enable");
+		if (options.cellTooltips)
+			return {
+				cellTooltips: await probeCellTooltips(client, evaluateExpression),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
 		if (options.uiShowcase) {
 			const uiShowcase = await probeUiShowcase(client, evaluateExpression);
 			return {
@@ -4795,6 +4827,20 @@ async function runClientHudHarness({ viteUrl }) {
 			};
 		}
 		await waitForClientHudHarnessApi(client);
+		if (options.clientTargeting) {
+			const targeting = await evaluate(
+				client,
+				"globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.probeTargeting",
+				[],
+			);
+			if (!targeting?.passed)
+				throw new Error("Client targeting probe did not pass.");
+			return {
+				clientTargeting: targeting,
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		}
 		if (options.clientCombatBar)
 			return {
 				clientHud: {

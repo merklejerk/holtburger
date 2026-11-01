@@ -17,16 +17,16 @@ describe("item cell presentation", () => {
 		expect(
 			itemCellPresentation({ ...item, equipped: true, cooldownSeconds: 23 })
 				.label,
-		).toBe("Tool (Equipped) (Ready in 23s; shared cooldown)");
+		).toBe("Tool\nEquipped\nReady in 23s; shared cooldown");
 	});
-	it("places a consumer's configured action beside the stack quantity", () => {
+	it("puts a consumer's configured action on its own line after the quantity", () => {
 		expect(
 			itemCellPresentation({
 				...item,
 				count: 20,
 				quantityActionHint: "Ctrl + F9 to split",
 			}).label,
-		).toBe("Tool (quantity: 20, Ctrl + F9 to split)");
+		).toBe("Tool\nQuantity: 20\nCtrl + F9 to split");
 	});
 	it("combines exact quantity, remaining uses, and equipment status", () => {
 		expect(
@@ -37,7 +37,7 @@ describe("item cell presentation", () => {
 				equipped: true,
 			}),
 		).toEqual({
-			label: "Tool (quantity: 20,100) [10/50] (Equipped)",
+			label: "Tool\nQuantity: 20,100\nStructure: [10/50]\nEquipped",
 			count: 20100,
 			meter: { fraction: 0.2, hue: 24 },
 			equipped: true,
@@ -50,7 +50,7 @@ describe("item cell presentation", () => {
 				capacity: { used: 0, max: 24 },
 				structure: { current: 10, max: 50 },
 			}),
-		).toMatchObject({ label: "Tool [0 / 24]", meter: null });
+		).toMatchObject({ label: "Tool\nContents: [0 / 24]", meter: null });
 	});
 	it.each([
 		[6, 24, 0.25, 90],
@@ -63,7 +63,7 @@ describe("item cell presentation", () => {
 			expect(
 				itemCellPresentation({ ...item, capacity: { used, max } }),
 			).toMatchObject({
-				label: `Tool [${used} / ${max}]`,
+				label: `Tool\nContents: [${used} / ${max}]`,
 				meter: { fraction, hue },
 			});
 		},
@@ -71,6 +71,9 @@ describe("item cell presentation", () => {
 	it("retains an empty red track for exhausted structure", () => {
 		expect(
 			itemCellPresentation({ ...item, structure: { current: 0, max: 50 } }),
-		).toMatchObject({ label: "Tool [0/50]", meter: { fraction: 0, hue: 0 } });
+		).toMatchObject({
+			label: "Tool\nStructure: [0/50]",
+			meter: { fraction: 0, hue: 0 },
+		});
 	});
 });

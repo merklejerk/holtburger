@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { applyUiScale } from "../app/ui-scale";
+	import UiTooltipHost from "../app/UiTooltipHost.svelte";
 	import {
 		ClientRestPostureController,
 		REST_POSTURE_LABELS,
@@ -2260,7 +2261,6 @@
 		pointerSelection = pointer;
 		const cycle = new ClientCycleSelectionController({
 			selection,
-			policy: CLIENT_TUNING.entitySelection.cycle,
 			sample: () =>
 				sampleCycleCandidates(
 					owner.entities,
@@ -2268,6 +2268,12 @@
 					gameplayPresentation?.targetingView() ?? null,
 					CLIENT_TUNING.entitySelection.cycle,
 					userSettings.input.targetOnlyInView,
+					{
+						combatMode: owner.state().combatMode,
+						partyMembers: new Set(
+							owner.partySnapshot()?.members.map((member) => member.guid) ?? [],
+						),
+					},
 				),
 		});
 		const input = new ClientSelectionInput({
@@ -2487,6 +2493,7 @@
 	style:--ui-font-heading={fontCss(userSettings.ui.fonts.heading)}
 	style:--ui-font-mono={fontCss(userSettings.ui.fonts.mono)}
 >
+	{#if interactionRoot !== null}<UiTooltipHost root={interactionRoot} />{/if}
 	<div class="client-overlay-ui" use:applyUiScale={userSettings.ui.uiScale}>
 		<!-- A mounted dialog receives a non-null item until teardown, including nested snippets. -->
 		{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}

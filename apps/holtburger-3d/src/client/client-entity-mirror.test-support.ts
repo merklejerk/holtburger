@@ -31,6 +31,7 @@ export function entityFacts(
 		worldContainerContent: false,
 		canReceiveGive: false,
 		canTrade: false,
+		playerThreat: false,
 		canOfferTrade: false,
 		lockTool: null,
 		isLocked: null,

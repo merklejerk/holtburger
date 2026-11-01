@@ -15,7 +15,7 @@ export interface UiIconOwner {
 type UiIconProblem =
 	IconIssue | { readonly code: "preparation"; readonly detail: string };
 type UiIconProblems = readonly [UiIconProblem, ...UiIconProblem[]];
-/** Immutable bounded-cadence UI snapshot; names remain the cell's fallback. */
+/** Immutable bounded-cadence artwork snapshot; cells own identity in every image state. */
 export type UiIconDisplay =
 	| { readonly kind: "loading" }
 	| { readonly kind: "ready"; readonly url: string }

@@ -623,7 +623,7 @@
 						? "Unlimited projectiles"
 						: `${remaining} projectiles remaining`}
 				>
-					<span aria-hidden="true"
+					<span aria-hidden="true" title={AMMUNITION_SLOT.label}
 						><EquipmentSlotIcon slot={AMMUNITION_SLOT} /></span
 					>
 					<strong>{remaining}</strong>

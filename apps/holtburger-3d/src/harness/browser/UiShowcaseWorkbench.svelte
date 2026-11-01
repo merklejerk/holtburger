@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { applyUiScale } from "../../app/ui-scale";
 	import { logicalClientHudViewport } from "../../client/client-hud-layout";
+	import UiTooltipHost from "../../app/UiTooltipHost.svelte";
 	import type { Snippet } from "svelte";
 	import UiRange from "../../app/UiRange.svelte";
 	import UiDialog from "../../app/UiDialog.svelte";
@@ -36,6 +37,8 @@
 	import swordUrl from "../../assets/icons/equipment-weapon.svg?url";
 	import shieldUrl from "../../assets/icons/equipment-shield.svg?url";
 	import cloakUrl from "../../assets/icons/hud-cloak.svg?url";
+
+	let tooltipRoot = $state<HTMLElement>();
 
 	interface Props {
 		/** Shared fixture commands become available after the real session has started. */
@@ -189,6 +192,7 @@
 </script>
 
 <main
+	bind:this={tooltipRoot}
 	class="showcase ui-theme"
 	aria-label="UI showcase"
 	style:--ui-text-scale={preferences.ui.textScale}
@@ -196,6 +200,7 @@
 	data-showcase-ready={session !== null}
 	data-showcase-pending={pending}
 >
+	{#if tooltipRoot}<UiTooltipHost root={tooltipRoot} />{/if}
 	<aside
 		class="showcase-controls ui-panel"
 		use:keyboard.scope={{ nativeControls: true, keydown: () => {} }}

@@ -176,7 +176,7 @@ jobs:
           $candidates = @(@("${env:ProgramFiles(x86)}\Inno Setup $major\ISCC.exe", "$env:ProgramFiles\Inno Setup $major\ISCC.exe") | Where-Object { Test-Path $_ })
           if ($candidates.Count -ne 1) { throw 'Expected one compiler for the installed Inno Setup package' }
           "INNO_COMPILER=$($candidates[0])" >> $env:GITHUB_ENV
-          & ($candidates[0]) /?
+          Write-Host "Inno Setup compiler: $($candidates[0])"
       - name: Build and verify the desktop installer from the native archive
         if: runner.os != 'Linux' && inputs.product != 'cli'
         run: |

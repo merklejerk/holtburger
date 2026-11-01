@@ -191,14 +191,14 @@ def verify_windows_installer(native: Path, installer: Path, compiler: Path, work
         (payload / "obsolete-repair-fixture.txt").write_text("obsolete")
         setup(installer, False)
         for executable in ["h3d/holtburger-3d.exe", "h3d/resources/holtburger-3d-host.exe"]:
-            with windows_file_lock(payload / executable):
-                result = subprocess.run([str(installer), *quiet, f"/DIR={install}"], timeout=180)
-                if result.returncode == 0:
-                    raise ValueError("Installer accepted a locked payload")
-                verify_payload(native, payload)
-                result = subprocess.run([str(uninstaller), *quiet], timeout=180)
-                if result.returncode == 0:
-                    raise ValueError("Uninstaller accepted a locked payload")
+            for command, label in [([str(installer), *quiet, f"/DIR={install}"], "Installer"),
+                                   ([str(uninstaller), *quiet], "Uninstaller")]:
+                with windows_file_lock(payload / executable):
+                    result = subprocess.run(command, timeout=180)
+                    if result.returncode == 0:
+                        raise ValueError(f"{label} accepted a locked payload")
+                # An exclusive Windows lock also denies this verifier read access.
+                # Release it before hashing the payload, then reacquire for the next operation.
                 verify_payload(native, payload)
     finally:
         if uninstaller.exists():

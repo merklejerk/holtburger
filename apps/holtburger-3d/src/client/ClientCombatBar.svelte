@@ -9,7 +9,8 @@
 		COMBAT_HEIGHT_INDICES,
 		type ClientKeyboardConfiguration,
 	} from "../lib/input/input-contract";
-	import { type InputDisplayPlatform } from "../lib/input/input-presentation";
+	import type { InputPlatform } from "../lib/input/input-platform";
+
 	import ClientHudPanel from "./ClientHudPanel.svelte";
 	import EquipmentSlotIcon from "./EquipmentSlotIcon.svelte";
 	import { AMMUNITION_SLOT } from "./client-inventory-equipment";
@@ -173,7 +174,7 @@
 		readonly inventory: ClientInventoryState | null;
 		/** Accepted physical-combat shortcuts. */
 		readonly input: ClientKeyboardConfiguration;
-		readonly displayPlatform: InputDisplayPlatform;
+		readonly displayPlatform: InputPlatform;
 		readonly placement: ClientHudPlacement;
 		readonly editable: boolean;
 		readonly viewport: ClientHudViewport;

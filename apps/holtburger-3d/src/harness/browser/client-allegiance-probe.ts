@@ -1,4 +1,4 @@
-import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
+import { createInputDefaults } from "../../lib/input/input-defaults";
 import { mount, tick, unmount } from "svelte";
 import ClientSocialPanel from "../../client/ClientSocialPanel.svelte";
 import ClientSelectedEntityHud from "../../client/ClientSelectedEntityHud.svelte";
@@ -376,7 +376,7 @@ export async function probeAllegiance(options: {
 			target,
 			context,
 			props: {
-				input: INPUT_DEFAULTS,
+				input: createInputDefaults("windows"),
 				displayPlatform: "unknown",
 				selectedGuid: patron.guid,
 				readSelectedDisplay: () => ({

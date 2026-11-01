@@ -69,7 +69,8 @@
 	import { presentClientBinding } from "./client-binding-catalog";
 	import type { ClientCombatMode } from "./client-host-contract";
 	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
-	import { type InputDisplayPlatform } from "../lib/input/input-presentation";
+	import type { InputPlatform } from "../lib/input/input-platform";
+
 	import ClientHudIcon from "./ClientHudIcon.svelte";
 	import ClientHudTray from "./ClientHudTray.svelte";
 	import {
@@ -88,7 +89,7 @@
 		readonly onPlacementChange: (placement: ClientHudPlacement) => void;
 		/** Accepted keyboard bindings for stance and system-panel hints. */
 		readonly input: ClientKeyboardConfiguration;
-		readonly displayPlatform: InputDisplayPlatform;
+		readonly displayPlatform: InputPlatform;
 		/** Server-confirmed stance, independent of the active panel. */
 		readonly combatMode: ClientCombatMode;
 		/** Whether gameplay currently accepts stance changes. */

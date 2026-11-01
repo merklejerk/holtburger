@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { type InputPlatform } from "../lib/input/input-platform";
+
 	import ClientLockFeedback from "./ClientLockFeedback.svelte";
 	import type { ClientLockFeedbackFrame } from "./client-lock-feedback";
 	import { applyUiScale } from "../app/ui-scale";
@@ -56,7 +58,7 @@
 		type ClientInputConfiguration,
 		type InputDigitIndex,
 	} from "../lib/input/input-contract";
-	import { inputDisplayPlatform } from "../lib/input/input-presentation";
+
 	import ClientSpellBar from "./ClientSpellBar.svelte";
 	import ClientCombatBar from "./ClientCombatBar.svelte";
 	import type { ClientViewportTargetPicker } from "./client-pointer-selection-controller";
@@ -183,6 +185,8 @@
 	import ClientSystemMenu from "./ClientSystemMenu.svelte";
 
 	interface Props {
+		/** Startup platform used by input reset policy and key labels. */
+		readonly platform: InputPlatform;
 		/** Local chat admission preferences, independent of server character options. */
 		readonly chatSuppression: ClientChatSuppressionSettings;
 		/** Local persisted policy for key automation and chooser presentation. */
@@ -629,11 +633,12 @@
 		onChatNotice,
 		canvasElement,
 		interactionRoot,
+		platform,
 	}: Props = $props();
 	provideClientHudGeometry();
 	const { viewport: inputGate, keyboard } = useAppInputPolicy();
 	const clientInput = useClientInput();
-	const displayPlatform = inputDisplayPlatform(navigator.userAgent);
+	const displayPlatform = $derived(platform);
 	/** The wheel owns a disposable physical-key lifetime while its activation key is held. */
 	let emoteWheel = $state<{ readonly release: () => void } | null>(null);
 	function closeEmotes(): void {

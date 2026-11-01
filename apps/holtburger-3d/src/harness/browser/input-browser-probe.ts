@@ -4,7 +4,7 @@ import {
 	type CharacterActionInput,
 } from "../../explorer/explorer-camera-input-controller";
 import { AppInput } from "../../lib/input/app-input";
-import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
+import { createInputDefaults } from "../../lib/input/input-defaults";
 import type { ViewportInputGate } from "../../lib/input/viewport-input-gate";
 import { CharacterInputController } from "../../lib/game/controls/character-input-controller";
 import { ClientInputArbiter } from "../../client/client-input-arbiter";
@@ -27,9 +27,15 @@ export function probeBrowserInput(
 		keyboard,
 		canvas,
 		input: new AppInput({
-			...INPUT_DEFAULTS,
-			character: { ...INPUT_DEFAULTS.character, jump: [{ key: "F8" }] },
-			fly: { ...INPUT_DEFAULTS.fly, ascend: [{ key: "F9" }, { key: "F10" }] },
+			...createInputDefaults("windows"),
+			character: {
+				...createInputDefaults("windows").character,
+				jump: [{ key: "F8" }],
+			},
+			fly: {
+				...createInputDefaults("windows").fly,
+				ascend: [{ key: "F9" }, { key: "F10" }],
+			},
 		}),
 		onChange() {},
 		onPhysicalWheel() {},
@@ -114,7 +120,7 @@ function probeClientAutorun(keyboard: KeyboardInputPolicy): void {
 	});
 	const arbiter = new ClientInputArbiter({
 		ordinary: controller,
-		powerBindings: INPUT_DEFAULTS.preciseJump,
+		powerBindings: createInputDefaults("windows").preciseJump,
 		onEnter() {},
 		onActivate() {},
 		onCancel() {},
@@ -265,7 +271,7 @@ function probeClientAutorun(keyboard: KeyboardInputPolicy): void {
 
 /** Verify DOM routing and capture when the platform supplies only Space's physical identity. */
 function probeUnidentifiedSpace(keyboard: KeyboardInputPolicy): void {
-	const input = new AppInput(INPUT_DEFAULTS);
+	const input = new AppInput(createInputDefaults("windows"));
 	let precise = false;
 	let jumped = false;
 	const character = input.characterContext((action, pressed) => {

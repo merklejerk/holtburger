@@ -71,7 +71,7 @@ it("defers Client construction and composes saved HUD placements after content r
 		innerHeight: viewport.height,
 		location: { search: "" },
 	});
-	const defaults = createDefaultClientUserSettings(viewport, 0);
+	const defaults = createDefaultClientUserSettings(viewport, 0, "windows");
 	const inventory = { ...defaults.hudLayout.inventory, preferredWidth: 444 };
 	bridge.loadUser.mockResolvedValue({
 		settings: { ...defaults, hudLayout: { ...defaults.hudLayout, inventory } },
@@ -132,7 +132,7 @@ function savedTheme(id: string) {
 			listenFailures: vi.fn(),
 		},
 	});
-	const defaults = createDefaultClientUserSettings(viewport, 0);
+	const defaults = createDefaultClientUserSettings(viewport, 0, "windows");
 	bridge.loadUser.mockResolvedValue({
 		settings: { ...defaults, ui: { ...defaults.ui, themeId: id } },
 		repaired: [],

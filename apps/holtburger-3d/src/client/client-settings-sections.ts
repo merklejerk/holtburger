@@ -1,3 +1,4 @@
+import { INPUT_PLATFORMS } from "../lib/input/input-platform.js";
 import { z } from "zod";
 import {
 	clientCharacterSettingsSchema,
@@ -36,6 +37,8 @@ export type ClientUserSectionValues = Omit<ClientUserSettings, "hudLayout">;
 /** Browser facts needed to assemble scale-aware client defaults before mounting. */
 export const clientUserSettingsContextSchema = z
 	.object({
+		/** Platform used to resolve first-run and repair input defaults. */
+		platform: z.enum(INPUT_PLATFORMS),
 		/** Unscaled browser content extent in viewport CSS pixels. */
 		viewport: z
 			.object({

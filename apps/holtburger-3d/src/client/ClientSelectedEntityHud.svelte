@@ -15,14 +15,15 @@
 		type ClientHudIconName,
 	} from "./ClientHudIcon.svelte";
 	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
-	import { type InputDisplayPlatform } from "../lib/input/input-presentation";
+	import type { InputPlatform } from "../lib/input/input-platform";
+
 	import { CLIENT_TUNING } from "./client-tuning";
 
 	interface Props {
 		/** Accepted bindings keep tooltip hints current after keyboard remapping. */
 		readonly input: ClientKeyboardConfiguration;
 		/** Platform vocabulary matches the other client HUD shortcut hints. */
-		readonly displayPlatform: InputDisplayPlatform;
+		readonly displayPlatform: InputPlatform;
 		/** Cold selection identity controlling whether the runtime surface is present. */
 		readonly selectedGuid: number | null;
 		/** Bounded display read kept separate from frame-hot target projection. */

@@ -1,7 +1,7 @@
+import { type InputPlatform } from "../lib/input/input-platform";
 import {
 	compactInputHint,
 	formatInputBindings,
-	type InputDisplayPlatform,
 } from "../lib/input/input-presentation";
 import {
 	clientBindingId,
@@ -375,7 +375,7 @@ function clientBindingDefinition(
 export function presentClientBinding(
 	settings: ClientKeyboardConfiguration,
 	reference: ClientBindingReference,
-	platform: InputDisplayPlatform,
+	platform: InputPlatform,
 ): { readonly hint: string | null; readonly description: string } {
 	const definition = clientBindingDefinition(reference);
 	const bindings = readClientBinding(settings, definition.reference);

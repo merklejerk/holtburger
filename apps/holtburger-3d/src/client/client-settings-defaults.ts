@@ -1,3 +1,4 @@
+import type { InputPlatform } from "../lib/input/input-platform.js";
 import type { ClientUserSectionValues } from "./client-settings-sections.js";
 import {
 	CLIENT_DEFAULT_THEME_ID,
@@ -25,7 +26,7 @@ import type {
 import { CLIENT_TUNING } from "./client-tuning.js";
 import { CLIENT_UI_DEFAULTS } from "./client-ui-defaults.js";
 import { CLIENT_GRAPHICS_DEFAULTS } from "./client-settings-policy.js";
-import { CLIENT_INPUT_DEFAULTS } from "./client-input-settings.js";
+import { createClientInputDefaults } from "./client-input-settings.js";
 import {
 	CLIENT_CLOCK_FORMAT_DEFAULT,
 	CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
@@ -43,9 +44,10 @@ export const CLIENT_AUDIO_DEFAULTS = {
 export function createDefaultClientUserSettings(
 	viewport: ClientHudViewport,
 	shortcutCount: number,
+	platform: InputPlatform,
 ): ClientUserSettings {
 	return {
-		...createDefaultClientUserSections(),
+		...createDefaultClientUserSections(platform),
 		hudLayout: createClientHudLayout(
 			CLIENT_UI_DEFAULTS,
 			viewport,
@@ -55,7 +57,9 @@ export function createDefaultClientUserSettings(
 }
 
 /** Non-layout defaults can be repaired before the saved UI scale determines placement defaults. */
-export function createDefaultClientUserSections(): ClientUserSectionValues {
+export function createDefaultClientUserSections(
+	platform: InputPlatform,
+): ClientUserSectionValues {
 	return {
 		spellBarShape: "single",
 		minimapViewDiameters: { ...MAP_DEFAULT_VIEW_DIAMETERS },
@@ -76,7 +80,7 @@ export function createDefaultClientUserSections(): ClientUserSectionValues {
 			themeId: CLIENT_DEFAULT_THEME_ID,
 			fonts: { body: "theme", heading: "theme", mono: "theme" },
 		},
-		input: structuredClone(CLIENT_INPUT_DEFAULTS),
+		input: createClientInputDefaults(platform),
 		clockFormat: CLIENT_CLOCK_FORMAT_DEFAULT,
 		environmentOverrides: CLIENT_ENVIRONMENT_OVERRIDES_DEFAULT,
 		inspection: {

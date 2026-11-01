@@ -10,7 +10,7 @@ import {
 } from "./client-cycle-selection-controller";
 import { ClientSelectionInput } from "./client-selection-input";
 import { AppInput } from "../lib/input/app-input";
-import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
+import { createInputDefaults } from "../lib/input/input-defaults";
 import type { InputConfiguration } from "../lib/input/input-contract";
 import type { ClientLifecycleSessionEvent } from "./client-lifecycle-session";
 
@@ -18,9 +18,9 @@ const HOLD_MS = 100;
 // Own every binding consumed by ClientSelectionInput so editable defaults cannot
 // change the tap, hold, modifier, or cancellation scenarios below.
 const TEST_INPUT = {
-	...INPUT_DEFAULTS,
+	...createInputDefaults("windows"),
 	client: {
-		...INPUT_DEFAULTS.client,
+		...createInputDefaults("windows").client,
 		selectSelf: [],
 		nextSmartCombat: [{ key: "Tab", shift: false, ctrl: false }],
 		previousSmartCombat: [{ key: "Tab", shift: true, ctrl: false }],

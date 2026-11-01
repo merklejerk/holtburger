@@ -3,7 +3,6 @@ import {
 	COMBAT_BREAKPOINT_INDICES,
 	COMBAT_HEIGHT_INDICES,
 } from "./input-contract";
-import { INPUT_DEFAULTS } from "./input-defaults";
 import { InputContext, matchesKey } from "./input-context";
 import type {
 	ActionBarDirection,
@@ -168,6 +167,3 @@ export class AppInput {
 		return this.configuration.pointer[action].includes(event.button);
 	}
 }
-
-/** One configuration entry point for both app modes; no storage or settings UI policy lives here. */
-export const APP_INPUT = new AppInput(INPUT_DEFAULTS);

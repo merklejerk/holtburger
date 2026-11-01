@@ -28,13 +28,18 @@ vi.mock("node:fs/promises", async (importOriginal) => {
 const userContext = {
 	viewport: { width: 1440, height: 900 },
 	shortcutCount: 8,
+	platform: "windows" as const,
 };
 
 const initialWindow = {
 	normalBounds: { width: 1440, height: 900 },
 	maximized: false,
 };
-const user = createDefaultClientUserSettings(initialWindow.normalBounds, 8);
+const user = createDefaultClientUserSettings(
+	initialWindow.normalBounds,
+	8,
+	"windows",
+);
 const character = createDefaultClientCharacterSettings();
 const directories: string[] = [];
 

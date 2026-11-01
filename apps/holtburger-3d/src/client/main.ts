@@ -1,3 +1,4 @@
+import { detectInputPlatform } from "../lib/input/input-platform";
 import { createElectronVisualCacheTransport } from "./client-visual-cache-transport";
 import "../app/base.css";
 import ContentStartup from "../app/ContentStartup.svelte";
@@ -17,8 +18,10 @@ async function startGame(
 	context: Map<unknown, unknown>,
 	contentLocation: string,
 ): Promise<boolean> {
+	const platform = detectInputPlatform(navigator.userAgent);
 	const settingsTransport = createElectronClientSettingsTransport();
 	const loadedUserSettings = await settingsTransport.loadUser({
+		platform,
 		viewport: { width: window.innerWidth, height: window.innerHeight },
 		shortcutCount: createClientShortcuts(
 			clientDebugEnabled(window.location.search),
@@ -62,6 +65,7 @@ async function startGame(
 			target,
 			context,
 			props: {
+				platform,
 				contentLocation,
 				themeSelection,
 				initialUserSettings,

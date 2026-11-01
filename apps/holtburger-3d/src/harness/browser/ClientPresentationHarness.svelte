@@ -464,10 +464,12 @@
 			};
 			props = {
 				themeSelection: fixtureTheme.owner,
+				platform: "windows",
 				contentLocation: null,
 				initialUserSettings: createDefaultClientUserSettings(
 					{ width: innerWidth, height: innerHeight },
 					createClientShortcuts(false).length,
+					"windows",
 				),
 				initialSettingsIssue: null,
 				settingsTransport: {
@@ -475,6 +477,7 @@
 						settings: createDefaultClientUserSettings(
 							context.viewport,
 							context.shortcutCount,
+							"windows",
 						),
 						repaired: [],
 					}),

@@ -12,6 +12,7 @@ function installBridge(overrides: Record<string, unknown> = {}): void {
 				settings: createDefaultClientUserSettings(
 					{ width: 1440, height: 900 },
 					8,
+					"windows",
 				),
 				repaired: [],
 			}),
@@ -34,6 +35,7 @@ describe("Electron client settings transport", () => {
 		const user = createDefaultClientUserSettings(
 			{ width: 1440, height: 900 },
 			8,
+			"windows",
 		);
 		const character = createDefaultClientCharacterSettings();
 		installBridge({
@@ -54,6 +56,7 @@ describe("Electron client settings transport", () => {
 			await transport.loadUser({
 				viewport: { width: 1440, height: 900 },
 				shortcutCount: 8,
+				platform: "windows" as const,
 			}),
 		).toEqual({
 			settings: user,
@@ -76,6 +79,7 @@ describe("Electron client settings transport", () => {
 		const user = createDefaultClientUserSettings(
 			{ width: 1440, height: 900 },
 			8,
+			"windows",
 		);
 		await transport.saveUserPatch({
 			hudPlacements: { book: user.hudLayout.book },
@@ -103,6 +107,7 @@ describe("Electron client settings transport", () => {
 			createElectronClientSettingsTransport().loadUser({
 				viewport: { width: 1440, height: 900 },
 				shortcutCount: 8,
+				platform: "windows" as const,
 			}),
 		).rejects.toThrow("Malformed user settings response");
 		installBridge({

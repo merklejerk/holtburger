@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { type InputPlatform } from "../lib/input/input-platform";
+
 	import { applyUiScale } from "../app/ui-scale";
 	import UiTooltipHost from "../app/UiTooltipHost.svelte";
 	import {
@@ -38,10 +40,7 @@
 	import { ClientDeathCommands } from "./client-death-commands";
 	import { runRecallCommand } from "./client-recall-command";
 	import { runClientHelpCommand } from "./client-command-help";
-	import {
-		compactInputHint,
-		inputDisplayPlatform,
-	} from "../lib/input/input-presentation";
+	import { compactInputHint } from "../lib/input/input-presentation";
 	import { presentPartyHud } from "./client-party-hud";
 	import { observeCombatEffectsAppearance } from "./client-combat-effects-appearance";
 	import type { CombatEffectsAppearance } from "../lib/game/systems/combat-effects-system";
@@ -266,6 +265,8 @@
 	} from "./client-inspection";
 
 	interface Props {
+		/** Startup platform shared by input defaults and displayed key labels. */
+		readonly platform: InputPlatform;
 		/** Canonical startup selection; injected diagnostic hosts can lack filesystem provenance. */
 		readonly contentLocation: string | null;
 		/** Already initialized once by bootstrap; this shell owns subsequent retirement. */
@@ -278,6 +279,7 @@
 	}
 
 	const {
+		platform,
 		contentLocation,
 		themeSelection,
 		initialUserSettings,
@@ -287,6 +289,7 @@
 	}: Props = $props();
 	// Bootstrap completes before mount; later prop replacement cannot own live settings lifetime.
 	const startupThemeSelection = untrack(() => themeSelection);
+	const startupPlatform = untrack(() => platform);
 	const startupUserSettings = untrack(() => initialUserSettings);
 	const startupSettingsIssue = untrack(() => initialSettingsIssue);
 	const startupSettingsTransport = untrack(() => settingsTransport);
@@ -296,7 +299,9 @@
 
 	let userSettings = $state.raw<ClientUserSettings>(startupUserSettings);
 	const clientInput = provideClientInput(
-		new AppInput(clientInputConfiguration(startupUserSettings.input)),
+		new AppInput(
+			clientInputConfiguration(startupUserSettings.input, startupPlatform),
+		),
 	);
 
 	let entityCollisionDisabled = $state(false);
@@ -786,7 +791,9 @@
 			keyboard.cancel();
 			characterInput.replaceBindings(accepted.character);
 			inputArbiter?.replacePowerBindings(accepted.preciseJump);
-			clientInput.replaceConfiguration(clientInputConfiguration(accepted));
+			clientInput.replaceConfiguration(
+				clientInputConfiguration(accepted, startupPlatform),
+			);
 		}
 		changeUserSection("input", accepted);
 	}
@@ -1524,13 +1531,10 @@
 	}
 
 	const jumpPowerKeys: readonly [string, string] = $derived.by(() => {
-		const platform = inputDisplayPlatform(
-			globalThis.navigator?.userAgent ?? "",
-		);
 		const input = userSettings.input.preciseJump;
 		return [
-			compactInputHint(input.increasePower, platform) ?? "—",
-			compactInputHint(input.decreasePower, platform) ?? "—",
+			compactInputHint(input.increasePower, startupPlatform) ?? "—",
+			compactInputHint(input.decreasePower, startupPlatform) ?? "—",
 		];
 	});
 
@@ -2526,6 +2530,7 @@
 
 	{#if page.kind === "gameplay" && canvasElement !== null && interactionRoot !== null}
 		<ClientGameplayView
+			platform={startupPlatform}
 			{theme}
 			onReturnToMainMenu={() => void returnToMainMenu()}
 			onDisconnect={() => void disconnect()}

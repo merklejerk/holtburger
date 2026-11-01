@@ -1,5 +1,4 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { CLIENT_KEYBOARD_DEFAULTS } from "../../client/client-input-settings";
 import {
 	clientBindingId,
 	readClientBinding,
@@ -8,8 +7,14 @@ import {
 } from "./client-keyboard-bindings";
 import { InputContext } from "./input-context";
 import { AppInput } from "./app-input";
-import { clientInputConfiguration } from "../../client/client-input-settings";
+import {
+	createClientKeyboardDefaults,
+	clientInputConfiguration,
+	clientKeyboardSettingsEqual,
+} from "../../client/client-input-settings";
 import type { KeyBinding } from "./input-contract";
+
+const defaults = createClientKeyboardDefaults("windows");
 
 const addresses: readonly ClientBindingReference[] = [
 	{ kind: "character", action: "forward" },
@@ -33,24 +38,21 @@ describe("typed client binding access", () => {
 				{ key: "é", ctrl: true },
 				{ code: "Numpad2", shift: false },
 			];
-			const next = replaceClientBinding(
-				CLIENT_KEYBOARD_DEFAULTS,
-				reference,
-				alternatives,
-			);
+			const next = replaceClientBinding(defaults, reference, alternatives);
+			expect(clientKeyboardSettingsEqual(defaults, next)).toBe(false);
 			expect(readClientBinding(next, reference)).toBe(alternatives);
 			expect(
 				replaceClientBinding(
 					next,
 					reference,
-					readClientBinding(CLIENT_KEYBOARD_DEFAULTS, reference),
+					readClientBinding(defaults, reference),
 				),
-			).toEqual(CLIENT_KEYBOARD_DEFAULTS);
-			expect(CLIENT_KEYBOARD_DEFAULTS).not.toEqual(next);
+			).toEqual(defaults);
+			expect(defaults).not.toEqual(next);
 			for (const other of addresses) {
 				if (clientBindingId(other) !== clientBindingId(reference))
 					expect(readClientBinding(next, other)).toBe(
-						readClientBinding(CLIENT_KEYBOARD_DEFAULTS, other),
+						readClientBinding(defaults, other),
 					);
 			}
 			expect(
@@ -85,10 +87,10 @@ it("rejects invalid reference shapes at the type boundary", () => {
 
 it("uses accepted replacement addresses in every runtime lookup family", () => {
 	const event = { key: "q", code: "KeyQ", shiftKey: false };
-	let settings = CLIENT_KEYBOARD_DEFAULTS;
+	let settings = defaults;
 	for (const reference of addresses) {
 		settings = replaceClientBinding(settings, reference, [{ code: "KeyQ" }]);
-		const input = new AppInput(clientInputConfiguration(settings));
+		const input = new AppInput(clientInputConfiguration(settings, "windows"));
 		switch (reference.kind) {
 			case "client":
 				expect(input.shortcut(reference.action, event)).toBe(true);
@@ -142,6 +144,6 @@ it("uses accepted replacement addresses in every runtime lookup family", () => {
 				expect(input.actionBarCommand(reference.action, event)).toBe(true);
 				break;
 		}
-		settings = CLIENT_KEYBOARD_DEFAULTS;
+		settings = defaults;
 	}
 });

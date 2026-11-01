@@ -169,8 +169,12 @@ viewport button maps. Keyboard bindings use browser `key` names (case-insensitiv
 modifier constraints. Multiple bindings may activate the same action. Pointer maps use browser
 button numbers: primary `0`, middle `1`, secondary `2`.
 
-`APP_INPUT` is the shared configuration entry point for both modes. Its `InputContext` resolves
-presses to semantic actions, suppresses repeat, and retains physical-key ownership until release.
+`createInputDefaults(platform)` resolves the maps from an explicit platform fact. Mac uses Command
+for held chat-history interaction to preserve native Control-click behavior; other platforms use
+Control. Startup settings, missing-binding repair, and input resets use the same policy. Saved
+bindings remain explicit choices. Each frontend constructs its own `AppInput` from the resolved
+configuration. `InputContext` resolves presses to semantic actions, suppresses repeat, and retains
+physical-key ownership until release.
 Each mounted frontend owns its action context. `provideAppInputPolicy()` provides one keyboard
 router and one `ViewportInputGate`; descendants access them with `useAppInputPolicy()`.
 `ClientApp` and `ExplorerApp` mount keyboard routing at their app lifetimes. Gameplay action

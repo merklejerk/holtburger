@@ -20,10 +20,10 @@ import { AppInput } from "../../lib/input/app-input";
 import {
 	clientInputConfiguration,
 	clientKeyboardSettingsSchema,
-	CLIENT_KEYBOARD_DEFAULTS,
+	createClientKeyboardDefaults,
 } from "../../client/client-input-settings";
 import { replaceClientBinding } from "../../lib/input/client-keyboard-bindings";
-import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
+import { createInputDefaults } from "../../lib/input/input-defaults";
 import { ClientInputArbiter } from "../../client/client-input-arbiter";
 import { CLIENT_TUNING } from "../../client/client-tuning";
 import {
@@ -123,7 +123,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		},
 	});
 	const arbiter = new ClientInputArbiter({
-		powerBindings: INPUT_DEFAULTS.preciseJump,
+		powerBindings: createInputDefaults("windows").preciseJump,
 		ordinary: {
 			applyAction: () => false,
 			restoreHeldAction() {},
@@ -137,7 +137,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		onAutoRunChanged() {},
 	});
 	let nowMs = 0;
-	const appInput = new AppInput(INPUT_DEFAULTS);
+	const appInput = new AppInput(createInputDefaults("windows"));
 	const character = appInput.characterContext(() => {});
 	const input = new ClientSelectionInput({
 		keyboard,
@@ -351,22 +351,26 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		expectSelected(1, "self binding");
 		const remappedSelf = clientKeyboardSettingsSchema.parse(
 			replaceClientBinding(
-				CLIENT_KEYBOARD_DEFAULTS,
+				createClientKeyboardDefaults("windows"),
 				{ kind: "client", action: "selectSelf" },
 				[{ key: "q" }],
 			),
 		);
 		keyboard.cancel();
 		character.replaceBindings(remappedSelf.character);
-		appInput.replaceConfiguration(clientInputConfiguration(remappedSelf));
+		appInput.replaceConfiguration(
+			clientInputConfiguration(remappedSelf, "windows"),
+		);
 		selection.select(3);
 		press("x");
 		expectSelected(3, "old self binding retired");
 		press("q");
 		expectSelected(1, "remapped self without rendered presentation");
 		keyboard.cancel();
-		character.replaceBindings(CLIENT_KEYBOARD_DEFAULTS.character);
-		appInput.replaceConfiguration(INPUT_DEFAULTS);
+		character.replaceBindings(
+			createClientKeyboardDefaults("windows").character,
+		);
+		appInput.replaceConfiguration(createInputDefaults("windows"));
 		pointer.acquireViewportPoint(0, 0);
 		const request = requests.at(-1);
 		if (request === undefined)
@@ -475,14 +479,16 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		const beforeRemap = scans;
 		const remappedCycle = clientKeyboardSettingsSchema.parse(
 			replaceClientBinding(
-				CLIENT_KEYBOARD_DEFAULTS,
+				createClientKeyboardDefaults("windows"),
 				{ kind: "client", action: "nextSmartCombat" },
 				[{ key: "q" }],
 			),
 		);
 		keyboard.cancel();
 		character.replaceBindings(remappedCycle.character);
-		appInput.replaceConfiguration(clientInputConfiguration(remappedCycle));
+		appInput.replaceConfiguration(
+			clientInputConfiguration(remappedCycle, "windows"),
+		);
 		await waitForHold();
 		expectSelected(3, "configuration replacement cancels hold timer");
 		if (scans !== beforeRemap)
@@ -492,8 +498,10 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		press("q");
 		expectSelected(2, "new cycle binding acquires immediate");
 		keyboard.cancel();
-		character.replaceBindings(CLIENT_KEYBOARD_DEFAULTS.character);
-		appInput.replaceConfiguration(INPUT_DEFAULTS);
+		character.replaceBindings(
+			createClientKeyboardDefaults("windows").character,
+		);
+		appInput.replaceConfiguration(createInputDefaults("windows"));
 
 		// The fallback must wait for both selection and a window whose close awaits authority.
 		selection.select(2);

@@ -113,7 +113,7 @@
 		ClientViewportTargetDestination,
 		ClientViewportTargetResult,
 	} from "../../client/client-pointer-selection-controller";
-	import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
+	import { createInputDefaults } from "../../lib/input/input-defaults";
 	import { entityFacts } from "../../client/client-entity-mirror.test-support";
 	import { probeClientBindings } from "./client-binding-probe";
 	import {
@@ -309,6 +309,7 @@
 	const initialUserSettings = createDefaultClientUserSettings(
 		{ width: window.innerWidth, height: window.innerHeight },
 		9,
+		"windows",
 	);
 	// Fixtures mount Base; the interactive showcase selects the client default during startup.
 	let userSettings = $state.raw<ClientUserSettings>({
@@ -316,7 +317,12 @@
 		ui: { ...initialUserSettings.ui, themeId: null },
 	});
 	const clientInput = provideClientInput(
-		new AppInput(clientInputConfiguration(untrack(() => userSettings.input))),
+		new AppInput(
+			clientInputConfiguration(
+				untrack(() => userSettings.input),
+				"windows",
+			),
+		),
 	);
 	// Initialize the imperative binding once; controls replace it without reactive reconstruction.
 	let environmentBinding = bindClientPresentationEnvironment(
@@ -343,7 +349,9 @@
 		if (!clientKeyboardSettingsEqual(userSettings.input, accepted)) {
 			keyboard.cancel();
 			characterInput.replaceBindings(accepted.character);
-			clientInput.replaceConfiguration(clientInputConfiguration(accepted));
+			clientInput.replaceConfiguration(
+				clientInputConfiguration(accepted, "windows"),
+			);
 		}
 		userSettings = { ...userSettings, input: accepted };
 		return accepted;
@@ -1135,8 +1143,8 @@
 					"client-item-use-target-result",
 					itemUseTargetResultSchema.parse(payload),
 				),
-			interactBinding: INPUT_DEFAULTS.client.interact[0],
-			alternateModifier: INPUT_DEFAULTS.actionBars.alternate,
+			interactBinding: createInputDefaults("windows").client.interact[0],
+			alternateModifier: createInputDefaults("windows").actionBars.alternate,
 			selected: () => selection.selectedGuid(),
 			snapshot: () => itemInteractions.snapshot(),
 			reply: (payload: unknown) =>
@@ -1883,7 +1891,7 @@
 	let pendingInventoryWorldPick: ClientViewportTargetDestination | null = null;
 	let releaseGiveKeys: (() => void) | null = null;
 	const giveProbe = {
-		binding: INPUT_DEFAULTS.client.give[0],
+		binding: createInputDefaults("windows").client.give[0],
 		begin: () => {
 			const read = interactionLifecycle.entities.read();
 			if (read.kind !== "current")
@@ -2068,7 +2076,9 @@
 			readonly backgroundIsolation: true;
 			readonly sharedCancellation: true;
 		}>;
-		readonly binding: (typeof INPUT_DEFAULTS.client.examine)[number];
+		readonly binding: ReturnType<
+			typeof createInputDefaults
+		>["client"]["examine"][number];
 		begin(): void;
 		end(): void;
 		select(guid: number | null): void;
@@ -2526,7 +2536,7 @@
 				);
 			return { backgroundIsolation: true, sharedCancellation: true };
 		},
-		binding: INPUT_DEFAULTS.client.examine[0],
+		binding: createInputDefaults("windows").client.examine[0],
 		begin: () => {
 			releaseInspectionKeys?.();
 			inspectionOwner.close();
@@ -5993,6 +6003,7 @@
 						const defaults = createDefaultClientUserSettings(
 							{ width: rect.width, height: rect.height },
 							createClientShortcuts(true).length,
+							"windows",
 						);
 						userSettings = { ...userSettings, hudLayout: defaults.hudLayout };
 						if (characterSettings === null)
@@ -6178,6 +6189,7 @@
 			></canvas>
 			{#if gameplayCanvas !== null && interactionRoot !== null}
 				<ClientGameplayView
+					platform="windows"
 					{barber}
 					lockInteractions={userSettings.lockInteractions}
 					onLockInteractionsChange={(lockInteractions) =>

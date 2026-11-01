@@ -1,4 +1,4 @@
-import { INPUT_DEFAULTS } from "../lib/input/input-defaults";
+import { createInputDefaults } from "../lib/input/input-defaults";
 import { describe, expect, it } from "vitest";
 
 import type { CharacterAction } from "../lib/input/input-contract";
@@ -47,7 +47,7 @@ function fixture() {
 	const edges: string[] = [];
 	const autoRunChanges: boolean[] = [];
 	const arbiter = new ClientInputArbiter({
-		powerBindings: INPUT_DEFAULTS.preciseJump,
+		powerBindings: createInputDefaults("windows").preciseJump,
 		ordinary,
 		onEnter: () => edges.push("enter"),
 		onActivate: () => edges.push("activate"),
@@ -143,7 +143,7 @@ describe("ClientInputArbiter", () => {
 			onEdge() {},
 		});
 		const arbiter = new ClientInputArbiter({
-			powerBindings: INPUT_DEFAULTS.preciseJump,
+			powerBindings: createInputDefaults("windows").preciseJump,
 			ordinary,
 			onEnter() {},
 			onActivate() {},
@@ -195,7 +195,7 @@ describe("ClientInputArbiter", () => {
 			onEdge() {},
 		});
 		const arbiter = new ClientInputArbiter({
-			powerBindings: INPUT_DEFAULTS.preciseJump,
+			powerBindings: createInputDefaults("windows").preciseJump,
 			ordinary,
 			onEnter() {},
 			onActivate() {},
@@ -362,7 +362,7 @@ it("merges keyboard and mouse forward holds through gait, opposing axes, and pre
 	});
 	const arbiter = new ClientInputArbiter({
 		ordinary,
-		powerBindings: INPUT_DEFAULTS.preciseJump,
+		powerBindings: createInputDefaults("windows").preciseJump,
 		onEnter() {},
 		onActivate() {},
 		onCancel() {},

@@ -1,5 +1,5 @@
 import type { ClientChatLine } from "../../client/client-chat-policy";
-import { INPUT_DEFAULTS } from "../../lib/input/input-defaults";
+import { createInputDefaults } from "../../lib/input/input-defaults";
 import { formatInputBindings } from "../../lib/input/input-presentation";
 import { mount, tick, unmount } from "svelte";
 import { fromStore, writable } from "svelte/store";
@@ -16,7 +16,7 @@ import { CLIENT_TUNING } from "../../client/client-tuning";
 
 /** Exercise action eligibility, menu artwork, dispatch, and dismissal in a real browser. */
 export async function probeSelectedActions(context: Map<unknown, unknown>) {
-	const splitLabel = `Split stack (${formatInputBindings(INPUT_DEFAULTS.client.splitStack, "windows")})`;
+	const splitLabel = `Split stack (${formatInputBindings(createInputDefaults("windows").client.splitStack, "windows")})`;
 	const target = document.createElement("div");
 	target.className = "ui-theme";
 	target.style.cssText = `position: fixed; top: 0; left: 0; pointer-events: none; width: ${CLIENT_UI_DEFAULTS.selectedEntity.size.width}px; height: ${CLIENT_UI_DEFAULTS.selectedEntity.size.height}px;`;
@@ -50,9 +50,9 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 		context,
 		props: {
 			input: {
-				...INPUT_DEFAULTS,
+				...createInputDefaults("windows"),
 				client: {
-					...INPUT_DEFAULTS.client,
+					...createInputDefaults("windows").client,
 					interact: [{ key: "f", ctrl: true }],
 					examine: [],
 				},

@@ -11,10 +11,11 @@
 	import type { UiIconDisplay } from "../../app/ui-icon-repository";
 	import artworkUrl from "../../assets/icons/equipment-weapon.svg?url";
 	import { provideClientInput } from "../../client/client-input-context";
-	import { APP_INPUT } from "../../lib/input/app-input";
+	import { AppInput } from "../../lib/input/app-input";
+	import { createInputDefaults } from "../../lib/input/input-defaults";
 	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	const { keyboard } = provideAppInputPolicy();
-	provideClientInput(APP_INPUT);
+	provideClientInput(new AppInput(createInputDefaults("windows")));
 	const problem = [
 		{ code: "preparation", detail: "Synthetic artwork diagnostic" },
 	] as const;

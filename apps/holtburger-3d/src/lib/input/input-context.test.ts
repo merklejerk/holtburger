@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { InputContext } from "./input-context";
 import { AppInput } from "./app-input";
-import { INPUT_DEFAULTS } from "./input-defaults";
+import { createInputDefaults } from "./input-defaults";
 
 describe("InputContext", () => {
 	it("separates precise and ordinary jumps even when Space has no logical key", () => {
-		const input = new AppInput(INPUT_DEFAULTS);
+		const input = new AppInput(createInputDefaults("windows"));
 		const action = vi.fn();
 		const character = input.characterContext(action);
 		for (const key of [" ", "Unidentified"]) {
@@ -26,7 +26,7 @@ describe("InputContext", () => {
 	});
 
 	it("maps unmodified number keys 1–5 to combat breakpoints", () => {
-		const input = new AppInput(INPUT_DEFAULTS);
+		const input = new AppInput(createInputDefaults("windows"));
 		for (const [index, digit] of ["1", "2", "3", "4", "5"].entries()) {
 			expect(
 				input.combatBreakpoint({
@@ -49,7 +49,7 @@ describe("InputContext", () => {
 	});
 
 	it("maps Shift+1–3 to top-to-bottom attack heights", () => {
-		const input = new AppInput(INPUT_DEFAULTS);
+		const input = new AppInput(createInputDefaults("windows"));
 		for (const [index, digit] of ["1", "2", "3"].entries()) {
 			expect(
 				input.combatHeight({
@@ -68,7 +68,7 @@ describe("InputContext", () => {
 	});
 
 	it("binds auto-run to unmodified Q while permitting the walk modifier", () => {
-		const input = new AppInput(INPUT_DEFAULTS);
+		const input = new AppInput(createInputDefaults("windows"));
 		for (const shiftKey of [false, true]) {
 			expect(
 				input.shortcut("toggleAutoRun", {
@@ -95,7 +95,7 @@ describe("InputContext", () => {
 	});
 
 	it("binds both backquote characters without consuming modified system chords", () => {
-		const input = new AppInput(INPUT_DEFAULTS);
+		const input = new AppInput(createInputDefaults("windows"));
 		for (const [key, shiftKey] of [
 			["`", false],
 			["~", true],
@@ -118,8 +118,11 @@ describe("InputContext", () => {
 
 	it("resolves give from the configured chord rather than the default key", () => {
 		const input = new AppInput({
-			...INPUT_DEFAULTS,
-			client: { ...INPUT_DEFAULTS.client, give: [{ key: "F9", ctrl: true }] },
+			...createInputDefaults("windows"),
+			client: {
+				...createInputDefaults("windows").client,
+				give: [{ key: "F9", ctrl: true }],
+			},
 		});
 		expect(
 			input.shortcut("give", { key: "F9", shiftKey: false, ctrlKey: true }),
@@ -127,7 +130,7 @@ describe("InputContext", () => {
 		expect(
 			input.shortcut("give", { key: "F9", shiftKey: false, ctrlKey: false }),
 		).toBe(false);
-		const original = INPUT_DEFAULTS.client.give[0];
+		const original = createInputDefaults("windows").client.give[0];
 		expect(
 			input.shortcut("give", {
 				key: original.key,
@@ -141,9 +144,9 @@ describe("InputContext", () => {
 
 	it("resolves an alternate configured examine binding with exact modifiers", () => {
 		const input = new AppInput({
-			...INPUT_DEFAULTS,
+			...createInputDefaults("windows"),
 			client: {
-				...INPUT_DEFAULTS.client,
+				...createInputDefaults("windows").client,
 				examine: [
 					{
 						code: "KeyQ",
@@ -261,9 +264,12 @@ describe("InputContext", () => {
 
 	it("uses an injected configuration for keyboard and pointer mappings", () => {
 		const input = new AppInput({
-			...INPUT_DEFAULTS,
-			character: { ...INPUT_DEFAULTS.character, forward: [{ key: "ArrowUp" }] },
-			pointer: { ...INPUT_DEFAULTS.pointer, flyRotate: [2] },
+			...createInputDefaults("windows"),
+			character: {
+				...createInputDefaults("windows").character,
+				forward: [{ key: "ArrowUp" }],
+			},
+			pointer: { ...createInputDefaults("windows").pointer, flyRotate: [2] },
 		});
 		const action = vi.fn();
 		const context = input.characterContext(action);
@@ -275,16 +281,22 @@ describe("InputContext", () => {
 	});
 
 	it("replaces live client shortcuts and held movement without a release action", () => {
-		const input = new AppInput(INPUT_DEFAULTS);
+		const input = new AppInput(createInputDefaults("windows"));
 		const action = vi.fn();
 		const context = input.characterContext(action);
 		const oldPress = { key: "w", code: "KeyW", shiftKey: false };
 		const newPress = { key: "i", code: "KeyI", shiftKey: false };
 		context.apply(oldPress, true);
 		const next = {
-			...INPUT_DEFAULTS,
-			character: { ...INPUT_DEFAULTS.character, forward: [{ key: "i" }] },
-			client: { ...INPUT_DEFAULTS.client, interact: [{ key: "f" }] },
+			...createInputDefaults("windows"),
+			character: {
+				...createInputDefaults("windows").character,
+				forward: [{ key: "i" }],
+			},
+			client: {
+				...createInputDefaults("windows").client,
+				interact: [{ key: "f" }],
+			},
 		};
 		context.replaceBindings(next.character);
 		input.replaceConfiguration(next);

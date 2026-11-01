@@ -5,11 +5,9 @@
 	import { presentClientBinding } from "./client-binding-catalog";
 	import { sameConsumableIdentity } from "./client-action-item";
 	import { useClientInput } from "./client-input-context";
-	import {
-		modifierName,
-		type InputDisplayPlatform,
-	} from "../lib/input/input-presentation";
+	import { modifierName } from "../lib/input/input-presentation";
 	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
+	import type { InputPlatform } from "../lib/input/input-platform";
 	import PopupMenu from "../app/PopupMenu.svelte";
 	import { CLIENT_ACTION_BAR_TUNING } from "./client-tuning";
 	import { onMount } from "svelte";
@@ -37,7 +35,7 @@
 	interface Props {
 		/** Accepted user keyboard map for shortcut hints. */
 		input: ClientKeyboardConfiguration;
-		displayPlatform: InputDisplayPlatform;
+		displayPlatform: InputPlatform;
 		/** Cold bar configuration from the collection owner. */
 		bar: ClientActionBar;
 		/** Current one-based hotkey position and collection size. */

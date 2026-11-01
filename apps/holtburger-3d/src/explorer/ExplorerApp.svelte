@@ -3,7 +3,9 @@
 	import { type WeenieCatalogCapability } from "../lib/host/weenie-catalog-capability";
 
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
-	import { APP_INPUT } from "../lib/input/app-input";
+	import { detectInputPlatform } from "../lib/input/input-platform";
+	import { AppInput } from "../lib/input/app-input";
+	import { createInputDefaults } from "../lib/input/input-defaults";
 	import { onMount } from "svelte";
 	import FrameMetricsOverlay, {
 		type FrameMetrics,
@@ -1900,7 +1902,9 @@
 				cameraController = new ExplorerCameraInputController({
 					inputGate,
 					keyboard,
-					input: APP_INPUT,
+					input: new AppInput(
+						createInputDefaults(detectInputPlatform(navigator.userAgent)),
+					),
 					canvas,
 					keyboardYawRadiansPerSecond(precisionActive) {
 						const controls = EXPLORER_TUNING.camera.controls;

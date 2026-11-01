@@ -7,7 +7,8 @@
 		ClientKeyboardConfiguration,
 		InputDigitIndex,
 	} from "../lib/input/input-contract";
-	import { type InputDisplayPlatform } from "../lib/input/input-presentation";
+	import type { InputPlatform } from "../lib/input/input-platform";
+
 	import type { UiIconDisplay } from "../app/ui-icon-repository";
 	import {
 		SPELL_BAR_INDICES,
@@ -36,7 +37,7 @@
 	interface Props {
 		/** Accepted spell shortcuts for visible hints and full descriptions. */
 		input: ClientKeyboardConfiguration;
-		displayPlatform: InputDisplayPlatform;
+		displayPlatform: InputPlatform;
 		/** Retained HUD anchors; natural extent is derived from measured theme geometry. */
 		placement: ClientHudPlacement;
 		/** Retained shape survives stance hiding and tab switches. */

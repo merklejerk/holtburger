@@ -84,7 +84,7 @@ export class ClientSettingsStore {
 	/** Assemble complete settings only after the persisted scale is known. Missing sections stay sparse on disk. */
 	async loadUser(context: unknown, mode: ClientSettingsReadMode) {
 		const request = clientUserSettingsContextSchema.parse(context);
-		const defaults = createDefaultClientUserSections();
+		const defaults = createDefaultClientUserSections(request.platform);
 		return this.#queueWrite((document) => {
 			if (mode === "fresh")
 				return {

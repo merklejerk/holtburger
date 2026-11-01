@@ -1,20 +1,13 @@
 import type { KeyBinding } from "./input-contract";
 
-/** Display vocabulary only; serialized bindings retain portable modifier names. */
-export type InputDisplayPlatform = "mac" | "windows" | "linux" | "unknown";
+import type { InputPlatform } from "./input-platform.js";
+
 type Modifier = "ctrl" | "alt" | "shift" | "meta";
 const MODIFIERS: readonly Modifier[] = ["ctrl", "alt", "shift", "meta"];
 
-export function inputDisplayPlatform(userAgent: string): InputDisplayPlatform {
-	if (/Macintosh|Mac OS X/i.test(userAgent)) return "mac";
-	if (/Windows/i.test(userAgent)) return "windows";
-	if (/Linux/i.test(userAgent)) return "linux";
-	return "unknown";
-}
-
 export function modifierName(
 	modifier: Modifier,
-	platform: InputDisplayPlatform,
+	platform: InputPlatform,
 ): string {
 	if (modifier === "ctrl") return platform === "mac" ? "Control" : "Ctrl";
 	if (modifier === "alt") return platform === "mac" ? "Option" : "Alt";
@@ -28,10 +21,7 @@ export function modifierName(
 				: "Meta";
 }
 
-function modifierGlyph(
-	modifier: Modifier,
-	platform: InputDisplayPlatform,
-): string {
+function modifierGlyph(modifier: Modifier, platform: InputPlatform): string {
 	if (platform === "mac")
 		return { ctrl: "⌃", alt: "⌥", shift: "⇧", meta: "⌘" }[modifier];
 	return {
@@ -87,7 +77,7 @@ function requiredModifiers(binding: KeyBinding): readonly Modifier[] {
 /** Full, accessible binding description; alternatives are kept in saved order. */
 export function formatInputBinding(
 	binding: KeyBinding,
-	platform: InputDisplayPlatform,
+	platform: InputPlatform,
 ): string {
 	const base = selfModifier(binding);
 	return [
@@ -101,7 +91,7 @@ export function formatInputBinding(
 /** Complete chord for a settings pill; Mac uses familiar modifier symbols. */
 export function formatInputPill(
 	binding: KeyBinding,
-	platform: InputDisplayPlatform,
+	platform: InputPlatform,
 ): string {
 	const base = selfModifier(binding);
 	if (platform !== "mac")
@@ -121,7 +111,7 @@ export function formatInputPill(
 
 export function formatInputBindings(
 	bindings: readonly KeyBinding[],
-	platform: InputDisplayPlatform,
+	platform: InputPlatform,
 ): string {
 	return bindings.length === 0
 		? "Unbound"
@@ -133,7 +123,7 @@ export function formatInputBindings(
 /** Compact first alternative for bounded HUD overlays. */
 export function compactInputHint(
 	bindings: readonly KeyBinding[],
-	platform: InputDisplayPlatform,
+	platform: InputPlatform,
 ): string | null {
 	const binding = bindings[0];
 	if (binding === undefined) return null;

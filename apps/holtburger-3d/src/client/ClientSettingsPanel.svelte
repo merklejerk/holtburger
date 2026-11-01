@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { type InputPlatform } from "../lib/input/input-platform";
+
 	import type {
 		ClientChatSuppressionSettings,
 		ClientLockInteractionSettings,
@@ -39,8 +41,8 @@
 		type ClientBindingRow,
 	} from "./client-binding-catalog";
 	import {
-		CLIENT_INPUT_DEFAULTS,
-		CLIENT_KEYBOARD_DEFAULTS,
+		createClientInputDefaults,
+		createClientKeyboardDefaults,
 	} from "./client-input-settings";
 	import { type TextureFilteringCapabilities } from "../lib/game/renderer/texture-filtering-policy";
 	import type {
@@ -62,7 +64,6 @@
 		formatInputBinding,
 		formatInputPill,
 		modifierName,
-		type InputDisplayPlatform,
 	} from "../lib/input/input-presentation";
 
 	export type SettingsTab = "graphics" | "audio" | "ui" | "input" | "gameplay";
@@ -102,7 +103,7 @@
 			overrides: ClientEnvironmentOverrides,
 		) => void;
 		readonly input: ClientInputConfiguration;
-		readonly displayPlatform: InputDisplayPlatform;
+		readonly displayPlatform: InputPlatform;
 		readonly textureFilteringCapabilities: TextureFilteringCapabilities | null;
 		readonly selectedTab: SettingsTab;
 		readonly onSelectTab: (tab: SettingsTab) => void;
@@ -296,7 +297,10 @@
 	): void {
 		proposeBindings(
 			row,
-			readClientBinding(CLIENT_KEYBOARD_DEFAULTS, row.reference),
+			readClientBinding(
+				createClientKeyboardDefaults(displayPlatform),
+				row.reference,
+			),
 			null,
 			source,
 		);
@@ -552,7 +556,8 @@
 				<button
 					type="button"
 					class="ui-button"
-					onclick={() => onInputChange(structuredClone(CLIENT_INPUT_DEFAULTS))}
+					onclick={() =>
+						onInputChange(createClientInputDefaults(displayPlatform))}
 					>Restore default input settings</button
 				>
 				<details class="ui-disclosure ui-disclosure-section" open>

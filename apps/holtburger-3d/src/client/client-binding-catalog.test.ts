@@ -4,7 +4,7 @@ import {
 } from "../lib/input/client-keyboard-bindings";
 import { describe, expect, it } from "vitest";
 import {
-	CLIENT_KEYBOARD_DEFAULTS,
+	createClientKeyboardDefaults,
 	clientKeyboardSettingsSchema,
 } from "./client-input-settings";
 import { ACTION_SLOT_INDICES } from "./client-action-bar-contract";
@@ -17,6 +17,8 @@ import {
 	replaceConflictingClientBindings,
 	presentClientBinding,
 } from "./client-binding-catalog";
+
+const defaults = createClientKeyboardDefaults("windows");
 
 function row(id: string) {
 	const match = CLIENT_BINDING_ROWS.find((candidate) => candidate.id === id);
@@ -34,23 +36,8 @@ const ctrlDigitTwo = {
 };
 
 describe("client binding catalog", () => {
-	it("defaults resting to unmodified N and fills missing saved bindings", () => {
-		const { cycleRestPosture, ...savedClient } =
-			CLIENT_KEYBOARD_DEFAULTS.client;
-		expect(cycleRestPosture).toEqual([
-			{ key: "n", shift: false, ctrl: false, alt: false, meta: false },
-		]);
-		const restored = clientKeyboardSettingsSchema.parse({
-			...CLIENT_KEYBOARD_DEFAULTS,
-			client: savedClient,
-		});
-		expect(restored.client.cycleRestPosture).toEqual(cycleRestPosture);
-		const binding = CLIENT_BINDING_ROWS.find(
-			(row) =>
-				row.reference.kind === "client" &&
-				row.reference.action === "cycleRestPosture",
-		);
-		expect(binding).toMatchObject({
+	it("presents rest posture among movement bindings", () => {
+		expect(row("client.cycleRestPosture")).toMatchObject({
 			label: "Cycle rest posture",
 			group: "Movement",
 		});
@@ -81,13 +68,13 @@ describe("client binding catalog", () => {
 
 	it("normalizes saved Space selectors without changing modifiers or alternate bindings", () => {
 		const restored = clientKeyboardSettingsSchema.parse({
-			...CLIENT_KEYBOARD_DEFAULTS,
+			...defaults,
 			client: {
-				...CLIENT_KEYBOARD_DEFAULTS.client,
+				...defaults.client,
 				preciseJump: [{ key: " ", ctrl: true }, { key: "F8" }],
 			},
 			character: {
-				...CLIENT_KEYBOARD_DEFAULTS.character,
+				...defaults.character,
 				jump: [{ key: " ", ctrl: false }],
 			},
 		});
@@ -101,14 +88,17 @@ describe("client binding catalog", () => {
 	it.each(["Interactable", "Creature"])(
 		"renames saved %s shortcuts without losing remaps or overriding smart combat bindings",
 		(legacy) => {
-			const savedClient = { ...CLIENT_KEYBOARD_DEFAULTS.client };
+			const savedClient = { ...defaults.client };
 			Reflect.deleteProperty(savedClient, "nextSmartCombat");
 			Reflect.deleteProperty(savedClient, "previousSmartCombat");
 			Reflect.set(savedClient, `next${legacy}`, [{ key: "F8" }]);
 			Reflect.set(savedClient, `previous${legacy}`, []);
 			Reflect.set(savedClient, "nextHostile", [{ key: "F9" }]);
 			Reflect.set(savedClient, "previousHostile", []);
-			const saved = { ...CLIENT_KEYBOARD_DEFAULTS, client: savedClient };
+			const saved = {
+				...defaults,
+				client: savedClient,
+			};
 			const restored = clientKeyboardSettingsSchema.parse(saved);
 			expect(restored.client.nextSmartCombat).toEqual([{ key: "F8" }]);
 			expect(restored.client.previousSmartCombat).toEqual([]);
@@ -136,11 +126,9 @@ describe("client binding catalog", () => {
 				alt: false,
 				meta: false,
 			};
-			const settings = replaceClientBinding(
-				CLIENT_KEYBOARD_DEFAULTS,
-				row(id).reference,
-				[binding],
-			);
+			const settings = replaceClientBinding(defaults, row(id).reference, [
+				binding,
+			]);
 			expect(
 				conflictingClientBindings(settings, panel, binding, null).map(
 					(entry) => entry.id,
@@ -150,7 +138,7 @@ describe("client binding catalog", () => {
 	});
 	it("distinguishes a panel toggle from a shifted precise-jump binding", () => {
 		const settings = replaceClientBinding(
-			CLIENT_KEYBOARD_DEFAULTS,
+			defaults,
 			row("client.preciseJump").reference,
 			[{ key: "j", shift: true }],
 		);
@@ -167,24 +155,21 @@ describe("client binding catalog", () => {
 		const toggle = row("client.toggleChatHistory");
 		expect(
 			conflictingClientBindings(
-				CLIENT_KEYBOARD_DEFAULTS,
+				defaults,
 				toggle,
 				{ key: "c", ctrl: true },
 				null,
 			),
 		).toEqual([]);
 		expect(
-			conflictingClientBindings(
-				CLIENT_KEYBOARD_DEFAULTS,
-				toggle,
-				{ key: "Enter" },
-				null,
-			).map((entry) => entry.id),
+			conflictingClientBindings(defaults, toggle, { key: "Enter" }, null).map(
+				(entry) => entry.id,
+			),
 		).toContain("client.chat");
 	});
 	it("covers the independent persisted keyboard address universe", () => {
 		const expected: string[] = [];
-		for (const [group, entries] of Object.entries(CLIENT_KEYBOARD_DEFAULTS)) {
+		for (const [group, entries] of Object.entries(defaults)) {
 			for (const [name, value] of Object.entries(entries)) {
 				if (Array.isArray(value)) expected.push(`${group}.${name}`);
 				else if (typeof value === "object")
@@ -199,7 +184,7 @@ describe("client binding catalog", () => {
 
 	it("presents current alternatives, empty bindings, and platform modifiers for Select self", () => {
 		const reference = { kind: "client", action: "selectSelf" } as const;
-		const settings = replaceClientBinding(CLIENT_KEYBOARD_DEFAULTS, reference, [
+		const settings = replaceClientBinding(defaults, reference, [
 			{ code: "KeyQ", meta: true },
 			{ key: "é" },
 		]);
@@ -221,12 +206,10 @@ describe("client binding catalog", () => {
 
 	it("keeps power remaps independent while checking live precise controls", () => {
 		const power = row("preciseJump.increasePower");
-		const settings = replaceClientBinding(
-			CLIENT_KEYBOARD_DEFAULTS,
-			power.reference,
-			[{ key: "i" }],
-		);
-		expect(settings.character).toBe(CLIENT_KEYBOARD_DEFAULTS.character);
+		const settings = replaceClientBinding(defaults, power.reference, [
+			{ key: "i" },
+		]);
+		expect(settings.character).toBe(defaults.character);
 		expect(presentClientBinding(settings, power.reference, "linux").hint).toBe(
 			"I",
 		);
@@ -273,17 +256,9 @@ describe("client binding catalog", () => {
 			CLIENT_BINDING_ROWS.length,
 		);
 		for (const row of CLIENT_BINDING_ROWS) {
-			for (const binding of readClientBinding(
-				CLIENT_KEYBOARD_DEFAULTS,
-				row.reference,
-			)) {
+			for (const binding of readClientBinding(defaults, row.reference)) {
 				expect(
-					conflictingClientBindings(
-						CLIENT_KEYBOARD_DEFAULTS,
-						row,
-						binding,
-						null,
-					),
+					conflictingClientBindings(defaults, row, binding, null),
 					row.id,
 				).toEqual([]);
 			}
@@ -301,19 +276,16 @@ describe("client binding catalog", () => {
 			throw new Error("Missing movement row");
 		const binding = { key: "s", ctrl: false, alt: false, meta: false };
 		const conflicts = conflictingClientBindings(
-			CLIENT_KEYBOARD_DEFAULTS,
+			defaults,
 			forward,
 			binding,
 			null,
 		);
 		expect(conflicts.map((row) => row.id)).toEqual([backward.id]);
 		const next = replaceConflictingClientBindings(
-			CLIENT_KEYBOARD_DEFAULTS,
+			defaults,
 			forward,
-			[
-				...readClientBinding(CLIENT_KEYBOARD_DEFAULTS, forward.reference),
-				binding,
-			],
+			[...readClientBinding(defaults, forward.reference), binding],
 			conflicts,
 			null,
 		);
@@ -329,7 +301,7 @@ describe("client binding catalog", () => {
 			throw new Error("Missing client cancellation row");
 		expect(
 			conflictingClientBindings(
-				CLIENT_KEYBOARD_DEFAULTS,
+				defaults,
 				cancel,
 				{
 					key: "Enter",
@@ -354,7 +326,7 @@ describe("client binding catalog", () => {
 			binding,
 		);
 		const conflicts = conflictingClientBindings(
-			CLIENT_KEYBOARD_DEFAULTS,
+			defaults,
 			first,
 			binding,
 			ctrlDigitTwo,
@@ -372,11 +344,7 @@ describe("client binding catalog", () => {
 			alt: false,
 			meta: false,
 		};
-		const settings = replaceClientBinding(
-			CLIENT_KEYBOARD_DEFAULTS,
-			second.reference,
-			[legacy],
-		);
+		const settings = replaceClientBinding(defaults, second.reference, [legacy]);
 		const binding = captureClientBinding(ctrlDigitTwo);
 		const conflicts = conflictingClientBindings(
 			settings,
@@ -409,20 +377,12 @@ describe("client binding catalog", () => {
 		};
 		const binding = captureClientBinding(numpad);
 		expect(binding).toMatchObject({ code: "Numpad2" });
-		expect(
-			conflictingClientBindings(
-				CLIENT_KEYBOARD_DEFAULTS,
-				first,
-				binding,
-				numpad,
-			),
-		).toEqual([]);
-		const shared = readClientBinding(
-			CLIENT_KEYBOARD_DEFAULTS,
-			combat.reference,
-		)[0];
-		expect(
-			conflictingClientBindings(CLIENT_KEYBOARD_DEFAULTS, spell, shared, null),
-		).toEqual([]);
+		expect(conflictingClientBindings(defaults, first, binding, numpad)).toEqual(
+			[],
+		);
+		const shared = readClientBinding(defaults, combat.reference)[0];
+		expect(conflictingClientBindings(defaults, spell, shared, null)).toEqual(
+			[],
+		);
 	});
 });

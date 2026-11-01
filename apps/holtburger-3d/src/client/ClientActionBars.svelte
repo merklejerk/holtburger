@@ -41,11 +41,11 @@
 	} from "./client-action-bar-layout";
 	import { CLIENT_TUNING, CLIENT_HUD_SNAP_TUNING } from "./client-tuning";
 	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
-	import type { InputDisplayPlatform } from "../lib/input/input-presentation";
+	import type { InputPlatform } from "../lib/input/input-platform";
 	interface Props {
 		/** Accepted user keyboard map for accurate shortcut hints. */
 		readonly input: ClientKeyboardConfiguration;
-		readonly displayPlatform: InputDisplayPlatform;
+		readonly displayPlatform: InputPlatform;
 		/** Character-owned complete action-bar configuration. */
 		readonly bars: readonly ClientActionBar[];
 		readonly onBarsChange: (bars: readonly ClientActionBar[]) => void;

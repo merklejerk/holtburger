@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { presentClientBinding } from "./client-binding-catalog";
 	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
-	import type { InputDisplayPlatform } from "../lib/input/input-presentation";
+	import type { InputPlatform } from "../lib/input/input-platform";
 	import { onMount } from "svelte";
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { useClientInput } from "./client-input-context";
@@ -21,7 +21,7 @@
 	interface Props {
 		/** Accepted keyboard settings keep contextual inspection hints reactive. */
 		readonly inputSettings: ClientKeyboardConfiguration;
-		readonly displayPlatform: InputDisplayPlatform;
+		readonly displayPlatform: InputPlatform;
 		readonly model: ClientTradeState;
 		/** Shared entity selection also covers the partner’s preview items. */
 		readonly selectedGuid: number | null;

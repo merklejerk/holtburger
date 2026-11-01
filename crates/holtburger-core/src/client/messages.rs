@@ -1024,6 +1024,7 @@ impl ClientRuntime {
                 Ok(())
             }
             GameMessage::PlaySound(data) => {
+                self.observe_lock_sound(data.target, data.sound_id);
                 self.observe_use_sound(data.target, data.sound_id);
                 self.route_entity_cue(
                     data.target,

@@ -1,3 +1,4 @@
+import { probeClientLockFeedback } from "./client-lock-feedback-probe";
 import { probeClientCombatTargetIndicator } from "./client-combat-target-indicator-probe";
 import {
 	ClientEntityMirror,
@@ -52,6 +53,7 @@ const CYCLE_POLICY: CycleSelectionPolicy = {
 /** Real browser input with production acquisition owners and asset-free accepted host records. */
 export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	const combatTargetIndicator = await probeClientCombatTargetIndicator();
+	const lockFeedback = await probeClientLockFeedback();
 	const entities = new ClientEntityMirror();
 	const motion = new DynamicEntityMirror();
 	const listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();
@@ -633,6 +635,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		return {
 			passed: true,
 			combatTargetIndicator,
+			lockFeedback,
 			holdDelayMs: CLIENT_TUNING.entitySelection.holdDelayMs,
 			holdAndFocusChecks: true,
 			immediateTargetChecks: true,

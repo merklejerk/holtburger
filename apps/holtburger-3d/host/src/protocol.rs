@@ -138,6 +138,7 @@ pub enum HostEvent {
     ClientSalvageResult(holtburger_core::client::salvage::SalvageSubmitResult),
     ClientItemUseResult(holtburger_core::client::item_use::ItemUseResult),
     ClientItemUseFinished(holtburger_core::client::item_use::ItemUseFinished),
+    ClientLockFeedback(holtburger_core::client::lock_feedback::LockFeedback),
     ClientLockedTarget {
         /// Original guarded direct-use receipt identity.
         sequence: u32,
@@ -589,6 +590,9 @@ impl ClientEventSink for StdioEventSink {
             crate::client_projection::ClientHostEvent::ItemUseResult(result) => {
                 HostEvent::ClientItemUseResult(result)
             }
+            crate::client_projection::ClientHostEvent::LockFeedback(feedback) => {
+                HostEvent::ClientLockFeedback(feedback)
+            }
             crate::client_projection::ClientHostEvent::ItemUseFinished(result) => {
                 HostEvent::ClientItemUseFinished(result)
             }
@@ -1015,6 +1019,32 @@ mod tests {
                 "event": "client-item-use-finished", "payload": { "sequence": 42, "outcome": {
                     "kind": "completed", "error": "KeyDoesntFitThisLock", "message": "The key does not fit."
                 }}
+            })
+        );
+    }
+
+    #[test]
+    fn target_lock_feedback_reaches_the_wire_without_request_attribution() {
+        use holtburger_core::client::lock_feedback::{LockFeedback, LockFeedbackOutcome};
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let sink = StdioEventSink::new(sender);
+        let event = holtburger_core::ClientViewEvent::LockFeedback(LockFeedback {
+            target: holtburger_common::Guid(9),
+            generation: 2,
+            world_generation: 3,
+            outcome: LockFeedbackOutcome::Failed,
+        });
+        sink.publish_client_event(crate::client_projection::project_client_event(event).unwrap())
+            .unwrap();
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("expected target lock feedback")
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "event": "client-lock-feedback", "payload": {
+                    "target": 9, "generation": 2, "worldGeneration": 3, "outcome": "failed"
+                }
             })
         );
     }

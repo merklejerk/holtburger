@@ -819,6 +819,70 @@ describe("ClientGameplayPresentation", () => {
 		await presentation.destroy();
 	});
 
+	it("projects session lock feedback independently of selection and rejects stale incarnations", async () => {
+		const snapshot = currentState(0x0101_0001);
+		const transport = new FakeClientTransport({
+			...snapshot,
+			dynamic: {
+				...snapshot.dynamic,
+				entities: [...snapshot.dynamic.entities, view(7)],
+			},
+		});
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const canvas = fakeCanvas();
+		const presentation = new ClientGameplayPresentation({
+			canvas,
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+		});
+		try {
+			await presentation.start();
+			await vi.waitFor(() =>
+				expect(presentation.frame(1000).rendered).toBe(true),
+			);
+			const camera = runtime.primaryViews.at(-1);
+			if (camera === undefined)
+				throw new Error("Fixture has no presented camera.");
+			runtime.entityFrame = entityFrameInCamera(camera, 7, new Vec3(0, 0, -10));
+			const feedback = {
+				target: 7,
+				generation: 1,
+				worldGeneration: snapshot.worldGeneration,
+				outcome: "failed",
+			};
+			transport.emit("client-lock-feedback", {
+				...feedback,
+				worldGeneration: snapshot.worldGeneration + 1,
+			});
+			expect(presentation.readLockFeedbackFrames()).toEqual([]);
+			transport.emit("client-lock-feedback", { ...feedback, generation: 2 });
+			expect(presentation.readLockFeedbackFrames()).toEqual([]);
+			transport.emit("client-lock-feedback", feedback);
+			const frames = presentation.readLockFeedbackFrames();
+			expect(frames).toHaveLength(1);
+			expect(frames[0].x).toBeCloseTo(canvas.clientWidth / 2);
+			expect(frames[0].y).toBeCloseTo(canvas.clientHeight / 2);
+			presentation.setSelectedEntityGuid(8);
+			expect(presentation.readLockFeedbackFrames()[0].target).toBe(7);
+			transport.emit("client-lock-feedback", {
+				...feedback,
+				outcome: "unlocked",
+			});
+			expect(presentation.readLockFeedbackFrames()[0].outcome).toBe("unlocked");
+			transport.emit("client-dynamic-entity", {
+				kind: "removed",
+				guid: 7,
+				generation: 1,
+			});
+			expect(presentation.readLockFeedbackFrames()).toEqual([]);
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+		}
+	});
+
 	it("tracks the auto-attack identity independently and hides when engagement ends or realization disappears", async () => {
 		const engagement = {
 			desired: {

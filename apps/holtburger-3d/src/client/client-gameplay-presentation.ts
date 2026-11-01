@@ -1,3 +1,8 @@
+import {
+	ClientLockFeedbackEffects,
+	type ClientLockFeedbackFrame,
+} from "./client-lock-feedback";
+import { projectClientEntityCenter } from "./client-entity-projection";
 import type { BarberPreview, BarberSnapshot } from "./client-barber-contract";
 import type { DynamicPresentationOverride } from "../lib/game/runtime/dynamic-presentation-override";
 import {
@@ -25,7 +30,11 @@ import {
 } from "../lib/assets/ac-frame";
 import type { ActiveRegionSource } from "../lib/assets/active-region-source";
 import type { LandblockProfileSource } from "../lib/assets/landblock-profile-source";
-import { CLIENT_TUNING, CLIENT_COMBAT_EFFECTS_TUNING } from "./client-tuning";
+import {
+	CLIENT_TUNING,
+	CLIENT_COMBAT_EFFECTS_TUNING,
+	CLIENT_LOCK_FEEDBACK_TUNING,
+} from "./client-tuning";
 import type { ResolvedSceneEnvironment } from "../lib/game/environment/scene-environment";
 import {
 	bindClientPresentationEnvironment,
@@ -455,6 +464,7 @@ export class ClientGameplayPresentation {
 	#pendingFieldOfView: number | null = null;
 	#sceneInterestCoordinator: SceneInterestRequestCoordinator | null = null;
 	#unsubscribe: (() => void) | null = null;
+	readonly #lockFeedback = new ClientLockFeedbackEffects();
 	#playerGuid: number | null = null;
 	#startPromise: Promise<void> | null = null;
 	#sceneTargetKey: string | null = null;
@@ -592,6 +602,35 @@ export class ClientGameplayPresentation {
 	setSelectedEntityGuid(guid: number | null): void {
 		this.#selectedEntityGuid = guid;
 		this.#activeResources?.runtime.setSelectedEntityGuid(guid);
+	}
+
+	/** Pull target-local overlays against the same presented camera as combat indicators. */
+	readLockFeedbackFrames(): readonly ClientLockFeedbackFrame[] {
+		const view = this.#lastPrimaryView;
+		return this.#lockFeedback.readFrames(
+			performance.now(),
+			this.#session.state().worldGeneration,
+			(feedback) => {
+				if (
+					view === null ||
+					this.#session.mirror.entity(feedback.target, feedback.generation) ===
+						null
+				)
+					return null;
+				const state =
+					this.#activeResources?.runtime.dynamicEntityPresentationState(
+						feedback.target,
+					);
+				if (state?.kind !== "realized") return null;
+				return projectClientEntityCenter({
+					bounds: state.frame.localBounds,
+					placement: state.frame.placement,
+					view,
+					cssWidth: this.#canvas.clientWidth,
+					cssHeight: this.#canvas.clientHeight,
+				});
+			},
+		);
 	}
 
 	/** Pull the combat bound and presented camera without publishing frame-hot UI state. */
@@ -1325,6 +1364,7 @@ export class ClientGameplayPresentation {
 		// Revoke camera registration before joining work that may depend on its receipt.
 		await attempt("camera-stop", () => this.camera.stop());
 		// Withdraw desired entities before awaiting startup/realization so late visuals cannot publish.
+		this.#lockFeedback.clear();
 		this.#unsubscribe?.();
 		this.#unsubscribe = null;
 		this.#sceneInterestCoordinator?.invalidate();
@@ -1435,6 +1475,18 @@ export class ClientGameplayPresentation {
 	#receive(event: ClientLifecycleSessionEvent): void {
 		if (this.#destroyed) return;
 		switch (event.type) {
+			case "lock-feedback":
+				if (
+					!this.#session.mirror.isAwaitingSnapshot() &&
+					event.feedback.worldGeneration ===
+						this.#session.state().worldGeneration
+				)
+					this.#lockFeedback.accept(
+						event.feedback,
+						performance.now(),
+						CLIENT_LOCK_FEEDBACK_TUNING,
+					);
+				return;
 			case "combat-outcome":
 				if (
 					this.#session.mirror.isAwaitingSnapshot() ||
@@ -1453,6 +1505,7 @@ export class ClientGameplayPresentation {
 				);
 				return;
 			case "resyncing":
+				this.#lockFeedback.clear();
 				this.#activeResources?.runtime.clearCombatEffects();
 				return;
 			case "barber-updated":
@@ -1461,6 +1514,7 @@ export class ClientGameplayPresentation {
 				);
 				return;
 			case "current-state":
+				this.#lockFeedback.clear();
 				this.#receiveCurrentState(event.state);
 				this.#reconcileEntityNameplates();
 				return;
@@ -1468,6 +1522,7 @@ export class ClientGameplayPresentation {
 				this.#reconcileEntityNameplates();
 				return;
 			case "lifecycle":
+				if (event.lifecycle.kind !== "in-world") this.#lockFeedback.clear();
 				return;
 			case "local-player-established":
 				this.#playerGuid = event.identity.playerGuid;
@@ -1501,9 +1556,11 @@ export class ClientGameplayPresentation {
 				this.#refreshEnvironment(performance.now());
 				return;
 			case "presentation-discontinuity":
+				this.#lockFeedback.clear();
 				this.#receivePresentationDiscontinuity(event.discontinuity);
 				return;
 			case "exit-requested":
+				this.#lockFeedback.clear();
 				// Session outcomes belong to ClientApp; ending authority is not a renderer failure.
 				this.#setStatus("stopped", event.exit.diagnostic);
 				return;
@@ -1617,6 +1674,7 @@ export class ClientGameplayPresentation {
 				this.#reconcileEntityNameplate(event.entity.identity.guid);
 				return;
 			case "removed":
+				this.#lockFeedback.remove(event.guid, event.generation);
 				if (event.guid === this.#playerGuid)
 					this.#invalidatePlayerPresentationConvergence();
 				this.#activeResources?.runtime.removeDynamicEntity(

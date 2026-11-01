@@ -1381,6 +1381,7 @@ pub enum ClientHostEvent {
     /// Correlated semantic item-use outcome.
     ItemUseResult(holtburger_core::client::item_use::ItemUseResult),
     ItemUseFinished(holtburger_core::client::item_use::ItemUseFinished),
+    LockFeedback(holtburger_core::client::lock_feedback::LockFeedback),
     LockedTarget {
         /// Original guarded direct-use receipt identity.
         sequence: u32,
@@ -1788,6 +1789,7 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         ClientViewEvent::SalvageSubmitted(result) => Some(ClientHostEvent::SalvageResult(result)),
         ClientViewEvent::ItemUseResult(result) => Some(ClientHostEvent::ItemUseResult(result)),
         ClientViewEvent::ItemUseFinished(result) => Some(ClientHostEvent::ItemUseFinished(result)),
+        ClientViewEvent::LockFeedback(feedback) => Some(ClientHostEvent::LockFeedback(feedback)),
         ClientViewEvent::ItemUseTargetResult(result) => {
             Some(ClientHostEvent::ItemUseTargetResult(result))
         }

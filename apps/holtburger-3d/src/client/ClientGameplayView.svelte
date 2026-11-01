@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ClientLockFeedback from "./ClientLockFeedback.svelte";
+	import type { ClientLockFeedbackFrame } from "./client-lock-feedback";
 	import { applyUiScale } from "../app/ui-scale";
 	import { logicalClientHudViewport } from "./client-hud-layout";
 	import { presentClientBinding } from "./client-binding-catalog";
@@ -388,6 +390,8 @@
 		readonly onExamineSpell: (spellId: number) => void;
 		readonly onCloseInspection: () => void;
 		readonly readCombatTargetFrame: () => ClientCombatTargetFrame | null;
+		/** Pull transient target feedback independently of helper visibility. */
+		readonly readLockFeedbackFrames: () => readonly ClientLockFeedbackFrame[];
 		readonly readTargetIndicatorFrame: () => ClientTargetIndicatorFrame | null;
 		readonly selectedEntityGuid: number | null;
 		readonly hoveredEntityGuid: number | null;
@@ -582,6 +586,7 @@
 		onCloseInspection,
 		readTargetIndicatorFrame,
 		readCombatTargetFrame,
+		readLockFeedbackFrames,
 		selectedEntityGuid,
 		hoveredEntityGuid,
 		entityCollisionDisabled,
@@ -1172,6 +1177,7 @@
 		/>
 	{/key}
 	<ClientCombatTargetIndicator readFrame={readCombatTargetFrame} />
+	<ClientLockFeedback readFrames={readLockFeedbackFrames} />
 	<ClientTargetIndicator
 		readFrame={readTargetIndicatorFrame}
 		selectedGuid={selectedEntityGuid}

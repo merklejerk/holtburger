@@ -1737,6 +1737,9 @@
 		return frameRateSampler?.readFrameRates() ?? null;
 	}
 
+	function readLockFeedbackFrames() {
+		return gameplayPresentation?.readLockFeedbackFrames() ?? [];
+	}
 	function readCombatTargetFrame() {
 		return gameplayPresentation?.readCombatTargetFrame() ?? null;
 	}
@@ -2647,6 +2650,7 @@
 			{readFrameRates}
 			{readTargetIndicatorFrame}
 			{readCombatTargetFrame}
+			{readLockFeedbackFrames}
 			{readSelectedEntityDisplay}
 			{spells}
 			{enchantments}

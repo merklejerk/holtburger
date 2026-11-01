@@ -1,3 +1,4 @@
+import type { ClientLockFeedback } from "../../client/client-lock-feedback-contract";
 import type { ClientGameplayPreferences } from "../../client/client-gameplay-options-contract";
 import type {
 	SalvagePreviewResult,
@@ -287,6 +288,7 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-salvage-result",
 	"client-item-use-result",
 	"client-item-use-finished",
+	"client-lock-feedback",
 	"client-locked-target",
 	"client-death-locations",
 	"client-item-use-target-result",
@@ -404,6 +406,7 @@ export interface HostEventPayloadMap {
 	"client-salvage-result": SalvageSubmitResult;
 	"client-item-use-result": ClientItemUseResult;
 	"client-item-use-finished": ClientItemUseFinished;
+	"client-lock-feedback": ClientLockFeedback;
 	"client-locked-target": ClientLockedTarget;
 	"client-death-locations": DeathLocationResult;
 	"client-item-use-target-result": ClientItemUseTargetResult;

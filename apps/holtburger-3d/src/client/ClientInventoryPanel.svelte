@@ -313,21 +313,9 @@
 						pending={view?.currenciesPending ?? true}
 						{displays}
 					>
-						{#if pyrealDisplay?.kind === "ready" || pyrealDisplay?.kind === "degraded"}
-							<span class="inventory-currency-icon"
-								><UiIcon
-									display={pyrealDisplay}
-									name="Pyreals"
-									tooltipLabel="Pyreals"
-								/></span
-							>
-						{:else}
-							<UiIcon
-								display={pyrealDisplay}
-								name="Pyreals:"
-								tooltipLabel="Pyreals"
-							/>
-						{/if}
+						<span class="inventory-currency-icon"
+							><UiIcon display={pyrealDisplay} /></span
+						>
 						<span>{pyrealText}</span>
 					</InventoryCurrencyOverlay>
 					<span

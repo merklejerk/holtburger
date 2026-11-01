@@ -57,7 +57,7 @@
 <div class="inspection-artwork" aria-label={`${name} artwork`}>
 	{#if artwork.kind === "ready" && icons !== null}
 		<div class="inspection-artwork-image">
-			<UiIcon {display} {name} tooltipLabel={`${name} artwork`} />
+			<UiIcon {display} />
 		</div>
 		{#if issue !== null}
 			<p

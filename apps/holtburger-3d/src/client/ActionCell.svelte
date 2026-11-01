@@ -112,7 +112,8 @@
 	data-empty={content === null}
 	data-dimmed={content !== null && !available}
 	aria-label={tooltip}
-	title={tooltip}
+	title=""
+	data-ui-tooltip={tooltip}
 	aria-pressed={selected}
 	onclick={(event) => onactivate(clientInput.actionBarAlternate(event))}
 >
@@ -122,9 +123,7 @@
 		<ItemCellVisual
 			cooldownAnimation={cooldownStatus.animation}
 			{display}
-			name={label}
 			{presentation}
-			tooltipLabel={tooltip}
 		/>
 	{/if}
 	{#if activeAlternate !== null}<span

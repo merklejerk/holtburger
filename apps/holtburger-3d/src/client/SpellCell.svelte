@@ -65,7 +65,8 @@
 	data-dimmed={spell !== null && !available}
 	aria-label={accessibleLabel}
 	aria-disabled={!available}
-	title={accessibleLabel}
+	title=""
+	data-ui-tooltip={accessibleLabel}
 	oncontextmenu={(event) => {
 		event.preventDefault();
 		if (spell !== null) onexamine(spell);
@@ -74,11 +75,7 @@
 		if (available) onactivate();
 	}}
 >
-	{#if spell !== null}<UiIcon
-			{display}
-			name={label}
-			tooltipLabel={accessibleLabel}
-		/>{/if}
+	{#if spell !== null}<UiIcon {display} />{/if}
 	{#if shortcut?.hint != null}<span class="ui-shortcut-hint" aria-hidden="true"
 			>{shortcut.hint}</span
 		>{/if}

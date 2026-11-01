@@ -21,6 +21,40 @@ function fixture() {
 }
 
 describe("game keyboard routing", () => {
+	it("dismisses a hint before routing a fresh Escape, without draining on repeat", () => {
+		const { keyboard, game } = fixture();
+		const dismiss = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+		const retire = keyboard.bindHintDismissal(dismiss);
+		keyboard.keydown(keyEvent("Escape"));
+		keyboard.keydown(keyEvent("Escape", true));
+		expect(dismiss).toHaveBeenCalledOnce();
+		expect(game.keydown).not.toHaveBeenCalled();
+		keyboard.keyup(keyEvent("Escape"));
+		keyboard.keydown(keyEvent("Escape"));
+		expect(game.keydown).toHaveBeenCalledOnce();
+		retire();
+		keyboard.keydown(keyEvent("Escape"));
+		expect(dismiss).toHaveBeenCalledTimes(2);
+	});
+
+	it("keeps gesture cancellation ahead of hints and enforces one hint owner", () => {
+		const { keyboard } = fixture();
+		const dismiss = vi.fn(() => true);
+		const retire = keyboard.bindHintDismissal(dismiss);
+		expect(() => keyboard.bindHintDismissal(dismiss)).toThrow(
+			"already registered",
+		);
+		keyboard.bindEscapeCancellation(() => true);
+		keyboard.keydown(keyEvent("Escape"));
+		expect(dismiss).not.toHaveBeenCalled();
+		retire();
+		const replacement = keyboard.bindHintDismissal(dismiss);
+		retire();
+		expect(() => keyboard.bindHintDismissal(dismiss)).toThrow(
+			"already registered",
+		);
+		replacement();
+	});
 	it("routes unhandled keys and repeats to the foreground page and restores the previous page on teardown", () => {
 		const { keyboard } = fixture();
 		const element = () =>

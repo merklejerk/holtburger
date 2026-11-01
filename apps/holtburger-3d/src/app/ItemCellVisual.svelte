@@ -8,12 +8,8 @@
 	interface Props {
 		/** Leased artwork; callers retain ownership across DOM commits. */
 		readonly display: UiIconDisplay | undefined;
-		/** Plain fallback name when artwork is unavailable. */
-		readonly name: string;
 		/** Item status composed by the same decision that labels the parent button. */
 		readonly presentation: ItemCellPresentation;
-		/** Complete tooltip, including caller-owned action hints. */
-		readonly tooltipLabel: string;
 		/** Hide the redundant marker where the surrounding UI already identifies equipment. */
 		readonly showEquipped?: boolean;
 		/** Active fill inputs, independent of icon artwork and countdown text updates. */
@@ -21,17 +17,13 @@
 	}
 	const {
 		display,
-		name,
 		presentation,
-		tooltipLabel,
 		showEquipped = true,
 		cooldownAnimation = null,
 	}: Props = $props();
 </script>
 
-<span class="item-cell-art" data-drag-preview
-	><UiIcon {display} {name} {tooltipLabel} /></span
->
+<span class="item-cell-art" data-drag-preview><UiIcon {display} /></span>
 {#if cooldownAnimation !== null}
 	{#key `${cooldownAnimation.deadlineMs}:${cooldownAnimation.durationSeconds}`}
 		<ItemCooldownFill animation={cooldownAnimation} />

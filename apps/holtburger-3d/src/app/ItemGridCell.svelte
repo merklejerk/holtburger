@@ -105,7 +105,8 @@
 	data-template-wcid={templateWcid}
 	data-dimmed={dimmed}
 	data-item-guid={itemGuid}
-	title={presentation.label}
+	title=""
+	data-ui-tooltip={presentation.label}
 	aria-label={presentation.label}
 	aria-pressed={selected}
 	disabled={disabled || empty}
@@ -117,11 +118,9 @@
 	{#if !empty || placeholderReady}
 		<ItemCellVisual
 			display={empty ? placeholderDisplay : display}
-			name={label}
 			{presentation}
 			cooldownAnimation={cooldownStatus.animation}
 			{showEquipped}
-			tooltipLabel={presentation.label}
 		/>
 	{/if}
 </button>

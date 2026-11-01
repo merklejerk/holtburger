@@ -19,7 +19,7 @@
 	import SigilIcon from "../assets/icons/equipment-sigil.svg?component";
 	import type { InventoryEquipmentRow } from "./client-inventory-equipment";
 	interface Props {
-		/** Slot identity supplies the symbol and the tooltip, including layer/side. */
+		/** Slot identity supplies the symbol and accessible name, including layer/side. */
 		readonly slot: InventoryEquipmentRow["slot"];
 	}
 	const { slot }: Props = $props();
@@ -46,7 +46,7 @@
 	const Icon = $derived(icons[slot.symbol]);
 </script>
 
-<span role="img" aria-label={slot.label} title={slot.label}>
+<span role="img" aria-label={slot.label}>
 	<Icon
 		style="display: inline; width: calc(var(--ui-inventory-equipment-slot-icon-size) * var(--ui-icon-scale)); height: calc(var(--ui-inventory-equipment-slot-icon-size) * var(--ui-icon-scale)); color: var(--ui-inventory-equipment-slot-icon-color); stroke-width: 1.5"
 	/>

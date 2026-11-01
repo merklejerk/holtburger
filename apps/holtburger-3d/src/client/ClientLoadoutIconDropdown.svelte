@@ -67,7 +67,8 @@
 	aria-label="Choose loadout badge"
 	aria-haspopup="menu"
 	aria-expanded={open}
-	title={`Click to choose a badge. ${content === null ? "Include at least one slot to drag and save." : `Drag to an action cell to save.\n${loadoutTooltip(content)}`}`}
+	title=""
+	data-ui-tooltip={`Click to choose a badge. ${content === null ? "Include at least one slot to drag and save." : `Drag to an action cell to save.\n${loadoutTooltip(content)}`}`}
 	onclick={() => (open = !open)}
 >
 	<span

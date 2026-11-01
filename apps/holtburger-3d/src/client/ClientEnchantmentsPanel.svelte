@@ -240,11 +240,7 @@
 		>
 			<span class="spell-icon">
 				{#if row.spell?.artwork.kind === "icon"}
-					<UiIcon
-						display={displays.get(row.spell.artwork.key)}
-						name="…"
-						tooltipLabel={row.spell.name}
-					/>
+					<UiIcon display={displays.get(row.spell.artwork.key)} />
 				{:else}<span
 						title={row.spell?.artwork.kind === "failed"
 							? row.spell.artwork.detail

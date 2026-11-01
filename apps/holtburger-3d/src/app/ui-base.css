@@ -1225,10 +1225,10 @@
 	}
 	.ui-theme .ui-tooltip {
 		padding: 3px 6px;
-		border: 1px solid var(--ui-color-border);
-		border-radius: var(--ui-radius-control);
-		background: var(--ui-color-well);
-		box-shadow: var(--ui-surface-shadow, none);
+		border: 0;
+		border-radius: 2px;
+		background: color-mix(in srgb, var(--ui-color-well) 85%, transparent);
+		box-shadow: none;
 		color: var(--ui-color-text);
 		font-size: calc(var(--ui-font-size-caption) * var(--ui-text-scale));
 	}

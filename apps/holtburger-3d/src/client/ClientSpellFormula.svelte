@@ -81,11 +81,7 @@
 				<li>
 					<span class="component-icon">
 						{#if row.key !== null}
-							<UiIcon
-								display={displays.get(row.key)}
-								name="…"
-								tooltipLabel={row.reference.name}
-							/>
+							<UiIcon display={displays.get(row.key)} />
 						{:else}<span title={row.reference.name}>?</span>{/if}
 					</span>
 					<span

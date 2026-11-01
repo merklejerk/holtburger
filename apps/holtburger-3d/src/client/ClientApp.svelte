@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UiTooltipHost from "../app/UiTooltipHost.svelte";
 	import {
 		ClientRestPostureController,
 		REST_POSTURE_LABELS,
@@ -2491,6 +2492,7 @@
 	style:--ui-font-heading={fontCss(userSettings.ui.fonts.heading)}
 	style:--ui-font-mono={fontCss(userSettings.ui.fonts.mono)}
 >
+	{#if interactionRoot !== null}<UiTooltipHost root={interactionRoot} />{/if}
 	<!-- A mounted dialog receives a non-null item until teardown, including nested snippets. -->
 	{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
 		<ClientMessageDialog

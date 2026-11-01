@@ -132,14 +132,15 @@
 								</p>
 							{/if}
 							{#each side.items as cell (cell.guid)}
-								{@const label = `${cell.name}${cell.count > 1 ? ` ×${cell.count.toLocaleString()}` : ""}. Examine (${examineShortcut.description}) or right-click to inspect.`}
+								{@const label = `${cell.name}${cell.count > 1 ? `\nQuantity: ${cell.count.toLocaleString()}` : ""}\nExamine (${examineShortcut.description}) or right-click to inspect.`}
 								<button
 									type="button"
 									class="trade-cell ui-item-cell ui-item-selection ui-hud-control"
 									data-trade-item={cell.guid}
 									aria-pressed={selectedGuid === cell.guid}
 									aria-label={label}
-									title={label}
+									title=""
+									data-ui-tooltip={label}
 									disabled={!cell.described || !current.ready}
 									onclick={() => onSelectItem(cell.guid)}
 									ondblclick={() => onExamineItem(cell.guid)}
@@ -152,7 +153,6 @@
 										display={cell.iconKey === null
 											? undefined
 											: displays.get(cell.iconKey)}
-										name={cell.name}
 										presentation={itemCellPresentation({
 											label: cell.name,
 											count: cell.count,
@@ -160,7 +160,6 @@
 											structure: null,
 											capacity: null,
 										})}
-										tooltipLabel={label}
 									/>
 								</button>
 							{/each}

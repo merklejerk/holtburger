@@ -1,4 +1,6 @@
 <script lang="ts">
+	import UiTooltipHost from "../../app/UiTooltipHost.svelte";
+	import { provideAppInputPolicy } from "../../lib/input/app-input-policy-context";
 	import { onMount, tick } from "svelte";
 	import ClientItemInspection from "../../client/ClientItemInspection.svelte";
 	import { decodeObjectInspectionResult } from "../../client/client-object-inspection-contract";
@@ -37,15 +39,23 @@
 		{ groupId: 1000, durationSeconds: 15 },
 	];
 	let mounted = $state(true);
-	let root: HTMLDivElement;
+	const { keyboard } = provideAppInputPolicy();
+	let fixtureRoot = $state<HTMLDivElement>();
 
 	function cell(guid: number): HTMLButtonElement {
+		const root = fixtureRoot;
+		if (root === undefined) throw new Error("Cooldown fixture is not mounted");
 		const element = root.querySelector<HTMLButtonElement>(
 			`[data-item-guid="${guid}"]`,
 		);
 		if (element === null)
 			throw new Error(`Missing cooldown fixture cell ${guid}`);
 		return element;
+	}
+	function label(guid: number): string {
+		const text = cell(guid).dataset.uiTooltip;
+		if (text === undefined) throw new Error("Missing cell tooltip label");
+		return text;
 	}
 	function require(condition: boolean, message: string): void {
 		if (!condition) throw new Error(message);
@@ -54,6 +64,8 @@
 		new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 	async function probe() {
+		const root = fixtureRoot;
+		if (root === undefined) throw new Error("Cooldown fixture is not mounted");
 		await tick();
 		let idleMutations = 0;
 		let artworkMutations = 0;
@@ -79,7 +91,7 @@
 		await tick();
 		require(root.querySelectorAll("[data-item-cooldown]").length ===
 			2, "Only duration-bearing active cells should animate");
-		require(cell(4).title.includes(
+		require(label(4).includes(
 			"Ready in 3s",
 		), "Missing duration must still show shared cooldown status");
 		require(root
@@ -93,9 +105,9 @@
 		for (const guid of [1, 2, 4])
 			tooltip.observe(cell(guid), {
 				attributes: true,
-				attributeFilter: ["title", "aria-label"],
+				attributeFilter: ["data-ui-tooltip", "aria-label"],
 			});
-		const titles = [1, 2, 4].map((guid) => cell(guid).title);
+		const labels = [1, 2, 4].map((guid) => label(guid));
 		const fill = cell(1).querySelector<HTMLElement>("[data-item-cooldown]");
 		if (fill === null) throw new Error("Missing active overlay");
 		const animation = fill.getAnimations()[0];
@@ -109,11 +121,9 @@
 			.querySelector("[data-inspection-cooldown]")
 			?.textContent?.includes("2s") ===
 			true, "Inspection countdown did not advance at its own cadence");
-		require(titles.every(
-			(title, index) => title === cell([1, 2, 4][index]).title,
-		) &&
+		require(labels.every((value, index) => value === label([1, 2, 4][index])) &&
 			tooltipMutations ===
-				0, "Countdown ticks rebuilt native tooltips or accessible labels");
+				0, "Countdown ticks rebuilt cell labels or accessible labels");
 		tooltip.disconnect();
 		require(fill === cell(1).querySelector("[data-item-cooldown]") &&
 			fill.getAnimations()[0] ===
@@ -134,9 +144,7 @@
 		await delay(1400);
 		require(root.querySelectorAll("[data-item-cooldown]").length ===
 			0, "Overlay did not expire without a server removal");
-		require(!cell(4).title.includes(
-			"Ready in",
-		), "Cooldown status survived expiry");
+		require(!label(4).includes("Ready in"), "Cooldown status survived expiry");
 		require(idleMutations === 0 &&
 			artworkMutations === 0, "Countdown mutated unrelated cells or artwork");
 		require(images.every(
@@ -151,23 +159,23 @@
 		});
 		mounted = true;
 		await tick();
-		require(cell(1).title.includes(
+		require(label(1).includes(
 			"Ready in 8s",
 		), "Remounted item did not find the existing group timer");
-		const remountedTitle = cell(1).title;
+		const remountedLabel = label(1);
 		let cadenceMutations = 0;
 		const cadenceObserver = new MutationObserver((records) => {
 			cadenceMutations += records.length;
 		});
 		cadenceObserver.observe(cell(1), {
 			attributes: true,
-			attributeFilter: ["title", "aria-label"],
+			attributeFilter: ["data-ui-tooltip", "aria-label"],
 		});
 		await delay(ITEM_COOLDOWN_CADENCE_SECONDS.tooltip * 1000 - 200);
-		require(cell(1).title === remountedTitle &&
+		require(label(1) === remountedLabel &&
 			cadenceMutations === 0, "Tooltip refreshed before its cadence elapsed");
 		await delay(400);
-		require(cell(1).title !== remountedTitle &&
+		require(label(1) !== remountedLabel &&
 			cadenceMutations ===
 				2, "Tooltip did not publish one countdown update at its cadence");
 		cadenceObserver.disconnect();
@@ -183,7 +191,7 @@
 		});
 		await tick();
 		require(root.querySelectorAll("[data-item-cooldown]").length === 2 &&
-			cell(1).title.includes(
+			label(1).includes(
 				"Ready in 11s",
 			), "Fresh character baseline did not restore mounted item cooldowns");
 		require(root
@@ -210,18 +218,21 @@
 	}
 
 	onMount(() => {
+		const retireKeyboard = keyboard.mount(document);
 		const harnessGlobal = window as typeof window & {
 			/** Focused nonvisual browser assertions over the production item cell. */
 			__HOLTBURGER_ITEM_COOLDOWNS__?: typeof probe;
 		};
 		harnessGlobal.__HOLTBURGER_ITEM_COOLDOWNS__ = probe;
 		return () => {
+			retireKeyboard();
 			delete harnessGlobal.__HOLTBURGER_ITEM_COOLDOWNS__;
 		};
 	});
 </script>
 
-<div bind:this={root} class="ui-theme ui-item-grid">
+<div bind:this={fixtureRoot} class="ui-theme ui-item-grid">
+	{#if fixtureRoot}<UiTooltipHost root={fixtureRoot} />{/if}
 	{#if mounted}
 		{#each cells as cooldown, index}
 			<ItemGridCell

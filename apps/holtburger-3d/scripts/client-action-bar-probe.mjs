@@ -214,7 +214,7 @@ async function runActionBarProbe(client, evaluateExpression, screenshotPath) {
    throw new Error('Equipped action indicator did not update');
   })()`);
 		assert.equal(marked.marked, expected);
-		assert.equal(marked.label.includes("(Equipped)"), expected);
+		assert.equal(marked.label.split("\n").includes("Equipped"), expected);
 	};
 	await drag(
 		'.equipment-row[aria-label="Chest armor"] .item-grid-cell[data-item-guid="95"]',

@@ -109,11 +109,7 @@
 				<div class="currency-row">
 					<dt>
 						<span class="currency-icon"
-							><UiIcon
-								display={displays.get(row.iconKey)}
-								name=""
-								tooltipLabel={row.name}
-							/></span
+							><UiIcon display={displays.get(row.iconKey)} /></span
 						><span>{row.name}</span>
 					</dt>
 					<dd>{row.count.toLocaleString()}</dd>

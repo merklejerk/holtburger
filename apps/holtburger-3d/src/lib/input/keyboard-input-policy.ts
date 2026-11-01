@@ -141,6 +141,8 @@ export class KeyboardInputPolicy {
 	} | null = null;
 	/** A pointer gesture must see Escape before a focused scope consumes it. */
 	#escapeCancellation: (() => boolean) | null = null;
+	/** One passive hint can dismiss without changing the surrounding keyboard owner. */
+	#hintDismissal: (() => boolean) | null = null;
 	/** Opt-in app contexts ordered from least to most recently engaged. */
 	readonly #escapeContexts: EscapeContextEntry[] = [];
 	/** One mode-specific controller, independent of pointer handlers. */
@@ -151,6 +153,12 @@ export class KeyboardInputPolicy {
 	constructor(private readonly viewport: ViewportInputGate) {
 		// The gate and policy share the app lifetime, including periods without a game controller.
 		viewport.attach((mode) => this.#cancel(mode));
+	}
+
+	/** Most recently opened modal; DOM order does not determine interaction ownership. */
+	get activeModal(): HTMLDialogElement | null {
+		const modal = this.#modals.at(-1);
+		return modal === undefined ? null : modal.element;
 	}
 
 	/** Whether keyboard commands can currently enter the world context. */
@@ -236,6 +244,19 @@ export class KeyboardInputPolicy {
 		this.#escapeCancellation = cancel;
 		return () => {
 			if (this.#escapeCancellation === cancel) this.#escapeCancellation = null;
+		};
+	}
+
+	/** Dismiss one passive hint before its surrounding UI, without transferring focus. */
+	bindHintDismissal(dismiss: () => boolean): () => void {
+		if (this.#hintDismissal !== null)
+			throw new Error("A hint dismissal participant is already registered.");
+		this.#hintDismissal = dismiss;
+		let active = true;
+		return () => {
+			if (!active) return;
+			active = false;
+			this.#hintDismissal = null;
 		};
 	}
 
@@ -480,6 +501,12 @@ export class KeyboardInputPolicy {
 			this.returnToGame();
 			event.preventDefault();
 			event.stopImmediatePropagation();
+			return;
+		}
+		if (event.key === "Escape" && this.#hintDismissal?.()) {
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			this.#presses.set(key, "cancelled");
 			return;
 		}
 		const owner = this.#owner;

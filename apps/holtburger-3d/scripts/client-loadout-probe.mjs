@@ -426,7 +426,7 @@ export async function probeLoadouts(client, evaluateExpression) {
 		assert.equal(stored.kind, "loadout");
 		assert.equal(stored.name, "Travel");
 		const savedTooltip = await read(
-			`document.querySelector(${JSON.stringify(target)}).title`,
+			`document.querySelector(${JSON.stringify(target)}).dataset.uiTooltip`,
 		);
 		assert.equal(savedTooltip.split("\n")[0], '0: Loadout "Travel"');
 		assert.equal(savedTooltip.split("Travel").length - 1, 1);

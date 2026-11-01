@@ -126,7 +126,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		`${api}.bindingSettings.replace({...${JSON.stringify(inputSettings)}, client: {...${JSON.stringify(inputSettings.client)}, examine: [{key: "F8"}]}})`,
 	);
 	await wait(
-		`document.querySelector(${JSON.stringify(offer)})?.title.includes('Examine (F8)')`,
+		`document.querySelector(${JSON.stringify(offer)})?.dataset.uiTooltip.includes('Examine (F8)')`,
 	);
 	await read(`document.querySelector(${JSON.stringify(offer)}).focus()`);
 	for (const type of ["keyDown", "keyUp"])

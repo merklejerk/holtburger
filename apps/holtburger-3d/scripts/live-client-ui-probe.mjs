@@ -198,7 +198,7 @@ try {
                 url: image.src, width: image.naturalWidth, height: image.naturalHeight,
                 count: image.closest("[data-item-guid]").querySelector(".item-count-overlay")?.textContent ?? null,
             })),
-            fallbacks: document.querySelectorAll('.client-inventory .ui-icon-fallback').length,
+            placeholders: document.querySelectorAll('.client-inventory .ui-icon-placeholder').length,
             containers: [...document.querySelectorAll('.client-inventory section')].map(section => section.getAttribute('aria-label')),
         })`;
 		const before = await evaluate(client, inventoryState);

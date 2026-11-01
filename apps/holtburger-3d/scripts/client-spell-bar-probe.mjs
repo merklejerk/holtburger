@@ -127,7 +127,7 @@ export async function probeSpellBar(
 	await settled();
 	assert.deepEqual(
 		await read(
-			`(() => ({ hint: document.querySelector('[data-spell-cell="0"] .ui-shortcut-hint')?.textContent, tooltip: document.querySelector('[data-spell-cell="0"]').title, tabHint: document.querySelector('.spell-tabs button').textContent, tab: document.querySelector('.spell-tabs button').title }))()`,
+			`(() => ({ hint: document.querySelector('[data-spell-cell="0"] .ui-shortcut-hint')?.textContent, tooltip: document.querySelector('[data-spell-cell="0"]').dataset.uiTooltip, tabHint: document.querySelector('.spell-tabs button').textContent, tab: document.querySelector('.spell-tabs button').title }))()`,
 		),
 		{
 			hint: "1",
@@ -758,7 +758,9 @@ export async function probeSpellBar(
 	})()`);
 	assert.deepEqual(casterGeometry, { left: true, square: true });
 	assert.match(
-		await read(`document.querySelector('[data-caster-spell] button').title`),
+		await read(
+			`document.querySelector('[data-caster-spell] button').dataset.uiTooltip`,
+		),
 		/Ctrl \+ Shift \+ 1/,
 	);
 	await rightClick("[data-caster-spell] button");

@@ -116,7 +116,7 @@
 					{@const failure = view.appraisalFailures.find(
 						(failure) => failure.guid === guid,
 					)}
-					{@const label = `${presentation.label}. ${failure !== undefined ? `${failure.reason} Use Retry to load salvage details.` : needsDetails ? "Loading salvage details automatically." : "Right-click or Examine to inspect. Drag out of the queue to remove."}`}
+					{@const label = `${presentation.label}\n${failure !== undefined ? `${failure.reason}\nUse Retry to load salvage details.` : needsDetails ? "Loading salvage details automatically." : "Right-click or Examine to inspect.\nDrag out of the queue to remove."}`}
 					<ItemQueueCell
 						type="button"
 						removeLabel={`Remove ${name} from salvage queue`}
@@ -126,7 +126,8 @@
 						data-salvage-pending-details={needsDetails}
 						aria-pressed={selectedGuid === guid}
 						aria-label={label}
-						title={label}
+						title=""
+						data-ui-tooltip={label}
 						onclick={() => onSelectItem(guid)}
 						ondblclick={() => onExamineItem(guid)}
 						oncontextmenu={(event) => {
@@ -138,9 +139,7 @@
 							display={iconKey === undefined
 								? undefined
 								: displays.get(iconKey)}
-							{name}
 							{presentation}
-							tooltipLabel={label}
 						/>
 						{#if needsDetails}<span
 								class="salvage-details ui-hud-group"

@@ -11,6 +11,14 @@ import { EQUIPMENT_SLOTS } from "../../client/client-inventory-equipment";
 import type { ClientInputConfiguration } from "../../lib/input/input-contract";
 import { formatInputBindings } from "../../lib/input/input-presentation";
 
+/** Read the cell-owned label independently of decorative artwork state. */
+function cellTooltip(cell: HTMLElement): string {
+	const label = cell.dataset.uiTooltip;
+	if (label === undefined)
+		throw new Error("Missing inventory cell tooltip label");
+	return label;
+}
+
 /** Browser-only fixture record; wire delivery still passes through the real session decoder. */
 export function inventoryFixtureItem(
 	guid: number,
@@ -380,10 +388,10 @@ export async function probeClientInventory(options: {
 			".item-cell-meter-fill",
 		);
 		if (max === null) {
-			if (fill !== null || containerCell().title.includes("["))
+			if (fill !== null || cellTooltip(containerCell()).includes("["))
 				throw new Error("Unknown container capacity displayed an indicator.");
 		} else if (
-			!containerCell().title.endsWith(`[1 / ${max}]`) ||
+			!cellTooltip(containerCell()).endsWith(`[1 / ${max}]`) ||
 			fill === null ||
 			Math.abs(
 				Number.parseFloat(fill.style.height) -
@@ -404,7 +412,7 @@ export async function probeClientInventory(options: {
 	});
 	await sample();
 	if (
-		!containerCell().title.endsWith("[1 / 24]") ||
+		!cellTooltip(containerCell()).endsWith("[1 / 24]") ||
 		containerCell().closest(".contents-grid") === null
 	)
 		throw new Error(
@@ -1187,8 +1195,8 @@ export async function probeClientInventory(options: {
 				"Stack quantities did not remain entity-specific or leaked onto Main Pack.",
 			);
 		if (
-			!cell(20).getAttribute("aria-label")?.includes("quantity: 2") ||
-			!cell(22).title.includes("20,100")
+			!cell(20).getAttribute("aria-label")?.includes("Quantity: 2") ||
+			!cellTooltip(cell(22)).includes("20,100")
 		)
 			throw new Error(
 				"Stack quantity is missing from accessible labels/tooltips.",
@@ -1204,8 +1212,8 @@ export async function probeClientInventory(options: {
 			});
 			await tick();
 			if (
-				cell(22).title !==
-				"Inventory item 22 (quantity: 20,100, Ctrl + F9 to split)"
+				cellTooltip(cell(22)) !==
+				"Inventory item 22\nQuantity: 20,100\nCtrl + F9 to split"
 			)
 				throw new Error(
 					"Stack tooltip did not follow the accepted split binding.",
@@ -1215,7 +1223,7 @@ export async function probeClientInventory(options: {
 				client: { ...previousInput.client, splitStack: [] },
 			});
 			await tick();
-			if (cell(22).title !== "Inventory item 22 (quantity: 20,100)")
+			if (cellTooltip(cell(22)) !== "Inventory item 22\nQuantity: 20,100")
 				throw new Error("Unbound split action retained a keyboard hint.");
 		} finally {
 			options.changeInput(previousInput);
@@ -1281,8 +1289,8 @@ export async function probeClientInventory(options: {
 			await sample();
 			const label = `[${current}/50]`;
 			if (
-				cell(22).title !==
-					`Inventory item 22 (quantity: 20,100, ${splitHint}) ${label}` ||
+				cellTooltip(cell(22)) !==
+					`Inventory item 22\nQuantity: 20,100\n${splitHint}\nStructure: ${label}` ||
 				selectedHeading()?.textContent !== `Inventory item 22 (20,100) ${label}`
 			)
 				throw new Error("Structure values did not reach both item labels.");
@@ -1354,8 +1362,8 @@ export async function probeClientInventory(options: {
 			await sample();
 			if (
 				cell(22).querySelector(".item-cell-meter") !== null ||
-				cell(22).title !==
-					`Inventory item 22 (quantity: 20,100, ${splitHint})` ||
+				cellTooltip(cell(22)) !==
+					`Inventory item 22\nQuantity: 20,100\n${splitHint}` ||
 				selectedHeading()?.textContent !== "Inventory item 22 (20,100)"
 			)
 				throw new Error("Full or incomplete structure retained its indicator.");
@@ -1386,12 +1394,10 @@ export async function probeClientInventory(options: {
 			appearance(20, 0x06000002);
 			await sample();
 			if (
-				cell(20).querySelector(".ui-icon-fallback") === null ||
+				cell(20).querySelector('[data-artwork-state="loading"]') === null ||
 				cell(20).disabled
 			)
-				throw new Error(
-					"Loading artwork did not leave a usable named fallback.",
-				);
+				throw new Error("Loading artwork did not leave a usable named cell.");
 			button("Close Inventory").click();
 			await sample();
 			const whileHeld = options.readPreparedIconCount();
@@ -1415,28 +1421,14 @@ export async function probeClientInventory(options: {
 		const afterFailure = options.readPreparedIconCount();
 		if (
 			badge(20)?.textContent !== "7" ||
-			!cell(20)
-				.querySelector(".ui-icon-fallback")
-				?.getAttribute("title")
-				?.includes("quantity: 7")
-		)
-			throw new Error(
-				"Missing-art fallback lost its count or count-bearing diagnostic tooltip.",
-			);
-		if (
-			!cell(20)
-				.querySelector(".ui-icon-fallback")
-				?.getAttribute("title")
-				?.includes("Injected missing HUD fixture image")
-		)
-			throw new Error(
-				"Missing-art detail was absent from the fallback tooltip.",
-			);
-		if (
-			cell(20).querySelector(".ui-icon-fallback") === null ||
+			!cellTooltip(cell(20)).includes("Quantity: 7") ||
+			!cell(20).getAttribute("aria-label")?.includes("Quantity: 7") ||
+			cell(20).querySelector('[data-artwork-state="failed"]') === null ||
 			cell(20).disabled
 		)
-			throw new Error("Missing artwork blocked its named fallback.");
+			throw new Error(
+				"Failed artwork lost its placeholder, item identity, quantity or action availability.",
+			);
 		selection.select(null);
 		cell(20).click();
 		if (selection.selectedGuid() !== 20)
@@ -1629,7 +1621,7 @@ export async function probeClientInventory(options: {
 		equippedCells.some(
 			(cell) =>
 				cell.querySelector(".item-equipped") !== null ||
-				!cell.title.includes("(Equipped)"),
+				!cellTooltip(cell).split("\n").includes("Equipped"),
 		)
 	)
 		throw new Error(

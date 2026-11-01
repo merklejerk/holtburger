@@ -1,4 +1,5 @@
 <script lang="ts">
+	import UiTooltipHost from "../../app/UiTooltipHost.svelte";
 	import { provideClientHudGeometry } from "../../client/client-hud-geometry-context";
 	import { clientMinimapLandmark } from "../../client/client-minimap-policy";
 	import { CameraLookController } from "../../lib/game/controls/camera-look-controller";
@@ -6131,6 +6132,9 @@
 		style:--ui-text-scale={userSettings.ui.textScale}
 		style:--ui-icon-scale={userSettings.ui.iconScale}
 	>
+		{#if !showcase && interactionRoot !== null}<UiTooltipHost
+				root={interactionRoot}
+			/>{/if}
 		{#each dialogPresentation === null ? [] : [dialogPresentation] as presentation}
 			<ClientMessageDialog
 				{presentation}

@@ -146,7 +146,7 @@
 
 		/* Compact overlays use the window's metal at a smaller scale. Their existing
 	   backings, modality, focus ownership and placement are unchanged. */
-		.ui-theme :is(.ui-overlay-surface:not(.ui-dialog), .ui-tooltip) {
+		.ui-theme .ui-overlay-surface:not(.ui-dialog) {
 			border-image-source: var(--ui-travelers-frame);
 			border-image-slice: 16;
 			border-image-width: 6px;

@@ -4,13 +4,13 @@ import { itemStructureDisplay, type ItemStructure } from "./item-structure";
 
 /** Item facts needed by both inventory and bound-action cells. */
 export interface ItemCellFacts {
-	/** Remaining time sampled at the tooltip cadence so native hover text stays readable. */
+	/** Remaining time sampled at the cell label's bounded reading cadence. */
 	readonly cooldownSeconds?: number;
 	/** Base accessible name, including any caller-owned slot context. */
 	readonly label: string;
 	/** Stack quantity; null when absent or unknown. */
 	readonly count: number | null;
-	/** Consumer-owned action hint displayed beside a stack quantity. */
+	/** Consumer-owned action hint displayed on its own line after a stack quantity. */
 	readonly quantityActionHint?: string | null;
 	/** Remaining uses or durability supplied by the server. */
 	readonly structure: ItemStructure | null;
@@ -30,7 +30,7 @@ interface ItemCellMeter {
 
 /** One presentation decision shared by artwork, overlays, and accessible labels. */
 export interface ItemCellPresentation {
-	/** Complete item label before control-specific hints. */
+	/** Item identity followed by one line per status or action hint. */
 	readonly label: string;
 	/** Visible stack quantity, omitted for single items. */
 	readonly count: number | null;
@@ -40,18 +40,22 @@ export interface ItemCellPresentation {
 	readonly equipped: boolean;
 }
 
-/** Compose item status once so icon diagnostics and button tooltips cannot disagree. */
+/** Compose item status once for visual indicators, accessible names and cell tooltips. */
 export function itemCellPresentation(
 	facts: ItemCellFacts,
 ): ItemCellPresentation {
 	const count = facts.count !== null && facts.count > 1 ? facts.count : null;
-	let label = facts.label;
+	const lines = [facts.label];
 	let meter: ItemCellMeter | null = null;
-	if (count !== null)
-		label += ` (quantity: ${formatQuantity(count)}${facts.quantityActionHint ? `, ${facts.quantityActionHint}` : ""})`;
+	if (count !== null) {
+		lines.push(`Quantity: ${formatQuantity(count)}`);
+		if (facts.quantityActionHint) lines.push(facts.quantityActionHint);
+	}
 	const capacity = facts.capacity;
 	if (capacity !== null) {
-		label += ` [${formatQuantity(capacity.used)} / ${formatQuantity(capacity.max)}]`;
+		lines.push(
+			`Contents: [${formatQuantity(capacity.used)} / ${formatQuantity(capacity.max)}]`,
+		);
 		if (capacity.used > 0) {
 			// Occupancy at or above a zero limit is full, without dividing by zero.
 			const fraction =
@@ -61,12 +65,12 @@ export function itemCellPresentation(
 	} else {
 		const structure = itemStructureDisplay(facts.structure);
 		if (structure !== null) {
-			label += ` ${structure.label}`;
+			lines.push(`Structure: ${structure.label}`);
 			meter = { fraction: structure.fraction, hue: structure.fraction * 120 };
 		}
 	}
-	if (facts.equipped) label += " (Equipped)";
+	if (facts.equipped) lines.push("Equipped");
 	if (facts.cooldownSeconds !== undefined && facts.cooldownSeconds > 0)
-		label += ` (Ready in ${facts.cooldownSeconds}s; shared cooldown)`;
-	return { label, count, meter, equipped: facts.equipped };
+		lines.push(`Ready in ${facts.cooldownSeconds}s; shared cooldown`);
+	return { label: lines.join("\n"), count, meter, equipped: facts.equipped };
 }

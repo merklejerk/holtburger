@@ -196,14 +196,15 @@
 											offer.price.kind === "quoted" &&
 											availableCurrency !== undefined &&
 											offer.price.amount > availableCurrency}
-										{@const label = `${cell.name} — ${price}; stock: ${offer.supply === null ? "unlimited" : offer.supply.toLocaleString()}.${unaffordable ? ` Not enough ${current.currency.name} for this offer.` : ""} Double-click or Enter to ${offer.stackable ? "choose a buying quantity" : "buy"}; Examine (${examineShortcut.description}) or right-click to inspect.`}
+										{@const label = `${cell.name}\nPrice: ${price}\nStock: ${offer.supply === null ? "unlimited" : offer.supply.toLocaleString()}${unaffordable ? `\nNot enough ${current.currency.name} for this offer.` : ""}\nDouble-click or Enter to ${offer.stackable ? "choose a buying quantity" : "buy"}.\nExamine (${examineShortcut.description}) or right-click to inspect.`}
 										<button
 											type="button"
 											class="vendor-offer-row ui-item-selection"
 											data-vendor-offer={offer.guid}
 											data-vendor-guid={current.vendor}
 											aria-label={label}
-											title={label}
+											title=""
+											data-ui-tooltip={label}
 											aria-pressed={selected === offer.guid}
 											disabled={locked || offer.supply === 0}
 											onclick={() => (selected = offer.guid)}
@@ -214,11 +215,7 @@
 											}}
 										>
 											<span class="offer-icon"
-												><UiIcon
-													display={displays.get(cell.iconKey)}
-													name={cell.name}
-													tooltipLabel={label}
-												/></span
+												><UiIcon display={displays.get(cell.iconKey)} /></span
 											>
 											<span class="offer-name"
 												>{cell.name}{#if offer.stack_count > 1}
@@ -297,7 +294,7 @@
 									</h3>
 									<div class="queue-grid">
 										{#each cells as cell (cell.key)}
-											{@const label = `${cell.name}: ${cell.amount.toLocaleString()}, ${cell.total.toLocaleString()} ${currency.name}. Click to select; Examine (${examineShortcut.description}) or right-click to inspect.`}
+											{@const label = `${cell.name}\nQuantity: ${cell.amount.toLocaleString()}\nTotal: ${cell.total.toLocaleString()} ${currency.name}\nClick to select.\nExamine (${examineShortcut.description}) or right-click to inspect.`}
 											<ItemQueueCell
 												type="button"
 												removeLabel={`Remove ${cell.name} from ${side === "buy" ? "buying" : "selling"} queue`}
@@ -305,7 +302,8 @@
 												onremove={() => act(() => model.remove(cell))}
 												data-vendor-queued-item={cell.sources[0]}
 												aria-label={label}
-												title={label}
+												title=""
+												data-ui-tooltip={label}
 												aria-pressed={selected === cell.sources[0]}
 												onclick={() => (selected = cell.sources[0])}
 												oncontextmenu={(event) => {
@@ -315,9 +313,7 @@
 											>
 												<ItemCellVisual
 													display={displays.get(cell.iconKey)}
-													name={cell.name}
 													presentation={presentation(cell.name, cell.amount)}
-													tooltipLabel={label}
 												/>
 											</ItemQueueCell>
 										{/each}

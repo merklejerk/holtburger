@@ -126,9 +126,9 @@
 					{@const binding = bindings.find(
 						(candidate) => candidate.slot === slot.mask,
 					)}
-					{@const label = `${slot.label}: ${binding?.item == null ? "Empty (unequip)" : binding.name}`}
+					{@const label = `${slot.label}\n${binding?.item == null ? "Empty (unequip)" : binding.name}`}
 					<div class="loadout-slot">
-						<div class="loadout-slot-heading">
+						<div class="loadout-slot-heading" title={slot.label}>
 							<EquipmentSlotIcon {slot} /><input
 								type="checkbox"
 								aria-label={`Include ${slot.label}`}
@@ -143,7 +143,8 @@
 							data-loadout-slot={slot.mask}
 							data-item-guid={binding?.item ?? undefined}
 							data-empty={binding?.item == null}
-							title={label}
+							title=""
+							data-ui-tooltip={label}
 							aria-label={label}
 							aria-pressed={included.has(slot.mask)}
 							onclick={() => toggle(slot.mask, !included.has(slot.mask))}
@@ -151,7 +152,6 @@
 							{#if binding !== undefined && binding.item !== null}
 								<ItemCellVisual
 									display={displays.get(binding.item)}
-									name={binding.name}
 									presentation={itemCellPresentation({
 										label,
 										count: null,
@@ -159,7 +159,6 @@
 										capacity: null,
 										equipped: false,
 									})}
-									tooltipLabel={label}
 								/>
 							{:else}<EquipmentSlotIcon {slot} />{/if}
 						</button>

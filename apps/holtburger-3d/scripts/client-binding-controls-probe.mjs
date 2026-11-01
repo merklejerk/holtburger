@@ -278,7 +278,9 @@ export async function probeBindingControls(client, evaluateExpression) {
 			/focus: F11/,
 		);
 		assert.match(
-			await read(`document.querySelector('[data-action-cell="1"]').title`),
+			await read(
+				`document.querySelector('[data-action-cell="1"]').dataset.uiTooltip`,
+			),
 			/F12/,
 		);
 		await key("F11");
@@ -305,7 +307,9 @@ export async function probeBindingControls(client, evaluateExpression) {
 			`document.querySelector('[data-spell-cell="0"] .ui-shortcut-hint')?.textContent === 'F9'`,
 		);
 		assert.match(
-			await read(`document.querySelector('[data-spell-cell="0"]').title`),
+			await read(
+				`document.querySelector('[data-spell-cell="0"]').dataset.uiTooltip`,
+			),
 			/key: F9/,
 		);
 		assert.equal(
@@ -323,7 +327,7 @@ export async function probeBindingControls(client, evaluateExpression) {
 		);
 		caster = await read(`${api}.spellBarProbe.caster(3,true)`);
 		await until(
-			`document.querySelector('[data-caster-spell] button')?.title.includes('F10')`,
+			`document.querySelector('[data-caster-spell] button')?.dataset.uiTooltip.includes('F10')`,
 		);
 		await key("F10");
 		await read(`${api}.spellBarProbe.resolveCaster()`);

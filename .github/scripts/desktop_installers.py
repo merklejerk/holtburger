@@ -113,8 +113,8 @@ def probe_installed(executable: Path, profile: Path, server_name: str) -> None:
 
 
 @contextmanager
-def windows_file_lock(path: Path):
-    """Hold a real Windows sharing lock; this is not a simulated installer result."""
+def windows_delete_lock(path: Path):
+    """Deny real deletion while allowing compatible read/write observers."""
     import ctypes
     from ctypes import wintypes
 
@@ -124,7 +124,9 @@ def windows_file_lock(path: Path):
     kernel.CreateFileW.restype = wintypes.HANDLE
     kernel.CloseHandle.argtypes = [wintypes.HANDLE]
     kernel.CloseHandle.restype = wintypes.BOOL
-    handle = kernel.CreateFileW(str(path), 0x80000000, 0, None, 3, 0, None)
+    # FILE_SHARE_READ | FILE_SHARE_WRITE permits CI readers; omitting
+    # FILE_SHARE_DELETE blocks precisely the access used by installer cleanup.
+    handle = kernel.CreateFileW(str(path), 0x80000000, 0x1 | 0x2, None, 3, 0, None)
     if handle == ctypes.c_void_p(-1).value:
         raise ctypes.WinError(ctypes.get_last_error())
     try:
@@ -206,12 +208,11 @@ def verify_windows_installer(native: Path, installer: Path, compiler: Path, work
         for executable in ["h3d/holtburger-3d.exe", "h3d/resources/holtburger-3d-host.exe"]:
             for program, options, label in [(installer, [f"/DIR={install}"], "Installer"),
                                             (uninstaller, [], "Uninstaller")]:
-                with windows_file_lock(payload / executable):
+                with windows_delete_lock(payload / executable):
                     result = run_installer(program, options)
                     if result.returncode == 0:
                         raise ValueError(f"{label} accepted a locked payload")
-                # An exclusive Windows lock also denies this verifier read access.
-                # Release it before hashing the payload, then reacquire for the next operation.
+                # Verify retained bytes between independent locked operations.
                 verify_payload(native, payload)
     finally:
         if uninstaller.exists():

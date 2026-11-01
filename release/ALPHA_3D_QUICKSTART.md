@@ -22,10 +22,14 @@ owned program payload, including obsolete files. A locked payload stops installa
 quit the running copy and retry. Interrupted installation can be repaired by rerunning
 setup. There is no in-app updater or guaranteed atomic rollback.
 
-On macOS, open `holtburger-3d-VERSION-aarch64-apple-darwin.dmg` and copy
-`holtburger-3d.app` into Applications. For an update, quit the existing application,
-drag the new app into the same location, and choose Replace. Eject the disk image
-after copying. Keep the accompanying quickstart and notices available in the DMG.
+On macOS, double-click `holtburger-3d-VERSION-aarch64-apple-darwin.dmg` to open its
+contents in Finder. Inside that window, drag `holtburger-3d` (the app; Finder usually
+hides its `.app` extension) onto the Applications shortcut beside it. Then open
+Finder's Applications folder and launch `holtburger-3d`.
+The `.dmg` is the download container; the `.app` inside it is what you install.
+For an update, quit the existing application, drag the new app into the same location,
+and choose Replace. Eject the disk image after copying. Keep the accompanying
+quickstart and notices available in the DMG.
 
 Updates preserve the existing Electron user profile, including launcher profiles,
 saved credentials, themes, and settings. Keep user files and retail assets outside
@@ -84,8 +88,14 @@ GBM, and ALSA. The release manifest records linkage from the native build runner
 Windows packages are not publisher-signed. macOS apps are ad-hoc signed for bundle
 integrity, without Developer ID signing or notarization. Neither the installer format
 nor an integrity signature establishes a trusted publisher. Windows/macOS may warn
-or block launch, and macOS may not offer Open Anyway. If macOS reports a trusted download from this
-repository as damaged, remove quarantine only from the extracted app, then retry:
+or block launch. If macOS says Apple could not verify the app, click Done, then open
+Apple menu → System Settings → Privacy & Security. Scroll to Security and use Open
+Anyway beside the blocked app, then confirm Open. This control is in Settings,
+not the initial warning dialog. See [Apple's instructions](https://support.apple.com/en-us/102445).
+
+Some macOS versions or warning types may not offer Open Anyway. If macOS reports a
+trusted download from this repository as damaged, remove quarantine only from the
+extracted app, then retry:
 
 ```sh
 xattr -dr com.apple.quarantine ./h3d/holtburger-3d.app

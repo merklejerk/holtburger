@@ -29,6 +29,10 @@ solve locally. Reduced movement and this request policy are specific to the CLI 
 Windows packages are not publisher-signed. macOS apps use ad-hoc integrity signing,
 without Developer ID signing or notarization; its quickstart has the app-specific
 quarantine workaround. Installer formats do not bypass OS publisher-trust checks.
+The user verified the Apple Silicon DMG from
+[diagnostic run 41258522177](https://github.com/merklejerk/holtburger/actions/runs/41258522177):
+after copying the app into Applications, first launch succeeded through System
+Settings → Privacy & Security → Open Anyway, without a Terminal workaround.
 Automated build/resource/identity/startup and installer checks do
 not establish GPU, audio, input, scaling, Gatekeeper, or SmartScreen acceptance.
 

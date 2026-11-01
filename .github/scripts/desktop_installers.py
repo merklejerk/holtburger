@@ -156,9 +156,18 @@ def verify_windows_installer(native: Path, installer: Path, compiler: Path, work
     server = profile_fixture("seed", profile)["serverName"]
     quiet = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
 
+    def run_installer(path: Path, options: list[str]) -> subprocess.CompletedProcess:
+        """Expose native setup diagnostics when a silent operation fails."""
+        log = work / "installer-operation.log"
+        log.unlink(missing_ok=True)
+        result = subprocess.run([str(path), *quiet, *options, f"/LOG={log}"], timeout=180)
+        if result.returncode != 0 and log.exists():
+            print(log.read_text(encoding="utf-8-sig"), flush=True)
+        return result
+
     def setup(path: Path, select_destination: bool) -> None:
         destination = [f"/DIR={install}"] if select_destination else []
-        subprocess.run([str(path), *quiet, *destination], check=True, timeout=180)
+        run_installer(path, destination).check_returncode()
         verify_payload(native, payload)
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_name) as key:
             if Path(winreg.QueryValueEx(key, "InstallLocation")[0]) != install:
@@ -171,7 +180,7 @@ def verify_windows_installer(native: Path, installer: Path, compiler: Path, work
 
     try:
         setup(installer, True)
-        subprocess.run([str(uninstaller), *quiet], check=True, timeout=180)
+        run_installer(uninstaller, []).check_returncode()
         profile_fixture("verify", profile)
         if payload.exists() or shortcut.exists():
             raise ValueError("Uninstall left owned program files or shortcut")
@@ -182,7 +191,7 @@ def verify_windows_installer(native: Path, installer: Path, compiler: Path, work
         (previous / "obsolete-upgrade-fixture.txt").write_text("obsolete")
         predecessor = work / "predecessor.exe"
         compile_windows(previous, "0.0.0", predecessor, compiler)
-        subprocess.run([str(predecessor), *quiet, f"/DIR={install}"], check=True, timeout=180)
+        run_installer(predecessor, [f"/DIR={install}"]).check_returncode()
         verify_payload(previous, payload)
         probe_installed(payload / "h3d/holtburger-3d.exe", profile, server)
         setup(installer, False)
@@ -191,10 +200,10 @@ def verify_windows_installer(native: Path, installer: Path, compiler: Path, work
         (payload / "obsolete-repair-fixture.txt").write_text("obsolete")
         setup(installer, False)
         for executable in ["h3d/holtburger-3d.exe", "h3d/resources/holtburger-3d-host.exe"]:
-            for command, label in [([str(installer), *quiet, f"/DIR={install}"], "Installer"),
-                                   ([str(uninstaller), *quiet], "Uninstaller")]:
+            for program, options, label in [(installer, [f"/DIR={install}"], "Installer"),
+                                            (uninstaller, [], "Uninstaller")]:
                 with windows_file_lock(payload / executable):
-                    result = subprocess.run(command, timeout=180)
+                    result = run_installer(program, options)
                     if result.returncode == 0:
                         raise ValueError(f"{label} accepted a locked payload")
                 # An exclusive Windows lock also denies this verifier read access.
@@ -202,7 +211,7 @@ def verify_windows_installer(native: Path, installer: Path, compiler: Path, work
                 verify_payload(native, payload)
     finally:
         if uninstaller.exists():
-            subprocess.run([str(uninstaller), *quiet], check=True, timeout=180)
+            run_installer(uninstaller, []).check_returncode()
     profile_fixture("verify", profile)
     if payload.exists() or shortcut.exists():
         raise ValueError("Final uninstall left owned program files or shortcut")

@@ -1313,11 +1313,8 @@ impl MovementSystem {
         let movement_sequence = world.player.next_move_seq();
         match world.submit_local_authored_motion_command(intent.command, 1.0, movement_sequence) {
             Ok(()) => {}
-            Err(holtburger_world::state::LocalAuthoredMotionCommandError::QueueOverflow {
-                ..
-            }) => {
-                self.authored_motion_rejections
-                    .push(holtburger_protocol::errors::WeenieError::TooManyActions);
+            Err(holtburger_world::state::LocalAuthoredMotionCommandError::Refused { reason }) => {
+                self.authored_motion_rejections.push(reason);
                 return Ok(());
             }
             Err(error) => {

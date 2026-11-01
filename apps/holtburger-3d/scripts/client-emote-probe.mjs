@@ -69,6 +69,7 @@ export async function probeClientEmotes(client, evaluateExpression) {
 		await settle();
 	};
 	try {
+		await evaluate(`${api}.chat.setCombatMode("peace")`);
 		await reset();
 		await press("Escape", "Escape", 27);
 		await holdWheel();
@@ -522,6 +523,106 @@ export async function probeClientEmotes(client, evaluateExpression) {
 		);
 		await reset();
 
+		// Both popup routes and typed emotes wait for an authoritative stance event.
+		for (const mode of ["melee", "missile", "magic"]) {
+			for (const category of ["Greetings", "Recent"]) {
+				await evaluate(`${api}.chat.setCombatMode(${JSON.stringify(mode)})`);
+				await settle();
+				const before = await read();
+				await holdWheel();
+				await click(".emote-wheel [role=menuitem]", category);
+				assert.equal(
+					await evaluate(
+						"document.querySelector('.emote-wedge[title=\"*wave*\"]').disabled",
+					),
+					false,
+				);
+				await click(".emote-wheel [role=menuitem]", "Wave");
+				assert.equal(await open(), false);
+				assert.equal((await read()).peaceRequests, before.peaceRequests + 1);
+				assert.equal(
+					(await read()).requests.length,
+					before.requests.length,
+					"Enqueue acknowledgement must not release an emote",
+				);
+				await evaluate(`${api}.chat.setCombatMode("peace")`);
+				await settle();
+				assert.deepEqual(
+					(await read()).requests.slice(before.requests.length),
+					[{ kind: "soul-emote", token: "wave" }],
+				);
+				await evaluate(`${api}.chat.setEmoteActivity("emote")`);
+				await settle();
+				assert.deepEqual((await read()).combatRequests, before.combatRequests);
+				await evaluate(`${api}.chat.setEmoteActivity("explicit")`);
+				await settle();
+				assert.deepEqual(
+					(await read()).combatRequests,
+					before.combatRequests,
+					"Exit animation must finish before restoring",
+				);
+				await evaluate(`${api}.chat.setEmoteActivity("locomotion")`);
+				await settle();
+				assert.deepEqual((await read()).combatRequests, [
+					...before.combatRequests,
+					mode,
+				]);
+				await evaluate(`${api}.chat.setCombatMode(${JSON.stringify(mode)})`);
+				await key("keyUp", "t", "KeyT", 84);
+			}
+		}
+		await evaluate(`${api}.chat.setCombatMode("magic")`);
+		await draft("Hello *wave*");
+		const beforeTyped = await read();
+		await press("Enter", "Enter", 13);
+		assert.equal((await read()).requests.length, beforeTyped.requests.length);
+		await evaluate(`${api}.chat.setCombatMode("peace")`);
+		await settle();
+		assert.deepEqual(
+			(await read()).requests.slice(beforeTyped.requests.length),
+			[
+				{ kind: "soul-emote", token: "wave" },
+				{ kind: "speech", message: "Hello" },
+			],
+		);
+		await reset();
+		for (const manualMode of ["peace", "magic"]) {
+			await evaluate(`${api}.chat.setCombatMode("magic")`);
+			await draft("*wave*");
+			await press("Enter", "Enter", 13);
+			await evaluate(`${api}.chat.setCombatMode("peace")`);
+			await settle();
+			await evaluate(`${api}.chat.setEmoteActivity("emote")`);
+			const beforeManual = (await read()).combatRequests;
+			await evaluate(
+				`${api}.chat.changeCombatMode(${JSON.stringify(manualMode)})`,
+			);
+			await evaluate(`${api}.chat.setCombatMode("peace")`);
+			await evaluate(`${api}.chat.setEmoteActivity("locomotion")`);
+			await settle();
+			assert.deepEqual(
+				(await read()).combatRequests,
+				manualMode === "peace" ? beforeManual : [...beforeManual, manualMode],
+				"Manual stance intent must invalidate the queued return",
+			);
+		}
+		await press("Escape", "Escape", 27);
+		await reset();
+		await evaluate(`${api}.chat.setCombatMode("melee")`);
+		await holdWheel();
+		await click(".emote-wheel [role=menuitem]", "Greetings");
+		await click(".emote-wheel [role=menuitem]", "Wave");
+		await press("Escape", "Escape", 27);
+		await evaluate(`${api}.chat.setCombatMode("peace")`);
+		await settle();
+		assert.equal(
+			(await read()).requests.length,
+			0,
+			"Escape cancels an emote awaiting peace",
+		);
+		await key("keyUp", "t", "KeyT", 84);
+		await reset();
+
 		// The existing keyboard fixture owns a real production controller, including held-key cancellation.
 		await evaluate(`${api}.beginKeyboardProbe()`);
 		await settle();
@@ -570,6 +671,8 @@ export async function probeClientEmotes(client, evaluateExpression) {
 			embeddedSpeech: true,
 			sharedRecent: true,
 			wheel: true,
+			automaticPeace: true,
+			combatRestoration: true,
 			annularHitAreas: true,
 			constantGapsAndGlass: true,
 			wheelThemeTokens: true,
@@ -581,6 +684,7 @@ export async function probeClientEmotes(client, evaluateExpression) {
 			heldInputRetired: true,
 		};
 	} finally {
+		await evaluate(`${api}.chat.setCombatMode("peace")`);
 		await key("keyUp", "t", "KeyT", 84);
 		await evaluate(`${api}.chat.clearPrompt()`);
 		await evaluate(`${api}.chat.setEmotesEnabled(true)`);

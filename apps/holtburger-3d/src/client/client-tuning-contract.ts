@@ -59,10 +59,12 @@ export interface ClientTuning {
 		/** CSS-pixel width of a bucket merging available housing areas. */
 		readonly clusterSpacingCssPixels: number;
 	};
-	/** User-profile emote usage history shared across characters and servers. */
+	/** App-owned emote submission timing and user-profile history. */
 	readonly emotes: {
 		/** Maximum distinct queued poses retained in Recent. */
 		readonly recentLimit: number;
+		/** Bound each acknowledgement/start wait; do not guess active emote durations. */
+		readonly acknowledgementTimeoutMs: number;
 	};
 	/** In-memory sent-chat input retained for this app session. */
 	readonly chat: {

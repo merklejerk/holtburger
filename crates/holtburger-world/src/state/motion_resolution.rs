@@ -16,7 +16,7 @@ use holtburger_common::properties::WorldObjectExt as _;
 use holtburger_common::{Guid, RigidTransform, Vector3};
 use holtburger_content::{MotionHookEffect, MotionSequenceTable};
 use holtburger_dat::file_type::MotionTable;
-use holtburger_protocol::messages::movement::InterpretedMotionCommand;
+use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionStance};
 use std::time::Duration;
 use thiserror::Error;
 
@@ -175,9 +175,12 @@ pub enum LocalAuthoredMotionCommandError {
         "local player 0x{guid:08X} resolved unavailable motion table 0x{motion_table_id:08X} for authored command"
     )]
     MotionTableUnavailable { guid: u32, motion_table_id: u32 },
-    /// Active plus pending actions already occupy retail's six slots.
-    #[error("local player 0x{guid:08X} authored action queue is full")]
-    QueueOverflow { guid: u32 },
+    /// Retail admission refused the command without changing playback or sending motion.
+    #[error("local authored motion command refused: {reason:?}")]
+    Refused {
+        /// User-facing reason emitted by core without terminating movement.
+        reason: holtburger_protocol::errors::WeenieError,
+    },
 }
 
 /// Retail cylinder-to-cylinder sticky gap.
@@ -658,14 +661,27 @@ impl WorldState {
                 motion_table_id,
             },
         )?;
+        // Retail DoMotion rejects social animations before interpreted playback dispatch (ACE
+        // MotionInterp.DoMotion). Use the authoritative style: ordinary playback may still
+        // retain a peace pose while manual locomotion owns combat.
+        if command.is_chat_emote()
+            && self
+                .reported_player_motion_style()
+                .unwrap_or(table.default_style)
+                != MotionStance::NonCombat as u32
+        {
+            return Err(LocalAuthoredMotionCommandError::Refused {
+                reason: holtburger_protocol::errors::WeenieError::CantChatEmoteInCombat,
+            });
+        }
         match self
             .motion_runtimes
             .submit_local_command(table, guid, command, speed, admission)
         {
             crate::motion::MotionCommandAdmissionOutcome::Accepted => {}
             crate::motion::MotionCommandAdmissionOutcome::QueueFull => {
-                return Err(LocalAuthoredMotionCommandError::QueueOverflow {
-                    guid: u32::from(guid),
+                return Err(LocalAuthoredMotionCommandError::Refused {
+                    reason: holtburger_protocol::errors::WeenieError::TooManyActions,
                 });
             }
             crate::motion::MotionCommandAdmissionOutcome::Unsupported => {

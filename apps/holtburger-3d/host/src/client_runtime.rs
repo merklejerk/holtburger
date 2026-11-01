@@ -16,6 +16,27 @@ use crate::host_mode::ClientLaunchConfiguration;
 use crate::protocol::{HostResponse, ProtocolError, application_error};
 use crate::shared_host_content::SharedHostContent;
 
+/// Explicit requested mode excludes the unknown observation used during character hydration.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RequestedCombatMode {
+    Peace,
+    Melee,
+    Missile,
+    Magic,
+}
+
+impl From<RequestedCombatMode> for holtburger_protocol::messages::combat::CombatMode {
+    fn from(mode: RequestedCombatMode) -> Self {
+        match mode {
+            RequestedCombatMode::Peace => Self::NonCombat,
+            RequestedCombatMode::Melee => Self::Melee,
+            RequestedCombatMode::Missile => Self::Missile,
+            RequestedCombatMode::Magic => Self::Magic,
+        }
+    }
+}
+
 /// Typed chat intent; command spelling and destination selection remain frontend-owned.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
@@ -410,6 +431,11 @@ pub enum ClientHostCommand {
     },
     /// Toggle peace and the current equipment-derived stance in core.
     ToggleClientCombatMode,
+    /// Explicit stance request for app-owned workflows; independent of toggle timing.
+    SetClientCombatMode {
+        /// Explicit family captured by the frontend; unknown hydration state is not an intent.
+        mode: RequestedCombatMode,
+    },
     /// Change one server-saved option exposed by Gameplay settings.
     SetClientGameplayOption {
         option: crate::client_gameplay::ClientGameplayOption,
@@ -641,6 +667,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "recall_client",
     "teleport_client_to_map_position",
     "toggle_client_combat_mode",
+    "set_client_combat_mode",
     "set_client_appearance_option",
     "set_client_gameplay_option",
     "cast_client_spell",
@@ -1130,6 +1157,11 @@ pub async fn dispatch_client(
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
+        SetClientCombatMode { mode } => runtime
+            .send_command(ClientCommand::SetCombatMode(mode.into()))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
         SetClientCharacterTitle {
             character,
             title_id,
@@ -1474,6 +1506,24 @@ pub async fn dispatch_client(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_protocol::messages::combat::CombatMode;
+
+    #[test]
+    fn explicit_stance_requests_preserve_the_requested_family_and_reject_unknown() {
+        for (spelling, expected) in [
+            ("peace", CombatMode::NonCombat),
+            ("melee", CombatMode::Melee),
+            ("missile", CombatMode::Missile),
+            ("magic", CombatMode::Magic),
+        ] {
+            let request: RequestedCombatMode =
+                serde_json::from_value(serde_json::json!(spelling)).unwrap();
+            assert_eq!(CombatMode::from(request), expected);
+        }
+        assert!(
+            serde_json::from_value::<RequestedCombatMode>(serde_json::json!("unknown")).is_err()
+        );
+    }
 
     /// No publication is valid when launch is rejected before construction.
     struct UnexpectedEvents;

@@ -2,6 +2,7 @@ import { composeHumanoidGesturePose } from "../animation/humanoid-gesture-pose";
 import type { AnimationPoseComposition } from "../animation/humanoid-body-layout";
 import type { PreparedAnimation } from "../animation/animation-asset-repository";
 import { AnimationSequence } from "../animation/animation-sequence";
+import type { DynamicEntityMotion } from "../runtime/dynamic-entity-feed";
 import {
 	advancePlayingFrame,
 	clipEntryFrame,
@@ -93,8 +94,7 @@ export type AnimationLayerUpdate =
 	| { readonly kind: "retime"; readonly framesPerSecond: number };
 
 /** Shared semantic activity; visibility priority is applied here in the frontend. */
-export type AnimationMotionActivity =
-	"locomotion" | "gesture" | "reach" | "explicit";
+export type AnimationMotionActivity = DynamicEntityMotion["activity"];
 
 interface OrdinaryPlayback {
 	/** Meaning of the displayed clip, retained while a successor waits. */

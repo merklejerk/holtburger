@@ -269,6 +269,8 @@ pub enum OrdinaryMotionActivity {
     Gesture,
     /// Inventory reach, including entry and return; independent of locomotion eligibility.
     Reach,
+    /// Social action or retained social pose; remains active while queued emotes still own playback.
+    Emote,
     /// Other actions, explicit poses, or noncyclic transitions, including contact/death.
     Explicit,
 }
@@ -613,6 +615,16 @@ impl BodyMotionRuntime {
                 .is_some_and(|action| action.command.movement_override_gesture().is_some())
         {
             OrdinaryMotionActivity::Gesture
+        } else if self.state.substate.is_chat_emote()
+            || self
+                .active_action
+                .is_some_and(|action| action.command.is_chat_emote())
+            || self
+                .action_queue
+                .iter()
+                .any(|action| action.command.is_chat_emote())
+        {
+            OrdinaryMotionActivity::Emote
         } else if self.ordinary_owns_body_semantics() {
             OrdinaryMotionActivity::Explicit
         } else {

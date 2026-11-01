@@ -24,6 +24,9 @@
 	import "../../client/client-canvas.css";
 	import { createClientMouseMovementFixture } from "./client-mouse-movement-fixture";
 	import { soulEmoteFixture } from "../../client/client-soul-emotes.test-support";
+	import { ClientEmoteController } from "../../client/client-emote-controller";
+	import { emotePlaybackFixture } from "./client-emote-fixture";
+	import { decodeClientCombatMode } from "../../client/client-host-contract";
 	import { RenderSceneInterestController } from "../../lib/game/runtime/render-scene-interest-controller";
 	import { nearbySceneInterest } from "../../client/client-nearby.test-support";
 	import { runClientHelpCommand } from "../../client/client-command-help";
@@ -1187,6 +1190,16 @@
 			readonly rejectNextSend: () => void;
 			readonly rejectAfter: (successes: number) => void;
 			readonly setEmotesEnabled: (enabled: boolean) => void;
+			/** Inject a confirmed stance for emote availability checks. */
+			readonly setCombatMode: (mode: ClientCombatMode) => void;
+			/** Explicit user stance intent invalidates a queued return before any acknowledgement. */
+			readonly changeCombatMode: (
+				mode: Exclude<ClientCombatMode, "unknown">,
+			) => Promise<void>;
+			/** Synthetic source-owned activity, independent of the browser animation clock. */
+			readonly setEmoteActivity: (
+				activity: NonNullable<DynamicEntityView["motion"]>["activity"],
+			) => void;
 			readonly professorPrompt: () => void;
 			readonly clearPrompt: () => void;
 			readonly read: () => {
@@ -1196,6 +1209,10 @@
 				readonly requests: readonly ClientChatRequest[];
 				readonly destination: typeof chatComposer.destination;
 				readonly recentEmotes: readonly string[];
+				/** Explicit peace requests submitted by the production emote policy. */
+				readonly peaceRequests: number;
+				/** Captured explicit combat requests, excluding peace. */
+				readonly combatRequests: readonly ClientCombatMode[];
 				readonly inputAllowed: boolean;
 				readonly gameActive: boolean;
 				readonly reply: ClientChatTellTarget | null;
@@ -3979,6 +3996,11 @@
 		return composer;
 	}
 	let chatComposer = $state.raw(createChatComposer());
+	const emoteController = new ClientEmoteController(
+		interactionLifecycle,
+		keyboard,
+		(error) => appendChat({ kind: "error", message: String(error) }),
+	);
 	const chatRequests: ClientChatRequest[] = [];
 	let sentChatHistory = $state<readonly string[]>([]);
 	let messages = $state<readonly ClientChatLine[]>([
@@ -5070,12 +5092,14 @@
 					chatComposer.inParty = present;
 				},
 				restart: async () => {
+					emoteController.cancel();
 					chatComposer.reset();
 					// Retire the previous session's keyed editor before starting a new owner.
 					await tick();
 					chatComposer = createChatComposer();
 				},
 				reset: () => {
+					emoteController.cancel();
 					chatComposer.reset();
 					chatRequests.length = 0;
 					chatSuccessesBeforeFailure = null;
@@ -5093,6 +5117,19 @@
 				setEmotesEnabled: (enabled) => {
 					emotesEnabled = enabled;
 				},
+				setCombatMode: (mode) => {
+					spellCombatMode = mode;
+					emitInteractionEvent("client-combat-mode-updated", { mode });
+				},
+				changeCombatMode: async (mode) => {
+					emoteController.cancel();
+					await interactionLifecycle.setCombatMode(mode);
+				},
+				setEmoteActivity: (activity) =>
+					emitInteractionEvent("client-dynamic-entity", {
+						kind: "upserted",
+						entity: emotePlaybackFixture(1, activity),
+					}),
 				rejectNextSend: () => {
 					chatSuccessesBeforeFailure = 0;
 				},
@@ -5111,6 +5148,18 @@
 					retainedMessages: messages,
 					selectedEntity: selection.selectedGuid(),
 					requests: chatRequests.slice(),
+					peaceRequests: interactionCommands.filter(
+						(entry) =>
+							entry.command === "set_client_combat_mode" &&
+							entry.args?.mode === "peace",
+					).length,
+					combatRequests: interactionCommands
+						.filter(
+							(entry) =>
+								entry.command === "set_client_combat_mode" &&
+								entry.args?.mode !== "peace",
+						)
+						.map((entry) => decodeClientCombatMode(entry.args).mode),
 					destination: chatComposer.destination,
 					recentEmotes: [...chatComposer.recentEmotes],
 					inputAllowed: inputGate.allowed,
@@ -5983,6 +6032,7 @@
 			selection.destroy();
 			socialParty.destroy();
 			nearbyOwner.destroy();
+			emoteController.destroy();
 			interactionLifecycle.stop();
 			overlayObservation.restore();
 			readMinimapOverlayArcCalls = () => 0;
@@ -6306,13 +6356,16 @@
 						if (resolution.kind === "error")
 							throw new Error(resolution.message);
 						if (resolution.kind === "send" || resolution.kind === "sequence") {
-							await chatComposer.sendAll(
+							await emoteController.sendAll(
 								resolution.kind === "send"
 									? [resolution.request]
 									: resolution.requests,
-								async (request) => {
-									await interactionLifecycle.sendChat(request);
-									chatRequests.push(request);
+								{
+									sendAll: (requests, send) =>
+										chatComposer.sendAll(requests, async (request) => {
+											await send(request);
+											chatRequests.push(request);
+										}),
 								},
 							);
 						} else if (isLogopolisCommand(message)) {

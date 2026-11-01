@@ -20,6 +20,7 @@
 	import { ClientFacingInputDispatch } from "./client-facing-input-dispatch";
 	import type { ClientMouseMovementInput } from "./client-viewport-mouse-controller";
 	import { loadSoulEmotes } from "./client-soul-emotes";
+	import { ClientEmoteController } from "./client-emote-controller";
 	import type { SceneInterestMembership } from "../lib/game/runtime/render-scene-interest-controller";
 	import { startPresentationFrameLoop } from "../app/presentation-frame-loop";
 	import { ClientNavigationWaypointOwner } from "./client-navigation-waypoint";
@@ -318,6 +319,7 @@
 	});
 	const debugEnabled = clientDebugEnabled(window.location.search);
 	let deathCommands: ClientDeathCommands | null = null;
+	let emoteController: ClientEmoteController | null = null;
 	let session = $state<ClientLifecycleSession | null>(null);
 	const navigationWaypoint = new ClientNavigationWaypointOwner(
 		CLIENT_WAYPOINT_NEAR_RADIUS_METERS,
@@ -408,6 +410,7 @@
 	}
 	function selectCombatProfile(profile: ClientAttackProfile): void {
 		if (!persistCombatProfile(profile)) return;
+		emoteController?.cancel();
 		combatProfileSelectionRevision += 1;
 		if (selectedEntityGuid === null && combatStatus.desired !== null) {
 			void session?.updateCombatProfile(profile).catch(reportCommandFailure);
@@ -462,6 +465,7 @@
 			return;
 		}
 		// Selection is sampled only for this explicit begin; core retains the engaged target.
+		emoteController?.cancel();
 		retireCombatEscapeContext();
 		const sequence = nextCombatIntentSequence();
 		const context = keyboard.bindEscapeContext(stopCombat);
@@ -1337,6 +1341,7 @@
 	async function castSpell(spellId: number): Promise<void> {
 		const currentSession = session;
 		if (currentSession === null) return;
+		emoteController?.cancel();
 		const selection = entitySelection?.selectedGuid() ?? null;
 		try {
 			const reference =
@@ -1355,6 +1360,7 @@
 
 	async function toggleCombatMode(): Promise<void> {
 		if (session === null || lifecycle.kind !== "in-world") return;
+		emoteController?.cancel();
 		try {
 			await session.toggleCombatMode();
 		} catch (error) {
@@ -1385,11 +1391,16 @@
 		if (resolution.kind === "error") throw new Error(resolution.message);
 		if (resolution.kind === "send" || resolution.kind === "sequence") {
 			const currentSession = session;
-			if (currentSession === null || lifecycle.kind !== "in-world")
+			const emotes = emoteController;
+			if (
+				currentSession === null ||
+				emotes === null ||
+				lifecycle.kind !== "in-world"
+			)
 				throw new Error("Chat session is not in the world.");
-			await chatComposer.sendAll(
+			await emotes.sendAll(
 				resolution.kind === "send" ? [resolution.request] : resolution.requests,
-				(request) => currentSession.sendChat(request),
+				chatComposer,
 			);
 			return;
 		}
@@ -2065,6 +2076,12 @@
 			hostClientLifecycleTransport(transport),
 		);
 		session = owner;
+		const emoteOwner = new ClientEmoteController(
+			owner,
+			keyboard,
+			reportCommandFailure,
+		);
+		emoteController = emoteOwner;
 		chatComposer.reset();
 		chatCharacterGuid = null;
 		partyHudPresent = owner.partyHudPresent();
@@ -2316,6 +2333,8 @@
 			// Include synchronous controller cleanup in the same retained failure outcome.
 			retirement.add("barber-editor", () => barberOwner.destroy());
 			retirement.add("client-controllers", () => {
+				emoteOwner.destroy();
+				if (emoteController === emoteOwner) emoteController = null;
 				spellState.destroy();
 				retireCombatEscapeContext();
 				spellReferences.dispose();

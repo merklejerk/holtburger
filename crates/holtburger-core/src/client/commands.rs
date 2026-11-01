@@ -1215,6 +1215,7 @@ mod tests {
     use holtburger_content::SoulEmoteCatalog;
     use holtburger_protocol::errors::WeenieError;
     use holtburger_protocol::messages::combat::CombatMode;
+    use holtburger_protocol::messages::movement::MotionStance;
     use holtburger_protocol::messages::{
         CharacterCreateAppearanceData, CharacterCreateRequestData, CharacterEntry,
         ItemProfileActionData, SkillAdvancementClass,
@@ -1970,6 +1971,35 @@ mod tests {
         assert_eq!(client.session.game_action_sequence, 2);
         assert!(client.session.bytes_out > 0);
         assert!(client.world.has_authored_motion_actions(guid));
+    }
+
+    #[tokio::test]
+    async fn combat_soul_emotes_keep_chat_but_refuse_motion_without_sending_a_motion_packet() {
+        for token in ["wave", "bow"] {
+            let mut client = build_test_client();
+            let guid = Guid(0x5000_0001);
+            seed_action_capable_player(&mut client, guid);
+            client.world.player.last_server_motion_style = Some(MotionStance::Magic);
+            client
+                .handle_command(ClientCommand::SoulEmote(token.into()))
+                .await
+                .unwrap();
+            let chat_bytes = client.session.bytes_out;
+            assert_eq!(client.session.game_action_sequence, 1);
+            client
+                .movement
+                .tick(Instant::now(), &mut client.world, &mut client.session)
+                .await
+                .unwrap();
+            assert_eq!(client.session.game_action_sequence, 1);
+            assert_eq!(client.session.bytes_out, chat_bytes);
+            assert_eq!(
+                client.movement.take_authored_motion_rejections(),
+                vec![WeenieError::CantChatEmoteInCombat]
+            );
+            assert!(!client.world.has_local_authored_motion(guid));
+            assert!(!client.world.has_authored_motion_actions(guid));
+        }
     }
 
     #[tokio::test]

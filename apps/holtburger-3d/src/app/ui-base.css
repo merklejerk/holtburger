@@ -949,6 +949,10 @@
 	:where(dialog, [popover]:not([aria-hidden="true"]), .ui-dialog-backdrop) {
 		pointer-events: auto;
 	}
+	/* Informational hints never take pointer input from the surface below them. */
+	:where([role="tooltip"]) {
+		pointer-events: none;
+	}
 	/* Management lists share Housing's recessed surface and row treatment. */
 	.ui-theme .ui-inset {
 		padding: var(--ui-inset-padding);
@@ -1354,7 +1358,7 @@
 	.ui-theme .ui-item-cell[data-dimmed="true"]:not([data-combine-dimmed]),
 	.ui-theme .ui-item-cell[data-combine-dimmed="true"],
 	.ui-theme .ui-item-cell[data-inventory-dimmed="true"] {
-		opacity: var(--ui-item-dimmed-opacity, 0.3);
+		opacity: var(--ui-item-dimmed-opacity, 0.4);
 	}
 	@media (prefers-reduced-motion: reduce) {
 		.ui-theme .ui-item-cell {

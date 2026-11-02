@@ -1877,6 +1877,7 @@
 									{displayPlatform}
 									interactions={itemInteractions}
 									{inventory}
+									{vendor}
 									selectedGuid={selectedEntityGuid}
 									onSelectItem={(guid) => onSelectContentsItem(guid, "toggle")}
 									requestedSplit={requestedInventorySplit}

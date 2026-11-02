@@ -34,7 +34,7 @@
 			width: max-content;
 			max-width: min(360px, calc(var(--ui-viewport-width) - 16px));
 			max-height: calc(var(--ui-viewport-height) - 16px);
-			overflow: auto;
+			overflow: hidden;
 			white-space: pre-wrap;
 			overflow-wrap: anywhere;
 		}

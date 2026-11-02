@@ -29,7 +29,7 @@
 		readonly onSelectItem: (guid: number) => boolean;
 		/** Panel-owned quantity actions; external contents do not offer inventory splitting. */
 		readonly quantityActionHint?: (item: ClientEntityFacts) => string | null;
-		/** Optional equipment-hover presentation, owned by the inventory panel. */
+		/** Optional contextual dimming, owned by the inventory panel. */
 		readonly dimItem?: (item: ClientEntityFacts) => boolean;
 		/** Optional item hover identity for inventory-owned equipment affordances. */
 		readonly onHoverItem?: (guid: number | null) => void;
@@ -105,6 +105,7 @@
 								? item.description.name
 								: "Loading pack…"}
 					selected={item !== null && selectedGuid === item.guid}
+					dimmed={index !== 0 && item !== null && (dimItem?.(item) ?? false)}
 					disabled={pending ||
 						item === null ||
 						item.description.kind === "pending"}

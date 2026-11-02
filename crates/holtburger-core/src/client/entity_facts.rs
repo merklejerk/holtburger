@@ -104,6 +104,8 @@ pub(super) struct EntityFactsPublication {
     owner: Option<Guid>,
     /// Last trade publication used to invalidate preview-only semantic records.
     trade_revision: Option<u32>,
+    /// Vendor replacement/retirement invalidates sale verdicts for every owned source.
+    vendor: Option<Guid>,
     /// Access changes invalidate eligibility even when no item changes parent.
     container: WorldContainerState,
 }
@@ -114,6 +116,15 @@ impl EntityFactsPublication {
     }
 
     pub(super) fn observe(&mut self, event: &WorldEvent) {
+        if matches!(event, WorldEvent::VendorApproached(_)) {
+            // Refreshed terms can change acceptance while retaining the same vendor GUID.
+            self.dirty.extend(
+                self.records
+                    .values()
+                    .filter(|record| record.owned_by_player)
+                    .map(|record| record.guid),
+            );
+        }
         // Strength and enchantments change burden without changing an owned item.
         // Before the first collection, owner establishment already prepares the player.
         if matches!(
@@ -153,10 +164,12 @@ impl EntityFactsPublication {
         opened_corpses: &BTreeSet<Guid>,
     ) -> Result<CollectedEntityFacts, ScenePlacementError> {
         let revision = world.trade.as_ref().map(|trade| trade.revision);
-        if self.trade_revision != revision {
+        let vendor = world.vendor.as_ref().map(|vendor| vendor.vendor_guid);
+        if self.trade_revision != revision || self.vendor != vendor {
             self.dirty.extend(self.records.keys().copied());
             self.dirty.extend(world.client_entity_guids());
             self.trade_revision = revision;
+            self.vendor = vendor;
         }
         let storage_changes = world.take_storage_changes();
         let projectile_supply = world.projectile_supply();
@@ -323,6 +336,67 @@ mod tests {
     const PLAYER: Guid = Guid(1);
     const PACK: Guid = Guid(2);
     const ITEM: Guid = Guid(3);
+
+    #[test]
+    fn vendor_terms_republish_owned_sale_verdicts_without_item_updates() {
+        use holtburger_common::properties::{ItemType, WorldObjectPropertyAccessorsMut};
+        use holtburger_world::{
+            entity::Entity,
+            vendor::{VendorState, VendorValueLimits},
+        };
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut item = Entity::new(ITEM, "Food".into(), Default::default());
+        item.set_int_prop(PropertyInt::ItemType, ItemType::FOOD.bits() as i32);
+        item.set_int_prop(PropertyInt::Value, 10);
+        world.add_entity(item);
+        world.handle_message(&place(ITEM, PLAYER, InventoryEntryKind::Item));
+        let mut publication = EntityFactsPublication::default();
+        publication.collect(&mut world).unwrap();
+        let mut vendor = VendorState {
+            vendor_guid: Guid(100),
+            items: Vec::new(),
+            buy_multiplier: 1.0,
+            sell_multiplier: 1.0,
+            merchandise_item_types: ItemType::FOOD.bits(),
+            value_limits: VendorValueLimits::default(),
+            alternate_currency_wcid: 0,
+            alternate_currency_amount: 0,
+            alternate_currency_name: String::new(),
+        };
+        for (vendor_guid, item_type, accepted) in [
+            (Guid(100), ItemType::FOOD, true),
+            (Guid(100), ItemType::ARMOR, false),
+            (Guid(101), ItemType::FOOD, true),
+        ] {
+            vendor.vendor_guid = vendor_guid;
+            vendor.merchandise_item_types = item_type.bits();
+            world.vendor = Some(vendor.clone());
+            publication.observe(&WorldEvent::VendorApproached(vendor.clone()));
+            let delta = publication.collect(&mut world).unwrap();
+            let verdict = delta
+                .upserts
+                .iter()
+                .find(|record| record.guid == ITEM)
+                .unwrap()
+                .vendor_sale
+                .as_ref()
+                .unwrap();
+            assert_eq!(verdict.vendor, vendor_guid);
+            assert_eq!(verdict.accepted, accepted);
+        }
+        world.vendor = None;
+        let delta = publication.collect(&mut world).unwrap();
+        assert!(
+            delta
+                .upserts
+                .iter()
+                .find(|record| record.guid == ITEM)
+                .unwrap()
+                .vendor_sale
+                .is_none()
+        );
+    }
 
     fn event(event: GameEvent) -> GameMessage {
         GameMessage::GameEvent(Box::new(GameEventMessage {

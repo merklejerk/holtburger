@@ -16,7 +16,7 @@
 		readonly quantityActionHint?: (item: ClientEntityFacts) => string | null;
 		/** Player inventory supplies Main Pack; external roots keep their own name. */
 		readonly rootLabel: string | null;
-		/** Optional equipment-hover presentation, owned by the inventory panel. */
+		/** Optional contextual dimming, owned by the inventory panel. */
 		readonly dimItem?: (item: ClientEntityFacts) => boolean;
 		/** Optional item hover identity for inventory-owned equipment affordances. */
 		readonly onHoverItem?: (guid: number | null) => void;

@@ -322,6 +322,16 @@ pub(crate) fn lock_tool_facts(
     }
 }
 
+/// Whole-source sale admission tied to the vendor whose terms produced it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VendorSaleEligibility {
+    /// Interaction identity prevents a frontend applying a verdict to a different vendor.
+    pub vendor: Guid,
+    /// Whether the source can enter a sale draft under the current world facts.
+    pub accepted: bool,
+}
+
 /// One accepted identity's facts; browser consumers never replay raw entity properties.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -346,6 +356,8 @@ pub struct ClientEntityFacts {
     pub can_trade: bool,
     /// Whole-item trade admission consumed by inventory drops.
     pub can_offer_trade: bool,
+    /// Current vendor's whole-source verdict for owned items; absent without vendor terms.
+    pub vendor_sale: Option<VendorSaleEligibility>,
     /// Shared whole-item salvage admission and normalized review inputs.
     pub salvage: crate::crafting::salvage::SalvageCandidate,
     /// Tool classification and template bonus consumed by lock interactions.
@@ -579,6 +591,14 @@ impl WorldState {
             can_receive_give: crate::interaction::give_recipient_candidate(self, guid),
             can_trade: self.trade_partner_candidate(guid),
             can_offer_trade: self.can_offer_trade_item(guid),
+            vendor_sale: self
+                .vendor
+                .as_ref()
+                .filter(|_| owned_by_player)
+                .map(|vendor| VendorSaleEligibility {
+                    vendor: vendor.vendor_guid,
+                    accepted: self.quote_vendor_sale(vendor, guid).is_ok(),
+                }),
             salvage: self.salvage_candidate(guid),
             lock_tool: entity
                 .and_then(|entity| lock_tool_facts(entity.flags, entity.item_type(), entity.wcid)),

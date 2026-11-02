@@ -1645,6 +1645,7 @@
 					canReceiveGive: false,
 					canTrade: false,
 					canOfferTrade: false,
+					vendorSale: null,
 					lockTool: null,
 					isLocked: null,
 					salvage: {

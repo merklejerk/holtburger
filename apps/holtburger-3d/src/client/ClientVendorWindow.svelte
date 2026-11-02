@@ -182,6 +182,10 @@
 			>
 				<div class="vendor-content" inert={current.quantityRequest !== null}>
 					<div class="vendor-catalog">
+						<p class="vendor-hint">
+							Double-click or Enter to buy. Stackable items prompt for quantity.
+							Right-click or Examine ({examineShortcut.description}) to inspect.
+						</p>
 						{#each current.sections as section (section.name)}
 							<section aria-label={section.name}>
 								<h3>{section.name}</h3>
@@ -204,7 +208,6 @@
 											data-vendor-guid={current.vendor}
 											aria-label={label}
 											title=""
-											data-ui-tooltip={label}
 											aria-pressed={selected === offer.guid}
 											disabled={locked || offer.supply === 0}
 											onclick={() => (selected = offer.guid)}
@@ -236,6 +239,19 @@
 													/>
 												{:else}Unavailable{/if}
 											</span>
+											{#if offer.supply !== null || offer.price.kind !== "quoted" || unaffordable}
+												<span class="offer-details">
+													{#if offer.supply !== null}<span
+															>Stock: {offer.supply.toLocaleString()}</span
+														>{/if}
+													{#if offer.price.kind !== "quoted"}<span
+															class="vendor-problem">{offer.price.reason}</span
+														>
+													{:else if unaffordable}<span class="vendor-problem"
+															>Not enough {current.currency.name} for this offer.</span
+														>{/if}
+												</span>
+											{/if}
 										</button>
 									{/each}
 								</div>
@@ -390,6 +406,17 @@
 		}
 		.vendor-catalog section + section {
 			margin-top: var(--ui-inventory-section-gap);
+		}
+		.vendor-hint {
+			margin: 0 0 var(--ui-inventory-section-gap);
+			color: var(--ui-color-muted);
+		}
+		.offer-details {
+			grid-column: 2 / -1;
+			display: flex;
+			flex-wrap: wrap;
+			gap: var(--ui-vendor-offer-column-gap);
+			color: var(--ui-color-muted);
 		}
 		.vendor-list {
 			display: grid;

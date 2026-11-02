@@ -280,6 +280,20 @@ describe("vendor draft presentation", () => {
 		expect(f.model.read()).toBeNull();
 	});
 
+	it("samples visibility without preparing the vendor view or quoting inventory revisions", () => {
+		const f = fixture(null);
+		f.answer(blank);
+		f.previewVendor.mockClear();
+		expect(f.model.visibleVendor()).toBe(vendorId);
+		expect(f.previewVendor).not.toHaveBeenCalled();
+		f.setVendorDistance(0);
+		expect(f.model.visibleVendor()).toBe(vendorId);
+		f.setVendorDistance(CLIENT_TUNING.vendor.maximumDistanceMeters + 1);
+		expect(f.model.visibleVendor()).toBeNull();
+		f.emit({ type: "vendor-snapshot", vendor: catalog });
+		expect(f.model.visibleVendor()).toBeNull();
+	});
+
 	it("keeps sale admission idempotent and blocks trading an unaffordable quote", () => {
 		const f = fixture();
 		f.model.queueSell(10);

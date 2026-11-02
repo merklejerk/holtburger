@@ -635,7 +635,6 @@
 			touch-action: none;
 		}
 		.specimen-tooltip {
-			pointer-events: auto;
 			position: absolute;
 			left: calc(50% - 94px);
 			top: 122px;

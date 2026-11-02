@@ -377,16 +377,10 @@ export async function probeContractMap(options: {
 			tooltip().textContent?.includes(
 				"Contract 39",
 			), "Crowded point lost contracts");
-		require(tooltip().scrollHeight >
-			tooltip()
-				.clientHeight, "Long tooltip was not constrained with scrolling");
-		tooltip().scrollTop = tooltip().scrollHeight;
-		require(tooltip().scrollTop > 0, "Long tooltip cannot reveal all entries");
-		get<HTMLCanvasElement>(`${rootSelector} canvas`).dispatchEvent(
-			new PointerEvent("pointerleave", { relatedTarget: tooltip() }),
-		);
-		require(!tooltip()
-			.hidden, "Entering the tooltip dismissed its scrollable content");
+		const tooltipStyle = getComputedStyle(tooltip());
+		require(tooltipStyle.overflow === "hidden" &&
+			tooltipStyle.pointerEvents ===
+				"none", "Crowded tooltip must stay clipped and pass pointer input to the map");
 		const tooltipBounds = tooltip().getBoundingClientRect();
 		const mapBounds = get<HTMLElement>(
 			`${rootSelector} .world-map-surface`,
@@ -396,6 +390,10 @@ export async function probeContractMap(options: {
 			tooltipBounds.right <= mapBounds.right &&
 			tooltipBounds.bottom <=
 				mapBounds.bottom, "Long tooltip escaped map bounds");
+		get<HTMLCanvasElement>(`${rootSelector} canvas`).dispatchEvent(
+			new PointerEvent("pointerleave"),
+		);
+		require(tooltip().hidden, "Map departure left its tooltip visible");
 		replace(remaining);
 		await settle();
 		(await toggle()).click();
@@ -427,7 +425,7 @@ export async function probeContractMap(options: {
 			completionRetainsContact: true,
 			expiryRevealsQuestArea: true,
 			unchangedDestinationsRetainNodes: true,
-			crowdedTooltipScroll: true,
+			crowdedTooltipClipping: true,
 			characterReset: true,
 		};
 	} finally {

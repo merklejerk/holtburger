@@ -13,7 +13,6 @@ export class UiTooltipController<T> {
 	#pointer: T | null = null;
 	#focus: T | null = null;
 	#latest: "pointer" | "focus" = "pointer";
-	#surfaceHovered = false;
 	#suppressed = new Set<T>();
 	#disclosure: UiTooltipDisclosure<T> | null = null;
 	#warmUntil = -Infinity;
@@ -52,12 +51,6 @@ export class UiTooltipController<T> {
 		this.refresh();
 	}
 
-	hoverSurface(hovered: boolean): void {
-		if (hovered === this.#surfaceHovered) return;
-		this.#surfaceHovered = hovered;
-		this.refresh();
-	}
-
 	/** Reconcile mutations without treating changing label text as fresh engagement. */
 	refresh(): void {
 		if (this.#pointer !== null && !this.eligible(this.#pointer))
@@ -75,10 +68,6 @@ export class UiTooltipController<T> {
 				: allowed(this.#focus);
 		const next = preferred ?? allowed(this.#focus) ?? allowed(this.#pointer);
 		if (next === this.visible && next !== null) {
-			this.#cancelTimer();
-			return;
-		}
-		if (next === null && this.#surfaceHovered && this.visible !== null) {
 			this.#cancelTimer();
 			return;
 		}
@@ -121,7 +110,6 @@ export class UiTooltipController<T> {
 		const wasVisible = this.visible !== null;
 		if (this.#pointer !== null) this.#suppressed.add(this.#pointer);
 		if (this.#focus !== null) this.#suppressed.add(this.#focus);
-		this.#surfaceHovered = false;
 		this.#warmUntil = -Infinity;
 		this.#show(null);
 		return wasVisible;
@@ -132,7 +120,6 @@ export class UiTooltipController<T> {
 		this.#pointer = null;
 		this.#focus = null;
 		this.#suppressed.clear();
-		this.#surfaceHovered = false;
 		this.#warmUntil = -Infinity;
 		this.#show(null);
 	}

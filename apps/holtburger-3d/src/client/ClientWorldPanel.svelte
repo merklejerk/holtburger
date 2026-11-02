@@ -692,14 +692,7 @@
 					bind:this={canvas}
 					aria-label="World terrain map"
 					onpointermove={moveHover}
-					onpointerleave={(event) => {
-						if (
-							event.relatedTarget instanceof Node &&
-							positionTooltip.contains(event.relatedTarget)
-						)
-							return;
-						clearHover();
-					}}
+					onpointerleave={clearHover}
 					onpointerdown={pan}
 					oncontextmenu={openContextMenu}
 					onwheel={zoom}
@@ -771,7 +764,6 @@
 				<div
 					bind:this={positionTooltip}
 					class="world-map-tooltip ui-tooltip"
-					onpointerleave={clearHover}
 					role="tooltip"
 					hidden
 				></div>
@@ -909,11 +901,10 @@
 		}
 		.world-map-tooltip {
 			position: absolute;
-			pointer-events: auto;
 			white-space: pre-line;
 			max-width: calc(100% - 16px);
 			max-height: calc(100% - 16px);
-			overflow: auto;
+			overflow: hidden;
 			overflow-wrap: anywhere;
 		}
 		.world-map-surface {

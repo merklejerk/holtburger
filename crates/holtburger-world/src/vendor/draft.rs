@@ -67,6 +67,56 @@ pub struct VendorDraftQuote {
 }
 
 impl WorldState {
+    /// Resolve one whole-source sale using the same admission and price rules as a draft.
+    pub(crate) fn quote_vendor_sale(
+        &self,
+        vendor: &super::VendorState,
+        id: Guid,
+    ) -> Result<VendorLineQuote, String> {
+        if !self.storage.owned_by(id, self.player.guid) {
+            return Err("Only your own items can be sold".into());
+        }
+        let item = self
+            .entities
+            .get(id)
+            .ok_or("Sale item description is still pending")?;
+        if self
+            .trade
+            .as_ref()
+            .is_some_and(|trade| trade.self_side.items.contains(&id))
+        {
+            return Err(format!(
+                "{} is already offered in a player trade",
+                item.name()
+            ));
+        }
+        vendor
+            .check_sale_item(item)
+            .map_err(|reason| format!("{}: {reason}", item.name()))?;
+        if self.storage_coverage(id) == Some(RosterCoverage::Awaiting) {
+            return Err(format!(
+                "{}: container contents are still pending",
+                item.name()
+            ));
+        }
+        if self.container_contents(id).next().is_some() {
+            return Err(format!(
+                "{} must be empty before it can be sold",
+                item.name()
+            ));
+        }
+        let amount = quantity(item).map_err(|error| error.to_string())?;
+        if amount > i32::MAX as u32 {
+            return Err("Sale quantity exceeds the wire limit".into());
+        }
+        Ok(VendorLineQuote {
+            item: id,
+            amount,
+            merge_key: item.stack_compatibility_key(item.wcid),
+            total: vendor.sale_price(item).map_err(|error| error.to_string())?,
+        })
+    }
+
     /// Evaluate a candidate draft against the current vendor and authoritative storage.
     /// Unknown descriptions block a quote; they never become zero-valued possessions.
     pub fn quote_vendor_draft(&self, draft: &VendorDraft) -> Result<VendorDraftQuote, String> {
@@ -84,48 +134,7 @@ impl WorldState {
             if !seen.insert(*id) {
                 return Err("An owned stack was queued more than once".into());
             }
-            if !self.storage.owned_by(*id, self.player.guid) {
-                return Err("Only your own items can be sold".into());
-            }
-            let item = self
-                .entities
-                .get(*id)
-                .ok_or("Sale item description is still pending")?;
-            if self
-                .trade
-                .as_ref()
-                .is_some_and(|trade| trade.self_side.items.contains(id))
-            {
-                return Err(format!(
-                    "{} is already offered in a player trade",
-                    item.name()
-                ));
-            }
-            vendor
-                .check_sale_item(item)
-                .map_err(|reason| format!("{}: {reason}", item.name()))?;
-            if self.storage_coverage(*id) == Some(RosterCoverage::Awaiting) {
-                return Err(format!(
-                    "{}: container contents are still pending",
-                    item.name()
-                ));
-            }
-            if self.container_contents(*id).next().is_some() {
-                return Err(format!(
-                    "{} must be empty before it can be sold",
-                    item.name()
-                ));
-            }
-            let amount = quantity(item).map_err(|error| error.to_string())?;
-            if amount > i32::MAX as u32 {
-                return Err("Sale quantity exceeds the wire limit".into());
-            }
-            sells.push(VendorLineQuote {
-                item: *id,
-                amount,
-                merge_key: item.stack_compatibility_key(item.wcid),
-                total: vendor.sale_price(item).map_err(|error| error.to_string())?,
-            });
+            sells.push(self.quote_vendor_sale(vendor, *id)?);
         }
         let mut buys = Vec::new();
         seen.clear();
@@ -325,6 +334,38 @@ mod tests {
         world
             .storage
             .replace_contents(PLAYER, &[(SOURCE, InventoryEntryKind::Item)]);
+    }
+
+    #[test]
+    fn mirrored_sale_verdict_matches_source_admission() {
+        let mut world = world(0);
+        source(&mut world, 42, 10, 100);
+        for item_type in [ItemType::FOOD, ItemType::ARMOR, ItemType::FOOD] {
+            world
+                .entities
+                .get_mut(SOURCE)
+                .unwrap()
+                .set_int_prop(PropertyInt::ItemType, item_type.bits() as i32);
+            let record = world.client_entity_facts(SOURCE).unwrap().unwrap();
+            let verdict = record.vendor_sale.unwrap();
+            assert_eq!(verdict.vendor, VENDOR);
+            assert_eq!(verdict.accepted, item_type == ItemType::FOOD);
+            assert_eq!(
+                verdict.accepted,
+                world
+                    .quote_vendor_sale(world.vendor.as_ref().unwrap(), SOURCE)
+                    .is_ok()
+            );
+        }
+        world.vendor = None;
+        assert!(
+            world
+                .client_entity_facts(SOURCE)
+                .unwrap()
+                .unwrap()
+                .vendor_sale
+                .is_none()
+        );
     }
 
     #[test]

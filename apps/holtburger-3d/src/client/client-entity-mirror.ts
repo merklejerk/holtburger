@@ -223,6 +223,12 @@ const clientEntityFactsSchema = z
 		canReceiveGive: z.boolean(),
 		canTrade: z.boolean(),
 		canOfferTrade: z.boolean(),
+		/** World-owned whole-source sale verdict, tied to the vendor whose terms produced it. */
+		vendorSale: z
+			.object({ vendor: guid, accepted: z.boolean() })
+			.strict()
+			.readonly()
+			.nullable(),
 		/** Shared tool identity and template bonus; grouping belongs to the frontend. */
 		lockTool: lockToolFactsSchema.nullable(),
 		isLocked: z.boolean().nullable(),

@@ -66,7 +66,7 @@ describe("cell tooltip disclosure", () => {
 		]);
 	});
 
-	it("retains hoverable content and restores the remaining engagement", () => {
+	it("restores the remaining engagement and closes after both end", () => {
 		const { controller } = fixture();
 		controller.focus("a");
 		expect(controller.visible).toBe("a");
@@ -74,11 +74,7 @@ describe("cell tooltip disclosure", () => {
 		expect(controller.visible).toBe("b");
 		controller.point(null);
 		expect(controller.visible).toBe("a");
-		controller.hoverSurface(true);
 		controller.focus(null);
-		vi.advanceTimersByTime(timing.closeDelayMs * 2);
-		expect(controller.visible).toBe("a");
-		controller.hoverSurface(false);
 		vi.advanceTimersByTime(timing.closeDelayMs);
 		expect(controller.visible).toBeNull();
 	});

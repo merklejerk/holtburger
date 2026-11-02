@@ -349,7 +349,7 @@ export interface FrontendTuning {
 		readonly openDelayMs: number;
 		/** Time after leaving an open hint during which another cell opens immediately. */
 		readonly switchGraceMs: number;
-		/** Time to cross the gap between a cell and its hoverable hint. */
+		/** Delay before hiding a hint after its pointer and focus engagements end. */
 		readonly closeDelayMs: number;
 	};
 	/** Finite positive multiplier for the authored minimum distance between particle births. */

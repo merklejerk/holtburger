@@ -84,6 +84,7 @@ export function createVendorFixture(options: {
 	const sources = [6001, 6002, 6003].map((guid, index) =>
 		named(guid, index === 2 ? "Retained Scarabs" : "Lead Scarabs", {
 			ownedByPlayer: true,
+			vendorSale: { vendor, accepted: index !== 2 },
 			location: {
 				kind: "contained",
 				parentGuid: 1,

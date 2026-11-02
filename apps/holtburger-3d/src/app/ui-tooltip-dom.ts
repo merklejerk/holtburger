@@ -63,8 +63,7 @@ export function mountUiTooltip(
 			resolve(doc.activeElement) !== target
 		) {
 			const hit = doc.elementFromPoint(pointerPosition.x, pointerPosition.y);
-			if (hit === null || (!target.contains(hit) && !surface.contains(hit)))
-				return false;
+			if (hit === null || !target.contains(hit)) return false;
 		}
 		return true;
 	};
@@ -217,7 +216,6 @@ export function mountUiTooltip(
 		if (pressed || doc.pointerLockElement !== null) return;
 		pointerPosition = { x: event.clientX, y: event.clientY };
 		pointed = resolve(node);
-		controller.hoverSurface(node instanceof Node && surface.contains(node));
 		controller.point(pointed);
 	};
 	const move = (event: PointerEvent) => point(event, event.target);
@@ -227,10 +225,7 @@ export function mountUiTooltip(
 			if (disposed || pressed || doc.pointerLockElement !== null) return;
 			controller.focus(resolve(doc.activeElement));
 		});
-	const outsideSurface = (event: Event) =>
-		!(event.target instanceof Node && surface.contains(event.target));
-	const press = (event: PointerEvent) => {
-		if (!outsideSurface(event)) return;
+	const press = () => {
 		pressed = true;
 		reset();
 	};
@@ -240,9 +235,6 @@ export function mountUiTooltip(
 	const cancel = () => {
 		pressed = false;
 		reset();
-	};
-	const interrupt = (event: Event) => {
-		if (outsideSurface(event)) reset();
 	};
 	const toggle = (event: Event) => {
 		if (
@@ -272,7 +264,7 @@ export function mountUiTooltip(
 	doc.addEventListener("focusin", focus, options);
 	doc.addEventListener("focusout", focus, options);
 	for (const type of ["click", "auxclick", "contextmenu", "wheel", "scroll"])
-		doc.addEventListener(type, interrupt, options);
+		doc.addEventListener(type, reset, options);
 	// The later toggle event can arrive after focus opened a hint in the new surface.
 	doc.addEventListener("beforetoggle", toggle, options);
 	doc.addEventListener("pointerlockchange", cancel, options);

@@ -126,7 +126,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		`${api}.bindingSettings.replace({...${JSON.stringify(inputSettings)}, client: {...${JSON.stringify(inputSettings.client)}, examine: [{key: "F8"}]}})`,
 	);
 	await wait(
-		`document.querySelector(${JSON.stringify(offer)})?.dataset.uiTooltip.includes('Examine (F8)')`,
+		`document.querySelector('.vendor-hint')?.textContent.includes('Examine (F8)')`,
 	);
 	await read(`document.querySelector(${JSON.stringify(offer)}).focus()`);
 	for (const type of ["keyDown", "keyUp"])
@@ -194,6 +194,25 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	if (!(await read("document.querySelector('.client-inventory') !== null")))
 		await click('button[aria-label="Inventory"]');
 	await wait(`document.querySelector(${JSON.stringify(owned(6001))}) !== null`);
+	await wait(
+		`document.querySelector(${JSON.stringify(owned(6003))})?.dataset.dimmed === 'true'`,
+	);
+	if (
+		await read(
+			`document.querySelector(${JSON.stringify(owned(6001))}).dataset.dimmed !== 'false'`,
+		)
+	)
+		throw new Error("Vendor dimmed an accepted inventory item");
+	await click('button[aria-label="Close Festival Merchant"]');
+	await wait(
+		`document.querySelector(${JSON.stringify(owned(6003))})?.dataset.dimmed === 'false'`,
+	);
+	await read(`${fixture}.approach()`);
+	await wait("document.querySelector('[data-vendor-panel]') !== null");
+	await quote([], [], unchangedCurrencies);
+	await wait(
+		`document.querySelector(${JSON.stringify(owned(6003))})?.dataset.dimmed === 'true'`,
+	);
 	const requestsBefore = await countInventoryRequests();
 	const inventorySubmissions = () =>
 		read(
@@ -532,6 +551,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		...displayed,
 		sourceIds: submitted.draft.sells,
 		partialFailure: failure,
+		vendorInventoryDimming: true,
 		inventorySubmissions: 0,
 	};
 	const inspectionsBefore = await read(

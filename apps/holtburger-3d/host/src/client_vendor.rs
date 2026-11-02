@@ -33,7 +33,7 @@ pub struct ClientVendorOffer {
     pub supply: Option<u32>,
     /// Existing icon-composition inputs, reusable by the inventory artwork repository.
     pub icon: EntityIconAppearance,
-    /// Whole offered-stack price for catalog tooltips, using the same quote as the draft.
+    /// Whole offered-stack price for catalog rows and labels, using the draft quote rules.
     pub price: ClientVendorPrice,
 }
 

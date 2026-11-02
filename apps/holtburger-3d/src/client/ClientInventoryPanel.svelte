@@ -14,6 +14,7 @@
 	} from "./client-inventory-split";
 
 	import ClientContentsView from "./ClientContentsView.svelte";
+	import type { ClientVendorState } from "./client-vendor-state";
 
 	import UiIcon from "../app/UiIcon.svelte";
 	import InventoryCurrencyOverlay from "./InventoryCurrencyOverlay.svelte";
@@ -43,6 +44,8 @@
 		readonly displayPlatform: InputPlatform;
 		/** Stable session owner; the parent keys this component by that lifetime. */
 		readonly inventory: ClientInventoryState;
+		/** Visible vendor identity gates the world's sale verdict without owning acceptance rules. */
+		readonly vendor: ClientVendorState | null;
 		/** Shared source activation and target acquisition. */
 		readonly interactions: ClientItemInteractions;
 		readonly selectedGuid: number | null;
@@ -62,6 +65,7 @@
 		input,
 		displayPlatform,
 		inventory,
+		vendor,
 		interactions,
 		selectedGuid,
 		onSelectItem,
@@ -76,6 +80,8 @@
 			: null,
 	);
 	let view = $state<ClientInventoryView | null>(null);
+	/** Sampled alongside inventory; closing the vendor restores ordinary cell presentation. */
+	let visibleVendor = $state<number | null>(null);
 	/** Row hover is local UI state; compatible locations come from sampled world facts. */
 	let hoveredEquipmentSlot = $state<number | null>(null);
 	/** Submission state prevents repeated writes while one option request is in flight. */
@@ -167,7 +173,10 @@
 		const display = startUiIconDisplay({
 			repository: inventory.icons,
 			intervalMs: CLIENT_TUNING.inventory.displayIntervalMs,
-			read: () => inventory.read(),
+			read: () => {
+				visibleVendor = vendor?.visibleVendor() ?? null;
+				return inventory.read();
+			},
 			keys: (next) => [
 				...next.iconKeys.values(),
 				...next.currencies.map((row) => row.iconKey),
@@ -298,12 +307,15 @@
 				!pending && isSplittableInventoryItem(item) ? splitActionHint : null}
 			dimItem={(item) =>
 				!pending &&
-				hoveredEquipmentSlot !== null &&
-				!(
-					item.description.kind === "known" &&
-					item.description.equipLocations !== null &&
-					(item.description.equipLocations & hoveredEquipmentSlot) !== 0
-				)}
+				((item.vendorSale !== null &&
+					item.vendorSale.vendor === visibleVendor &&
+					!item.vendorSale.accepted) ||
+					(hoveredEquipmentSlot !== null &&
+						!(
+							item.description.kind === "known" &&
+							item.description.equipLocations !== null &&
+							(item.description.equipLocations & hoveredEquipmentSlot) !== 0
+						)))}
 		>
 			{#snippet footer()}
 				<div class="inventory-bottom-bar" aria-label="Inventory summary">

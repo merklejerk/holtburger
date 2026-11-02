@@ -147,6 +147,14 @@ export class ClientVendorState {
 		this.#replaceSnapshot(snapshot);
 	}
 
+	/** Sample window identity without preparing catalog artwork or requesting a draft quote. */
+	visibleVendor(): number | null {
+		this.#checkRange();
+		return this.#visible && this.#snapshot !== null
+			? this.#snapshot.vendor
+			: null;
+	}
+
 	read(): VendorView | null {
 		if (!this.#visible || this.#snapshot === null || this.#draft === null)
 			return null;

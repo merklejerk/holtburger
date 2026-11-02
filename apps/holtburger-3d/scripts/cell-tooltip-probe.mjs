@@ -159,8 +159,8 @@ export async function probeCellTooltips(client, evaluateExpression) {
 		"Modal tooltip doubled its inherited scale or lost its anchor",
 	);
 	await assert(
-		'(() => {const tip=document.querySelector(".cell-tooltip");const r=tip.getBoundingClientRect();return tip.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));})()',
-		"Modal tooltip is visible but cannot receive hover input",
+		'(() => {const tip=document.querySelector(".cell-tooltip");const r=tip.getBoundingClientRect();return !tip.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2));})()',
+		"Modal tooltip intercepted pointer hit testing",
 	);
 	await escape();
 	await wait(`!${open}`);
@@ -218,12 +218,42 @@ export async function probeCellTooltips(client, evaluateExpression) {
 	await move('[data-cell="long"]');
 	await wait(open);
 	await assert(
-		'(() => {const tip=document.querySelector(".cell-tooltip");const r=tip.getBoundingClientRect();return tip.scrollHeight>tip.clientHeight && r.top>=0 && r.bottom<=innerHeight;})()',
-		"Long tooltip was not bounded and scrollable",
+		'(() => {const tip=document.querySelector(".cell-tooltip");const r=tip.getBoundingClientRect();return getComputedStyle(tip).overflow === "hidden" && r.top>=0 && r.bottom<=innerHeight;})()',
+		"Long tooltip was not bounded and clipped",
 	);
-	await move(".cell-tooltip");
-	await read('document.querySelector(".cell-tooltip").scrollTop = 40');
-	await assert(open, "Tooltip closed while reading its scrollable contents");
+	// Place a real control below the still-visible top-layer hint, then click through it.
+	const coveredPoint = await read(`(() => {
+		const tip = document.querySelector(".cell-tooltip");
+		const r = tip.getBoundingClientRect();
+		const button = document.createElement("button");
+		button.dataset.coveredControl = "";
+		button.textContent = "Covered control";
+		button.style.cssText = "position:fixed;inset:0;margin:0;width:80px;height:36px";
+		document.querySelector("[data-tooltip-fixture]").append(button);
+		const x = r.left + r.width / 2, y = r.top + r.height / 2;
+		button.style.left = (x / button.currentCSSZoom - 40) + "px";
+		button.style.top = (y / button.currentCSSZoom - 18) + "px";
+		button.onclick = () => { button.dataset.clicked = "true"; };
+		return {x, y};
+	})()`);
+	await assert(
+		`${open} && document.elementFromPoint(${coveredPoint.x}, ${coveredPoint.y}) === document.querySelector("[data-covered-control]")`,
+		"Visible tooltip intercepted the underlying control",
+	);
+	for (const type of ["mousePressed", "mouseReleased"])
+		await client.send("Input.dispatchMouseEvent", {
+			type,
+			...coveredPoint,
+			button: "left",
+			buttons: type === "mousePressed" ? 1 : 0,
+			clickCount: 1,
+		});
+	await assert(
+		'document.querySelector("[data-covered-control]").dataset.clicked === "true"',
+		"Click did not reach the control beneath the tooltip",
+	);
+	await wait(`!${open}`);
+	await read('document.querySelector("[data-covered-control]").remove()');
 	await read(
 		"window.longTooltipScaleProbe.update(1); delete window.longTooltipScaleProbe",
 	);
@@ -332,7 +362,7 @@ export async function probeCellTooltips(client, evaluateExpression) {
 		passed: true,
 		checked: [
 			"scaled-anchor-and-unscaled-host",
-			"scaled-modal-and-scrollable-content",
+			"scaled-modal-hit-testing",
 			"scale-change-dismissal",
 			"hover",
 			"disabled",
@@ -346,7 +376,7 @@ export async function probeCellTooltips(client, evaluateExpression) {
 			"covering-popover",
 			"retained-panel",
 			"reparented-target-visibility",
-			"scrollable-content",
+			"bounded-content-and-click-through",
 			"artwork-states-and-overlays",
 			"unavailable-artwork-drag-ghost",
 			"item-spell-action-queue-cells",

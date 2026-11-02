@@ -53,11 +53,7 @@
 	function scheduleClose() {
 		cancelClose();
 		closeTimer = setTimeout(() => {
-			if (
-				!trigger.matches(":hover, :focus") &&
-				!popup.matches(":hover, :focus-within")
-			)
-				close();
+			if (!trigger.matches(":hover, :focus")) close();
 		}, 150);
 	}
 	onMount(() => {
@@ -102,9 +98,6 @@
 	popover="manual"
 	role="tooltip"
 	class="inventory-currency-overlay ui-overlay-surface"
-	onpointerdown={() => escapeContext?.promote()}
-	onpointerenter={cancelClose}
-	onpointerleave={scheduleClose}
 >
 	<strong>Alternate currencies</strong>
 	{#if pending}<p role="status">Updating inventory…</p>
@@ -142,7 +135,7 @@
 			width: max-content;
 			max-width: min(360px, calc(var(--ui-viewport-width) - 16px));
 			max-height: min(360px, calc(var(--ui-viewport-height) - 16px));
-			overflow: auto;
+			overflow: hidden;
 		}
 		p,
 		dl {

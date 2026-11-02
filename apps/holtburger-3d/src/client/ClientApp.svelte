@@ -1714,7 +1714,7 @@
 				clientMinimapLandmark(facts?.get(guid), playerName),
 			trackedGuids: nearby?.trackedGuids() ?? EMPTY_TRACKED_GUIDS,
 			waypoint: navigationWaypoint.read(
-				frame.subject,
+				frame,
 				lifecycle.kind === "in-world" &&
 					session !== null &&
 					!session.mirror.isAwaitingSnapshot() &&

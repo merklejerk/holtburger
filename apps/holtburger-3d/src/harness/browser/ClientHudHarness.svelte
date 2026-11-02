@@ -4178,6 +4178,7 @@
 	let waypointProbeEnabled = false;
 	let waypointContentProbeEnabled = false;
 	let waypointAvailable = true;
+	let waypointMixedInterior = false;
 	let waypointHeading = 0;
 	let waypointCameraHeading = 0;
 	const waypointMessages: ClientChatMessage[] = [];
@@ -4209,7 +4210,7 @@
 		const frame: MinimapFrame = {
 			landmarkCategory: (guid) =>
 				clientMinimapLandmark(facts?.get(guid), playerName),
-			surfaceMapEligible: !minimapSubjectIndoor,
+			surfaceMapEligible: !minimapSubjectIndoor || waypointMixedInterior,
 			waypoint: null,
 			cameraFovRadians: Math.PI / 3,
 			cameraHeadingRadians: waypointCameraHeading,
@@ -4262,7 +4263,7 @@
 		};
 		return {
 			...frame,
-			waypoint: waypointOwner.read(frame.subject, waypointAvailable),
+			waypoint: waypointOwner.read(frame, waypointAvailable),
 		};
 	}
 
@@ -5090,6 +5091,9 @@
 				waypointOwner.acceptCharacter(1);
 			},
 			chat: submitWaypointChat,
+			mixedInterior: (enabled) => {
+				waypointMixedInterior = enabled;
+			},
 			player: (x, z, heading, camera, indoor, available) => {
 				minimapSubjectWorldX = x;
 				minimapSubjectWorldZ = z;

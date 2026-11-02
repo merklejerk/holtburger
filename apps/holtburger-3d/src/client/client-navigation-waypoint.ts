@@ -1,4 +1,4 @@
-import type { MinimapSubject } from "../app/minimap-frame";
+import type { MinimapFrame } from "../app/minimap-frame";
 import { parsePrintedMapCoordinates } from "../lib/game/map/map-coordinates";
 import {
 	formatWaypointReadout,
@@ -68,9 +68,10 @@ export class ClientNavigationWaypointOwner {
 
 	/** Read against the exact subject sampled for this UI frame; no movement publications. */
 	read(
-		subject: MinimapSubject | null,
+		frame: Pick<MinimapFrame, "subject" | "surfaceMapEligible">,
 		available: boolean,
 	): MapWaypointDisplay | null {
+		const { subject, surfaceMapEligible } = frame;
 		const target = this.#target;
 		if (target === null) return null;
 		if (
@@ -82,10 +83,15 @@ export class ClientNavigationWaypointOwner {
 			return {
 				kind: "paused",
 				target,
-				reason: "Waypoint · waiting for outdoor position",
+				reason: "Waypoint · waiting for surface position",
 			};
-		if (subject.anchor.residency.envCellId !== null)
-			return { kind: "paused", target, reason: "Waypoint · paused indoors" };
+		// Mixed interiors share surface coordinates; scene demand owns that classification.
+		if (!surfaceMapEligible)
+			return {
+				kind: "paused",
+				target,
+				reason: "Waypoint · surface position unavailable",
+			};
 		return mapWaypointGuidance(target, subject.anchor, this.#nearRadiusMeters);
 	}
 

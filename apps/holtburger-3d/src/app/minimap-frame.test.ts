@@ -85,7 +85,7 @@ describe("minimap GPU draw state", () => {
 			...initial,
 			waypoint: {
 				kind: "paused",
-				reason: "Waypoint · paused indoors",
+				reason: "Waypoint · surface position unavailable",
 				target: {
 					label: "0.0N, 0.0E",
 					position: scenePointFromPrintedCoordinates({

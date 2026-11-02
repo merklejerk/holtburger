@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { MinimapSubject } from "../app/minimap-frame";
+import type { MinimapFrame, MinimapSubject } from "../app/minimap-frame";
 import {
 	MAP_DEGREE_DISPLAY_BIAS,
 	MAP_DEGREE_ORIGIN,
@@ -47,7 +47,8 @@ function fixture() {
 	owner.acceptCharacter(CHARACTER);
 	const append = vi.fn();
 	const notify = vi.fn();
-	const read = () => owner.read(subject(100, 0), true);
+	const read = () =>
+		owner.read({ subject: subject(100, 0), surfaceMapEligible: true }, true);
 	const command = (message: string) =>
 		owner.runCommand(message, read, append, notify);
 	return { owner, append, notify, read, command };
@@ -189,40 +190,70 @@ describe("waypoint commands", () => {
 		f.owner.acceptCharacter(null);
 		expect(() => f.command("@waypoint 0N 0E")).toThrow("Select a character");
 	});
-	it("retains targets while unavailable or indoors and resumes on coherent outdoor placement", () => {
+	it("retains targets through unavailable placements and resumes on coherent surface placement", () => {
 		const f = fixture();
 		f.command("@waypoint 0.0N 0.0E");
 		const player = subject(100, 0);
-		expect(f.owner.read(player, false)).toMatchObject({
+		const frame: Pick<MinimapFrame, "subject" | "surfaceMapEligible"> = {
+			subject: player,
+			surfaceMapEligible: true,
+		};
+		for (const unavailable of [
+			{ ...frame, subject: null },
+			{
+				...frame,
+				subject: { ...player, anchor: { ...player.anchor, residency: null } },
+			},
+			{
+				...frame,
+				subject: { kind: "free-camera" as const, anchor: player.anchor },
+			},
+			{ ...frame, subject: { ...player, guid: 2 } },
+		]) {
+			expect(f.owner.read(unavailable, true)).toMatchObject({
+				kind: "paused",
+				target,
+			});
+		}
+		expect(f.owner.read(frame, false)).toMatchObject({
 			kind: "paused",
 			target,
 		});
-		expect(f.owner.read(null, true)?.kind).toBe("paused");
-		expect(
-			f.owner.read(
-				{ ...player, anchor: { ...player.anchor, residency: null } },
-				true,
-			)?.kind,
-		).toBe("paused");
-		expect(
-			f.owner.read(
-				{
-					...player,
-					anchor: {
-						...player.anchor,
-						residency: { landblockId: "0x7f7fffff", envCellId: "0x7f7f0100" },
-					},
-				},
-				true,
-			),
-		).toMatchObject({ kind: "paused", reason: "Waypoint · paused indoors" });
-		expect(
-			f.owner.read({ kind: "free-camera", anchor: player.anchor }, true)?.kind,
-		).toBe("paused");
-		expect(f.owner.read({ ...player, guid: 2 }, true)?.kind).toBe("paused");
 		expect(f.read()?.kind).toBe("guiding");
-		expect(f.owner.read(subject(0, 0), true)?.kind).toBe("near");
+		expect(f.owner.read({ ...frame, subject: subject(0, 0) }, true)?.kind).toBe(
+			"near",
+		);
 		expect(f.read()?.kind).toBe("guiding");
+	});
+	it("uses scene-owned surface eligibility for both outdoor and EnvCell placements", () => {
+		const f = fixture();
+		f.command("@waypoint 0.0N 0.0E");
+		const player = subject(100, 0);
+		const interior: MinimapSubject = {
+			...player,
+			anchor: {
+				...player.anchor,
+				residency: { landblockId: "0x7f7fffff", envCellId: "0x7f7f0100" },
+			},
+		};
+		const outdoor = f.owner.read(
+			{ subject: player, surfaceMapEligible: true },
+			true,
+		);
+		expect(
+			f.owner.read({ subject: interior, surfaceMapEligible: true }, true),
+		).toEqual(outdoor);
+		for (const placement of [player, interior]) {
+			expect(
+				f.owner.read({ subject: placement, surfaceMapEligible: false }, true),
+			).toMatchObject({
+				kind: "paused",
+				target,
+			});
+		}
+		expect(
+			f.owner.read({ subject: interior, surfaceMapEligible: true }, true),
+		).toEqual(outdoor);
 	});
 	it("retains the same character through portal travel and resets on character replacement", () => {
 		const f = fixture();

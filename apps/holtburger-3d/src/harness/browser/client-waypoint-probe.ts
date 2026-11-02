@@ -9,6 +9,8 @@ import { CLIENT_WAYPOINT_NEAR_RADIUS_METERS } from "../../client/client-tuning";
 /** Synthetic placement controls for production navigation intent and real map components. */
 export interface WaypointProbeControls {
 	readonly enable: () => void;
+	/** Classify the fixture interior as surface-aligned instead of a dungeon. */
+	readonly mixedInterior: (enabled: boolean) => void;
 	readonly chat: (message: string) => void;
 	readonly player: (
 		x: number,
@@ -179,7 +181,23 @@ export async function probeClientWaypoint(controls: WaypointProbeControls) {
 		row().querySelector("span")?.textContent === "42.0N, 33.5E" &&
 			!visible(".minimap-waypoint-marker") &&
 			!visible(".minimap-waypoint-pointer"),
-		"Indoor waypoint was not paused",
+		"Dungeon waypoint was not paused",
+	);
+	controls.mixedInterior(true);
+	await settle();
+	assert(
+		controls.read().frame.waypoint?.kind === "guiding" &&
+			visible(".minimap-waypoint-pointer") &&
+			pointer() === initial &&
+			row().textContent?.includes("500 m") === true,
+		"Mixed interior failed to restore surface distance and rim bearing",
+	);
+	controls.mixedInterior(false);
+	await settle();
+	assert(
+		controls.read().frame.waypoint?.kind === "paused" &&
+			!visible(".minimap-waypoint-pointer"),
+		"Leaving surface eligibility retained dungeon guidance",
 	);
 	await click('button[aria-label="World"]');
 	assert(

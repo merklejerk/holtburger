@@ -41,7 +41,7 @@ export type MapWaypointDisplay = {
 	  }
 );
 
-/** Pure geometry for an eligible outdoor player; proximity uses unrounded horizontal meters. */
+/** Pure geometry for an eligible surface-map player; proximity uses unrounded horizontal meters. */
 export function mapWaypointGuidance(
 	target: MapWaypointTarget,
 	anchor: MapAnchor,

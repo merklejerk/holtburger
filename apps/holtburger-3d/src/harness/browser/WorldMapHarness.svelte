@@ -104,7 +104,7 @@
 			cameraFovRadians: 1,
 			cameraHeadingRadians: 0,
 		};
-		return { ...frame, waypoint: navigation.read(frame.subject, true) };
+		return { ...frame, waypoint: navigation.read(frame, true) };
 	};
 	const owner = (): WorldMapOwner => {
 		const value = panel?.readOwner();

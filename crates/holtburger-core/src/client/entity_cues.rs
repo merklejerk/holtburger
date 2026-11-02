@@ -7,9 +7,7 @@ use anyhow::{Context, Result};
 use holtburger_common::Guid;
 use holtburger_common::properties::WorldObjectExt;
 
-use super::lock_feedback::OPEN_FAIL_DUE_TO_LOCK_SOUND;
-use super::{ClientRuntime, ClientViewEvent, PendingOperation};
-use crate::{ActionResultReason, ActionResultSource};
+use super::{ClientRuntime, ClientViewEvent};
 use holtburger_world::{CollisionReportOutcome, CollisionReportPhase, WorldState};
 
 /// Resolve committed callback starts while their exact recipient generations are still present.
@@ -57,12 +55,6 @@ pub(super) fn collision_script_cues(
 
 /// Retail keeps its missing-object placeholder, including queued network blobs, for 25 seconds.
 const RETAIL_MISSING_OBJECT_LIFETIME: Duration = Duration::from_secs(25);
-
-/// Standard retail housing storage: ACE/Source/ACE.Entity/Enum/WeenieClassName.cs,
-/// W_STORAGE_CLASS. Retail IsStorage compares the template ID. Keep this narrow sound heuristic
-/// independent of bootstrap assets; remapped or custom storage templates can still produce a
-/// false locked hint.
-const RETAIL_HOUSING_STORAGE_WCID: u32 = 9687;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) enum PendingEntityCue {
@@ -119,39 +111,6 @@ impl ClientEntityCueInbox {
 }
 
 impl ClientRuntime {
-    /// Correlate at packet receipt, before scene admission can delay sound playback past UseDone.
-    pub(super) fn observe_use_sound(&mut self, guid: Guid, sound_id: u32) {
-        let Some(pending) = self.active_busy_operation.as_ref() else {
-            return;
-        };
-        if sound_id != OPEN_FAIL_DUE_TO_LOCK_SOUND
-            || pending.deadline <= Instant::now()
-            || pending.operation.direct_use_source() != Some(guid)
-        {
-            return;
-        }
-        let Some(entity) = self.world.entities.get(guid) else {
-            return;
-        };
-        // ACE Storage.cs sends the same sound for denied access, alongside explicit server text.
-        if entity.wcid == Some(RETAIL_HOUSING_STORAGE_WCID) {
-            return;
-        }
-        // Broadcasts identify the object, not the actor/request. Another player's concurrent
-        // attempt or a custom housing-storage WCID can therefore produce a false locked hint.
-        self.emit_action_result(
-            ActionResultSource::Client,
-            match pending.operation {
-                PendingOperation::GuardedUse { sequence, .. } => ActionResultReason::Locked {
-                    target: guid,
-                    name: entity.name().to_owned(),
-                    sequence,
-                },
-                _ => ActionResultReason::General(format!("The {} is locked", entity.name())),
-            },
-        );
-    }
-
     /// Routes one cue when its entity has usable scene placement, or retains it until admission.
     pub(super) fn route_entity_cue(&mut self, guid: Guid, cue: PendingEntityCue) -> Result<()> {
         if matches!(
@@ -235,6 +194,7 @@ impl ClientRuntime {
 
 #[cfg(test)]
 mod tests {
+    use super::super::lock_feedback::OPEN_FAIL_DUE_TO_LOCK_SOUND;
     use super::*;
     use crate::client::{ClientState, PHYSICS_TICK_MS, builder};
     use holtburger_common::position::WorldPosition;
@@ -504,124 +464,6 @@ mod tests {
             );
         }
         assert!(events.try_recv().is_err());
-    }
-
-    #[test]
-    fn locked_hint_requires_a_live_matching_use_and_excludes_housing_storage() {
-        use crate::client::{BUSY_OPERATION_TIMEOUT, PendingBusyOperation};
-        let guid = Guid(7);
-        let mut client = builder::build_test_client(ClientState::InWorld);
-        let mut entity = Entity::new(guid, "Chest".into(), WorldPosition::default());
-        entity.wcid = Some(42);
-        client.world.add_entity(entity);
-        let mut events = client.subscribe_client_view_events();
-        let pending = || PendingBusyOperation {
-            operation: PendingOperation::Use { source: guid },
-            deadline: Instant::now() + BUSY_OPERATION_TIMEOUT,
-            pending_error: None,
-        };
-
-        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
-        assert!(events.try_recv().is_err(), "no pending use");
-        client.active_busy_operation = Some(pending());
-        client.observe_use_sound(Guid(8), OPEN_FAIL_DUE_TO_LOCK_SOUND);
-        assert!(events.try_recv().is_err(), "different sound target");
-        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND + 1);
-        assert!(events.try_recv().is_err(), "different sound");
-        client.active_busy_operation.as_mut().unwrap().deadline = Instant::now();
-        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
-        assert!(events.try_recv().is_err(), "expired use");
-        client.active_busy_operation = Some(PendingBusyOperation {
-            operation: PendingOperation::UseWithTarget { spell_target: None },
-            ..pending()
-        });
-        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
-        assert!(events.try_recv().is_err(), "targeted use");
-        client.active_busy_operation = Some(pending());
-        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
-        assert!(
-            matches!(events.try_recv().unwrap(), ClientViewEvent::ActionResult {
-            source: ActionResultSource::Client,
-            reason: ActionResultReason::General(message),
-        } if message == "The Chest is locked")
-        );
-
-        let entity = client.world.entities.get_mut(guid).unwrap();
-        entity.wcid = Some(RETAIL_HOUSING_STORAGE_WCID);
-        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
-        assert!(
-            events.try_recv().is_err(),
-            "housing storage uses server feedback"
-        );
-        client.world.entities.remove(guid);
-        client.observe_use_sound(guid, OPEN_FAIL_DUE_TO_LOCK_SOUND);
-        assert!(events.try_recv().is_err(), "missing entity");
-    }
-
-    #[tokio::test]
-    async fn wire_lock_failure_reports_before_scene_admission_or_use_done() {
-        use crate::client::{BUSY_OPERATION_TIMEOUT, PendingBusyOperation};
-        let guid = Guid(7);
-        let mut client = builder::build_test_client(ClientState::InWorld);
-        let mut entity = Entity::new(guid, "Door".into(), WorldPosition::default());
-        entity.wcid = Some(42);
-        client.world.add_entity(entity);
-        client.active_busy_operation = Some(PendingBusyOperation {
-            operation: PendingOperation::GuardedUse {
-                sequence: 41,
-                intent: holtburger_world::item_use::ItemUseIntent::Direct {
-                    source: guid,
-                    unrestricted: false,
-                },
-                spell_target: None,
-            },
-            deadline: Instant::now() + BUSY_OPERATION_TIMEOUT,
-            pending_error: None,
-        });
-        let mut events = client.subscribe_client_view_events();
-        let mut bytes = Vec::new();
-        GameMessage::PlaySound(Box::new(PlaySoundData {
-            target: guid,
-            sound_id: OPEN_FAIL_DUE_TO_LOCK_SOUND,
-            volume: 1.0,
-        }))
-        .pack(&mut bytes);
-        client.handle_message(&bytes).await.unwrap();
-        assert!(
-            matches!(events.try_recv().unwrap(), ClientViewEvent::LockFeedback(
-            super::super::lock_feedback::LockFeedback {
-                target, outcome: super::super::lock_feedback::LockFeedbackOutcome::Failed, ..
-            }
-        ) if target == guid)
-        );
-        assert!(
-            matches!(events.try_recv().unwrap(), ClientViewEvent::ActionResult {
-            source: ActionResultSource::Client,
-            reason: ActionResultReason::Locked { target, name, sequence: 41 },
-        } if target == guid && name == "Door")
-        );
-        while let Ok(event) = events.try_recv() {
-            assert!(
-                !matches!(event, ClientViewEvent::DynamicSoundCue(_)),
-                "sound waits for scene admission"
-            );
-        }
-        assert!(
-            client.active_busy_operation.is_some(),
-            "sound does not release admission"
-        );
-        client
-            .finish_busy_operation_from_use_done(holtburger_protocol::errors::WeenieError::None)
-            .await
-            .unwrap();
-        assert!(client.active_busy_operation.is_none());
-        assert!(matches!(
-            events.try_recv().unwrap(),
-            ClientViewEvent::ItemUseFinished(super::super::item_use::ItemUseFinished {
-                sequence: 41,
-                ..
-            })
-        ));
     }
 
     #[test]

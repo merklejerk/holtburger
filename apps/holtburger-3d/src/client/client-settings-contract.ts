@@ -128,8 +128,8 @@ export type ClientChatSuppressionSettings = z.infer<
 /** Local lock interaction policy; server gameplay options do not own this automation. */
 export const clientLockInteractionSettingsSchema = z
 	.object({
-		/** Try distinct inventory key templates before offering lockpicks. Enabled by default. */
-		autoUseKeys: z.boolean().default(true),
+		/** Opt in to trying distinct inventory key templates before offering lockpicks. */
+		autoUseKeys: z.boolean().default(false),
 	})
 	.strict()
 	.readonly();

@@ -151,21 +151,20 @@ function fixture(
 		chat,
 		selection,
 	);
-	let openingSequence = allocateItemUseOperation();
-	const open = (finishOpening = true) => {
-		openingSequence = allocateItemUseOperation();
+	let encounterSequence = allocateItemUseOperation();
+	const open = () => {
+		encounterSequence = allocateItemUseOperation();
+		emit({
+			type: "item-use-finished",
+			result: {
+				sequence: encounterSequence,
+				outcome: { kind: "completed", error: "None", message: "" },
+			},
+		});
 		emit({
 			type: "locked-target",
-			target: { target: 9, name: "Chest", sequence: openingSequence },
+			target: { target: 9, name: "Chest", sequence: encounterSequence },
 		});
-		if (finishOpening)
-			emit({
-				type: "item-use-finished",
-				result: {
-					sequence: openingSequence,
-					outcome: { kind: "completed", error: "None", message: "" },
-				},
-			});
 	};
 	const currentQuery = () => {
 		const query = queryItemUseTarget.mock.calls.at(-1)?.[0];
@@ -228,7 +227,7 @@ function fixture(
 		},
 		emit,
 		open,
-		openingSequence: () => openingSequence,
+		encounterSequence: () => encounterSequence,
 		accept,
 		finish,
 		update,
@@ -243,168 +242,105 @@ function fixture(
 }
 
 describe("compact Locks workflow", () => {
-	it("waits for the exact opening receipt before starting automatic keys", () => {
+	it.each([false, true])(
+		"cancellation before late lock evidence retires only earlier uses, automatic keys %s",
+		(automatic) => {
+			const f = fixture([tool(2, 12), tool(5, 15, 20)]);
+			f.setAutoUseKeys(automatic);
+			const sequence = allocateItemUseOperation();
+			f.emit({
+				type: "item-use-finished",
+				result: {
+					sequence,
+					outcome: { kind: "completed", error: "None", message: "" },
+				},
+			});
+			f.model.cancel();
+			f.emit({
+				type: "locked-target",
+				target: { target: 9, name: "Chest", sequence },
+			});
+			expect(f.model.visible).toBe(false);
+			expect(f.queryItemUseTarget).not.toHaveBeenCalled();
+			f.open();
+			expect(f.model.visible).toBe(!automatic);
+			expect(f.queryItemUseTarget).toHaveBeenCalledOnce();
+			f.model.destroy();
+		},
+	);
+	it("starts automatic keys from the completed encounter without another receipt", () => {
 		const f = fixture();
 		f.setAutoUseKeys(true);
-		f.open(false);
+		f.open();
 		expect(f.model.visible).toBe(false);
 		expect(f.model.read().pending).toBe(true);
-		expect(f.queryItemUseTarget).not.toHaveBeenCalled();
-		f.emit({
-			type: "item-use-finished",
-			result: {
-				sequence: allocateItemUseOperation(),
-				outcome: { kind: "completed", error: "None", message: "" },
-			},
-		});
-		expect(f.queryItemUseTarget).not.toHaveBeenCalled();
-		f.emit({
-			type: "item-use-finished",
-			result: {
-				sequence: f.openingSequence(),
-				outcome: { kind: "completed", error: "None", message: "" },
-			},
-		});
 		expect(f.queryItemUseTarget).toHaveBeenCalledOnce();
 		f.accept();
 		expect(f.submitItemUse).toHaveBeenCalledOnce();
 		f.model.destroy();
 	});
-	it.each([
-		"escape",
-		"movement",
-		"selection",
-		"disabled",
-		"timeout",
-		"abort",
-		"error",
-		"removed",
-	] as const)("does not resume or open fallback after opening %s", (reason) => {
+	it.each(["escape", "movement", "selection", "disabled", "removed"] as const)(
+		"does not resume automatic keys after %s cancels compatibility checking",
+		(reason) => {
+			const f = fixture([tool(2, 12), tool(5, 15, 20)]);
+			f.setAutoUseKeys(true);
+			f.open();
+			const sequence = f.encounterSequence();
+			const query = f.currentQuery();
+			switch (reason) {
+				case "escape":
+					f.escape();
+					break;
+				case "movement":
+					f.model.cancel();
+					break;
+				case "selection":
+					f.selection.select(null);
+					break;
+				case "disabled":
+					f.setEnabled(false);
+					break;
+				case "removed":
+					f.update((rows) => rows.filter((row) => row.guid !== 9));
+					break;
+			}
+			f.emit({
+				type: "locked-target",
+				target: { target: 9, name: "Chest", sequence },
+			});
+			f.emit({
+				type: "item-use-target-result",
+				result: {
+					sequence: query.sequence,
+					eligible: true,
+					lockpickSuccessPercent: null,
+				},
+			});
+			expect(f.submitItemUse).not.toHaveBeenCalled();
+			expect(f.model.visible).toBe(false);
+			expect(f.model.read().pending).toBe(false);
+			f.model.destroy();
+		},
+	);
+	it("admits manual tools immediately after a completed encounter", () => {
 		const f = fixture([tool(2, 12), tool(5, 15, 20)]);
-		f.setAutoUseKeys(true);
-		f.open(false);
-		const sequence = f.openingSequence();
-		switch (reason) {
-			case "escape":
-				f.escape();
-				break;
-			case "movement":
-				f.model.cancel();
-				break;
-			case "selection":
-				f.selection.select(null);
-				break;
-			case "disabled":
-				f.setEnabled(false);
-				break;
-			case "removed":
-				f.update((rows) => rows.filter((row) => row.guid !== 9));
-				break;
-			case "timeout":
-			case "abort":
-				f.emit({
-					type: "item-use-finished",
-					result: {
-						sequence,
-						outcome: { kind: reason === "timeout" ? "timed-out" : "aborted" },
-					},
-				});
-				break;
-			case "error":
-				f.emit({
-					type: "item-use-finished",
-					result: {
-						sequence,
-						outcome: {
-							kind: "completed",
-							error: "LockUsedTooRecently",
-							message: "Denied",
-						},
-					},
-				});
-				break;
-		}
-		// A repeat of the original broadcast cannot revive the cancelled workflow.
-		f.emit({
-			type: "locked-target",
-			target: { target: 9, name: "Chest", sequence },
-		});
-		f.emit({
-			type: "item-use-finished",
-			result: {
-				sequence,
-				outcome: { kind: "completed", error: "None", message: "" },
-			},
-		});
-		expect(f.queryItemUseTarget).not.toHaveBeenCalled();
-		expect(f.submitItemUse).not.toHaveBeenCalled();
-		expect(f.model.visible).toBe(false);
-		expect(f.model.read().pending).toBe(false);
-		f.model.destroy();
-	});
-	it("disables manual actions until the opening use finishes", () => {
-		const f = fixture([tool(2, 12), tool(5, 15, 20)]);
-		f.open(false);
+		f.open();
 		expect(f.model.visible).toBe(true);
-		expect(f.model.read().pending).toBe(true);
-		f.model.attemptAll();
-		f.model.lockpick();
-		expect(f.submitItemUse).not.toHaveBeenCalled();
-		f.emit({
-			type: "item-use-finished",
-			result: {
-				sequence: f.openingSequence(),
-				outcome: { kind: "completed", error: "None", message: "" },
-			},
-		});
 		expect(f.model.read().pending).toBe(false);
 		f.model.attemptAll();
 		f.accept();
 		expect(f.submitItemUse).toHaveBeenCalledOnce();
 		f.model.destroy();
 	});
-
-	it("retains the cancelled opening receipt while retargeting manual controls", () => {
-		const f = fixture([tool(2, 12), tool(5, 15, 20)]);
-		f.update((rows) => [...rows, lockedTarget(10, "Door")]);
-		f.open(false);
-		f.model.cancel();
-		f.selection.select(10);
-		expect(f.model.visible).toBe(true);
-		expect(f.model.windowTitle).toBe("Unlock Door");
-		expect(f.model.read().pending).toBe(true);
-		const queries = f.queryItemUseTarget.mock.calls.length;
-		f.model.attemptAll();
-		f.model.lockpick();
-		expect(f.queryItemUseTarget).toHaveBeenCalledTimes(queries);
-		expect(f.submitItemUse).not.toHaveBeenCalled();
-		f.emit({
-			type: "item-use-finished",
-			result: {
-				sequence: f.openingSequence(),
-				outcome: { kind: "completed", error: "None", message: "" },
-			},
-		});
-		expect(f.model.read().pending).toBe(false);
-		expect(f.submitItemUse).not.toHaveBeenCalled();
-		f.model.lockpick();
-		f.accept();
-		expect(f.submitItemUse.mock.lastCall?.[0].intent).toEqual({
-			kind: "targeted",
-			source: 5,
-			target: 10,
-		});
-		f.model.destroy();
-	});
-	it("refreshes the preferred-pick estimate during the original manual use", () => {
+	it("refreshes the preferred-pick estimate when inventory changes", () => {
 		const f = fixture([tool(5, 15, 20)]);
-		f.open(false);
+		f.open();
 		expect(f.currentQuery().source).toBe(5);
 		f.update((rows) => [
 			...rows.filter((row) => row.guid !== 5),
 			tool(6, 16, 30),
 		]);
-		expect(f.model.read().pending).toBe(true);
+		expect(f.model.read().pending).toBe(false);
 		expect(f.currentQuery().source).toBe(6);
 		f.model.destroy();
 	});

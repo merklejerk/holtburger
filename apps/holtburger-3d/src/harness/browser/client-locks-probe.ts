@@ -180,11 +180,11 @@ export async function probeClientLocks(options: {
 			},
 		},
 	}));
-	const locked = (finishOpening = true) => {
+	const locked = () => {
 		options.selection.select(target);
 		const sequence = allocateItemUseOperation();
+		finish(sequence, "None");
 		emit("client-locked-target", { target, name: "Fixture chest", sequence });
-		if (finishOpening) finish(sequence, "None");
 		return sequence;
 	};
 	const escape = () =>
@@ -466,22 +466,17 @@ export async function probeClientLocks(options: {
 			...picks,
 			inventoryFixtureItem(target, { isLocked: true }),
 		]);
-		const opening = locked(false);
-		const beforeOpening = count();
+		locked();
+		const cancelledQuery = count();
 		if (model.visible || !model.read().pending)
 			throw new Error(
-				"Initial locked use did not retain hidden waiting ownership",
+				"Completed encounter did not start automatic key checking",
 			);
-		finish(allocateItemUseOperation(), "None");
-		if (count() !== beforeOpening)
-			throw new Error("Unrelated receipt started automatic keys");
 		escape();
-		finish(opening, "None");
-		if (model.visible || model.read().pending || count() !== beforeOpening)
-			throw new Error(
-				"Escape while awaiting initial UseDone continued automation",
-			);
-		checks.push("escape-cancels-wait-for-exact-opening-receipt");
+		finish(allocateItemUseOperation(), "None");
+		if (model.visible || model.read().pending || count() !== cancelledQuery)
+			throw new Error("Escape during key checking continued automation");
+		checks.push("escape-cancels-automatic-key-checking");
 		locked();
 		if (model.visible || !model.read().pending)
 			throw new Error("Hidden automation did not retain its subject");

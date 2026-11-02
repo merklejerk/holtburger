@@ -106,7 +106,7 @@ export const itemUseFinishedSchema = z
 	.strict();
 export type ClientItemUseFinished = z.infer<typeof itemUseFinishedSchema>;
 
-/** Best-effort server lock rejection matched to a pending direct use. */
+/** Best-effort lock rejection matched to a completed direct use; admission is already released. */
 export const lockedTargetSchema = z
 	.object({ target: identity, name: z.string(), sequence: identity })
 	.strict();

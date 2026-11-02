@@ -239,6 +239,8 @@ pub struct ClientRuntime {
     /// Equipped source already requested while its consumption policy remains unknown.
     projectile_appraisal: Option<Guid>,
     active_busy_operation: Option<PendingBusyOperation>,
+    /// Direct-use evidence outlives admission because sound and UseDone arrive independently.
+    lock_use: Option<lock_feedback::LockUse>,
     /// Close acknowledgements outstanding after local access has been revoked.
     closing_containers: std::collections::BTreeMap<Guid, Instant>,
     /// Bounded successful-open history used only by corpse-selection conveniences.

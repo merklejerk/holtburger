@@ -184,28 +184,29 @@ describe("ClientSettingsStore", () => {
 			(await store.loadUser(userContext, "persisted")).settings.ui,
 		).toEqual({ ...defaultUser.ui, fonts, uiScale: CLIENT_UI_SCALE.maximum });
 	});
-	it("defaults automatic keys on for existing profiles and persists explicit opt-outs", async () => {
-		const path = await temporarySettingsPath();
-		try {
-			const store = new ClientSettingsStore(path, initialWindow);
-			await store.load();
-			const loaded = await store.loadUser(userContext, "persisted");
-			expect({ ...defaultUser, ...loaded.settings }.lockInteractions).toEqual({
-				autoUseKeys: true,
-			});
-			await store.saveUserPatch({
-				sections: { lockInteractions: { autoUseKeys: false } },
-			});
-			const reloaded = new ClientSettingsStore(path, initialWindow);
-			await reloaded.load();
-			expect(await reloaded.loadUser(userContext, "persisted")).toMatchObject({
-				settings: { lockInteractions: { autoUseKeys: false } },
-				repaired: [],
-			});
-		} finally {
-			await rm(dirname(path), { recursive: true, force: true });
-		}
-	});
+	it.each([false, true])(
+		"persists explicit automatic-key choice %s across reloads",
+		async (autoUseKeys) => {
+			const path = await temporarySettingsPath();
+			try {
+				const store = new ClientSettingsStore(path, initialWindow);
+				await store.load();
+				await store.saveUserPatch({
+					sections: { lockInteractions: { autoUseKeys } },
+				});
+				const reloaded = new ClientSettingsStore(path, initialWindow);
+				await reloaded.load();
+				expect(await reloaded.loadUser(userContext, "persisted")).toMatchObject(
+					{
+						settings: { lockInteractions: { autoUseKeys } },
+						repaired: [],
+					},
+				);
+			} finally {
+				await rm(dirname(path), { recursive: true, force: true });
+			}
+		},
+	);
 
 	it("defaults chat timestamps on and retains user-wide chat choices across reloads", async () => {
 		const path = await temporarySettingsPath();

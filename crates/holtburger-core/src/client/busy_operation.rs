@@ -9,6 +9,7 @@ use std::time::Instant;
 impl ClientRuntime {
     /// Retire local ownership without claiming that the server stopped processing it.
     pub(super) fn clear_busy_operation(&mut self) {
+        self.lock_use = None;
         if let Some(pending) = self.active_busy_operation.take() {
             self.emit_pending_abort(&pending.operation, "Interaction ended".into());
             self.emit_item_use_finished(&pending.operation, ItemUseCompletion::Aborted);
@@ -31,9 +32,11 @@ impl ClientRuntime {
             );
             return false;
         }
+        let deadline = Instant::now() + BUSY_OPERATION_TIMEOUT;
+        self.track_lock_use(&operation, deadline);
         self.active_busy_operation = Some(PendingBusyOperation {
             operation,
-            deadline: Instant::now() + BUSY_OPERATION_TIMEOUT,
+            deadline,
             pending_error: None,
         });
         self.emit_busy_state_updated();
@@ -112,6 +115,7 @@ impl ClientRuntime {
                     parameter,
                 },
             );
+            self.complete_lock_use(resolved_error);
         }
         if error != WeenieError::None {
             self.emit_action_result(
@@ -166,6 +170,13 @@ impl ClientRuntime {
     }
 
     pub(super) fn expire_busy_operation(&mut self, now: Instant) {
+        if self
+            .lock_use
+            .as_ref()
+            .is_some_and(|pending| now >= pending.deadline)
+        {
+            self.lock_use = None;
+        }
         if let Some(pending) = self
             .active_busy_operation
             .take_if(|pending| now >= pending.deadline)

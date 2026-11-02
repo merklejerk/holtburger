@@ -459,11 +459,11 @@ pub enum ActionResultReason {
     },
     /// Lossless interpretation of the server character error.
     Character(super::CharacterErrorCode),
-    /// Matched lock rejection for a pending direct use; broadcast evidence is best effort.
+    /// Matched lock rejection after direct-use completion; broadcast evidence is best effort.
     Locked {
-        /// Guarded direct-use receipt identity; consumers wait for this use to finish.
+        /// Completed guarded direct-use identity; admission has already been released.
         sequence: u32,
-        /// Matched pending direct-use identity, never inferred from current selection.
+        /// Captured direct-use identity, never inferred from current selection.
         target: Guid,
         /// Captured label used by shared feedback formatting.
         name: String,

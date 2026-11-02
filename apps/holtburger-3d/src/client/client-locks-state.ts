@@ -12,7 +12,10 @@ import type {
 	EscapeContextHandle,
 	KeyboardInputPolicy,
 } from "../lib/input/keyboard-input-policy";
-import { allocateItemUseOperation } from "./client-item-use-sequence";
+import {
+	allocateItemUseOperation,
+	lastAllocatedItemUseOperation,
+} from "./client-item-use-sequence";
 
 /** Only the observed identity and shared command boundaries are required. */
 type Session = Pick<
@@ -156,15 +159,8 @@ export class ClientLocksState {
 	#visible = false;
 	#focusRevision = 0;
 	#pending: PendingAttempt | null = null;
-	/** Original use retains admission until its receipt, even after workflow cancellation. */
-	#opening: {
-		/** Only this direct-use receipt may start automatic keys. */
-		readonly sequence: number;
-		/** Cancel future work without forgetting the use still admitted by core. */
-		cancelled: boolean;
-	} | null = null;
-	/** Repeated sound broadcasts for a cancelled opening must not rearm automation. */
-	#lastOpeningSequence: number | null = null;
+	/** Consumed or cancelled identities cannot rearm work, including encounters still in transit. */
+	#retiredThroughSequence = lastAllocatedItemUseOperation();
 	#escape: EscapeContextHandle | null = null;
 	/** Queue and progress are retired together; single-pick attempts have no key run. */
 	#keyRun: KeyRun | null = null;
@@ -297,7 +293,7 @@ export class ClientLocksState {
 			unlocked:
 				this.#target !== null &&
 				this.#entities().get(this.#target.guid)?.isLocked === false,
-			pending: this.#pending !== null || this.#opening !== null,
+			pending: this.#pending !== null,
 		};
 	}
 	/** Retarget visible controls only; a selection change never starts automatic use. */
@@ -314,8 +310,8 @@ export class ClientLocksState {
 		else this.#notify();
 	}
 	#open(target: LockTarget, sequence: number): void {
-		if (this.#destroyed || this.#lastOpeningSequence === sequence) return;
-		this.#lastOpeningSequence = sequence;
+		if (this.#destroyed || sequence <= this.#retiredThroughSequence) return;
+		this.#retiredThroughSequence = sequence;
 		if (!this.#policy().enabled) {
 			this.#notice(`The ${target.name} is locked`, "status");
 			return;
@@ -323,15 +319,14 @@ export class ClientLocksState {
 		// Late feedback from an earlier selection must not restart its workflow.
 		if (target.guid !== this.#selection.selectedGuid()) return;
 		const mode = this.#policy().autoUseKeys ? "automatic" : "manual";
-		// A newer hint cannot replace an opening or tool use that still owns its receipt.
-		if (this.#opening !== null || this.#pending !== null) return;
+		// A newer result cannot replace a tool use that still owns its receipt.
+		if (this.#pending !== null) return;
 		if (this.#target?.guid !== target.guid || this.#mode !== mode) {
 			this.cancel();
 			this.#estimate = null;
 		}
 		this.#target = target;
 		this.#mode = mode;
-		this.#opening = { sequence, cancelled: false };
 		this.#targetAppraisal?.request?.cancel();
 		this.#targetAppraisal = null;
 		if (mode === "manual") {
@@ -341,10 +336,9 @@ export class ClientLocksState {
 		}
 		this.#visible = false;
 		this.#notify();
-		this.#escape?.release();
-		this.#escape = this.#keyboard.bindEscapeContext(() => this.cancel());
+		this.#startAutomatic();
 	}
-	/** Resume only after the original guarded use has released core's admission owner. */
+	/** Core publishes the encounter after direct-use admission has been released. */
 	#startAutomatic(): void {
 		const target = this.#target;
 		if (target === null || !this.#policy().enabled || this.#pending !== null)
@@ -432,10 +426,9 @@ export class ClientLocksState {
 	}
 	/** Cancel future submissions, preserving any use already submitted to core. */
 	cancel(): void {
-		const wasOpening = this.#opening !== null && !this.#opening.cancelled;
-		if (this.#opening !== null) this.#opening.cancelled = true;
+		this.#retiredThroughSequence = lastAllocatedItemUseOperation();
 		if (
-			(!wasOpening && this.#pending === null && this.#keyRun === null) ||
+			(this.#pending === null && this.#keyRun === null) ||
 			this.#pending?.cancelled
 		)
 			return;
@@ -462,7 +455,6 @@ export class ClientLocksState {
 			this.#target !== null &&
 			this.#target.guid === this.#selection.selectedGuid() &&
 			this.#pending === null &&
-			this.#opening === null &&
 			!this.read().unlocked
 		);
 	}
@@ -603,26 +595,6 @@ export class ClientLocksState {
 			);
 	}
 	#finish(result: ClientItemUseFinished): void {
-		const opening = this.#opening;
-		if (opening !== null && result.sequence === opening.sequence) {
-			this.#opening = null;
-			if (opening.cancelled) {
-				this.#notify();
-				return;
-			}
-			this.#escape?.release();
-			this.#escape = null;
-			if (
-				result.outcome.kind !== "completed" ||
-				result.outcome.error !== "None"
-			) {
-				this.close();
-				return;
-			}
-			if (this.#mode === "automatic") this.#startAutomatic();
-			this.#notify();
-			return;
-		}
 		const pending = this.#pending;
 		if (pending === null || result.sequence !== pending.sequence) return;
 		if (
@@ -760,17 +732,13 @@ export class ClientLocksState {
 		) {
 			this.close();
 			this.#pending = null;
-			this.#opening = null;
 			this.#target = null;
 			this.#unlockWatch = null;
 			return;
 		}
 		if (event.type === "entities" || event.type === "character-sheet") {
 			this.#observeUnlock();
-			if (
-				this.#keyRun?.mode === "automatic" ||
-				(!this.#visible && this.#opening !== null)
-			) {
+			if (this.#keyRun?.mode === "automatic") {
 				if (
 					this.#target === null ||
 					!this.#entities().has(this.#target.guid) ||

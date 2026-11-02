@@ -58,6 +58,9 @@ pub enum ClientChatRequest {
     /// Catalog alias; core owns motion and broadcast phrase resolution.
     SoulEmote {
         token: String,
+        /// Optional caller identity for local motion admission and completion results.
+        #[serde(default, rename = "requestId")]
+        request_id: Option<u32>,
     },
 }
 
@@ -69,7 +72,7 @@ impl ClientChatRequest {
             | Self::Tell { message, .. }
             | Self::Channel { message, .. }
             | Self::Emote { message } => message,
-            Self::SoulEmote { token } => token,
+            Self::SoulEmote { token, .. } => token,
         };
         ensure!(
             !message.trim().is_empty(),
@@ -100,7 +103,7 @@ impl ClientChatRequest {
                 ClientCommand::ChannelMessage { channel, message }
             }
             Self::Emote { message } => ClientCommand::Emote(message),
-            Self::SoulEmote { token } => ClientCommand::SoulEmote(token),
+            Self::SoulEmote { token, request_id } => ClientCommand::SoulEmote { token, request_id },
         })
     }
 }
@@ -1616,9 +1619,12 @@ mod tests {
         }))
         .unwrap();
         assert!(
-            matches!(request.into_command().unwrap(), ClientCommand::SoulEmote(token) if token == "Wave")
+            matches!(request.into_command().unwrap(), ClientCommand::SoulEmote { token, request_id: None } if token == "Wave")
         );
-        let empty = ClientChatRequest::SoulEmote { token: " ".into() };
+        let empty = ClientChatRequest::SoulEmote {
+            token: " ".into(),
+            request_id: None,
+        };
         assert!(empty.into_command().is_err());
         assert!(
             serde_json::from_value::<ClientChatRequest>(serde_json::json!({

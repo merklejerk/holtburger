@@ -189,6 +189,21 @@ pub enum LocalAuthoredMotionCommandError {
 pub(crate) const STICKY_TARGET_CLEARANCE_M: f32 = 0.3;
 
 impl WorldState {
+    /// Social motion requires the accepted server stance as well as its gameplay mode.
+    /// Property and motion updates can arrive independently during a combat transition.
+    pub fn player_social_motion_ready(&self) -> bool {
+        !self.player.guid.is_null()
+            && !self
+                .player_entity()
+                .and_then(|entity| entity.network_motion.snapshot())
+                .is_some_and(|snapshot| snapshot.indicates_death_motion())
+            && self.player_combat_mode()
+                == holtburger_protocol::messages::combat::CombatMode::NonCombat
+            && self
+                .resolve_player_motion_style()
+                .is_ok_and(|style| style == MotionStance::NonCombat as u32)
+    }
+
     /// Effective local motion style, without requiring any particular movement rows.
     pub fn resolve_player_motion_style(&self) -> Result<u32, PlayerMotionTableLookupError> {
         if let Some(style) = self.reported_player_motion_style() {
@@ -636,6 +651,7 @@ impl WorldState {
         command: InterpretedMotionCommand,
         speed: f32,
         action_sequence: u16,
+        request_id: Option<u32>,
     ) -> Result<Option<RestPosture>, LocalAuthoredMotionCommandError> {
         let action_sequence = action_sequence & 0x7FFF;
         let guid = self.player.guid;
@@ -651,9 +667,9 @@ impl WorldState {
             },
         )?;
         let rest_posture = RestPosture::from_command(command);
-        // A peace acknowledgement may arrive after authoritative death. Resting must not
-        // replace that death state while the character is still in the same placement epoch.
-        if rest_posture.is_some()
+        // A peace acknowledgement may arrive after authoritative death. Local poses and
+        // social commands must not replace death in the same placement epoch.
+        if (rest_posture.is_some() || command.is_chat_emote())
             && self
                 .player_entity()
                 .and_then(|entity| entity.network_motion.snapshot())
@@ -680,26 +696,36 @@ impl WorldState {
         // Retail DoMotion rejects resting and social animations before interpreted playback
         // dispatch (ACE MotionInterp.DoMotion). Use the authoritative style: ordinary playback
         // may still retain a peace pose while manual locomotion owns combat.
-        if self
+        if command.is_chat_emote() && !self.player_social_motion_ready() {
+            return Err(LocalAuthoredMotionCommandError::Refused {
+                reason: WeenieError::CantChatEmoteInCombat,
+            });
+        }
+        let style = self
             .reported_player_motion_style()
-            .unwrap_or(table.default_style)
-            != MotionStance::NonCombat as u32
-        {
+            .unwrap_or(table.default_style);
+        if style != MotionStance::NonCombat as u32 {
             let refusal = match rest_posture {
                 Some(RestPosture::Crouching) => Some(WeenieError::CantCrouchInCombat),
                 Some(RestPosture::Sitting) => Some(WeenieError::CantSitInCombat),
                 Some(RestPosture::Lying) => Some(WeenieError::CantLieDownInCombat),
-                _ if command.is_chat_emote() => Some(WeenieError::CantChatEmoteInCombat),
                 _ => None,
             };
             if let Some(reason) = refusal {
                 return Err(LocalAuthoredMotionCommandError::Refused { reason });
             }
         }
-        match self
-            .motion_runtimes
-            .submit_local_command(table, guid, command, speed, admission)
-        {
+        match self.motion_runtimes.submit_local_command(
+            table,
+            guid,
+            MotionCommand(style),
+            crate::motion::LocalMotionCommand {
+                command,
+                request_id,
+            },
+            speed,
+            admission,
+        ) {
             crate::motion::MotionCommandAdmissionOutcome::Accepted => {}
             crate::motion::MotionCommandAdmissionOutcome::QueueFull => {
                 return Err(LocalAuthoredMotionCommandError::Refused {

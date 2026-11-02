@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { probeClientEmotes } from "./client-emote-probe.mjs";
 import { probeBarber } from "./client-barber-probe.mjs";
 import { probeCellTooltips } from "./cell-tooltip-probe.mjs";
 import { extractContentArguments } from "./entry-paths.mjs";
@@ -289,6 +290,13 @@ try {
 			suite: "client-select-picker",
 			passed: true,
 			evidence: result.clientSelectPicker,
+			consoleMessages: result.consoleMessages,
+		};
+	} else if (options.clientEmotes) {
+		report = {
+			suite: "client-emotes",
+			passed: true,
+			evidence: result.clientEmotes,
 			consoleMessages: result.consoleMessages,
 		};
 	} else if (options.clientKeyboard) {
@@ -710,6 +718,7 @@ function parseArgs(args) {
 		clientAttention: false,
 		clientPartyScreenshotDirectory: null,
 		clientKeyboard: false,
+		clientEmotes: false,
 		clientSelectPicker: false,
 		clientConnection: false,
 		clientAudio: false,
@@ -916,6 +925,10 @@ function parseArgs(args) {
 			case "--client-settings-tabs":
 				parsed.clientHud = true;
 				parsed.clientSettingsTabs = true;
+				break;
+			case "--client-emotes":
+				parsed.clientHud = true;
+				parsed.clientEmotes = true;
 				break;
 			case "--client-keyboard":
 				parsed.clientHud = true;
@@ -2249,6 +2262,7 @@ Options:
   --client-party-screenshots <dir> Capture the real party HUD at one through four columns.
   --screenshot <path>   Persist the captured PNG after the harness exits.
   --character-sheet     Exercise the Character panel with synthetic quotes in the client HUD.
+  --client-emotes       Verify emote admission, combat restoration, and recoverable timeouts.
   --client-keyboard     Verify pointer controls, editor ownership, native navigation, and game routing.
   --client-select-picker Verify right-edge select opening, keyboard selection, and modal dismissal.
   --client-salvage      Exercise salvage HUD entry, Ust activation, pointer queue, and guarded submission.
@@ -5053,6 +5067,12 @@ async function runClientHudHarness({ viteUrl }) {
 		if (options.clientSelectPicker)
 			return {
 				clientSelectPicker: await probeSelectPicker(client, evaluateExpression),
+				consoleMessages,
+				state: { error: null, ready: true },
+			};
+		if (options.clientEmotes)
+			return {
+				clientEmotes: await probeClientEmotes(client, evaluateExpression),
 				consoleMessages,
 				state: { error: null, ready: true },
 			};

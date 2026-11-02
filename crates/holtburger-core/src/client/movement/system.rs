@@ -25,9 +25,9 @@ use holtburger_protocol::messages::movement::{InterpretedMotionCommand, MotionIt
 use holtburger_session::Session;
 use holtburger_world::context::WorldContextExt as _;
 use holtburger_world::motion::{
-    CharacterMotionPresentation, DirectedMotionSupport, DirectedMotionTravel, MotionCommand,
-    MotionContact, MotionOrder, SequenceTick, ServerDirectedMotionResolution,
-    ServerDirectedMotionState, resolve_server_directed_motion,
+    CharacterMotionPresentation, DirectedMotionSupport, DirectedMotionTravel, LocalMotionFeedback,
+    LocalMotionOutcome, MotionCommand, MotionContact, MotionOrder, SequenceTick,
+    ServerDirectedMotionResolution, ServerDirectedMotionState, resolve_server_directed_motion,
 };
 use holtburger_world::spatial::{ContactState, LocalDriveControl, LocalDriveGait};
 use holtburger_world::{SpatialBodyId, WorldEvent, WorldState};
@@ -205,6 +205,8 @@ pub(crate) struct MovementSystem {
     /// Expected local queue refusals published by ClientRuntime through ordinary action feedback.
     authored_motion_rejections: Vec<holtburger_protocol::errors::WeenieError>,
     pending_authored_commands: Vec<AuthoredMotionIntent>,
+    /// Immediate refusals before a command reaches the world playback owner.
+    authored_request_feedback: Vec<LocalMotionFeedback>,
     /// Ordered absolute correction and subsequent relative input for physical integration.
     pending_facing: PendingFacing,
     /// Sole selected source of local locomotion; absence leaves authoritative playback in charge.
@@ -287,6 +289,8 @@ struct PublishedDrive {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct AuthoredMotionIntent {
+    /// Optional submitting caller identity, preserved independently of wire stamps.
+    request_id: Option<u32>,
     command: InterpretedMotionCommand,
     motion_style: MotionStyle,
 }
@@ -319,6 +323,7 @@ impl MovementSystem {
             character_motion_feedback: Vec::new(),
             authored_motion_rejections: Vec::new(),
             pending_authored_commands: Vec::new(),
+            authored_request_feedback: Vec::new(),
             pending_facing: PendingFacing::default(),
             active_movement: None,
             manual_input: ManualInputLifetime::None,
@@ -343,6 +348,18 @@ impl MovementSystem {
         self.process_control_commands(now, world, false);
     }
 
+    /// A takeover explicitly retires commands that have not reached wire or playback admission.
+    fn cancel_pending_authored_commands(&mut self) {
+        for intent in self.pending_authored_commands.drain(..) {
+            if let Some(request_id) = intent.request_id {
+                self.authored_request_feedback.push(LocalMotionFeedback {
+                    request_id,
+                    outcome: LocalMotionOutcome::Cancelled,
+                });
+            }
+        }
+    }
+
     /// Gesture packets retire automatic approach without discarding the latest held input or
     /// jump charge. Playback arbitration decides whether that input can move the body now.
     pub(crate) fn admit_server_gesture(&mut self, now: Instant, world: &mut WorldState) {
@@ -362,7 +379,7 @@ impl MovementSystem {
         // Publish this manual takeover once with the newly admitted server-control sequence.
         self.movement_publication_required |= self.has_active_manual_drive();
         self.pending_facing = PendingFacing::default();
-        self.pending_authored_commands.clear();
+        self.cancel_pending_authored_commands();
     }
 
     fn select_server_directive(&mut self, motion: Option<ServerDirectedMotionState>) {
@@ -374,7 +391,7 @@ impl MovementSystem {
         self.movement_publication_required = false;
         self.character_motion.cancel_charge();
         self.pending_jump_attempt = None;
-        self.pending_authored_commands.clear();
+        self.cancel_pending_authored_commands();
         self.pending_facing = PendingFacing::default();
         self.pending_manual_playback_stop = false;
     }
@@ -404,6 +421,7 @@ impl MovementSystem {
         self.manual_input = ManualInputLifetime::None;
         self.pending_jump_attempt = None;
         self.character_motion_feedback.clear();
+        self.authored_request_feedback.clear();
         self.authored_motion_rejections.clear();
         self.pending_authored_commands.clear();
         self.pending_facing = PendingFacing::default();
@@ -478,10 +496,20 @@ impl MovementSystem {
         command: InterpretedMotionCommand,
         motion_style: MotionStyle,
     ) {
+        self.enqueue_authored_motion_request(command, motion_style, None);
+    }
+
+    pub(crate) fn enqueue_authored_motion_request(
+        &mut self,
+        command: InterpretedMotionCommand,
+        motion_style: MotionStyle,
+        request_id: Option<u32>,
+    ) {
         self.queued_control_commands
             .push(QueuedControlCommand::Authored(AuthoredMotionIntent {
                 command,
                 motion_style,
+                request_id,
             }));
     }
 
@@ -547,7 +575,7 @@ impl MovementSystem {
                 let had_server_directive = self.has_server_controlled_motion();
                 self.movement_publication_required |= had_server_directive;
                 self.pending_manual_playback_stop |= had_server_directive;
-                self.pending_authored_commands.clear();
+                self.cancel_pending_authored_commands();
                 self.character_motion.release_input();
                 self.pending_jump_attempt = None;
                 self.pending_facing = PendingFacing::default();
@@ -564,7 +592,7 @@ impl MovementSystem {
             self.character_motion.release_input();
             self.pending_jump_attempt = None;
             self.pending_facing = PendingFacing::default();
-            self.pending_authored_commands.clear();
+            self.cancel_pending_authored_commands();
             self.pending_manual_playback_stop = self.has_server_controlled_motion();
         } else if !matches!(
             self.active_movement,
@@ -984,7 +1012,17 @@ impl MovementSystem {
         self.pending_jump_attempt.take()
     }
 
-    /// Drain expected command refusals once, preserving ClientRuntime's client-versus-wire attribution.
+    /// Drain producer outcomes after simulation so even same-tick completion reaches the caller.
+    pub(crate) fn take_authored_request_feedback(
+        &mut self,
+        world: &mut WorldState,
+    ) -> Vec<LocalMotionFeedback> {
+        let mut feedback = std::mem::take(&mut self.authored_request_feedback);
+        feedback.extend(world.motion_runtimes.take_local_feedback(world.player.guid));
+        feedback
+    }
+
+    /// Drain expected refusals once, preserving client-versus-wire attribution.
     pub(crate) fn take_authored_motion_rejections(
         &mut self,
     ) -> Vec<holtburger_protocol::errors::WeenieError> {
@@ -1338,10 +1376,28 @@ impl MovementSystem {
             intent.command,
             1.0,
             movement_sequence,
+            intent.request_id,
         ) {
             Ok(posture) => posture,
             Err(holtburger_world::state::LocalAuthoredMotionCommandError::Refused { reason }) => {
+                if let Some(request_id) = intent.request_id {
+                    self.authored_request_feedback.push(LocalMotionFeedback {
+                        request_id,
+                        outcome: LocalMotionOutcome::Refused,
+                    });
+                }
                 self.authored_motion_rejections.push(reason);
+                return Ok(());
+            }
+            Err(holtburger_world::state::LocalAuthoredMotionCommandError::UnsupportedCommand {
+                ..
+            }) if intent.request_id.is_some() => {
+                if let Some(request_id) = intent.request_id {
+                    self.authored_request_feedback.push(LocalMotionFeedback {
+                        request_id,
+                        outcome: LocalMotionOutcome::Unsupported,
+                    });
+                }
                 return Ok(());
             }
             Err(error) => {

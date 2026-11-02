@@ -237,7 +237,7 @@ impl ClientRuntime {
             | ClientCommand::Tell { .. }
             | ClientCommand::ChannelMessage { .. }
             | ClientCommand::Emote(_)
-            | ClientCommand::SoulEmote(_) => self.handle_chat_command(cmd).await,
+            | ClientCommand::SoulEmote { .. } => self.handle_chat_command(cmd).await,
 
             ClientCommand::Identify(_)
             | ClientCommand::ReadBookPage { .. }
@@ -655,8 +655,17 @@ impl ClientRuntime {
                 })))
                 .await
             }
-            ClientCommand::SoulEmote(token) => {
+            ClientCommand::SoulEmote { token, request_id } => {
                 let Some(resolved) = self.world.soul_emote_catalog.resolve(&token) else {
+                    if let Some(request_id) = request_id {
+                        let _ =
+                            self.client_view_event_tx
+                                .send(ClientViewEvent::LocalMotionFeedback {
+                                    request_id,
+                                    world_generation: self.world_generation,
+                                    outcome: holtburger_world::motion::LocalMotionOutcome::Refused,
+                                });
+                    }
                     self.emit_action_result(
                         ActionResultSource::Client,
                         ActionResultReason::General(format!("Unknown soul emote token: {}", token)),
@@ -671,18 +680,31 @@ impl ClientRuntime {
                     .or_else(|| resolved.my_emote.map(str::to_owned))
                     .unwrap_or_else(|| resolved.token.to_string());
 
+                let motion_command = motion_command_for_soul_emote_pose(&pose);
                 if self.world.player.guid != Guid::NULL
-                    && let Some(command) = motion_command_for_soul_emote_pose(&pose)
+                    && let Some(command) = motion_command
                 {
-                    let motion_style = self
-                        .world
-                        .player
-                        .last_server_motion_style
-                        .unwrap_or(MotionStance::NonCombat);
-                    self.movement.enqueue_authored_motion(
+                    self.movement.enqueue_authored_motion_request(
                         command,
-                        crate::client::movement_types::MotionStyle::Explicit(motion_style),
+                        // World admission requires peace. An older autonomous echo must not
+                        // put a stale combat style back onto the outgoing social command.
+                        crate::client::movement_types::MotionStyle::Explicit(
+                            MotionStance::NonCombat,
+                        ),
+                        request_id,
                     );
+                }
+
+                if motion_command.is_none()
+                    && let Some(request_id) = request_id
+                {
+                    let _ = self
+                        .client_view_event_tx
+                        .send(ClientViewEvent::LocalMotionFeedback {
+                            request_id,
+                            world_generation: self.world_generation,
+                            outcome: holtburger_world::motion::LocalMotionOutcome::Unsupported,
+                        });
                 }
 
                 log::info!(">>> You soul emote: \"{}\"", message);
@@ -1227,9 +1249,12 @@ mod tests {
         ItemProfileActionData, SkillAdvancementClass,
     };
     use holtburger_world::RuntimeBodyResetCause;
-    use holtburger_world::entity::Entity;
+    use holtburger_world::entity::{Entity, EntityMotionSnapshot, EntityNetworkMotion};
+    use holtburger_world::motion::{LocalMotionFeedback, LocalMotionOutcome};
     use holtburger_world::spell::SpellCatalog;
-    use holtburger_world::state::motion_resolution::test_support::explicit_motion_catalog;
+    use holtburger_world::state::motion_resolution::test_support::{
+        FIXTURE_STAND_COMMAND, explicit_motion_catalog,
+    };
     use holtburger_world::state::{
         FellowshipDepartedMemberState, FellowshipLockEntryState, FellowshipLockState,
         FellowshipMemberState, FellowshipState, TradeSide, TradeState,
@@ -1956,13 +1981,229 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn social_motion_death_refusal_preserves_its_specific_reason() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        client
+            .world
+            .entities
+            .get_mut(Guid(1))
+            .unwrap()
+            .network_motion = EntityNetworkMotion::Initialized(EntityMotionSnapshot {
+            current_style: Some(MotionStance::NonCombat),
+            forward_command: Some(
+                holtburger_protocol::messages::movement::InterpretedMotionCommand::DEAD,
+            ),
+            ..EntityMotionSnapshot::default()
+        });
+        client
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".into(),
+                request_id: Some(7),
+            })
+            .await
+            .unwrap();
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        assert_eq!(
+            client.movement.take_authored_motion_rejections(),
+            vec![WeenieError::Dead]
+        );
+        assert_eq!(
+            client
+                .movement
+                .take_authored_request_feedback(&mut client.world),
+            vec![LocalMotionFeedback {
+                request_id: 7,
+                outcome: LocalMotionOutcome::Refused
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_replacement_world_epoch_can_reuse_retired_request_identity() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        client
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".into(),
+                request_id: Some(7),
+            })
+            .await
+            .unwrap();
+        let _prepared = client
+            .movement
+            .prepare_tick(Instant::now(), &mut client.world);
+        client.bump_world_generation();
+        client.movement.retire_movement_epoch();
+        client
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".into(),
+                request_id: Some(7),
+            })
+            .await
+            .unwrap();
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        client
+            .movement
+            .advance_local_authored_motion(&mut client.world, std::time::Duration::from_millis(30))
+            .unwrap();
+        assert_eq!(
+            client
+                .movement
+                .take_authored_request_feedback(&mut client.world),
+            vec![
+                LocalMotionFeedback {
+                    request_id: 7,
+                    outcome: LocalMotionOutcome::Accepted
+                },
+                LocalMotionFeedback {
+                    request_id: 7,
+                    outcome: LocalMotionOutcome::Unsupported
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn social_readiness_is_revoked_before_publishing_a_combat_mode_change() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        client.publish_social_motion_readiness();
+        let mut events = client.subscribe_client_view_events();
+        client
+            .world
+            .entities
+            .get_mut(Guid(1))
+            .unwrap()
+            .set_int_prop(PropertyInt::CombatMode, CombatMode::Magic as i32);
+        client.handle_world_event(&holtburger_world::WorldEvent::CombatModeUpdated(
+            CombatMode::Magic,
+        ));
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            ClientViewEvent::SocialMotionReadyUpdated { ready: false }
+        ));
+        assert!(matches!(
+            events.try_recv().unwrap(),
+            ClientViewEvent::CombatModeUpdated {
+                mode: CombatMode::Magic
+            }
+        ));
+    }
+
+    #[test]
+    fn social_motion_readiness_requires_mode_and_motion_stance_to_agree() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        assert!(client.world.player_social_motion_ready());
+        client.world.player.last_server_motion_style = Some(MotionStance::Magic);
+        assert!(!client.world.player_social_motion_ready());
+        client.world.player.last_server_motion_style = Some(MotionStance::NonCombat);
+        client
+            .world
+            .entities
+            .get_mut(Guid(1))
+            .unwrap()
+            .set_int_prop(PropertyInt::CombatMode, CombatMode::Magic as i32);
+        assert!(!client.world.player_social_motion_ready());
+        client
+            .world
+            .entities
+            .get_mut(Guid(1))
+            .unwrap()
+            .set_int_prop(PropertyInt::CombatMode, CombatMode::NonCombat as i32);
+        assert!(client.world.player_social_motion_ready());
+    }
+
+    #[tokio::test]
+    async fn server_stance_takeover_explicitly_cancels_an_uncommitted_emote() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        client
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".into(),
+                request_id: Some(8),
+            })
+            .await
+            .unwrap();
+        // A stance packet can be processed after chat admission but before the movement tick.
+        client
+            .movement
+            .admit_server_controlled_motion(None, Instant::now(), &mut client.world);
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        assert_eq!(
+            client
+                .movement
+                .take_authored_request_feedback(&mut client.world),
+            vec![LocalMotionFeedback {
+                request_id: 8,
+                outcome: LocalMotionOutcome::Cancelled
+            }]
+        );
+        assert!(!client.world.has_local_authored_motion(Guid(1)));
+    }
+
+    #[tokio::test]
+    async fn correlated_emote_exposes_selector_failure_without_stopping_the_client() {
+        let mut client = build_test_client();
+        seed_action_capable_player(&mut client, Guid(1));
+        client
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".into(),
+                request_id: Some(7),
+            })
+            .await
+            .unwrap();
+        client
+            .movement
+            .tick(Instant::now(), &mut client.world, &mut client.session)
+            .await
+            .unwrap();
+        client
+            .movement
+            .advance_local_authored_motion(&mut client.world, std::time::Duration::from_millis(30))
+            .unwrap();
+        assert_eq!(
+            client
+                .movement
+                .take_authored_request_feedback(&mut client.world),
+            vec![
+                LocalMotionFeedback {
+                    request_id: 7,
+                    outcome: LocalMotionOutcome::Accepted
+                },
+                LocalMotionFeedback {
+                    request_id: 7,
+                    outcome: LocalMotionOutcome::Unsupported
+                }
+            ]
+        );
+        assert!(matches!(client.state, ClientState::InWorld));
+    }
+
+    #[tokio::test]
     async fn soul_emote_command_sends_dedicated_game_action() {
         let mut client = build_test_client();
         let guid = Guid(0x5000_0001);
         seed_action_capable_player(&mut client, guid);
 
         client
-            .handle_command(ClientCommand::SoulEmote("wave".to_string()))
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".to_string(),
+                request_id: None,
+            })
             .await
             .unwrap();
 
@@ -1987,7 +2228,10 @@ mod tests {
             seed_action_capable_player(&mut client, guid);
             client.world.player.last_server_motion_style = Some(MotionStance::Magic);
             client
-                .handle_command(ClientCommand::SoulEmote(token.into()))
+                .handle_command(ClientCommand::SoulEmote {
+                    token: token.into(),
+                    request_id: None,
+                })
                 .await
                 .unwrap();
             let chat_bytes = client.session.bytes_out;
@@ -2009,13 +2253,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn soul_emote_pose_uses_shared_command_admission_and_preserves_multiple_requests() {
+    async fn soul_emotes_preserve_one_shot_requests_and_replace_held_poses() {
         let mut client = build_test_client();
         let guid = Guid(0x5000_0001);
         seed_action_capable_player(&mut client, guid);
         for token in ["wave", "bow", "wave"] {
             client
-                .handle_command(ClientCommand::SoulEmote(token.into()))
+                .handle_command(ClientCommand::SoulEmote {
+                    token: token.into(),
+                    request_id: None,
+                })
                 .await
                 .unwrap();
         }
@@ -2029,7 +2276,7 @@ mod tests {
             "each request sends its chat action and motion edge"
         );
         let runtime = client.world.motion_runtimes.get(guid).unwrap();
-        assert_eq!(runtime.state().substate.raw(), 0x4300_00ec);
+        assert_eq!(runtime.state().substate.raw(), FIXTURE_STAND_COMMAND);
         assert_eq!(
             runtime.action_count(),
             2,
@@ -2044,7 +2291,10 @@ mod tests {
         seed_action_capable_player(&mut client, Guid(0x5000_0001));
         for _ in 0..=holtburger_world::motion::MAX_AUTHORED_ACTIONS {
             client
-                .handle_command(ClientCommand::SoulEmote("wave".into()))
+                .handle_command(ClientCommand::SoulEmote {
+                    token: "wave".into(),
+                    request_id: None,
+                })
                 .await
                 .unwrap();
         }
@@ -2067,7 +2317,10 @@ mod tests {
         seed_action_capable_player(&mut client, guid);
         let now = Instant::now();
         client
-            .handle_command(ClientCommand::SoulEmote("bow".into()))
+            .handle_command(ClientCommand::SoulEmote {
+                token: "bow".into(),
+                request_id: None,
+            })
             .await
             .unwrap();
         client
@@ -2105,7 +2358,10 @@ mod tests {
         let mut client = build_test_client();
 
         client
-            .handle_command(ClientCommand::SoulEmote("wave".to_string()))
+            .handle_command(ClientCommand::SoulEmote {
+                token: "wave".to_string(),
+                request_id: None,
+            })
             .await
             .unwrap();
         client
@@ -2132,7 +2388,10 @@ mod tests {
         let mut view_events = client.subscribe_client_view_events();
 
         client
-            .handle_command(ClientCommand::SoulEmote("ploop".to_string()))
+            .handle_command(ClientCommand::SoulEmote {
+                token: "ploop".to_string(),
+                request_id: None,
+            })
             .await
             .unwrap();
 

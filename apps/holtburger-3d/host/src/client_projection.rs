@@ -697,6 +697,8 @@ pub struct ClientCurrentState {
     pub gameplay_preferences: Option<crate::client_gameplay::ClientGameplayPreferences>,
     /// Server-confirmed stance for the combat shortcut.
     pub combat_mode: ClientCombatMode,
+    /// Shared social-command admission, including accepted server motion stance.
+    pub social_motion_ready: bool,
     /// Desired targeted combat and shared repeat lifecycle.
     pub combat: ClientCombatStatusWire,
     /// Non-self recipient retained by the current spell operation until completion or retirement.
@@ -1427,7 +1429,15 @@ pub enum ClientHostEvent {
         player_guid: Guid,
         name: String,
     },
-    /// Server-confirmed stance replacement.
+    /// Shared readiness for social command admission.
+    SocialMotionReadyUpdated {
+        ready: bool,
+    },
+    LocalMotionFeedback {
+        request_id: u32,
+        world_generation: u64,
+        outcome: holtburger_world::motion::LocalMotionOutcome,
+    },
     CombatModeUpdated {
         mode: ClientCombatMode,
     },
@@ -1680,6 +1690,7 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
             appearance_options: snapshot.character_options.map(Into::into),
             gameplay_preferences: snapshot.character_options.map(Into::into),
             combat_mode: snapshot.combat_mode.into(),
+            social_motion_ready: snapshot.social_motion_ready,
             combat: snapshot.combat.into(),
             spell_cast_target: snapshot.spell_cast_target,
             lifecycle: (&snapshot.lifecycle).into(),
@@ -1852,6 +1863,18 @@ pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
         } => Some(ClientHostEvent::EntityHealthUpdated {
             guid,
             health_fraction,
+        }),
+        ClientViewEvent::SocialMotionReadyUpdated { ready } => {
+            Some(ClientHostEvent::SocialMotionReadyUpdated { ready })
+        }
+        ClientViewEvent::LocalMotionFeedback {
+            request_id,
+            world_generation,
+            outcome,
+        } => Some(ClientHostEvent::LocalMotionFeedback {
+            request_id,
+            world_generation,
+            outcome,
         }),
         ClientViewEvent::CombatModeUpdated { mode } => {
             Some(ClientHostEvent::CombatModeUpdated { mode: mode.into() })

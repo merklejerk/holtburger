@@ -184,7 +184,17 @@ pub enum HostEvent {
         #[serde(rename = "healthFraction")]
         health_fraction: f32,
     },
-    /// Server-confirmed stance replacement.
+    /// Shared readiness for social command admission.
+    ClientSocialMotionReadyUpdated {
+        ready: bool,
+    },
+    ClientLocalMotionFeedback {
+        #[serde(rename = "requestId")]
+        request_id: u32,
+        #[serde(rename = "worldGeneration")]
+        world_generation: u64,
+        outcome: holtburger_world::motion::LocalMotionOutcome,
+    },
     ClientCombatModeUpdated {
         mode: crate::client_projection::ClientCombatMode,
     },
@@ -660,6 +670,18 @@ impl ClientEventSink for StdioEventSink {
                 guid,
                 health_fraction,
             },
+            crate::client_projection::ClientHostEvent::SocialMotionReadyUpdated { ready } => {
+                HostEvent::ClientSocialMotionReadyUpdated { ready }
+            }
+            crate::client_projection::ClientHostEvent::LocalMotionFeedback {
+                request_id,
+                world_generation,
+                outcome,
+            } => HostEvent::ClientLocalMotionFeedback {
+                request_id,
+                world_generation,
+                outcome,
+            },
             crate::client_projection::ClientHostEvent::CombatModeUpdated { mode } => {
                 HostEvent::ClientCombatModeUpdated { mode }
             }
@@ -1019,6 +1041,29 @@ mod tests {
                 "event": "client-item-use-finished", "payload": { "sequence": 42, "outcome": {
                     "kind": "completed", "error": "KeyDoesntFitThisLock", "message": "The key does not fit."
                 }}
+            })
+        );
+    }
+
+    #[test]
+    fn local_motion_feedback_preserves_correlation_on_the_wire() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let sink = StdioEventSink::new(sender);
+        sink.publish_client_event(
+            crate::client_projection::ClientHostEvent::LocalMotionFeedback {
+                request_id: 17,
+                world_generation: 3,
+                outcome: holtburger_world::motion::LocalMotionOutcome::Completed,
+            },
+        )
+        .unwrap();
+        let ProtocolFrame::Event { event } = receiver.recv().unwrap() else {
+            panic!("expected motion feedback");
+        };
+        assert_eq!(
+            serde_json::to_value(event).unwrap(),
+            serde_json::json!({
+                "event": "client-local-motion-feedback", "payload": { "requestId": 17, "worldGeneration": 3, "outcome": "completed" }
             })
         );
     }

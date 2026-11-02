@@ -173,6 +173,11 @@ pub struct EntityMotionAdmission {
 /// Wire path that produced an interpreted motion command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntityMotionCommandSource {
+    /// Client-authored edge; its playback owner reports local lifecycle outcomes.
+    LocalCommand {
+        /// Optional local caller identity, independent of wrapping wire sequence stamps.
+        request_id: Option<u32>,
+    },
     /// Retail command-list item with its own wrapping 15-bit sequence.
     CommandList,
     /// ACE action-class forward command keyed by the fresh outer movement event.

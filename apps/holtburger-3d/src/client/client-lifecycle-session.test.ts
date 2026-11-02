@@ -897,6 +897,39 @@ describe("ClientLifecycleSession", () => {
 		session.stop();
 	});
 
+	it("keeps social readiness separate from combat mode and forwards correlated playback results", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		const observed = vi.fn<(event: ClientLifecycleSessionEvent) => void>();
+		session.subscribe(observed);
+		await session.start();
+		transport.emit("client-social-motion-ready-updated", { ready: false });
+		transport.emit("client-combat-mode-updated", { mode: "peace" });
+		expect(session.state().socialMotionReady).toBe(false);
+		transport.emit("client-social-motion-ready-updated", { ready: true });
+		expect(session.state().socialMotionReady).toBe(true);
+		await session.sendChat({
+			kind: "soul-emote",
+			token: "wave",
+			requestId: 17,
+		});
+		expect(transport.invocations.at(-1)).toEqual({
+			command: "send_client_chat",
+			args: { request: { kind: "soul-emote", token: "wave", requestId: 17 } },
+		});
+		const feedback = {
+			requestId: 17,
+			worldGeneration: 3,
+			outcome: "superseded",
+		};
+		transport.emit("client-local-motion-feedback", feedback);
+		expect(observed).toHaveBeenLastCalledWith({
+			type: "local-motion-feedback",
+			feedback,
+		});
+		session.stop();
+	});
+
 	it("casts only in confirmed magic and forwards each caller-owned aim", async () => {
 		const transport = new FakeClientTransport();
 		const session = new ClientLifecycleSession(transport);
@@ -955,6 +988,7 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-current-state", {
 			...currentState(1),
 			combatMode: "magic",
+			socialMotionReady: false,
 		});
 		expect(session.state().combatMode).toBe("magic");
 		transport.emit("client-combat-mode-updated", { mode: "peace" });
@@ -980,6 +1014,7 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-current-state", {
 			...currentState(1),
 			combatMode: "magic",
+			socialMotionReady: false,
 		});
 		transport.invocations.length = 0;
 		await session.setRestPosture("lying");
@@ -1004,6 +1039,7 @@ describe("ClientLifecycleSession", () => {
 		transport.emit("client-current-state", {
 			...currentState(1),
 			combatMode: "magic",
+			socialMotionReady: false,
 		});
 		transport.calls.length = 0;
 		await session.setCombatMode("peace");
@@ -1984,6 +2020,7 @@ describe("ClientLifecycleSession", () => {
 			knownSpells: null,
 			enchantments: null,
 			combatMode: "peace",
+			socialMotionReady: true,
 			worldName: "Morningthaw",
 			vitals: [{ kind: "health", current: 80, maximum: 100 }],
 			exit: {
@@ -2659,6 +2696,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		allegiancePreferences: null,
 		friendsPreferences: null,
 		combatMode: "peace",
+		socialMotionReady: true,
 		combat: {
 			desired: null,
 			state: "idle",

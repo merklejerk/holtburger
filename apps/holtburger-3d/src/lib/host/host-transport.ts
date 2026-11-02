@@ -1,3 +1,4 @@
+import type { ClientLocalMotionFeedback } from "../../client/client-host-contract";
 import type { ClientLockFeedback } from "../../client/client-lock-feedback-contract";
 import type { ClientGameplayPreferences } from "../../client/client-gameplay-options-contract";
 import type {
@@ -326,6 +327,8 @@ const CLIENT_HOST_EVENT_NAMES = [
 	"client-contract-membership-changed",
 	"client-squelch-updated",
 	"client-allegiance-updated",
+	"client-social-motion-ready-updated",
+	"client-local-motion-feedback",
 	"client-combat-mode-updated",
 	"client-combat-status-updated",
 	"client-spell-cast-target-updated",
@@ -454,6 +457,8 @@ export interface HostEventPayloadMap {
 	"client-party-updated": {
 		party: PartySnapshot | null;
 	};
+	"client-social-motion-ready-updated": { ready: boolean };
+	"client-local-motion-feedback": ClientLocalMotionFeedback;
 	"client-combat-mode-updated": { mode: ClientCombatMode };
 	"client-combat-status-updated": ClientCombatStatus;
 	/** Non-self spell recipient, already resolved by the shared operation owner. */

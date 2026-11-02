@@ -82,6 +82,10 @@ pub struct BodyMotionRuntime {
     active_action: Option<EntityMotionAction>,
     /// Fresh selector rejections awaiting body-context reporting by the registry owner.
     rejected_actions: Vec<EntityMotionAction>,
+    /// Local retained pose whose exit must finish before reporting completion.
+    local_pose_request: Option<u32>,
+    /// Request outcomes produced at admission, selection, and exact sequence boundaries.
+    local_feedback: Vec<LocalMotionFeedback>,
 }
 
 /// Independent selection and cursor; action ownership remains in `BodyMotionRuntime`.
@@ -132,6 +136,42 @@ impl LocomotionPlayback {
             resolution: MotionOrderResolution::default(),
         }
     }
+}
+
+/// A local command and its optional caller identity, separate from wrapping wire stamps.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LocalMotionCommand {
+    /// Expanded motion selected by the shared admission layer.
+    pub command: MotionCommand,
+    /// Caller identity retained through queueing, playback, and completion.
+    pub request_id: Option<u32>,
+}
+
+/// One local command's producer-owned playback result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalMotionFeedback {
+    /// Non-wrapping caller identity carried through local admission.
+    pub request_id: u32,
+    /// Admission or terminal result, never inferred from visible animation activity.
+    pub outcome: LocalMotionOutcome,
+}
+
+/// Local playback lifecycle independent of remote animation coverage.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LocalMotionOutcome {
+    /// Command entered the local action queue or selected its retained pose.
+    Accepted,
+    /// Action completed, or the retained pose's exit returned to ordinary locomotion.
+    Completed,
+    /// Death, a table change, or another authority retired unfinished playback.
+    Cancelled,
+    /// A newer local social command or retained pose replaced this request.
+    Superseded,
+    /// The motion table could not select the requested animation.
+    Unsupported,
+    /// Gameplay admission refused the command; ordinary action feedback carries the reason.
+    Refused,
 }
 
 /// Result of offering one transient edge to retail's six-action runtime bound.
@@ -343,10 +383,14 @@ impl BodyMotionRuntime {
     fn submit_local_command(
         &mut self,
         table: &MotionSequenceTable,
-        command: MotionCommand,
+        request: LocalMotionCommand,
         speed: OrderedMotionScalar,
         admission: EntityMotionAdmission,
     ) -> MotionCommandAdmissionOutcome {
+        let LocalMotionCommand {
+            command,
+            request_id,
+        } = request;
         self.bind_table(table);
         let outcome = if command.is_action() {
             let outcome = self.enqueue_action(EntityMotionAction {
@@ -355,17 +399,40 @@ impl BodyMotionRuntime {
                 action_sequence: admission.movement_sequence,
                 is_autonomous: true,
                 admission,
-                source: EntityMotionCommandSource::CommandList,
+                source: EntityMotionCommandSource::LocalCommand { request_id },
             });
             match outcome {
-                MotionActionEnqueueOutcome::Queued => MotionCommandAdmissionOutcome::Accepted,
+                MotionActionEnqueueOutcome::Queued => {
+                    if command.is_chat_emote()
+                        && self
+                            .steady_order
+                            .forward
+                            .is_some_and(|(held, _)| held.is_chat_emote())
+                    {
+                        // Social command-list packets replace the held forward state with Ready.
+                        // Keep its authored exit, but return the new action to standing.
+                        let mut order = self.steady_order;
+                        order.forward = None;
+                        self.accept_order(table, order);
+                        self.supersede_local_pose();
+                    }
+                    MotionCommandAdmissionOutcome::Accepted
+                }
                 MotionActionEnqueueOutcome::Overflow => MotionCommandAdmissionOutcome::QueueFull,
             }
         } else if command.is_substate() {
-            let mut order = self.steady_order;
+            let previous_order = self.steady_order;
+            let mut order = previous_order;
             order.forward = Some((command, speed.to_f32()));
-            self.locomotion = None;
             self.accept_order(table, order);
+            if self.ordinary_resolution.forward.is_some() {
+                // A missing route must not replace the existing retained pose or its caller.
+                self.accept_order(table, previous_order);
+                return MotionCommandAdmissionOutcome::Unsupported;
+            }
+            self.locomotion = None;
+            self.supersede_local_pose();
+            self.local_pose_request = request_id;
             MotionCommandAdmissionOutcome::Accepted
         } else {
             MotionCommandAdmissionOutcome::Unsupported
@@ -373,8 +440,24 @@ impl BodyMotionRuntime {
         if outcome == MotionCommandAdmissionOutcome::Accepted {
             self.local_command_owned = true;
             self.remote_motion = None;
+            if let Some(request_id) = request_id {
+                self.local_feedback.push(LocalMotionFeedback {
+                    request_id,
+                    outcome: LocalMotionOutcome::Accepted,
+                });
+            }
         }
         outcome
+    }
+
+    /// Transfer a replaced pose's completion ownership to the newly admitted local command.
+    fn supersede_local_pose(&mut self) {
+        if let Some(request_id) = self.local_pose_request.take() {
+            self.local_feedback.push(LocalMotionFeedback {
+                request_id,
+                outcome: LocalMotionOutcome::Superseded,
+            });
+        }
     }
 
     /// Whether accepted local playback owns the retained order rather than the last server snapshot.
@@ -425,8 +508,18 @@ impl BodyMotionRuntime {
         if self.action_count() != 0 {
             self.sticky.complete_action();
         }
-        self.active_action = None;
-        self.action_queue.clear();
+        if let Some(action) = self.active_action.take() {
+            self.finish_local_action(action, LocalMotionOutcome::Cancelled);
+        }
+        while let Some(action) = self.action_queue.pop_front() {
+            self.finish_local_action(action, LocalMotionOutcome::Cancelled);
+        }
+        if let Some(request_id) = self.local_pose_request.take() {
+            self.local_feedback.push(LocalMotionFeedback {
+                request_id,
+                outcome: LocalMotionOutcome::Cancelled,
+            });
+        }
     }
 
     /// Applies a fresh accepted state before its action batch, without advancing time.
@@ -491,6 +584,8 @@ impl BodyMotionRuntime {
             action_queue: VecDeque::new(),
             active_action: None,
             rejected_actions: Vec::new(),
+            local_pose_request: None,
+            local_feedback: Vec::new(),
         };
         set_default_state(table, &mut runtime.state, &mut runtime.sequence);
         runtime
@@ -565,7 +660,10 @@ impl BodyMotionRuntime {
         if self.motion_table_id != table.id {
             let remote = self.remote_motion;
             let sticky = self.sticky;
+            self.interrupt_transitions();
+            let feedback = std::mem::take(&mut self.local_feedback);
             *self = Self::establish(table, self.steady_order);
+            self.local_feedback = feedback;
             self.remote_motion = remote;
             self.sticky = sticky;
         }
@@ -979,7 +1077,9 @@ impl BodyMotionRuntime {
             if self.pending_gesture.is_none() {
                 self.sticky.complete_action();
             }
-            self.active_action = None;
+            if let Some(action) = self.active_action.take() {
+                self.finish_local_action(action, LocalMotionOutcome::Completed);
+            }
             self.ordinary_resolution = apply_order(
                 table,
                 &mut self.state,
@@ -991,6 +1091,15 @@ impl BodyMotionRuntime {
         }
         if self.pending_gesture != Some(self.state.substate) && self.sequence.is_cyclic() {
             self.pending_gesture = None;
+        }
+        if self.ordinary_is_locomotion
+            && self.sequence.is_cyclic()
+            && let Some(request_id) = self.local_pose_request.take()
+        {
+            self.local_feedback.push(LocalMotionFeedback {
+                request_id,
+                outcome: LocalMotionOutcome::Completed,
+            });
         }
         let contributes_motion = contributes_motion || self.sequence.contributes_motion();
         if let Some(remote) = &mut self.remote_motion {
@@ -1014,6 +1123,18 @@ impl BodyMotionRuntime {
             );
     }
 
+    fn finish_local_action(&mut self, action: EntityMotionAction, outcome: LocalMotionOutcome) {
+        if let EntityMotionCommandSource::LocalCommand {
+            request_id: Some(request_id),
+        } = action.source
+        {
+            self.local_feedback.push(LocalMotionFeedback {
+                request_id,
+                outcome,
+            });
+        }
+    }
+
     fn start_next_action(&mut self, table: &MotionSequenceTable) {
         while self.active_action.is_none() {
             let Some(action) = self.action_queue.pop_front() else {
@@ -1027,8 +1148,13 @@ impl BodyMotionRuntime {
                 action.speed.to_f32(),
             ) {
                 ActionSelectionOutcome::Selected => self.active_action = Some(action),
-                ActionSelectionOutcome::CompletedWithoutClips => {}
-                ActionSelectionOutcome::Unmodelled => self.rejected_actions.push(action),
+                ActionSelectionOutcome::CompletedWithoutClips => {
+                    self.finish_local_action(action, LocalMotionOutcome::Completed)
+                }
+                ActionSelectionOutcome::Unmodelled => {
+                    self.finish_local_action(action, LocalMotionOutcome::Unsupported);
+                    self.rejected_actions.push(action);
+                }
             }
         }
     }
@@ -1042,9 +1168,42 @@ fn valid_speed_multiplier(speed: f32) -> bool {
 #[derive(Debug, Clone, Default)]
 pub struct MotionRuntimeRegistry {
     bodies: HashMap<Guid, BodyMotionRuntime>,
+    /// Terminal results outlive body removal until the caller consumes them or retires its epoch.
+    retired_local_feedback: HashMap<Guid, Vec<LocalMotionFeedback>>,
 }
 
 impl MotionRuntimeRegistry {
+    /// Drain local command results from the owning body's playback timeline.
+    pub fn take_local_feedback(&mut self, guid: Guid) -> Vec<LocalMotionFeedback> {
+        let mut feedback = self
+            .retired_local_feedback
+            .remove(&guid)
+            .unwrap_or_default();
+        if let Some(runtime) = self.bodies.get_mut(&guid) {
+            feedback.append(&mut runtime.local_feedback);
+        }
+        feedback
+    }
+
+    /// A placement-epoch change invalidates callers without changing the surviving animation.
+    /// Clear correlation before any later completion can be stamped with the replacement epoch.
+    pub fn retire_local_requests(&mut self, guid: Guid) {
+        self.retired_local_feedback.remove(&guid);
+        if let Some(runtime) = self.bodies.get_mut(&guid) {
+            runtime.local_feedback.clear();
+            runtime.local_pose_request = None;
+            for action in runtime
+                .active_action
+                .iter_mut()
+                .chain(runtime.action_queue.iter_mut())
+            {
+                if let EntityMotionCommandSource::LocalCommand { request_id } = &mut action.source {
+                    *request_id = None;
+                }
+            }
+        }
+    }
+
     /// Apply one admitted command's sticky target independently of visible motion changes.
     pub fn admit_sticky_target(
         &mut self,
@@ -1114,8 +1273,25 @@ impl MotionRuntimeRegistry {
             .is_some_and(|runtime| runtime.action_count() != 0)
     }
 
+    fn preserve_body_cancellation(
+        feedback: &mut HashMap<Guid, Vec<LocalMotionFeedback>>,
+        guid: Guid,
+        runtime: &mut BodyMotionRuntime,
+    ) {
+        runtime.interrupt_transitions();
+        if !runtime.local_feedback.is_empty() {
+            feedback
+                .entry(guid)
+                .or_default()
+                .append(&mut runtime.local_feedback);
+        }
+    }
+
+    /// Retire playback while preserving explicit cancellation for unfinished local requests.
     pub fn forget(&mut self, guid: Guid) {
-        self.bodies.remove(&guid);
+        if let Some(mut runtime) = self.bodies.remove(&guid) {
+            Self::preserve_body_cancellation(&mut self.retired_local_feedback, guid, &mut runtime);
+        }
     }
 
     /// Commits one caller-proposed body playback after its enclosing transaction succeeds.
@@ -1182,7 +1358,13 @@ impl MotionRuntimeRegistry {
     }
 
     pub fn retain_bodies(&mut self, keep: impl Fn(Guid) -> bool) {
-        self.bodies.retain(|guid, _| keep(*guid));
+        self.bodies.retain(|guid, runtime| {
+            if keep(*guid) {
+                return true;
+            }
+            Self::preserve_body_cancellation(&mut self.retired_local_feedback, *guid, runtime);
+            false
+        });
     }
 
     pub fn len(&self) -> usize {
@@ -1198,14 +1380,27 @@ impl MotionRuntimeRegistry {
         &mut self,
         table: &MotionSequenceTable,
         guid: Guid,
-        command: MotionCommand,
+        style: MotionCommand,
+        request: LocalMotionCommand,
         speed: OrderedMotionScalar,
         admission: EntityMotionAdmission,
     ) -> MotionCommandAdmissionOutcome {
-        self.bodies
+        let runtime = self
+            .bodies
             .entry(guid)
-            .or_insert_with(|| BodyMotionRuntime::new(table))
-            .submit_local_command(table, command, speed, admission)
+            .or_insert_with(|| BodyMotionRuntime::new(table));
+        // Server stance admission and manual locomotion can leave ordinary playback on an older
+        // style. Select the accepted style before a transient action chooses its animation route.
+        if runtime.state.style != style {
+            runtime.accept_order(
+                table,
+                MotionOrder {
+                    style: Some(style),
+                    ..MotionOrder::default()
+                },
+            );
+        }
+        runtime.submit_local_command(table, request, speed, admission)
     }
 
     /// Advance the retained order only while it is still owned by local command admission.

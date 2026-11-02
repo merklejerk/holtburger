@@ -419,6 +419,7 @@ impl ClientRuntime {
             .as_ref()
             .map(super::collision::ClientCollisionCoordinator::snapshot);
         let mut body_motions = std::collections::HashMap::new();
+        self.publish_social_motion_readiness();
         profile.checkpoint("before_entity_projection");
         if active_world {
             let prepared_precise_jump = match self
@@ -446,6 +447,19 @@ impl ClientRuntime {
                 self.set_exit_cause(ClientExitCause::RuntimeFailure);
             })?;
             profile.checkpoint("simulation");
+            for feedback in self
+                .movement
+                .take_authored_request_feedback(&mut self.world)
+            {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::LocalMotionFeedback {
+                        request_id: feedback.request_id,
+                        world_generation: self.world_generation,
+                        outcome: feedback.outcome,
+                    });
+            }
+
             body_motions = simulation_tick.body_motions;
             let mut advanced_runtime_bodies = Vec::new();
             for event in simulation_tick.events {

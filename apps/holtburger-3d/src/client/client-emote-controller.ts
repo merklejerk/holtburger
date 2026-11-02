@@ -1,10 +1,6 @@
-import { playerMotionUpdate } from "./client-player-motion-update";
 import type { KeyboardInputPolicy } from "../lib/input/keyboard-input-policy";
 import type {
-	DynamicEntityEvent,
-	DynamicEntityMirror,
-} from "../lib/game/runtime/dynamic-entity-feed";
-import type {
+	ClientLocalMotionFeedback,
 	ClientChatRequest,
 	ClientCombatMode,
 } from "./client-host-contract";
@@ -20,12 +16,14 @@ type EmoteSession = Pick<
 	ClientLifecycleSession,
 	"subscribe" | "setCombatMode" | "sendChat"
 > & {
-	/** Batched feeds can contain ignored stale generations alongside accepted updates. */
-	readonly mirror: Pick<DynamicEntityMirror, "entity">;
 	/** Character and world changes invalidate the whole emote excursion. */
 	readonly state: () => Pick<
 		ClientLifecycleSessionState,
-		"lifecycle" | "playerGuid" | "worldGeneration" | "combatMode"
+		| "lifecycle"
+		| "playerGuid"
+		| "worldGeneration"
+		| "combatMode"
+		| "socialMotionReady"
 	>;
 };
 
@@ -45,11 +43,13 @@ interface EmoteRun {
 	readonly worldGeneration: number;
 	/** Exact combat family to restore; no equipment-derived toggle. */
 	readonly returnMode: Exclude<ClientCombatMode, "peace" | "unknown">;
-	/** Peace admission and authoritative playback observation have different completion rules. */
+	/** Peace readiness and request completion have separate lifetimes. */
 	phase:
 		| { kind: "peace"; enqueued: boolean; waiters: PeaceWaiter[] }
-		| { kind: "playback"; status: "awaiting-start" | "active" | "idle" };
-	/** Restart the bounded acknowledgement/start wait, never a duration for an active pose. */
+		| { kind: "playback" };
+	/** Each outstanding request records whether the shared motion owner admitted it. */
+	readonly pending: Map<number, boolean>;
+	/** Restart the bounded readiness/admission wait, never a duration for admitted playback. */
 	readonly restartTimeout: () => void;
 	/** Active host-owned playback has no guessed end deadline. */
 	readonly stopTimeout: () => void;
@@ -78,6 +78,8 @@ export class ClientEmoteController {
 	readonly #unsubscribe: () => void;
 	/** Replacement retires submission admission and the queued return together. */
 	#intent: EmoteIntent = { run: null, submissions: 0 };
+	/** Caller identity is monotonic across cancelled excursions on this session. */
+	#nextRequestId = 1;
 	#destroyed = false;
 
 	constructor(
@@ -93,7 +95,8 @@ export class ClientEmoteController {
 				this.cancel();
 			else {
 				this.#observe();
-				if (event.type === "dynamic") this.#observePlayback(event.event);
+				if (event.type === "local-motion-feedback")
+					this.#observeFeedback(event.feedback);
 			}
 		});
 	}
@@ -155,14 +158,18 @@ export class ClientEmoteController {
 			current.playerGuid !== state.playerGuid ||
 			current.worldGeneration !== state.worldGeneration ||
 			current.lifecycle?.kind !== "in-world" ||
+			!current.socialMotionReady ||
 			current.combatMode !== "peace"
 		)
 			throw new Error("Emote cancelled before submission.");
-		if (run?.phase.kind === "playback" && run.phase.status === "idle") {
-			run.phase.status = "awaiting-start";
+		if (run !== null) {
+			const requestId = this.#nextRequestId++;
+			run.pending.set(requestId, false);
 			run.restartTimeout();
+			await this.#session.sendChat({ ...request, requestId });
+		} else {
+			await this.#session.sendChat(request);
 		}
-		await this.#session.sendChat(request);
 	}
 
 	#begin(
@@ -181,6 +188,7 @@ export class ClientEmoteController {
 			worldGeneration,
 			returnMode,
 			phase: { kind: "peace", enqueued: false, waiters: [] },
+			pending: new Map(),
 			stopTimeout,
 			restartTimeout: () => {
 				stopTimeout();
@@ -189,10 +197,12 @@ export class ClientEmoteController {
 						this.#fail(
 							run,
 							new Error(
-								"Timed out waiting for emote acknowledgement. Combat return cancelled.",
+								run.phase.kind === "peace"
+									? "Timed out waiting for a peaceful motion stance. Emote cancelled."
+									: "Timed out waiting for local emote admission. Combat return cancelled.",
 							),
 						),
-					CLIENT_TUNING.emotes.acknowledgementTimeoutMs,
+					CLIENT_TUNING.emotes.admissionTimeoutMs,
 				);
 			},
 			retire: () => {
@@ -231,38 +241,54 @@ export class ClientEmoteController {
 		if (
 			run.phase.kind === "peace" &&
 			run.phase.enqueued &&
+			state.socialMotionReady &&
 			state.combatMode === "peace"
 		) {
 			const waiters = run.phase.waiters;
-			run.phase = { kind: "playback", status: "awaiting-start" };
+			run.phase = { kind: "playback" };
 			run.restartTimeout();
 			for (const waiter of waiters) waiter.resolve();
 		} else if (run.phase.kind === "playback" && state.combatMode !== "peace")
 			this.cancel();
 	}
 
-	#observePlayback(event: DynamicEntityEvent): void {
+	#observeFeedback(feedback: ClientLocalMotionFeedback): void {
 		const run = this.#intent.run;
-		if (run === null || run.phase.kind !== "playback") return;
-		const entity = playerMotionUpdate(
-			event,
-			run.character,
-			this.#session.mirror,
-		);
-		if (entity === "removed") {
+		if (
+			run === null ||
+			run.phase.kind !== "playback" ||
+			feedback.worldGeneration !== run.worldGeneration ||
+			!run.pending.has(feedback.requestId)
+		)
+			return;
+		if (feedback.outcome === "refused") {
 			this.cancel();
 			return;
 		}
-		if (entity?.motion?.activity === "emote") {
-			run.phase.status = "active";
-			run.stopTimeout();
-		} else if (
-			entity?.motion?.activity === "locomotion" &&
-			run.phase.status === "active"
-		) {
-			run.phase.status = "idle";
-			this.#restore();
+		if (feedback.outcome === "unsupported") {
+			this.#fail(
+				run,
+				new Error(
+					"The emote animation could not be played. Combat return cancelled.",
+				),
+			);
+			return;
 		}
+		if (feedback.outcome === "accepted") {
+			run.pending.set(feedback.requestId, true);
+			if ([...run.pending.values()].every(Boolean)) run.stopTimeout();
+			return;
+		}
+		run.pending.delete(feedback.requestId);
+		if (
+			feedback.outcome === "cancelled" ||
+			(feedback.outcome === "superseded" && run.pending.size === 0)
+		) {
+			this.cancel();
+			return;
+		}
+		if ([...run.pending.values()].every(Boolean)) run.stopTimeout();
+		this.#restore();
 	}
 
 	#restore(): void {
@@ -270,7 +296,7 @@ export class ClientEmoteController {
 		if (
 			run === null ||
 			run.phase.kind !== "playback" ||
-			run.phase.status !== "idle" ||
+			run.pending.size !== 0 ||
 			this.#intent.submissions !== 0
 		)
 			return;

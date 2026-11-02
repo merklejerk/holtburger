@@ -2292,6 +2292,7 @@ fn passive_drive_commands_preserve_local_emote_playback() {
                 InterpretedMotionCommand::from(bow.raw() as u16),
                 1.0,
                 1,
+                None,
             )
             .unwrap();
         let mut movement = MovementSystem::new();

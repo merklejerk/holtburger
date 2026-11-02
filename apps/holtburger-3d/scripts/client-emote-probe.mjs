@@ -545,23 +545,27 @@ export async function probeClientEmotes(client, evaluateExpression) {
 					before.requests.length,
 					"Enqueue acknowledgement must not release an emote",
 				);
-				await evaluate(`${api}.chat.setCombatMode("peace")`);
+				await evaluate(`${api}.chat.setCombatMode("peace", false)`);
+				await settle();
+				assert.equal(
+					(await read()).requests.length,
+					before.requests.length,
+					"Peace property alone cannot admit social motion",
+				);
+				await evaluate(`${api}.chat.setMotionReady(true)`);
 				await settle();
 				assert.deepEqual(
 					(await read()).requests.slice(before.requests.length),
 					[{ kind: "soul-emote", token: "wave" }],
 				);
-				await evaluate(`${api}.chat.setEmoteActivity("emote")`);
-				await settle();
-				assert.deepEqual((await read()).combatRequests, before.combatRequests);
-				await evaluate(`${api}.chat.setEmoteActivity("explicit")`);
+				await evaluate(`${api}.chat.admitEmotes()`);
 				await settle();
 				assert.deepEqual(
 					(await read()).combatRequests,
 					before.combatRequests,
-					"Exit animation must finish before restoring",
+					"Admission alone must not restore combat",
 				);
-				await evaluate(`${api}.chat.setEmoteActivity("locomotion")`);
+				await evaluate(`${api}.chat.completeEmotes()`);
 				await settle();
 				assert.deepEqual((await read()).combatRequests, [
 					...before.combatRequests,
@@ -571,6 +575,28 @@ export async function probeClientEmotes(client, evaluateExpression) {
 				await key("keyUp", "t", "KeyT", 84);
 			}
 		}
+		await reset();
+		await evaluate(`${api}.chat.setCombatMode("magic")`);
+		await draft("*wave*");
+		await press("Enter", "Enter", 13);
+		await evaluate(`${api}.chat.setCombatMode("peace")`);
+		await settle();
+		await evaluate(`${api}.chat.waitForEmoteTimeout()`);
+		assert.ok(
+			(await read()).retainedMessages.some((line) =>
+				JSON.stringify(line).includes("local emote admission"),
+			),
+			"Missing admission is reported",
+		);
+		const afterTimeout = (await read()).requests.length;
+		await draft("still connected");
+		await press("Enter", "Enter", 13);
+		assert.equal(
+			(await read()).requests.length,
+			afterTimeout + 1,
+			"Chat remains usable after an emote timeout",
+		);
+		await reset();
 		await evaluate(`${api}.chat.setCombatMode("magic")`);
 		await draft("Hello *wave*");
 		const beforeTyped = await read();
@@ -592,13 +618,13 @@ export async function probeClientEmotes(client, evaluateExpression) {
 			await press("Enter", "Enter", 13);
 			await evaluate(`${api}.chat.setCombatMode("peace")`);
 			await settle();
-			await evaluate(`${api}.chat.setEmoteActivity("emote")`);
+			await evaluate(`${api}.chat.admitEmotes()`);
 			const beforeManual = (await read()).combatRequests;
 			await evaluate(
 				`${api}.chat.changeCombatMode(${JSON.stringify(manualMode)})`,
 			);
 			await evaluate(`${api}.chat.setCombatMode("peace")`);
-			await evaluate(`${api}.chat.setEmoteActivity("locomotion")`);
+			await evaluate(`${api}.chat.completeEmotes()`);
 			await settle();
 			assert.deepEqual(
 				(await read()).combatRequests,

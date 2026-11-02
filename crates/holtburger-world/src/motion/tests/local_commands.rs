@@ -12,9 +12,13 @@ fn local_catalog() -> MotionSequenceCatalog {
         [MotionTable {
             id: TABLE,
             default_style: STYLE,
-            style_defaults: HashMap::from([(STYLE, STAND)]),
+            style_defaults: HashMap::from([(STYLE, STAND), (COMBAT_STYLE, COMBAT_STAND)]),
             cycles: HashMap::from([
                 (MotionTable::cycle_key(STYLE, STAND), data(STAND_ANIM)),
+                (
+                    MotionTable::cycle_key(COMBAT_STYLE, COMBAT_STAND),
+                    data(STAND_ANIM),
+                ),
                 (MotionTable::cycle_key(STYLE, BOW.raw()), data(BOW_ANIM)),
                 (MotionTable::cycle_key(STYLE, WALK), data(WALK_ANIM)),
             ]),
@@ -48,7 +52,11 @@ fn submit(
     registry.submit_local_command(
         table,
         BODY,
-        command,
+        MotionCommand(table.default_style),
+        crate::motion::LocalMotionCommand {
+            command,
+            request_id: Some(u32::from(sequence)),
+        },
         OrderedMotionScalar::from_f32(1.0).unwrap(),
         EntityMotionAdmission {
             object_instance_sequence: 0,
@@ -337,5 +345,291 @@ fn gameplay_postures_retain_their_target_and_transition_to_each_other() {
         RestPosture::from_command(MotionCommand(0x4300_013d)),
         None,
         "social sit is not a rest posture"
+    );
+}
+
+#[test]
+fn local_action_reports_admission_and_exact_completion_even_with_one_large_tick() {
+    let catalog = local_catalog();
+    let table = catalog.table(TABLE).unwrap();
+    let mut registry = MotionRuntimeRegistry::new();
+    submit(&mut registry, table, WAVE, 1);
+    registry.advance_local_command(table, BODY, 2.0);
+    assert_eq!(
+        registry.take_local_feedback(BODY),
+        vec![
+            LocalMotionFeedback {
+                request_id: 1,
+                outcome: LocalMotionOutcome::Accepted
+            },
+            LocalMotionFeedback {
+                request_id: 1,
+                outcome: LocalMotionOutcome::Completed
+            },
+        ]
+    );
+}
+
+#[test]
+fn unavailable_local_action_reports_failure_instead_of_disappearing() {
+    let catalog = local_catalog();
+    let table = catalog.table(TABLE).unwrap();
+    let mut registry = MotionRuntimeRegistry::new();
+    let shake_fist = MotionCommand(0x1300_0079);
+    submit(&mut registry, table, shake_fist, 1);
+    registry.advance_local_command(table, BODY, 0.0);
+    assert_eq!(
+        registry.take_local_feedback(BODY),
+        vec![
+            LocalMotionFeedback {
+                request_id: 1,
+                outcome: LocalMotionOutcome::Accepted
+            },
+            LocalMotionFeedback {
+                request_id: 1,
+                outcome: LocalMotionOutcome::Unsupported
+            },
+        ]
+    );
+}
+
+#[test]
+fn held_local_pose_completes_only_after_its_exit_reaches_locomotion() {
+    let catalog = local_catalog();
+    let table = catalog.table(TABLE).unwrap();
+    let mut registry = MotionRuntimeRegistry::new();
+    submit(&mut registry, table, BOW, 1);
+    registry.advance_local_command(table, BODY, 20.0);
+    assert_eq!(
+        registry.take_local_feedback(BODY),
+        vec![LocalMotionFeedback {
+            request_id: 1,
+            outcome: LocalMotionOutcome::Accepted
+        }]
+    );
+    registry.drive_manual(
+        table,
+        BODY,
+        MotionOrder {
+            forward: Some((MotionCommand(WALK), 1.0)),
+            ..MotionOrder::default()
+        },
+        CharacterMotionPresentation::Grounded,
+        0.0,
+    );
+    assert!(registry.take_local_feedback(BODY).is_empty());
+    registry.drive_manual(
+        table,
+        BODY,
+        MotionOrder {
+            forward: Some((MotionCommand(WALK), 1.0)),
+            ..MotionOrder::default()
+        },
+        CharacterMotionPresentation::Grounded,
+        2.0,
+    );
+    assert_eq!(
+        registry.take_local_feedback(BODY),
+        vec![LocalMotionFeedback {
+            request_id: 1,
+            outcome: LocalMotionOutcome::Completed
+        }]
+    );
+}
+
+#[test]
+fn caller_identity_is_not_narrowed_to_the_wrapping_wire_stamp() {
+    let catalog = local_catalog();
+    let table = catalog.table(TABLE).unwrap();
+    let mut registry = MotionRuntimeRegistry::new();
+    let request_id = u32::MAX;
+    registry.submit_local_command(
+        table,
+        BODY,
+        MotionCommand(table.default_style),
+        crate::motion::LocalMotionCommand {
+            command: WAVE,
+            request_id: Some(request_id),
+        },
+        OrderedMotionScalar::from_f32(1.0).unwrap(),
+        EntityMotionAdmission {
+            object_instance_sequence: 0,
+            movement_sequence: 1,
+            server_control_sequence: 0,
+            is_autonomous: true,
+        },
+    );
+    registry.advance_local_command(table, BODY, 2.0);
+    assert_eq!(
+        registry.take_local_feedback(BODY),
+        vec![
+            LocalMotionFeedback {
+                request_id,
+                outcome: LocalMotionOutcome::Accepted
+            },
+            LocalMotionFeedback {
+                request_id,
+                outcome: LocalMotionOutcome::Completed
+            },
+        ]
+    );
+}
+
+#[test]
+fn local_action_routes_from_the_accepted_stance_instead_of_retained_combat_playback() {
+    let catalog = local_catalog();
+    let table = catalog.table(TABLE).unwrap();
+    let mut registry = MotionRuntimeRegistry::new();
+    registry.drive(
+        table,
+        BODY,
+        MotionOrder {
+            style: Some(MotionCommand(COMBAT_STYLE)),
+            ..MotionOrder::default()
+        },
+        0.0,
+    );
+    assert_eq!(registry.state(BODY).unwrap().style.raw(), COMBAT_STYLE);
+    submit(&mut registry, table, WAVE, 1);
+    registry.advance_local_command(table, BODY, 2.0);
+    assert_eq!(registry.state(BODY).unwrap().style.raw(), STYLE);
+    assert_eq!(
+        registry.take_local_feedback(BODY),
+        vec![
+            LocalMotionFeedback {
+                request_id: 1,
+                outcome: LocalMotionOutcome::Accepted
+            },
+            LocalMotionFeedback {
+                request_id: 1,
+                outcome: LocalMotionOutcome::Completed
+            },
+        ]
+    );
+}
+
+#[test]
+fn unavailable_pose_does_not_replace_the_retained_pose_or_its_completion_owner() {
+    let catalog = local_catalog();
+    let table = catalog.table(TABLE).unwrap();
+    let mut registry = MotionRuntimeRegistry::new();
+    submit(&mut registry, table, BOW, 1);
+    assert_eq!(
+        submit(&mut registry, table, MotionCommand(0x4300_0144), 2),
+        MotionCommandAdmissionOutcome::Unsupported
+    );
+    assert_eq!(registry.state(BODY).unwrap().substate, BOW);
+    assert_eq!(
+        registry.take_local_feedback(BODY),
+        vec![LocalMotionFeedback {
+            request_id: 1,
+            outcome: LocalMotionOutcome::Accepted
+        }]
+    );
+}
+
+#[test]
+fn new_one_shot_emote_replaces_a_held_pose_and_finishes_at_standing() {
+    for advance_held_pose in [false, true] {
+        let catalog = local_catalog();
+        let table = catalog.table(TABLE).unwrap();
+        let mut registry = MotionRuntimeRegistry::new();
+        submit(&mut registry, table, BOW, 1);
+        if advance_held_pose {
+            registry.advance_local_command(table, BODY, 2.0);
+        }
+        registry.take_local_feedback(BODY);
+        assert_eq!(
+            submit(&mut registry, table, WAVE, 2),
+            MotionCommandAdmissionOutcome::Accepted
+        );
+        assert_eq!(
+            registry.take_local_feedback(BODY),
+            vec![
+                LocalMotionFeedback {
+                    request_id: 1,
+                    outcome: LocalMotionOutcome::Superseded
+                },
+                LocalMotionFeedback {
+                    request_id: 2,
+                    outcome: LocalMotionOutcome::Accepted
+                },
+            ]
+        );
+        registry.advance_local_command(table, BODY, 0.0);
+        assert!(registry.take_local_feedback(BODY).is_empty());
+        registry.advance_local_command(table, BODY, 3.0);
+        assert_eq!(registry.state(BODY).unwrap().substate.raw(), STAND);
+        assert_eq!(
+            registry.take_local_feedback(BODY),
+            vec![LocalMotionFeedback {
+                request_id: 2,
+                outcome: LocalMotionOutcome::Completed
+            }]
+        );
+    }
+}
+
+#[test]
+fn removed_body_results_survive_recreation_until_consumed() {
+    for bulk_removal in [false, true] {
+        let catalog = local_catalog();
+        let table = catalog.table(TABLE).unwrap();
+        let mut registry = MotionRuntimeRegistry::new();
+        submit(&mut registry, table, MotionCommand(ACTION), 1);
+        submit(&mut registry, table, BOW, 2);
+        registry.advance_local_command(table, BODY, 0.0);
+        registry.take_local_feedback(BODY);
+        if bulk_removal {
+            registry.retain_bodies(|_| false);
+        } else {
+            registry.forget(BODY);
+        }
+        submit(&mut registry, table, BOW, 3);
+        assert_eq!(
+            registry.take_local_feedback(BODY),
+            vec![
+                LocalMotionFeedback {
+                    request_id: 1,
+                    outcome: LocalMotionOutcome::Cancelled
+                },
+                LocalMotionFeedback {
+                    request_id: 2,
+                    outcome: LocalMotionOutcome::Cancelled
+                },
+                LocalMotionFeedback {
+                    request_id: 3,
+                    outcome: LocalMotionOutcome::Accepted
+                },
+            ]
+        );
+    }
+}
+
+#[test]
+fn a_new_caller_epoch_retires_correlation_without_interrupting_playback() {
+    let catalog = local_catalog();
+    let table = catalog.table(TABLE).unwrap();
+    let mut registry = MotionRuntimeRegistry::new();
+    submit(&mut registry, table, BOW, 1);
+    submit(&mut registry, table, MotionCommand(ACTION), 2);
+    registry.advance_local_command(table, BODY, 0.0);
+    registry.retire_local_requests(BODY);
+    assert_eq!(registry.get(BODY).unwrap().action_count(), 1);
+    submit(&mut registry, table, WAVE, 3);
+    registry.advance_local_command(table, BODY, 3.0);
+    registry.advance_local_command(table, BODY, 3.0);
+    assert_eq!(
+        registry.take_local_feedback(BODY),
+        vec![
+            LocalMotionFeedback {
+                request_id: 3,
+                outcome: LocalMotionOutcome::Accepted
+            },
+            LocalMotionFeedback {
+                request_id: 3,
+                outcome: LocalMotionOutcome::Completed
+            },
+        ]
     );
 }

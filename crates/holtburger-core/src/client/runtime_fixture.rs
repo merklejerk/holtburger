@@ -376,7 +376,10 @@ mod tests {
             events: Vec::new(),
         };
         let error = capture
-            .record_command(&ClientCommand::SoulEmote("wave".into()))
+            .record_command(&ClientCommand::SoulEmote {
+                token: "wave".into(),
+                request_id: None,
+            })
             .unwrap_err();
         assert!(error.to_string().contains("stationary scene"));
         assert!(capture.events.is_empty());

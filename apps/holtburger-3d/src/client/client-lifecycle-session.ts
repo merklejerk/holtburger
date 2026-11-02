@@ -1,4 +1,9 @@
 import {
+	localMotionFeedbackSchema,
+	socialMotionReadySchema,
+	type ClientLocalMotionFeedback,
+} from "./client-host-contract";
+import {
 	lockFeedbackSchema,
 	type ClientLockFeedback,
 } from "./client-lock-feedback-contract";
@@ -418,6 +423,8 @@ type ClientEventName = Extract<
 	| "client-squelch-updated"
 	| "client-allegiance-updated"
 	| "client-party-updated"
+	| "client-social-motion-ready-updated"
+	| "client-local-motion-feedback"
 	| "client-combat-mode-updated"
 	| "client-combat-status-updated"
 	| "client-spell-cast-target-updated"
@@ -485,6 +492,8 @@ export interface ClientLifecycleSessionState {
 	readonly gameplayPreferences: ClientGameplayPreferences | null;
 	/** Latest server stance, consumed by the combat shortcut. */
 	readonly combatMode: ClientCombatMode;
+	/** Host-owned readiness for local social command admission. */
+	readonly socialMotionReady: boolean;
 	readonly combat: ClientCombatStatus;
 	/** Core-resolved non-self recipient, retained only while the cast operation is pending. */
 	readonly spellCastTarget: number | null;
@@ -543,6 +552,11 @@ export type ClientLifecycleSessionEvent =
 	| {
 			readonly type: "object-preview-result";
 			readonly result: ObjectPreviewResult;
+	  }
+	| { readonly type: "social-motion-ready"; readonly ready: boolean }
+	| {
+			readonly type: "local-motion-feedback";
+			readonly feedback: ClientLocalMotionFeedback;
 	  }
 	| { readonly type: "combat-mode"; readonly mode: ClientCombatMode }
 	| { readonly type: "combat"; readonly status: ClientCombatStatus }
@@ -1678,6 +1692,21 @@ export class ClientLifecycleSession {
 				}),
 			);
 			unlisteners.push(
+				await listen("client-social-motion-ready-updated", (payload) => {
+					const { ready } = socialMotionReadySchema.parse(payload);
+					this.#state = { ...this.#state, socialMotionReady: ready };
+					this.#emit({ type: "social-motion-ready", ready });
+				}),
+			);
+			unlisteners.push(
+				await listen("client-local-motion-feedback", (payload) => {
+					this.#emit({
+						type: "local-motion-feedback",
+						feedback: localMotionFeedbackSchema.parse(payload),
+					});
+				}),
+			);
+			unlisteners.push(
 				await listen("client-combat-mode-updated", (payload) => {
 					const { mode } = decodeClientCombatMode(payload);
 					this.#state = { ...this.#state, combatMode: mode };
@@ -2138,6 +2167,7 @@ export class ClientLifecycleSession {
 			appearanceOptions: state.appearanceOptions,
 			gameplayPreferences: state.gameplayPreferences,
 			combatMode: state.combatMode,
+			socialMotionReady: state.socialMotionReady,
 			combat: state.combat,
 			spellCastTarget: state.spellCastTarget,
 			vitals: state.vitals,
@@ -2417,6 +2447,7 @@ function emptyState(): ClientLifecycleSessionState {
 		appearanceOptions: null,
 		gameplayPreferences: null,
 		combatMode: "unknown",
+		socialMotionReady: false,
 		combat: {
 			desired: null,
 			state: "idle",

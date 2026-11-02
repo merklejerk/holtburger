@@ -8,9 +8,10 @@ pub(super) fn reduce_action(_state: &mut GameState, action: AppAction) -> Update
     match action {
         AppAction::Suicide => UpdateResult::commands(vec![ClientCommand::Suicide]),
         AppAction::Emote { message } => UpdateResult::commands(vec![ClientCommand::Emote(message)]),
-        AppAction::SoulEmote { token } => {
-            UpdateResult::commands(vec![ClientCommand::SoulEmote(token)])
-        }
+        AppAction::SoulEmote { token } => UpdateResult::commands(vec![ClientCommand::SoulEmote {
+            token,
+            request_id: None,
+        }]),
         _ => UpdateResult::new(),
     }
 }
@@ -155,7 +156,7 @@ mod tests {
 
         assert!(matches!(
             result.commands.as_slice(),
-            [ClientCommand::SoulEmote(token)] if token == "wave"
+            [ClientCommand::SoulEmote { token, request_id: None }] if token == "wave"
         ));
     }
 

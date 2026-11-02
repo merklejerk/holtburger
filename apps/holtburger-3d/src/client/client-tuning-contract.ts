@@ -65,8 +65,8 @@ export interface ClientTuning {
 	readonly emotes: {
 		/** Maximum distinct queued poses retained in Recent. */
 		readonly recentLimit: number;
-		/** Bound each acknowledgement/start wait; do not guess active emote durations. */
-		readonly acknowledgementTimeoutMs: number;
+		/** Bound readiness and admission waits; do not guess active emote durations. */
+		readonly admissionTimeoutMs: number;
 	};
 	/** In-memory sent-chat input retained for this app session. */
 	readonly chat: {

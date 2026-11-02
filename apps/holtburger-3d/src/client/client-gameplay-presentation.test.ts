@@ -2329,6 +2329,7 @@ function currentState(playerGuid: number): ClientCurrentState {
 		allegiancePreferences: null,
 		friendsPreferences: null,
 		combatMode: "peace",
+		socialMotionReady: true,
 		combat: {
 			desired: null,
 			state: "idle",

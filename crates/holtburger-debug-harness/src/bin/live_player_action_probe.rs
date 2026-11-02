@@ -134,7 +134,10 @@ async fn main() -> Result<()> {
     println!("baseline motion {}", describe_motion(baseline.0));
 
     commands
-        .send(ClientCommand::SoulEmote(args.token.clone()))
+        .send(ClientCommand::SoulEmote {
+            token: args.token.clone(),
+            request_id: None,
+        })
         .context("client stopped before SoulEmote")?;
     let action_result = wait_for_action_return(
         &mut events,

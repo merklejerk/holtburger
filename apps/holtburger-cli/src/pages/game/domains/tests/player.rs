@@ -165,6 +165,7 @@ fn application_snapshot_restores_the_character_after_event_lag() {
         ),
         character_options: None,
         combat_mode: CombatMode::NonCombat,
+        social_motion_ready: true,
         combat: Default::default(),
         spell_cast_target: None,
         lifecycle: ClientLifecycleState::InWorld,

@@ -260,6 +260,18 @@ Client-authored command-list actions enter that same registry when `MovementSyst
 outbound pulse. The predicted edge and wire item share one command, speed, and 15-bit stamp; the
 world's existing local autonomous-echo policy rejects the later echo so playback cannot duplicate.
 
+Local social commands expose world-owned readiness and request-correlated motion outcomes.
+Readiness requires both the combat-mode property and accepted motion stance to permit the command;
+those server updates can arrive separately. The movement executor reports requests cancelled
+before admission, and the world playback owner reports admission, unsupported animation routes,
+interruption, and exact completion. Caller identities remain separate from wrapping wire stamps.
+A held pose completes only after its exit returns to ordinary locomotion. A new local soul emote
+supersedes a held social pose; a one-shot replacement exits it and finishes at standing instead
+of returning to it. Terminal outcomes survive body removal; placement-epoch changes retire caller
+identities before surviving playback can publish a result under the replacement scope. h3d owns
+temporary peace excursions and combat restoration; these outcomes do not impose that policy on
+other clients.
+
 Reusable combat execution lives in [src/client/combat_runtime.rs](src/client/combat_runtime.rs)
 and [src/client/combat_engagement.rs](src/client/combat_engagement.rs). Core owns attack request
 eligibility, busy state, feedback, and combat pursuit; frontends select the desired engagement.

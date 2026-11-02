@@ -70,6 +70,7 @@ async function fixture() {
 		allegiancePreferences: null,
 		friendsPreferences: null,
 		combatMode: "peace",
+		socialMotionReady: true,
 		combat: {
 			desired: null,
 			state: "idle",

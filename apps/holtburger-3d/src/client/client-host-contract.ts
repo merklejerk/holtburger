@@ -307,7 +307,11 @@ export const clientChatRequestSchema = z.discriminatedUnion("kind", [
 		.strict(),
 	z.object({ kind: z.literal("emote"), message: chatBodySchema }).strict(),
 	z
-		.object({ kind: z.literal("soul-emote"), token: z.string().trim().min(1) })
+		.object({
+			kind: z.literal("soul-emote"),
+			token: z.string().trim().min(1),
+			requestId: z.number().int().nonnegative().max(0xffff_ffff).optional(),
+		})
 		.strict(),
 ]);
 const chatSpeakerFields = {
@@ -569,6 +573,7 @@ const currentStateSchema = z
 		allegiancePreferences: allegiancePreferencesSchema.nullable(),
 		friendsPreferences: friendsPreferencesSchema.nullable(),
 		combatMode: combatModeSchema,
+		socialMotionReady: z.boolean(),
 		combat: combatStatusSchema,
 		spellCastTarget: spellCastTargetSchema.shape.target,
 		vitals: z.array(vitalSchema),
@@ -1357,3 +1362,25 @@ export type ClientCombatOutcome = z.infer<typeof combatOutcomeSchema>;
 export function decodeClientCombatOutcome(value: unknown): ClientCombatOutcome {
 	return combatOutcomeSchema.parse(value);
 }
+
+/** Request-scoped local playback outcome, independent of rendered animation activity. */
+export const localMotionFeedbackSchema = z
+	.object({
+		requestId: z.number().int().nonnegative().max(0xffff_ffff),
+		worldGeneration: z.number().int().nonnegative(),
+		outcome: z.enum([
+			"accepted",
+			"completed",
+			"cancelled",
+			"superseded",
+			"unsupported",
+			"refused",
+		]),
+	})
+	.strict();
+export type ClientLocalMotionFeedback = z.infer<
+	typeof localMotionFeedbackSchema
+>;
+export const socialMotionReadySchema = z
+	.object({ ready: z.boolean() })
+	.strict();

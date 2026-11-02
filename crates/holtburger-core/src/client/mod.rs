@@ -256,6 +256,8 @@ pub struct ClientRuntime {
     equipment_set: equipment_set::EquipmentSetState,
     /// Latest silent posture request waiting for a confirmed peace stance.
     pending_rest_posture: Option<rest_posture::PendingRestPosture>,
+    /// Last published social admission level; snapshots read the world directly.
+    published_social_motion_ready: bool,
     /// One successfully sent stance request; mode updates retire it, never equipment receipts.
     pending_combat_mode: Option<holtburger_protocol::messages::combat::CombatMode>,
     /// Outstanding P2P item acknowledgments shared by all frontends.
@@ -510,6 +512,7 @@ impl ClientRuntime {
             } else {
                 self.world.player_combat_mode()
             },
+            social_motion_ready: self.world.player_social_motion_ready(),
             combat: self.combat_engagement.status(),
             spell_cast_target: self.active_spell_cast_target(),
             vitals: self.world.player.vitals.clone(),
@@ -605,6 +608,9 @@ impl ClientRuntime {
     pub(crate) fn bump_world_generation(&mut self) -> u64 {
         self.cancel_rest_posture();
         self.combat_attribution.clear();
+        self.world
+            .motion_runtimes
+            .retire_local_requests(self.world.player.guid);
         self.world_generation = self.world_generation.saturating_add(1);
         self.precise_jump.invalidate();
         self.world_generation
@@ -1043,8 +1049,33 @@ impl ClientRuntime {
         self.publish_entity_facts();
     }
 
+    /// Publish social admission before consumers observe the mode or motion that changed it.
+    fn publish_social_motion_readiness(&mut self) {
+        let ready = self.world.player_social_motion_ready();
+        if ready != self.published_social_motion_ready {
+            self.published_social_motion_ready = ready;
+            let _ = self
+                .client_view_event_tx
+                .send(ClientViewEvent::SocialMotionReadyUpdated { ready });
+        }
+    }
+
     /// Project one event without finalizing a packet's character replacement yet.
     fn project_world_event(&mut self, event: &WorldEvent, suppress_vital_projection: bool) {
+        let changes_social_admission = match event {
+            WorldEvent::CombatModeUpdated(_)
+            | WorldEvent::SelfServerControlledMotion(_)
+            | WorldEvent::PlayerInfo(_) => true,
+            WorldEvent::EntityMotionUpdated { guid, .. }
+            | WorldEvent::EntityDespawned { guid, .. } => *guid == self.world.player.guid,
+            WorldEvent::EntitySpawned(entity) | WorldEvent::EntityReplaced(entity) => {
+                entity.guid == self.world.player.guid
+            }
+            _ => false,
+        };
+        if changes_social_admission {
+            self.publish_social_motion_readiness();
+        }
         self.observe_housing_world_event(event);
         if matches!(
             event,
@@ -2111,7 +2142,7 @@ mod tests {
         let command = InterpretedMotionCommand(JUMP_FIXTURE_ACTION_COMMAND as u16);
         client
             .world
-            .submit_local_authored_motion_command(command, 1.0, 1)
+            .submit_local_authored_motion_command(command, 1.0, 1, None)
             .unwrap();
         client.world.advance_authored_motion(Duration::ZERO);
         let predicted = client.world.motion_runtimes.motion_playback(guid).unwrap();

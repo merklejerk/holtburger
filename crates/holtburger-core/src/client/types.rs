@@ -618,6 +618,8 @@ pub struct ClientApplicationSnapshot {
     pub character_options: Option<PlayerCharacterOptions>,
     /// Server-confirmed stance, undefined before the local player is established.
     pub combat_mode: CombatMode,
+    /// Both server mode and accepted motion stance permit a social command.
+    pub social_motion_ready: bool,
     /// Shared desired attack and server-repeat lifecycle.
     pub combat: ClientCombatStatus,
     /// Resolved non-self recipient of the pending spell cast, absent for self/untargeted casts.
@@ -1246,6 +1248,20 @@ pub enum ClientViewEvent {
     ServerTimeUpdated {
         time: f64,
     },
+    /// Readiness shared by social command admission and frontend stance automation.
+    SocialMotionReadyUpdated {
+        /// Both gameplay mode and accepted motion stance permit social commands.
+        ready: bool,
+    },
+    /// Result of a correlated local emote, scoped to its submitting world generation.
+    LocalMotionFeedback {
+        /// Original caller identity, independent of wire sequence stamps.
+        request_id: u32,
+        /// Placement lifetime that accepted the request.
+        world_generation: u64,
+        /// Result supplied by command admission or the playback owner.
+        outcome: holtburger_world::motion::LocalMotionOutcome,
+    },
     CombatModeUpdated {
         mode: CombatMode,
     },
@@ -1429,7 +1445,13 @@ pub enum ClientCommand {
         message: String,
     },
     Emote(String),
-    SoulEmote(String),
+    /// Catalog emote; optional caller identity receives authoritative local playback outcomes.
+    SoulEmote {
+        /// Catalog alias resolved by core.
+        token: String,
+        /// Caller-scoped correlation, absent for callers that only need ordinary action feedback.
+        request_id: Option<u32>,
+    },
     /// Attempt one standard recall; ACE decides final acceptance.
     Recall(RecallDestination),
     /// Privileged outdoor map request; ACE supplies destination height and building placement.

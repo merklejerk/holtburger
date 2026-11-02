@@ -2123,10 +2123,8 @@
 			hostClientLifecycleTransport(transport),
 		);
 		session = owner;
-		const emoteOwner = new ClientEmoteController(
-			owner,
-			keyboard,
-			reportCommandFailure,
+		const emoteOwner = new ClientEmoteController(owner, keyboard, (error) =>
+			toastCenter.publish({ message: formatError(error), tone: "warning" }),
 		);
 		emoteController = emoteOwner;
 		const postureOwner = new ClientRestPostureController(

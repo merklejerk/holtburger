@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { clientChatRequestSchema } from "../../client/client-host-contract";
 	import { applyUiScale } from "../../app/ui-scale";
 	import UiTooltipHost from "../../app/UiTooltipHost.svelte";
 	import { provideClientHudGeometry } from "../../client/client-hud-geometry-context";
@@ -1210,15 +1211,17 @@
 			readonly rejectAfter: (successes: number) => void;
 			readonly setEmotesEnabled: (enabled: boolean) => void;
 			/** Inject a confirmed stance for emote availability checks. */
-			readonly setCombatMode: (mode: ClientCombatMode) => void;
+			readonly setCombatMode: (mode: ClientCombatMode, ready?: boolean) => void;
+			readonly setMotionReady: (ready: boolean) => void;
 			/** Explicit user stance intent invalidates a queued return before any acknowledgement. */
 			readonly changeCombatMode: (
 				mode: Exclude<ClientCombatMode, "unknown">,
 			) => Promise<void>;
-			/** Synthetic source-owned activity, independent of the browser animation clock. */
-			readonly setEmoteActivity: (
-				activity: NonNullable<DynamicEntityView["motion"]>["activity"],
-			) => void;
+			/** Synthetic request outcomes from the production host contract. */
+			readonly admitEmotes: () => void;
+			readonly completeEmotes: () => void;
+			readonly waitForEmoteTimeout: () => Promise<void>;
+
 			readonly professorPrompt: () => void;
 			readonly clearPrompt: () => void;
 			readonly read: () => {
@@ -1590,6 +1593,7 @@
 			allegiancePreferences: null,
 			friendsPreferences: null,
 			combatMode: "peace",
+			socialMotionReady: true,
 			combat: {
 				desired: null,
 				state: "idle",
@@ -1672,6 +1676,7 @@
 
 	let failNextBookPageRequest = false;
 	let chatSuccessesBeforeFailure: number | null = null;
+	const emoteFeedbackRequests = new Set<number>();
 	const interactionLifecycle = new ClientLifecycleSession({
 		listen: async (event, handler) => {
 			interactionHandlers.set(event, handler);
@@ -1690,6 +1695,11 @@
 					throw new Error("Injected chat enqueue failure");
 				}
 				chatSuccessesBeforeFailure--;
+			}
+			if (command === "send_client_chat") {
+				const request = clientChatRequestSchema.parse(args?.request);
+				if (request.kind === "soul-emote" && request.requestId !== undefined)
+					emoteFeedbackRequests.add(request.requestId);
 			}
 			if (command === "read_client_book_page" && failNextBookPageRequest) {
 				failNextBookPageRequest = false;
@@ -5204,6 +5214,7 @@
 				reset: () => {
 					emoteController.cancel();
 					chatComposer.reset();
+					emoteFeedbackRequests.clear();
 					chatRequests.length = 0;
 					chatSuccessesBeforeFailure = null;
 					sentChatHistory = [];
@@ -5220,19 +5231,39 @@
 				setEmotesEnabled: (enabled) => {
 					emotesEnabled = enabled;
 				},
-				setCombatMode: (mode) => {
+				setCombatMode: (mode, ready = mode === "peace") => {
 					spellCombatMode = mode;
 					emitInteractionEvent("client-combat-mode-updated", { mode });
+					emitInteractionEvent("client-social-motion-ready-updated", { ready });
 				},
+				setMotionReady: (ready) =>
+					emitInteractionEvent("client-social-motion-ready-updated", { ready }),
 				changeCombatMode: async (mode) => {
 					emoteController.cancel();
 					await interactionLifecycle.setCombatMode(mode);
 				},
-				setEmoteActivity: (activity) =>
-					emitInteractionEvent("client-dynamic-entity", {
-						kind: "upserted",
-						entity: emotePlaybackFixture(1, activity),
-					}),
+				admitEmotes: () => {
+					for (const requestId of emoteFeedbackRequests)
+						emitInteractionEvent("client-local-motion-feedback", {
+							requestId,
+							worldGeneration: 1,
+							outcome: "accepted",
+						});
+				},
+				completeEmotes: () => {
+					for (const requestId of emoteFeedbackRequests)
+						emitInteractionEvent("client-local-motion-feedback", {
+							requestId,
+							worldGeneration: 1,
+							outcome: "completed",
+						});
+					emoteFeedbackRequests.clear();
+				},
+				waitForEmoteTimeout: () =>
+					new Promise((resolve) =>
+						setTimeout(resolve, CLIENT_TUNING.emotes.admissionTimeoutMs + 100),
+					),
+
 				rejectNextSend: () => {
 					chatSuccessesBeforeFailure = 0;
 				},

@@ -48,7 +48,7 @@ impl ClientRuntime {
             | ClientCommand::CastSpell { .. }
             | ClientCommand::TargetedMeleeAttack { .. }
             | ClientCommand::TargetedMissileAttack { .. }
-            | ClientCommand::SoulEmote(_)
+            | ClientCommand::SoulEmote { .. }
             | ClientCommand::ApplyEquipmentSet(_)
             | ClientCommand::Recall(_)
             | ClientCommand::Use { .. }
@@ -409,6 +409,7 @@ mod tests {
                 InterpretedMotionCommand(posture.command().raw() as u16),
                 1.0,
                 1,
+                None,
             );
             assert!(
                 matches!(result, Err(holtburger_world::state::LocalAuthoredMotionCommandError::Refused { reason }) if reason == expected)

@@ -120,8 +120,8 @@ export const CLIENT_TUNING = {
 	emotes: {
 		/** Maximum distinct queued poses retained on this local user profile. */
 		recentLimit: 6,
-		/** Bound peace confirmation and playback start; active emotes and held poses have no deadline. */
-		acknowledgementTimeoutMs: 10_000,
+		/** Bound peace readiness and local command admission; admitted playback has no deadline. */
+		admissionTimeoutMs: 10_000,
 	},
 	chat: {
 		/** Nonnegative maximum of locally queued chat inputs retained for recall. */

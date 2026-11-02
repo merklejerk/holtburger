@@ -71,22 +71,26 @@ export async function probeClientBindings(options: {
 	};
 	try {
 		await tick();
-		const targetView = target.querySelector<HTMLInputElement>(
-			'input[name="targetOnlyInView"]',
-		);
-		if (targetView === null)
-			throw new Error("Missing target view restriction setting.");
-		const beforeTargetView = acceptedInput.targetOnlyInView;
-		targetView.click();
-		await tick();
-		require(acceptedInput.targetOnlyInView === !beforeTargetView &&
-			targetView.checked ===
-				!beforeTargetView, "Target view setting did not publish the accepted preference.");
-		targetView.click();
-		await tick();
-		require(acceptedInput.targetOnlyInView === beforeTargetView &&
-			targetView.checked ===
-				beforeTargetView, "Target view setting did not restore the accepted preference.");
+		for (const preference of [
+			"targetOnlyInView",
+			"smartTabHostileOnly",
+		] as const) {
+			const checkbox = target.querySelector<HTMLInputElement>(
+				`input[name="${preference}"]`,
+			);
+			if (checkbox === null) throw new Error(`Missing ${preference} setting.`);
+			const before = acceptedInput[preference];
+			checkbox.click();
+			await tick();
+			require(acceptedInput[preference] === !before &&
+				checkbox.checked ===
+					!before, `${preference} did not publish the accepted preference.`);
+			checkbox.click();
+			await tick();
+			require(acceptedInput[preference] === before &&
+				checkbox.checked ===
+					before, `${preference} did not restore the accepted preference.`);
+		}
 		const original = target.querySelector<HTMLButtonElement>(
 			'button[aria-label="Trade"]',
 		)?.title;

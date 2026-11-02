@@ -178,6 +178,8 @@ export type ClientInputConfiguration = ClientKeyboardConfiguration &
 	ClientMouseConfiguration & {
 		/** Restrict the default target cycler to the approximate camera view. */
 		readonly targetOnlyInView: boolean;
+		/** Restrict smart Tab taps and holds to monsters and PvP-threatening players. */
+		readonly smartTabHostileOnly: boolean;
 	};
 
 /** Zero-based positions of the ten numbered bars and cells. */

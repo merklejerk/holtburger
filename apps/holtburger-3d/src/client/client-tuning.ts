@@ -201,8 +201,12 @@ export const CLIENT_TUNING = {
 		cycle: {
 			radiusMeters: 125,
 			viewMarginMeters: 2,
+			/** Move the forward half-space plane this far behind the player origin. */
+			forwardHalfSpaceRearOffsetMeters: 1,
 			/** First band width; subsequent widths double with distance. */
 			initialDistanceBandMeters: 2.5,
+			/** Horizontal half-angle for immediate acquisition; elevation does not restrict it. */
+			immediateMaxAngleDegrees: 15,
 		},
 		/** Modest staleness is sufficient for cursor feedback and selection range expiry. */
 		sampleIntervalMs: 1_000 / 15,

@@ -127,6 +127,7 @@ const keyboardGroups = Object.keys(
 /** Platform-independent preferences shared by construction and missing-field validation. */
 const inputPreferenceDefaults = {
 	targetOnlyInView: false,
+	smartTabHostileOnly: false,
 	mouseMovement: true,
 	invertCameraHorizontal: false,
 	invertCameraVertical: false,
@@ -169,6 +170,10 @@ export const clientInputSettingsSchema = z.preprocess(
 			targetOnlyInView: z
 				.boolean()
 				.default(inputPreferenceDefaults.targetOnlyInView),
+			/** Older profiles retain broad smart Tab acquisition. */
+			smartTabHostileOnly: z
+				.boolean()
+				.default(inputPreferenceDefaults.smartTabHostileOnly),
 			mouseMovement: z.boolean().default(inputPreferenceDefaults.mouseMovement),
 			invertCameraHorizontal: z
 				.boolean()

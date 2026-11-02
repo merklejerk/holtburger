@@ -575,6 +575,18 @@
 									})}
 							/>Only select targets in view</label
 						>
+						<label class="ui-checkbox"
+							><input
+								type="checkbox"
+								name="smartTabHostileOnly"
+								checked={input.smartTabHostileOnly}
+								onchange={(event) =>
+									onInputChange({
+										...input,
+										smartTabHostileOnly: event.currentTarget.checked,
+									})}
+							/>Only select hostile creatures</label
+						>
 					</div>
 				</details>
 				<details class="ui-disclosure ui-disclosure-section" open>

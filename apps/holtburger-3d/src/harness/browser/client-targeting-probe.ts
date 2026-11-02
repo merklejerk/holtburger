@@ -47,7 +47,9 @@ import { Quat, Vec3 } from "../../lib/game/math/types";
 const CYCLE_POLICY: CycleSelectionPolicy = {
 	radiusMeters: 75,
 	initialDistanceBandMeters: 5,
+	immediateMaxAngleDegrees: 15,
 	viewMarginMeters: 2,
+	forwardHalfSpaceRearOffsetMeters: 0.5,
 };
 
 /** Real browser input with production acquisition owners and asset-free accepted host records. */
@@ -106,6 +108,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	let scans = 0;
 	let view = TARGETING_TEST_VIEW;
 	let targetOnlyInView = true;
+	let smartTabHostileOnly = false;
 	let combatMode: ClientCombatMode = "peace";
 	let partyMembers = new Set<number>();
 	const cycle = new ClientCycleSelectionController({
@@ -117,7 +120,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 				motion,
 				view,
 				CYCLE_POLICY,
-				targetOnlyInView,
+				{ targetOnlyInView, smartTabHostileOnly },
 				{ combatMode, partyMembers },
 			);
 		},
@@ -445,6 +448,23 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			new Promise<void>((resolve) =>
 				setTimeout(resolve, CLIENT_TUNING.entitySelection.holdDelayMs),
 			);
+		selection.select(null);
+		replace([
+			{ guid: 20, distance: 2, lateral: 2, creature: true },
+			{ guid: 21, distance: 8, height: 6, creature: true },
+		]);
+		dispatchHeld("keydown", false, false);
+		await waitForHold();
+		expectSelected(
+			21,
+			"horizontal cone admits elevation and excludes a nearer sideways target",
+		);
+		dispatchHeld("keyup", false, false);
+		press("Tab");
+		expectSelected(
+			20,
+			"ordinary traversal retains targets outside the immediate cone",
+		);
 		replace(base);
 		for (const ctrlKey of [false, true]) {
 			for (const shiftKey of [false, true]) {
@@ -456,11 +476,11 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 				);
 				await waitForHold();
 				expectSelected(
-					ctrlKey ? 9 : 2,
-					"held chord selects immediate in its category",
+					ctrlKey ? 3 : 2,
+					"held chord selects an immediate or retains selection when none is in the cone",
 				);
 				dispatchHeld("keyup", ctrlKey, shiftKey);
-				expectSelected(ctrlKey ? 9 : 2, "completed hold consumes release");
+				expectSelected(ctrlKey ? 3 : 2, "completed hold consumes release");
 			}
 		}
 		selection.select(3);
@@ -556,7 +576,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		press("Tab");
 		expectSelected(20, "already selected immediate advances");
 
-		// Camera sees behind the player; only the unrestricted filters may acquire there.
+		// Camera sees behind the player; the shifted half-space admits only the nearby rear strip.
 		view = {
 			...TARGETING_TEST_VIEW,
 			camera: {
@@ -567,6 +587,36 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 				},
 			},
 		};
+		replace([
+			{
+				guid: 24,
+				distance: -CYCLE_POLICY.forwardHalfSpaceRearOffsetMeters / 2,
+				creature: true,
+			},
+			{
+				guid: 25,
+				distance: -CYCLE_POLICY.forwardHalfSpaceRearOffsetMeters - 0.1,
+				creature: true,
+			},
+		]);
+		press("Tab");
+		expectSelected(
+			24,
+			"shifted half-space admits a visible target just behind the player",
+		);
+		press("Tab");
+		expectSelected(
+			24,
+			"shifted half-space excludes targets beyond its rear plane",
+		);
+		selection.select(20);
+		dispatchHeld("keydown", false, false);
+		await waitForHold();
+		expectSelected(
+			20,
+			"rear half-space allowance does not move the immediate cone",
+		);
+		dispatchHeld("keyup", false, false);
 		replace([{ guid: 23, distance: -8, creature: true, monster: true }]);
 		press("Tab");
 		expectSelected(
@@ -610,6 +660,33 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 				expectSelected(guid, `${mode} smart combat player and NPC admission`);
 			}
 		}
+		smartTabHostileOnly = true;
+		for (const mode of ["peace", "melee", "missile", "magic"] as const) {
+			combatMode = mode;
+			selection.select(null);
+			for (const guid of [4, 7, 4]) {
+				press("Tab");
+				expectSelected(
+					guid,
+					`${mode} hostile-only smart Tab excludes friendlies and objects`,
+				);
+			}
+			dispatchHeld("keydown", false, false);
+			await waitForHold();
+			expectSelected(4, "hostile-only hold acquires a monster");
+			dispatchHeld("keyup", false, false);
+		}
+		press("Tab", true);
+		expectSelected(
+			2,
+			"hostile-only preference leaves object selection unrestricted",
+		);
+		press("v");
+		expectSelected(
+			9,
+			"hostile-only preference leaves corpse selection unrestricted",
+		);
+		smartTabHostileOnly = false;
 		replace(combatTargets.filter((record) => record.guid !== 2));
 		press("Tab");
 		expectSelected(

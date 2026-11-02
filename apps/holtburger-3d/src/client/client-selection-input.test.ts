@@ -74,6 +74,7 @@ function fixture() {
 				guid: 2,
 				distanceBand: 0,
 				forwardAlignment: 1,
+				immediateEligible: true,
 				distanceSquared: 1,
 			},
 			{
@@ -81,6 +82,7 @@ function fixture() {
 				guid: 3,
 				distanceBand: 0,
 				forwardAlignment: 1,
+				immediateEligible: true,
 				distanceSquared: 4,
 			},
 		],
@@ -90,12 +92,14 @@ function fixture() {
 				guid: 8,
 				distanceBand: 0,
 				forwardAlignment: 1,
+				immediateEligible: true,
 				distanceSquared: 9,
 			},
 			{
 				guid: 9,
 				distanceBand: 0,
 				forwardAlignment: 1,
+				immediateEligible: true,
 				distanceSquared: 4,
 				filters: { "non-creature": "cycle", "unopened-corpse": "cycle" },
 			},
@@ -167,6 +171,7 @@ describe("selection press lifecycle", () => {
 				guid: 4,
 				distanceBand: 0,
 				forwardAlignment: 1,
+				immediateEligible: true,
 				distanceSquared: 1,
 			},
 			{
@@ -174,6 +179,7 @@ describe("selection press lifecycle", () => {
 				guid: 2,
 				distanceBand: 0,
 				forwardAlignment: 1,
+				immediateEligible: true,
 				distanceSquared: 4,
 			},
 		];
@@ -310,6 +316,7 @@ describe("selection press lifecycle", () => {
 				guid: 5,
 				distanceBand: 0,
 				forwardAlignment: 1,
+				immediateEligible: true,
 				distanceSquared: 1,
 			},
 			{
@@ -317,6 +324,7 @@ describe("selection press lifecycle", () => {
 				guid: 4,
 				distanceBand: 0,
 				forwardAlignment: 1,
+				immediateEligible: true,
 				distanceSquared: 1,
 			},
 			{
@@ -324,6 +332,7 @@ describe("selection press lifecycle", () => {
 				guid: 2,
 				distanceBand: 0,
 				forwardAlignment: 1,
+				immediateEligible: true,
 				distanceSquared: 4,
 			},
 		];

@@ -10,6 +10,7 @@ import type {
 } from "../lib/game/runtime/dynamic-entity-feed";
 import { dynamicEntityWorldOrigin } from "../lib/game/runtime/dynamic-entity-presentation";
 import type { PrimaryCameraView } from "../lib/game/runtime/types";
+import type { ClientInputConfiguration } from "../lib/input/input-contract";
 import type { ClientCombatMode } from "./client-host-contract";
 import type {
 	ClientEntityFacts,
@@ -34,8 +35,12 @@ export interface CycleSelectionPolicy {
 	readonly radiusMeters: number;
 	/** Width of the innermost radial band; each subsequent band doubles in width. */
 	readonly initialDistanceBandMeters: number;
+	/** Maximum horizontal angle from player facing for immediate acquisition, in degrees. */
+	readonly immediateMaxAngleDegrees: number;
 	/** Extra horizontal/vertical half-width in meters; no behind-camera admission. */
 	readonly viewMarginMeters: number;
+	/** Distance behind the player origin allowed by the forward half-space view restriction. */
+	readonly forwardHalfSpaceRearOffsetMeters: number;
 }
 /** Eligible identity and distance computed once by the candidate sampler. */
 export interface CycleCandidate {
@@ -47,6 +52,8 @@ export interface CycleCandidate {
 	readonly distanceBand: number;
 	/** Cosine of the 3D angle to horizontal player forward; larger values rank first. */
 	readonly forwardAlignment: number;
+	/** Sampler-owned horizontal cone admission; ordinary traversal remains unrestricted. */
+	readonly immediateEligible: boolean;
 	/** Sampler-owned admission per filter; absence means ineligible for that filter. */
 	readonly filters: Readonly<Partial<Record<CycleFilter, CycleMembership>>>;
 }
@@ -89,7 +96,10 @@ export function sampleCycleCandidates(
 	motion: DynamicEntityMirror,
 	view: PrimaryCameraView | null,
 	policy: CycleSelectionPolicy,
-	targetOnlyInView: boolean,
+	preferences: Pick<
+		ClientInputConfiguration,
+		"targetOnlyInView" | "smartTabHostileOnly"
+	>,
 	context: CycleSelectionContext,
 ): readonly CycleCandidate[] | null {
 	const read = entities.read();
@@ -114,6 +124,9 @@ export function sampleCycleCandidates(
 		view === null ? null : approximateTargetView(view, policy.viewMarginMeters);
 	const candidates: CycleCandidate[] = [];
 	const radiusSquared = policy.radiusMeters * policy.radiusMeters;
+	const minimumHorizontalAlignment = Math.cos(
+		(policy.immediateMaxAngleDegrees * Math.PI) / 180,
+	);
 	for (const [guid, placement] of placements) {
 		const position = dynamicEntityWorldOrigin(placement);
 		if (guid === read.level.playerGuid) continue;
@@ -128,17 +141,32 @@ export function sampleCycleCandidates(
 				(position.x - player.x) * forward.x +
 				(position.z - player.z) * forward.z;
 			const visible =
-				forwardDistance >= 0 && inView !== null && inView(position);
+				forwardDistance >= -policy.forwardHalfSpaceRearOffsetMeters &&
+				inView !== null &&
+				inView(position);
 			const distance = Math.sqrt(distanceSquared);
-			const inTargetView = !targetOnlyInView || visible;
+			const horizontalDistance = Math.hypot(
+				position.x - player.x,
+				position.z - player.z,
+			);
+			const inTargetView = !preferences.targetOnlyInView || visible;
 			const filters: Partial<Record<CycleFilter, CycleMembership>> = {};
 			if (facts.targeting === "creature") {
 				if (!inTargetView) continue;
-				filters["smart-combat"] = smartCombatMembership(facts, context);
+				const hostile =
+					facts.playerThreat ||
+					(facts.description.kind === "known" &&
+						facts.description.mapCategory === "mob");
+				if (!preferences.smartTabHostileOnly || hostile)
+					filters["smart-combat"] = smartCombatMembership(facts, context);
 			} else {
 				filters["non-creature"] = "cycle";
 				if (facts.corpse === "unopened") filters["unopened-corpse"] = "cycle";
-				if (facts.corpse === null && inTargetView) {
+				if (
+					!preferences.smartTabHostileOnly &&
+					facts.corpse === null &&
+					inTargetView
+				) {
 					const usable =
 						facts.description.kind === "known" &&
 						(facts.description.useCapability === "direct" ||
@@ -156,6 +184,10 @@ export function sampleCycleCandidates(
 				),
 				// Coincident origins have no direction: rank them like a perpendicular target.
 				forwardAlignment: distance === 0 ? 0 : forwardDistance / distance,
+				// Vertically aligned/coincident origins have no horizontal bearing.
+				immediateEligible:
+					horizontalDistance > 0 &&
+					forwardDistance / horizontalDistance >= minimumHorizontalAlignment,
 				filters,
 			});
 		}
@@ -215,43 +247,44 @@ export class ClientCycleSelectionController {
 	cycle(filter: CycleFilter, direction: 1 | -1): void {
 		if (this.#destroyed) return;
 		const intent = this.#selection.beginAcquisition("cycle");
-		const matching = this.#candidates(filter);
-		if (matching === null) return;
-		const immediate = matching[0];
+		const sampled = this.#candidates(filter);
+		if (sampled === null) return;
+		const { immediate, matching } = sampled;
 		const changed = this.#immediates.get(filter) !== (immediate?.guid ?? null);
 		this.#immediates.set(filter, immediate?.guid ?? null);
-		if (immediate === undefined) return;
+		if (matching.length === 0) return;
 		const selected = this.#selection.selectedGuid();
 		const cursorIndex = matching.findIndex(
 			(candidate) => candidate.guid === this.#cursor,
 		);
-		let next = immediate;
-		if ((!changed && cursorIndex >= 0) || immediate.guid === selected) {
-			const start = changed || cursorIndex < 0 ? 0 : cursorIndex;
-			for (let step = 1; step <= matching.length; step++) {
-				const index =
-					(((start + direction * step) % matching.length) + matching.length) %
-					matching.length;
-				const candidate = matching[index];
-				if (candidate === undefined)
-					throw new Error("Cycle index must name an eligible target.");
-				if (candidate.guid !== selected || matching.length === 1) {
-					next = candidate;
-					break;
-				}
+		let start = direction === 1 ? -1 : 0;
+		if (cursorIndex >= 0) start = cursorIndex;
+		if (immediate !== undefined && (changed || cursorIndex < 0)) {
+			// Begin just before the immediate; the shared traversal skips it if already selected.
+			start = matching.indexOf(immediate) - direction;
+		}
+		for (let step = 1; step <= matching.length; step++) {
+			const index =
+				(((start + direction * step) % matching.length) + matching.length) %
+				matching.length;
+			const candidate = matching[index];
+			if (candidate === undefined)
+				throw new Error("Cycle index must name an eligible target.");
+			if (candidate.guid !== selected || matching.length === 1) {
+				this.#cursor = candidate.guid;
+				this.#selection.commitAcquisition(intent, candidate.guid);
+				return;
 			}
 		}
-		this.#cursor = next.guid;
-		this.#selection.commitAcquisition(intent, next.guid);
 	}
 
 	/** Hold acquisition uses the same preference as taps and seeds subsequent traversal. */
 	selectImmediate(filter: CycleFilter): void {
 		if (this.#destroyed) return;
 		const intent = this.#selection.beginAcquisition("external");
-		const matching = this.#candidates(filter);
-		if (matching === null) return;
-		const immediate = matching[0];
+		const sampled = this.#candidates(filter);
+		if (sampled === null) return;
+		const { immediate } = sampled;
 		this.#immediates.set(filter, immediate?.guid ?? null);
 		if (immediate === undefined) return;
 		this.#cursor = immediate.guid;
@@ -264,7 +297,12 @@ export class ClientCycleSelectionController {
 		this.#unsubscribe();
 	}
 
-	#candidates(filter: CycleFilter): CycleCandidate[] | null {
+	#candidates(filter: CycleFilter): {
+		/** Best ranked candidate inside the horizontal cone, if any. */
+		readonly immediate: CycleCandidate | undefined;
+		/** Broad traversal ring, including the immediate-only winner when present. */
+		readonly matching: CycleCandidate[];
+	} | null {
 		const candidates = this.#sample();
 		if (candidates === null) {
 			this.#reset();
@@ -275,11 +313,14 @@ export class ClientCycleSelectionController {
 			.sort(preferredFirst);
 		// Resolve immediate from the broad pool before restricting traversal. The winning
 		// immediate-only entity stays in the ring; all other immediate-only entities are skipped.
-		const immediate = ranked[0];
-		return ranked.filter(
-			(candidate) =>
-				candidate === immediate || candidate.filters[filter] === "cycle",
-		);
+		const immediate = ranked.find((candidate) => candidate.immediateEligible);
+		return {
+			immediate,
+			matching: ranked.filter(
+				(candidate) =>
+					candidate === immediate || candidate.filters[filter] === "cycle",
+			),
+		};
 	}
 
 	#reset(): void {

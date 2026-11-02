@@ -346,6 +346,7 @@ it("preserves keyboard preferences and round-trips mouse settings", () => {
 
 it.each([
 	"targetOnlyInView",
+	"smartTabHostileOnly",
 	"invertCameraHorizontal",
 	"invertCameraVertical",
 	"invertSteeringHorizontal",
@@ -364,6 +365,7 @@ it("preserves physical key ownership for acquisition and mouse edits but detects
 	const changed = {
 		...defaults,
 		targetOnlyInView: !defaults.targetOnlyInView,
+		smartTabHostileOnly: !defaults.smartTabHostileOnly,
 		mouseMovement: !defaults.mouseMovement,
 		invertCameraHorizontal: !defaults.invertCameraHorizontal,
 		invertCameraVertical: !defaults.invertCameraVertical,
@@ -387,19 +389,21 @@ it("does not treat settings normalization as a keyboard edit", () => {
 	).toBe(true);
 });
 
-it.each([false, true])(
-	"restores absent targeting preferences and preserves an explicit view restriction of %s",
-	(targetOnlyInView) => {
+it.each(["targetOnlyInView", "smartTabHostileOnly"] as const)(
+	"restores missing %s and preserves its explicit value independently",
+	(preference) => {
 		const initial = clientInputSettingsSchema.parse(
 			createClientKeyboardDefaults("windows"),
 		);
-		expect(initial.targetOnlyInView).toBe(
-			createClientInputDefaults("windows").targetOnlyInView,
+		expect(initial[preference]).toBe(
+			createClientInputDefaults("windows")[preference],
 		);
-		const changed = { ...initial, targetOnlyInView };
-		expect(
-			clientInputSettingsSchema.parse(JSON.parse(JSON.stringify(changed))),
-		).toEqual(changed);
+		for (const enabled of [false, true]) {
+			const changed = { ...initial, [preference]: enabled };
+			expect(
+				clientInputSettingsSchema.parse(JSON.parse(JSON.stringify(changed))),
+			).toEqual(changed);
+		}
 	},
 );
 

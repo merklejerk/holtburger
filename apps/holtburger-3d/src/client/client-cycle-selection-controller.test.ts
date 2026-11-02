@@ -32,7 +32,9 @@ const PEACE_CONTEXT: CycleSelectionContext = {
 const POLICY = {
 	radiusMeters: 20,
 	viewMarginMeters: 2,
+	forwardHalfSpaceRearOffsetMeters: 0.5,
 	initialDistanceBandMeters: 5,
+	immediateMaxAngleDegrees: 15,
 };
 function candidate(
 	guid: number,
@@ -47,6 +49,9 @@ function candidate(
 			Math.log2(1 + distance / POLICY.initialDistanceBandMeters),
 		),
 		forwardAlignment,
+		immediateEligible:
+			forwardAlignment >=
+			Math.cos((POLICY.immediateMaxAngleDegrees * Math.PI) / 180),
 		filters: { [filter]: "cycle" },
 	};
 }
@@ -78,6 +83,49 @@ function fixture() {
 }
 
 describe("immediate target traversal", () => {
+	it.each([1, -1] as const)(
+		"cycles outside the cone without an immediate in direction %s",
+		(direction) => {
+			const f = fixture();
+			f.set([candidate(2, 6, 0.5), candidate(3, 8, 0.4)]);
+			f.selection.select(9);
+			f.cycle.selectImmediate("smart-combat");
+			expect(f.selection.selectedGuid()).toBe(9);
+			f.cycle.cycle("smart-combat", direction);
+			expect(f.selection.selectedGuid()).toBe(direction === 1 ? 2 : 3);
+			f.cycle.cycle("smart-combat", direction);
+			expect(f.selection.selectedGuid()).toBe(direction === 1 ? 3 : 2);
+			f.set([candidate(2, 6, 0.5), candidate(3, 8, 0.4), candidate(4, 10)]);
+			f.cycle.cycle("smart-combat", direction);
+			expect(f.selection.selectedGuid()).toBe(4);
+		},
+	);
+	it("excludes immediate-only candidates outside the cone from holds and traversal", () => {
+		const f = fixture();
+		f.set([
+			{ ...candidate(2, 1, 0), filters: { "smart-combat": "immediate-only" } },
+			candidate(3, 8, 0.5),
+		]);
+		f.cycle.selectImmediate("smart-combat");
+		expect(f.selection.selectedGuid()).toBeNull();
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(3);
+	});
+	it("continues from the cursor when the immediate leaves the cone", () => {
+		const f = fixture();
+		const others = [
+			candidate(2, 4, 0.5),
+			candidate(3, 6, 0.5),
+			candidate(5, 18, 0.5),
+		];
+		f.set([...others, candidate(4, 16)]);
+		f.cycle.cycle("smart-combat", 1);
+		f.cycle.cycle("smart-combat", -1);
+		expect(f.selection.selectedGuid()).toBe(3);
+		f.set([...others, candidate(4, 16, 0.5)]);
+		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(4);
+	});
 	it.each(["smart-combat", "non-creature", "unopened-corpse"] as const)(
 		"orders %s by band, alignment, distance, and GUID, wrapping in either direction",
 		(filter) => {
@@ -90,12 +138,12 @@ describe("immediate target traversal", () => {
 				candidate(6, 16, 1, filter),
 				candidate(7, 4, -1, filter),
 			]);
-			for (const guid of [7, 3, 4, 5, 2, 6, 7]) {
+			for (const guid of [6, 7, 3, 4, 5, 2, 6]) {
 				f.cycle.cycle(filter, 1);
 				expect(f.selection.selectedGuid()).toBe(guid);
 			}
 			f.cycle.cycle(filter, -1);
-			expect(f.selection.selectedGuid()).toBe(6);
+			expect(f.selection.selectedGuid()).toBe(2);
 		},
 	);
 	it.each([1, -1] as const)(
@@ -232,7 +280,10 @@ describe("smart combat stance policy", () => {
 		{ guid: 8, category: "other", use: "direct", distance: 8 },
 		{ guid: 9, category: "other", use: "direct", distance: 9 },
 	] as const;
-	function scenario(combatMode: CycleSelectionContext["combatMode"]) {
+	function scenario(
+		combatMode: CycleSelectionContext["combatMode"],
+		smartTabHostileOnly = false,
+	) {
 		const f = fixture();
 		const entities = new ClientEntityMirror();
 		entities.commit(
@@ -287,13 +338,30 @@ describe("smart combat stance policy", () => {
 					motion,
 					TARGETING_TEST_VIEW,
 					POLICY,
-					true,
+					{ targetOnlyInView: true, smartTabHostileOnly },
 					next,
 				),
 			);
 		refresh();
 		return { ...f, context, refresh, motion };
 	}
+	it.each(["peace", "melee", "missile", "magic", "unknown"] as const)(
+		"hostile-only targeting excludes friendly players, NPCs, and objects in %s stance",
+		(mode) => {
+			const f = scenario(mode, true);
+			f.cycle.selectImmediate("smart-combat");
+			expect(f.selection.selectedGuid()).toBe(4);
+			for (const guid of [7, 4, 7]) {
+				f.cycle.cycle("smart-combat", 1);
+				expect(f.selection.selectedGuid()).toBe(guid);
+			}
+			f.cycle.cycle("non-creature", 1);
+			expect(f.selection.selectedGuid()).toBe(2);
+			f.cycle.cycle("unopened-corpse", 1);
+			expect(f.selection.selectedGuid()).toBe(9);
+		},
+	);
+
 	it.each([
 		["peace", [2, 3, 4, 5, 6, 7, 8, 2]],
 		["unknown", [2, 3, 4, 5, 6, 7, 8, 2]],
@@ -360,6 +428,122 @@ describe("smart combat stance policy", () => {
 });
 
 describe("on-demand accepted candidate geometry", () => {
+	it("offsets the view half-space behind the player without moving the immediate cone", () => {
+		const entities = new ClientEntityMirror();
+		const policy = { ...POLICY, forwardHalfSpaceRearOffsetMeters: 1.25 };
+		const depths = [
+			-policy.forwardHalfSpaceRearOffsetMeters,
+			-policy.forwardHalfSpaceRearOffsetMeters - 0.01,
+			-policy.forwardHalfSpaceRearOffsetMeters / 2,
+			0.25,
+		];
+		entities.commit(
+			entities.prepareSnapshot(
+				{
+					...playerEntitySnapshot(1),
+					entities: [
+						entityFacts(1),
+						...depths.map((_, index) =>
+							entityFacts(index + 2, { targeting: "creature" }),
+						),
+					],
+				},
+				1,
+			),
+		);
+		const player = targetingEntity(1, 1);
+		player.placement.pose.coords.y = 10;
+		const motion = new DynamicEntityMirror();
+		motion.prepareSnapshot({
+			entities: [
+				player,
+				...depths.map((depth, index) => {
+					const entity = targetingEntity(index + 2, 1);
+					entity.placement.pose.coords.y =
+						player.placement.pose.coords.y + depth;
+					return entity;
+				}),
+			],
+			hostTime: { seconds: 0 },
+		})();
+		const sample = (rearOffsetMeters: number, targetOnlyInView: boolean) =>
+			sampleCycleCandidates(
+				entities,
+				motion,
+				TARGETING_TEST_VIEW,
+				{ ...policy, forwardHalfSpaceRearOffsetMeters: rearOffsetMeters },
+				{ targetOnlyInView, smartTabHostileOnly: false },
+				PEACE_CONTEXT,
+			);
+		expect(
+			sample(policy.forwardHalfSpaceRearOffsetMeters, true)?.map(
+				({ guid, immediateEligible }) => ({ guid, immediateEligible }),
+			),
+		).toEqual([
+			{ guid: 2, immediateEligible: false },
+			{ guid: 4, immediateEligible: false },
+			{ guid: 5, immediateEligible: true },
+		]);
+		expect(sample(0, true)?.map(({ guid }) => guid)).toEqual([5]);
+		expect(sample(0, false)?.map(({ guid }) => guid)).toEqual([2, 3, 4, 5]);
+	});
+	it("qualifies immediate targets by horizontal angle while retaining 3D bands and ranking", () => {
+		const entities = new ClientEntityMirror();
+		const policy = { ...POLICY, immediateMaxAngleDegrees: 30 };
+		const positions = [
+			{ x: 0, y: 2, z: 12 },
+			{ x: Math.sin(Math.PI / 6) * 8, y: Math.cos(Math.PI / 6) * 8, z: 0 },
+			{
+				x: Math.sin(Math.PI / 6 + 0.01) * 8,
+				y: Math.cos(Math.PI / 6 + 0.01) * 8,
+				z: 0,
+			},
+			{ x: 0, y: -2, z: 0 },
+			{ x: 0, y: 0, z: 2 },
+			{ x: 0, y: 0, z: 0 },
+		];
+		entities.commit(
+			entities.prepareSnapshot(
+				{
+					...playerEntitySnapshot(1),
+					entities: [
+						entityFacts(1),
+						...positions.map((_, index) => entityFacts(index + 2)),
+					],
+				},
+				1,
+			),
+		);
+		const motion = new DynamicEntityMirror();
+		motion.prepareSnapshot({
+			entities: [
+				targetingEntity(1, 1),
+				...positions.map((coords, index) => {
+					const entity = targetingEntity(index + 2, 1);
+					entity.placement.pose.coords = coords;
+					return entity;
+				}),
+			],
+			hostTime: { seconds: 0 },
+		})();
+		const candidates = sampleCycleCandidates(
+			entities,
+			motion,
+			null,
+			policy,
+			{ targetOnlyInView: false, smartTabHostileOnly: false },
+			PEACE_CONTEXT,
+		);
+		expect(candidates?.map((candidate) => candidate.immediateEligible)).toEqual(
+			[true, true, false, false, false, false],
+		);
+		expect(candidates?.[0]).toMatchObject({
+			distanceSquared: 148,
+			distanceBand: 1,
+			forwardAlignment: 2 / Math.sqrt(148),
+		});
+	});
+
 	it("samples exponential boundaries and 3D alignment independently of the camera", () => {
 		const entities = new ClientEntityMirror();
 		const positions = [
@@ -403,7 +587,7 @@ describe("on-demand accepted candidate geometry", () => {
 				motion,
 				view,
 				POLICY,
-				false,
+				{ targetOnlyInView: false, smartTabHostileOnly: false },
 				PEACE_CONTEXT,
 			);
 		const candidates = sample(null);
@@ -479,7 +663,7 @@ describe("on-demand accepted candidate geometry", () => {
 				motion,
 				view,
 				POLICY,
-				true,
+				{ targetOnlyInView: true, smartTabHostileOnly: false },
 				PEACE_CONTEXT,
 			),
 		).toEqual([
@@ -494,7 +678,7 @@ describe("on-demand accepted candidate geometry", () => {
 				motion,
 				view,
 				POLICY,
-				false,
+				{ targetOnlyInView: false, smartTabHostileOnly: false },
 				PEACE_CONTEXT,
 			),
 		).toEqual([
@@ -558,7 +742,7 @@ describe("on-demand accepted candidate geometry", () => {
 				motion,
 				TARGETING_TEST_VIEW,
 				POLICY,
-				false,
+				{ targetOnlyInView: false, smartTabHostileOnly: false },
 				PEACE_CONTEXT,
 			),
 		).toEqual([
@@ -587,7 +771,7 @@ describe("on-demand accepted candidate geometry", () => {
 					motion,
 					TARGETING_TEST_VIEW,
 					POLICY,
-					targetOnlyInView,
+					{ targetOnlyInView, smartTabHostileOnly: false },
 					PEACE_CONTEXT,
 				),
 		});
@@ -646,7 +830,7 @@ describe("on-demand accepted candidate geometry", () => {
 					motion,
 					TARGETING_TEST_VIEW,
 					POLICY,
-					true,
+					{ targetOnlyInView: true, smartTabHostileOnly: false },
 					PEACE_CONTEXT,
 				),
 			).toEqual([{ ...worldObject(2, 10), filters }]);
@@ -659,7 +843,7 @@ describe("on-demand accepted candidate geometry", () => {
 					motion,
 					TARGETING_TEST_VIEW,
 					POLICY,
-					true,
+					{ targetOnlyInView: true, smartTabHostileOnly: false },
 					PEACE_CONTEXT,
 				),
 			).toEqual([worldObject(2, 10, -1)]);
@@ -698,7 +882,7 @@ describe("on-demand accepted candidate geometry", () => {
 					motion,
 					TARGETING_TEST_VIEW,
 					POLICY,
-					true,
+					{ targetOnlyInView: true, smartTabHostileOnly: false },
 					PEACE_CONTEXT,
 				),
 			).toEqual([
@@ -756,7 +940,7 @@ describe("on-demand accepted candidate geometry", () => {
 				motion,
 				TARGETING_TEST_VIEW,
 				POLICY,
-				true,
+				{ targetOnlyInView: true, smartTabHostileOnly: false },
 				PEACE_CONTEXT,
 			);
 		expect(sample()).toEqual([candidate(2, 10), worldObject(3, 5, -1)]);
@@ -776,7 +960,7 @@ describe("on-demand accepted candidate geometry", () => {
 				motion,
 				reversedView,
 				POLICY,
-				true,
+				{ targetOnlyInView: true, smartTabHostileOnly: false },
 				PEACE_CONTEXT,
 			),
 		).toEqual([worldObject(3, 5, -1)]);
@@ -814,7 +998,7 @@ describe("on-demand accepted candidate geometry", () => {
 				motion,
 				null,
 				POLICY,
-				true,
+				{ targetOnlyInView: true, smartTabHostileOnly: false },
 				PEACE_CONTEXT,
 			),
 		).toEqual([worldObject(2, POLICY.radiusMeters, 0)]);
@@ -828,7 +1012,7 @@ describe("on-demand accepted candidate geometry", () => {
 				motion,
 				null,
 				POLICY,
-				true,
+				{ targetOnlyInView: true, smartTabHostileOnly: false },
 				PEACE_CONTEXT,
 			),
 		).toEqual([]);
@@ -860,7 +1044,7 @@ describe("on-demand accepted candidate geometry", () => {
 				motion,
 				null,
 				POLICY,
-				true,
+				{ targetOnlyInView: true, smartTabHostileOnly: false },
 				PEACE_CONTEXT,
 			),
 		).toEqual([worldObject(2, 2, 0)]);
@@ -871,7 +1055,7 @@ describe("on-demand accepted candidate geometry", () => {
 				motion,
 				null,
 				POLICY,
-				true,
+				{ targetOnlyInView: true, smartTabHostileOnly: false },
 				PEACE_CONTEXT,
 			),
 		).toBeNull();

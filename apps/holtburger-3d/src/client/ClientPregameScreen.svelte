@@ -27,6 +27,8 @@
 		readonly children: Snippet;
 		/** Page-owned peripheral actions or metadata, kept outside the foreground content. */
 		readonly footer: Snippet;
+		/** Optional page-owned controls grouped with the build information. */
+		readonly footerAside?: Snippet;
 	}
 	const {
 		branding,
@@ -36,6 +38,7 @@
 		onDefaultKeydown,
 		children,
 		footer,
+		footerAside,
 	}: Props = $props();
 	const { keyboard } = useAppInputPolicy();
 
@@ -111,9 +114,10 @@
 		<div class="pregame-content">{@render children()}</div>
 		<footer class="pregame-footer">
 			{@render footer()}
-			<span class="pregame-build" aria-label="Build information"
-				>{APP_BUILD_LABEL}</span
-			>
+			<div class="pregame-build">
+				<span aria-label="Build information">{APP_BUILD_LABEL}</span>
+				{#if footerAside}{@render footerAside()}{/if}
+			</div>
 		</footer>
 	</main>
 </div>
@@ -213,6 +217,10 @@
 			padding-top: 12px;
 		}
 		.pregame-build {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			min-width: 0;
 			margin-left: auto;
 			text-align: right;
 			overflow-wrap: anywhere;

@@ -8,6 +8,8 @@
 	import DeleteIcon from "../assets/icons/character-delete.svg?component";
 	import SelectionMarker from "../assets/icons/pregame-selection.svg?component";
 	import EyeIcon from "../assets/icons/hud-eye.svg?component";
+	import SettingsIcon from "../assets/icons/hud-settings.svg?component";
+	import AppSettingsDialog from "./AppSettingsDialog.svelte";
 	import ServerDirectoryDialog from "./ServerDirectoryDialog.svelte";
 	import { provideAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { requestElectronClientClose } from "../lib/host/electron-host-transport";
@@ -36,6 +38,8 @@
 	/** Primary submit control keeps keyboard entry on the validated form path. */
 	let playButton = $state<HTMLButtonElement>();
 	let browsingServers = $state(false);
+	/** App startup preferences remain independent of server/profile drafts. */
+	let editingAppSettings = $state(false);
 	let selectedServerId = $state("");
 	let selectedProfileId = $state("");
 	let account = $state("");
@@ -259,7 +263,7 @@
 	showPortalLogo={true}
 	backdrop={false}
 	onDefaultKeydown={(event) => {
-		if (editor === null && !browsingServers)
+		if (editor === null && !browsingServers && !editingAppSettings)
 			submitPregameOnEnter(
 				event,
 				playButton,
@@ -523,13 +527,31 @@
 			</div>
 		{:else}<p>Loading launcher settings…</p>{/if}
 	</section>
-	{#snippet footer()}<button
+	{#snippet footer()}
+		<button
 			class="pregame-action ui-button pregame-quiet"
 			onclick={() =>
 				void requestElectronClientClose().catch(
 					(error) => (failure = diagnostic(error)),
 				)}>Quit application</button
-		>{/snippet}
+		>
+	{/snippet}
+	{#snippet footerAside()}
+		<button
+			class="ui-button ui-icon-button pregame-quiet"
+			type="button"
+			aria-label="App settings"
+			title="App settings"
+			disabled={busy}
+			onclick={() => (editingAppSettings = true)}
+			><span class="pregame-icon launcher-settings-icon" aria-hidden="true"
+				><SettingsIcon /></span
+			></button
+		>
+	{/snippet}
+	{#if editingAppSettings}<AppSettingsDialog
+			onCancel={() => (editingAppSettings = false)}
+		/>{/if}
 	{#if browsingServers}
 		<ServerDirectoryDialog
 			onCancel={() => (browsingServers = false)}
@@ -641,6 +663,10 @@
 
 <style>
 	@layer components {
+		.launcher-settings-icon {
+			width: 1.6em;
+			height: 1.6em;
+		}
 		.launcher {
 			display: flex;
 			flex-direction: column;

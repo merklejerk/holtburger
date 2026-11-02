@@ -41,6 +41,9 @@ await import(
 
 // Launcher persistence and terminal events must remain consumable by Electron's Node runtime.
 await import(
+	new URL("../dist-electron/electron/app-settings.js", import.meta.url).href
+);
+await import(
 	new URL("../dist-electron/electron/server-directory.js", import.meta.url).href
 );
 await import(
@@ -54,6 +57,10 @@ await import(
 );
 
 // Resolved bootstrap defaults must also be consumable from Electron Node ESM.
+await import(
+	new URL("../dist-electron/src/app/hardware-info-contract.js", import.meta.url)
+		.href
+);
 await import(
 	new URL("../dist-electron/electron/client-settings-store.js", import.meta.url)
 		.href

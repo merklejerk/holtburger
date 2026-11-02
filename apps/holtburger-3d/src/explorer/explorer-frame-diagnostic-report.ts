@@ -3,7 +3,7 @@ import type {
 	FrameSettings,
 	RendererFrameDiagnosticsSnapshot,
 } from "../lib/game/renderer/renderer";
-import type { WebGL2DeviceDiagnosticIdentity } from "../lib/game/renderer/webgl2-device";
+import type { WebGL2DeviceDiagnosticIdentity } from "../lib/game/renderer/webgl2-diagnostic-identity";
 import type { ExplorerSceneInterestSnapshot } from "./explorer-camera-coordinator";
 import type { ExplorerCameraLocation } from "./explorer-camera-location";
 import type { FreeFlyCameraState } from "./explorer-camera-input-controller";

@@ -1,4 +1,8 @@
 import {
+	readWebGL2DiagnosticIdentity,
+	type WebGL2DeviceDiagnosticIdentity,
+} from "./webgl2-diagnostic-identity";
+import {
 	runCombatEffectsFixture,
 	type CombatEffectsFixtureResult,
 } from "./webgl2-combat-effects-fixture";
@@ -41,30 +45,6 @@ export interface Texture2DReadback {
 	/** Rows preserve the atlas packer's coordinate order for placement-bound overlays. */
 	readonly pixels: Uint8Array;
 	readonly width: number;
-}
-
-/** Cold context identity captured only for an explicitly exported diagnostic report. */
-export interface WebGL2DeviceDiagnosticIdentity {
-	readonly renderer: string;
-	readonly shadingLanguageVersion: string;
-	/**
-	 * Adapter string behind `WEBGL_debug_renderer_info`, or null where the browser withholds it.
-	 *
-	 * Non-null is not the same as true. WebKitGTK returns a fabricated value — it reported
-	 * "Apple GPU" on an RX 7900 XT — so this field has three states, not two: absent, honest, and
-	 * confidently wrong. Never branch on it, and never read it as evidence that timing came from a
-	 * real adapter; that is what the harness records `glRenderer` against a known-good host for.
-	 */
-	readonly unmaskedRenderer: string | null;
-	readonly unmaskedVendor: string | null;
-	readonly vendor: string;
-	readonly version: string;
-}
-
-/** Privacy-gated constants exposed by WEBGL_debug_renderer_info when the browser permits it. */
-interface WebGLDebugRendererInfo {
-	readonly UNMASKED_RENDERER_WEBGL: GLenum;
-	readonly UNMASKED_VENDOR_WEBGL: GLenum;
 }
 
 /** Whole-device lifecycle state; a lost context requires rebuilding the complete runtime. */
@@ -253,24 +233,7 @@ export class WebGL2Device {
 	/** Read browser and driver identity only when the Explorer creates a diagnostic report. */
 	getDiagnosticIdentity(): WebGL2DeviceDiagnosticIdentity {
 		this.#assertReady();
-		const gl = this.#gl;
-		const debug = gl.getExtension(
-			"WEBGL_debug_renderer_info",
-		) as WebGLDebugRendererInfo | null;
-		return {
-			renderer: gl.getParameter(gl.RENDERER) as string,
-			shadingLanguageVersion: gl.getParameter(
-				gl.SHADING_LANGUAGE_VERSION,
-			) as string,
-			unmaskedRenderer: debug
-				? (gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) as string)
-				: null,
-			unmaskedVendor: debug
-				? (gl.getParameter(debug.UNMASKED_VENDOR_WEBGL) as string)
-				: null,
-			vendor: gl.getParameter(gl.VENDOR) as string,
-			version: gl.getParameter(gl.VERSION) as string,
-		};
+		return readWebGL2DiagnosticIdentity(this.#gl);
 	}
 
 	/**

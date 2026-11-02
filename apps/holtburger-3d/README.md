@@ -6,19 +6,40 @@ Electron-backed development surface for Holtburger's replacement 3D client. Auth
 content and simulation behavior runs in the `holtburger-3d-host` Rust sidecar; the renderer reaches
 it through the context-isolated Electron preload boundary.
 
-On Windows, Electron defaults to `--use-angle=gl` and `--disable-gpu-vsync` to work
-around low scene frame rates and sluggish UI scrolling. An explicit native
-`--use-angle=...` switch overrides the backend default. Windows startup also supplies
+The launcher's gear button opens **App settings** for process-wide graphics preferences.
+Windows defaults to OpenGL with display synchronization off, preserving the scene FPS and
+UI scrolling workarounds. macOS and Linux default to Automatic with synchronization on.
+**Use defaults** restores the current platform's defaults. Automatic backend selection delegates
+to Chromium.
+Windows offers Direct3D 11 and OpenGL overrides, macOS offers Metal, and Linux offers OpenGL.
+The modal shows the renderer reported by Chromium when available, hardware acceleration status,
+and explicit launch overrides. **Save and restart** saves preferences, flushes native state,
+and restarts the application. Unsaved launcher
+entries are discarded on restart. Preferences live in `app-settings.json` in Electron's
+user-data directory, independently of server profiles and game settings. An unreadable
+file is reported in the modal and preserved as a sibling backup on explicit save.
+During `npm run dev:client`, the development launcher restarts Electron while keeping Vite
+running on the same port. Quit still stops both processes. Packaged apps use Electron relaunch.
+
+**Current graphics → Copy hardware info** copies a formatted JSON issue-report attachment with build,
+runtime, OS, CPU, memory, display, saved/startup graphics settings, selected native GPU details,
+and an on-demand launcher WebGL2 probe. The probe releases its context after collection.
+The report excludes raw launch arguments, local paths, credentials, hostnames, and display IDs.
+Missing native GPU information is recorded without preventing the rest of the report from copying.
+
+Explicit native `--use-angle=...`, `--disable-gpu-vsync`, and `--uncapped` launch arguments
+take precedence over saved preferences and remain in effect after restarting from the modal.
+Windows startup also supplies
 `--force-high-performance-gpu` to request the faster adapter on hybrid laptops, and the
 world and 3D preview contexts request `powerPreference: "high-performance"`. These hints
 may be ignored; Windows Graphics settings may still be needed to select the dedicated GPU.
 The app-owned `--enable-vsync`
-flag restores GPU vsync on any platform, overriding the Windows default, an explicit
+flag restores GPU vsync on any platform, overriding saved preferences, an explicit
 `--disable-gpu-vsync`, and `--uncapped` regardless of argument order. It also removes
 `--disable-frame-rate-limit`, because Chromium's frame-rate bypass implicitly disables
 GPU vsync. Chromium has no matching native enable switch; `--disable-gpu-vsync=false`
 does not restore vsync.
-These workarounds can cause transient startup presentation artifacts on some systems.
+The Windows OpenGL/vsync workarounds can cause transient startup presentation artifacts on some systems.
 
 Windows packaging also exports `NvOptimusEnablement = 1` and
 `AmdPowerXpressRequestHighPerformance = 1` from the unsigned Electron executable.

@@ -15,6 +15,7 @@ import {
 } from "./entry-paths.mjs";
 import { resolveVitePort } from "./dev-port.mjs";
 import { parseClientLaunchArguments } from "../dist-electron/electron/client-launch.js";
+import { DEV_RESTART_EXIT_CODE } from "../dist-electron/src/app/desktop-restart-contract.js";
 
 const [entryName, ...allArgs] = process.argv.slice(2);
 let rawArgs;
@@ -182,30 +183,51 @@ if (!existsSync(electronEntry)) {
 		`Electron entry point is missing at ${electronEntry}; run npm install first.`,
 	);
 }
-const electron = spawn(
-	process.execPath,
-	[
-		electronEntry,
-		...electronSwitches,
-		".",
-		entryName ?? "explorer",
-		...electronAppArgs,
-		...(release ? ["--release"] : []),
-	],
-	{
-		cwd: appRoot,
-		env: {
-			...process.env,
-			HOLTBURGER_ELECTRON_DEV_ORIGIN: `http://127.0.0.1:${vitePort}`,
-			HOLTBURGER_HOST_BIN: hostBinary,
+function startElectron() {
+	const child = spawn(
+		process.execPath,
+		[
+			electronEntry,
+			...electronSwitches,
+			".",
+			entryName ?? "explorer",
+			...electronAppArgs,
+			...(release ? ["--release"] : []),
+		],
+		{
+			cwd: appRoot,
+			env: {
+				...process.env,
+				HOLTBURGER_ELECTRON_DEV_ORIGIN: `http://127.0.0.1:${vitePort}`,
+				HOLTBURGER_HOST_BIN: hostBinary,
+				HOLTBURGER_ELECTRON_SUPERVISED: "1",
+			},
+			stdio: "inherit",
+			shell: false,
 		},
-		stdio: "inherit",
-		shell: false,
-	},
-);
+	);
+	child.on("exit", (code, signal) => {
+		if (
+			lifecycle === "running" &&
+			code === DEV_RESTART_EXIT_CODE &&
+			signal === null
+		) {
+			electron = startElectron();
+			return;
+		}
+		void finish(code, signal);
+	});
+	child.on("error", (error) => {
+		console.error(`Electron failed to start: ${error.message}`);
+		void finish(1, null);
+	});
+	return child;
+}
 
 const VITE_SHUTDOWN_GRACE_MS = 2_000;
-let cleanupStarted = false;
+/** Stop requests seal restarts before waiting for either child process to exit. */
+let lifecycle = "running";
+let electron = startElectron();
 
 function waitForExit(child) {
 	if (child.exitCode !== null || child.signalCode !== null) {
@@ -230,20 +252,16 @@ async function stopVite() {
 }
 
 async function finish(code, signal) {
-	if (cleanupStarted) return;
-	cleanupStarted = true;
+	if (lifecycle === "cleaning") return;
+	lifecycle = "cleaning";
 	await stopVite();
 	if (signal !== null) process.kill(process.pid, signal);
 	else process.exit(code ?? 1);
 }
 
-electron.on("exit", (code, signal) => void finish(code, signal));
-electron.on("error", (error) => {
-	console.error(`Electron failed to start: ${error.message}`);
-	void finish(1, null);
-});
 vite.on("exit", (code, signal) => {
-	if (cleanupStarted) return;
+	if (lifecycle !== "running") return;
+	lifecycle = "stopping";
 	console.error(
 		`Vite exited while Electron was running (code=${code ?? "none"}, signal=${signal ?? "none"}).`,
 	);
@@ -251,9 +269,13 @@ vite.on("exit", (code, signal) => {
 });
 
 process.on("SIGINT", () => {
+	if (lifecycle !== "running") return;
+	lifecycle = "stopping";
 	electron.kill("SIGINT");
 });
 
 process.on("SIGTERM", () => {
+	if (lifecycle !== "running") return;
+	lifecycle = "stopping";
 	electron.kill("SIGTERM");
 });

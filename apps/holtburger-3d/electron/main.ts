@@ -14,6 +14,15 @@ import {
 	pointerPositionSchema,
 } from "./pointer-lock-hover.js";
 import { LauncherStore } from "./launcher-store.js";
+import { copyHardwareInfo } from "./hardware-info.js";
+import { DEV_RESTART_EXIT_CODE } from "../src/app/desktop-restart-contract.js";
+import {
+	AppSettingsStore,
+	appSettingsRequireRestart,
+	applyAppGraphicsSettings,
+	graphicsBackendOptions,
+} from "./app-settings.js";
+import type { AppSettingsSnapshot } from "../src/app/app-settings-contract.js";
 import { ServerDirectoryCatalog } from "./server-directory.js";
 import { formatError } from "../src/lib/format-error.js";
 import { z } from "zod";
@@ -109,6 +118,7 @@ let documentRetirement: ClientRetirement | undefined;
 let exitCode = 0;
 let fatalReported = false;
 const documents = new DocumentAdmission();
+let restartRequested = false;
 let desktop: ClientApplication<NativeAttempt> | undefined;
 let stopGeometry: (() => Promise<void>) | null = null;
 let pickerFailure: string | null = null;
@@ -257,21 +267,9 @@ function entryArguments(): {
 			app.commandLine.appendSwitch(name, value);
 	}
 	if (process.platform === "win32") {
-		// Windows compatibility workarounds for low scene FPS and sluggish UI scrolling.
-		// Preserve an explicitly selected ANGLE backend for driver-specific diagnostics.
-		if (!app.commandLine.hasSwitch("use-angle"))
-			app.commandLine.appendSwitch("use-angle", "gl");
-		if (!app.commandLine.hasSwitch("disable-gpu-vsync"))
-			app.commandLine.appendSwitch("disable-gpu-vsync");
 		// Request the faster adapter on hybrid laptops; OS and driver selection may prevail.
 		if (!app.commandLine.hasSwitch("force-high-performance-gpu"))
 			app.commandLine.appendSwitch("force-high-performance-gpu");
-	}
-	// Chromium's frame-rate-limit bypass also disables GPU vsync in the GPU subprocess.
-	// Remove both switches so the explicit app override wins over native flags and --uncapped.
-	if (app.commandLine.hasSwitch("enable-vsync")) {
-		app.commandLine.removeSwitch("disable-gpu-vsync");
-		app.commandLine.removeSwitch("disable-frame-rate-limit");
 	}
 	return {
 		path: buildEntryPath(entry.path, launch.args),
@@ -793,13 +791,24 @@ async function loadEntry(
 
 void (async () => {
 	let entry: ReturnType<typeof entryArguments>;
+	let appSettings: AppSettingsStore;
+	let graphicsOverrides: readonly string[];
 	try {
 		entry = entryArguments();
+		appSettings = new AppSettingsStore(
+			join(app.getPath("userData"), "app-settings.json"),
+			process.platform,
+		);
+		graphicsOverrides = applyAppGraphicsSettings(
+			appSettings.settings,
+			app.commandLine,
+		);
 	} catch (error) {
 		await app.whenReady();
 		reportFatalError("Holtburger 3D launch arguments are invalid", error);
 		return;
 	}
+	const startupSettings = appSettings.settings;
 	await app.whenReady();
 	app.dock?.setIcon(applicationIconPath);
 	const menuTemplate = applicationMenuTemplate(process.platform);
@@ -1010,11 +1019,32 @@ void (async () => {
 			await showPicker(messages.size === 0 ? null : [...messages].join("\n"));
 		},
 		flushLauncher: async () => {
-			if (owner.attempt === null) await stopWindowGeometry();
-			await launcher.flush();
+			// Both independent stores must settle even when another persistence owner fails.
+			const results = await Promise.allSettled([
+				(async () => {
+					if (owner.attempt === null) await stopWindowGeometry();
+					await launcher.flush();
+				})(),
+				appSettings.flush(),
+			]);
+			const failures = results.flatMap((result) =>
+				result.status === "rejected" ? [formatError(result.reason)] : [],
+			);
+			if (failures.length > 0) throw new Error(failures.join("\n"));
 		},
 		exit: (failures) => {
 			for (const failure of failures) console.error(failure);
+			if (restartRequested && failures.length === 0) {
+				if (
+					!app.isPackaged &&
+					process.env.HOLTBURGER_ELECTRON_SUPERVISED === "1"
+				) {
+					// The dev launcher owns Vite and must also own replacement Electron processes.
+					app.exit(DEV_RESTART_EXIT_CODE);
+					return;
+				}
+				app.relaunch();
+			}
 			app.exit(failures.length ? 1 : exitCode);
 		},
 		report: (diagnostic) =>
@@ -1031,6 +1061,56 @@ void (async () => {
 	handle("launcher:snapshot", "picker", () =>
 		launcher.snapshot(pickerFailure, owner.canPlay),
 	);
+	handle(
+		"launcher:app-settings",
+		"picker",
+		async (): Promise<AppSettingsSnapshot> => {
+			let renderer: string | null = null;
+			let gpuDiagnostic: string | null = null;
+			try {
+				// Electron returns Chromium's evolving GPUInfo shape; consume only its renderer string.
+				const info = z
+					.object({
+						auxAttributes: z.object({ glRenderer: z.string().optional() }),
+					})
+					.parse(await app.getGPUInfo("complete"));
+				renderer = info.auxAttributes.glRenderer ?? null;
+			} catch (error) {
+				gpuDiagnostic = `Graphics information could not be read: ${formatError(error)}`;
+			}
+			const settings = appSettings.settings;
+			return {
+				settings,
+				defaults: appSettings.defaults,
+				backends: graphicsBackendOptions(process.platform),
+				restartRequired: appSettingsRequireRestart(startupSettings, settings),
+				overrides: graphicsOverrides,
+				renderer,
+				hardwareAcceleration: app.isHardwareAccelerationEnabled(),
+				diagnostic:
+					[appSettings.diagnostic, gpuDiagnostic]
+						.filter((value) => value !== null)
+						.join("\n") || null,
+			};
+		},
+	);
+	handle("launcher:save-app-settings", "picker", (_event, input: unknown) =>
+		appSettings.save(input),
+	);
+	handle("launcher:copy-hardware-info", "picker", (_event, input: unknown) =>
+		copyHardwareInfo(
+			window,
+			input,
+			startupSettings,
+			appSettings.settings,
+			graphicsOverrides,
+		),
+	);
+	handle("launcher:restart", "picker", async () => {
+		restartRequested = true;
+		quitting = true;
+		await owner.quit();
+	});
 	const directory = new ServerDirectoryCatalog(fetch);
 	handle("launcher:initial-content-path", "picker", () => {
 		const path = initialContentPath;

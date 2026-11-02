@@ -43,6 +43,12 @@ if (process.argv.includes("--holtburger-wayland-pointer-restore")) {
 contextBridge.exposeInMainWorld("holtburgerLauncher", {
 	enabled: !process.argv.includes("--holtburger-launcher-disabled"),
 	snapshot: () => invoke("launcher:snapshot"),
+	copyHardwareInfo: (value: unknown) =>
+		invoke("launcher:copy-hardware-info", value),
+	appSettings: () => invoke("launcher:app-settings"),
+	saveAppSettings: (value: unknown) =>
+		invoke("launcher:save-app-settings", value),
+	restart: () => invoke("launcher:restart"),
 	takeInitialContentPath: () => invoke("launcher:initial-content-path"),
 	chooseContentPath: (previous: string | null) =>
 		invoke("launcher:choose-content-path", previous),

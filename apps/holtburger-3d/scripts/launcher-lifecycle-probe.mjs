@@ -28,6 +28,8 @@ const { values } = parseArgs({
 		"tree-stats": { type: "boolean" },
 		"connection-failure-only": { type: "boolean" },
 		"profile-content-only": { type: "boolean" },
+		"app-settings-only": { type: "boolean" },
+		"dev-restart-only": { type: "boolean" },
 	},
 });
 const directory = await mkdtemp(join(tmpdir(), "h3d-launcher-probe-"));
@@ -36,6 +38,16 @@ const profileName = values.package ? "holtburger-3d" : "holtburger-3d-dev";
 const userData = join(config, profileName);
 await mkdir(userData, { recursive: true });
 const preference = join(userData, "content-selection.json");
+const appSettingsFile = join(userData, "app-settings.json");
+if (values["app-settings-only"] || values["dev-restart-only"]) {
+	await writeFile(
+		appSettingsFile,
+		JSON.stringify({
+			version: 1,
+			settings: { graphicsBackend: "automatic", vsync: false },
+		}),
+	);
+}
 const initialPreference = {
 	version: 1,
 	selection: {
@@ -106,21 +118,22 @@ if (!values.assets) {
 }
 const port = await findAvailablePort();
 const origin = `http://127.0.0.1:${port}`;
-const preview = values.package
-	? null
-	: spawn(
-			process.execPath,
-			[
-				join(appRoot, "node_modules/vite/bin/vite.js"),
-				"preview",
-				"--host",
-				"127.0.0.1",
-				"--port",
-				String(port),
-				"--strictPort",
-			],
-			{ cwd: appRoot, env: process.env, stdio: ["ignore", "pipe", "pipe"] },
-		);
+const preview =
+	values.package || values["dev-restart-only"]
+		? null
+		: spawn(
+				process.execPath,
+				[
+					join(appRoot, "node_modules/vite/bin/vite.js"),
+					"preview",
+					"--host",
+					"127.0.0.1",
+					"--port",
+					String(port),
+					"--strictPort",
+				],
+				{ cwd: appRoot, env: process.env, stdio: ["ignore", "pipe", "pipe"] },
+			);
 let output = "";
 let child;
 let browser;
@@ -261,6 +274,10 @@ async function snapshot(label) {
 	return { native, renderer };
 }
 async function runProbe() {
+	if (values["dev-restart-only"]) {
+		await runDevRestartProbe();
+		return;
+	}
 	if (preview) {
 		for (const stream of [preview.stdout, preview.stderr])
 			stream.on("data", (chunk) => {
@@ -338,6 +355,225 @@ async function runProbe() {
 	browser = await createCdpClient(browserEndpoint);
 	inspector = await createCdpClient(inspectorEndpoint);
 	await attach("launcher");
+	if (values["app-settings-only"]) {
+		const startup = await evaluate(
+			inspector,
+			`Promise.resolve(process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron')).then(({ app }) => ({ angle: app.commandLine.getSwitchValue('use-angle'), vsyncDisabled: app.commandLine.hasSwitch('disable-gpu-vsync') }))`,
+		);
+		requireCondition(
+			startup.angle === "swiftshader" && startup.vsyncDisabled,
+			"Startup preferences must apply before ready and preserve explicit backend overrides",
+		);
+		await evaluate(
+			inspector,
+			`Promise.resolve(process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron')).then(({ app }) => {
+globalThis.__originalGpuInfo = app.getGPUInfo;
+app.getGPUInfo = () => new Promise((resolve) => { globalThis.__releaseGpuInfo = () => resolve({gpuDevice: [], auxAttributes: {}}); });
+})`,
+		);
+		try {
+			await evaluate(
+				page,
+				`document.querySelector('button[aria-label="App settings"]').click()`,
+			);
+			await waitFor(
+				() => evaluate(inspector, `Boolean(globalThis.__releaseGpuInfo)`),
+				"pending GPU query",
+			);
+			const cancelled = await evaluate(
+				page,
+				`(() => {
+const button = [...document.querySelectorAll('.app-settings-dialog button')].find((node) => node.textContent.trim() === 'Cancel');
+if (!button || button.disabled) return false;
+button.click(); return true;
+})()`,
+			);
+			requireCondition(
+				cancelled,
+				"Settings loading must remain cancellable during a pending GPU query",
+			);
+			await waitFor(
+				() => evaluate(page, `!document.querySelector('.app-settings-dialog')`),
+				"cancelled loading modal",
+			);
+			report.scenarios.push(
+				"Settings loading remains cancellable while native GPU information is pending",
+			);
+		} finally {
+			await evaluate(
+				inspector,
+				`Promise.resolve(process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron')).then(({ app }) => {
+app.getGPUInfo = globalThis.__originalGpuInfo;
+globalThis.__releaseGpuInfo?.();
+delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
+})`,
+			);
+		}
+		await evaluate(
+			page,
+			`document.querySelector('button[aria-label="App settings"]').click()`,
+		);
+		await waitFor(
+			() =>
+				evaluate(
+					page,
+					`Boolean(document.querySelector('.app-settings-dialog select'))`,
+				),
+			"loaded app settings modal",
+		);
+		const initial = await evaluate(
+			page,
+			`window.holtburgerLauncher.appSettings()`,
+		);
+		requireCondition(
+			initial.settings.vsync === false &&
+				initial.overrides.includes("--use-angle"),
+			"Modal must expose saved preferences and diagnostic overrides",
+		);
+		requireCondition(
+			initial.diagnostic === null,
+			`Could not read graphics information: ${JSON.stringify(initial)}`,
+		);
+		const displayedRenderer = await evaluate(
+			page,
+			`document.querySelector('.app-settings-dialog dd').textContent.trim()`,
+		);
+		requireCondition(
+			displayedRenderer === (initial.renderer ?? "Not reported by Chromium"),
+			"Modal must distinguish actual renderer information from an uninitialized GPU",
+		);
+		const clipboardBefore = await evaluate(
+			inspector,
+			`Promise.resolve(process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron')).then(({ clipboard }) => clipboard.readText())`,
+		);
+		try {
+			await evaluate(
+				page,
+				`document.querySelector('.app-settings-dialog details').open = true; [...document.querySelectorAll('.app-settings-dialog button')].find((button) => button.textContent.trim() === 'Copy hardware info').click()`,
+			);
+			await waitFor(async () => {
+				const state = await evaluate(
+					page,
+					`({copied: [...document.querySelectorAll('.app-settings-dialog button')].some((node) => node.textContent.trim() === 'Copied!'), error: document.querySelector('.app-settings-dialog [role=alert]')?.textContent})`,
+				);
+				if (state.error)
+					throw new Error(`Hardware info copy failed: ${state.error}`);
+				return state.copied;
+			}, "hardware report clipboard confirmation");
+			const copied = await evaluate(
+				inspector,
+				`Promise.resolve(process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron')).then(({ clipboard }) => clipboard.readText())`,
+			);
+			const hardwareReport = JSON.parse(copied);
+			requireCondition(
+				hardwareReport.application &&
+					hardwareReport.system &&
+					hardwareReport.display &&
+					hardwareReport.launcherWebgl2Probe,
+				"Clipboard is missing hardware report sections",
+			);
+			requireCondition(
+				copied.includes('"unmaskedRenderer"') ||
+					copied.includes("Unavailable: WebGL2 context creation failed"),
+				"Hardware report must contain WebGL evidence or its failure state",
+			);
+			requireCondition(
+				!copied.includes(directory) &&
+					!copied.includes("probe-secret") &&
+					!copied.includes("client-settings.json"),
+				"Hardware report leaked launch paths or credentials",
+			);
+			await waitFor(
+				() =>
+					evaluate(
+						page,
+						`[...document.querySelectorAll('.app-settings-dialog button')].some((button) => button.textContent.trim() === 'Copy hardware info')`,
+					),
+				"copy button label recovery",
+			);
+			report.scenarios.push(
+				"Copy hardware info writes one JSON object, briefly shows Copied!, and restores its label",
+			);
+		} finally {
+			await evaluate(
+				inspector,
+				`Promise.resolve(process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron')).then(({ clipboard }) => clipboard.writeText(${JSON.stringify(clipboardBefore)}))`,
+			);
+		}
+		const savedSource = await readFile(appSettingsFile, "utf8");
+		await evaluate(
+			page,
+			`document.querySelector('.app-settings-dialog input[type=checkbox]').click(); [...document.querySelectorAll('.app-settings-dialog button')].find((button) => button.textContent.trim() === 'Cancel').click()`,
+		);
+		requireCondition(
+			(await readFile(appSettingsFile, "utf8")) === savedSource,
+			"Cancel must discard the draft",
+		);
+		await evaluate(
+			page,
+			`document.querySelector('button[aria-label="App settings"]').click()`,
+		);
+		await waitFor(
+			() =>
+				evaluate(
+					page,
+					`Boolean(document.querySelector('.app-settings-dialog select'))`,
+				),
+			"restart app settings modal",
+		);
+		await evaluate(
+			page,
+			`[...document.querySelectorAll('.app-settings-dialog button')].find((button) => button.textContent.trim() === 'Use defaults').click()`,
+		);
+		const draftUi = await evaluate(
+			page,
+			`({ backend: document.querySelector('.app-settings-dialog select').value, checked: document.querySelector('.app-settings-dialog input[type=checkbox]').checked })`,
+		);
+		requireCondition(
+			draftUi.backend === initial.defaults.graphicsBackend &&
+				draftUi.checked === initial.defaults.vsync,
+			`Use defaults did not restore native platform settings: ${JSON.stringify(draftUi)}`,
+		);
+		report.scenarios.push(
+			"native startup preferences, backend override precedence, actual renderer diagnostics, platform defaults reset, and draft cancellation",
+		);
+		// Intercept only spawning the replacement, so the production restart still drains and exits.
+		// This avoids leaving an untracked Electron process after the probe cleans its user data.
+		const relaunchMarker = join(directory, "relaunch-requested");
+		await evaluate(
+			inspector,
+			`Promise.resolve(process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron')).then(({ app }) => { app.relaunch = () => process.getBuiltinModule('fs').writeFileSync(${JSON.stringify(relaunchMarker)}, 'requested'); })`,
+		);
+		await evaluate(
+			page,
+			`setTimeout(() => [...document.querySelectorAll('.app-settings-dialog button')].find((button) => button.textContent.trim() === 'Save and restart').click(), 0)`,
+		);
+		// Node's inspector keeps a quitting process alive until its debugger detaches.
+		inspector.close();
+		inspector = null;
+		const restartDeadline = Date.now() + 10000;
+		while (status === null && Date.now() < restartDeadline)
+			await new Promise((done) => setTimeout(done, 100));
+		requireCondition(
+			status?.code === 0,
+			`Restart shutdown failed: ${JSON.stringify(status)}`,
+		);
+		requireCondition(
+			(await readFile(relaunchMarker, "utf8")) === "requested",
+			"Clean native shutdown did not request app relaunch",
+		);
+		const saved = JSON.parse(await readFile(appSettingsFile, "utf8"));
+		requireCondition(
+			saved.settings.graphicsBackend === initial.defaults.graphicsBackend &&
+				saved.settings.vsync === initial.defaults.vsync,
+			"Save and restart did not persist the draft",
+		);
+		report.scenarios.push(
+			"Save and restart flushes native state, requests relaunch, and exits cleanly (replacement spawn intercepted)",
+		);
+		console.log(JSON.stringify(report, null, 2));
+		return;
+	}
 	if (values["connection-failure-only"]) {
 		requireCondition(
 			Boolean(values.assets),
@@ -1787,6 +2023,145 @@ async function runProbe() {
 	await quitAndReport();
 }
 
+/** Exercise the user's npm launcher and actual replacement processes; keep Vite under its real owner. */
+async function runDevRestartProbe() {
+	const npmEntry = process.env.npm_execpath;
+	requireCondition(
+		npmEntry !== undefined,
+		"Run the development restart probe through npm run probe:launcher",
+	);
+	child = spawn(
+		process.execPath,
+		[
+			npmEntry,
+			"run",
+			"dev:client",
+			"--",
+			"--debug-port",
+			"0",
+			"--vite-port",
+			String(port),
+			"--no-content-search",
+		],
+		{
+			cwd: appRoot,
+			detached: process.platform !== "win32",
+			env: {
+				...process.env,
+				XDG_CONFIG_HOME: config,
+				APPDATA: config,
+				LOCALAPPDATA: join(directory, "local"),
+				HOLTBURGER_ELECTRON_DISABLE_GPU: "1",
+			},
+			stdio: ["ignore", "pipe", "pipe"],
+		},
+	);
+	child.on("error", (error) => {
+		output += error.stack;
+	});
+	child.on("close", (code, signal) => {
+		status = { code, signal };
+	});
+	for (const stream of [child.stdout, child.stderr])
+		stream.on("data", (chunk) => {
+			output += chunk;
+		});
+	const readEndpoint = () =>
+		[...output.matchAll(/DevTools listening on (ws:\/\/[^\s]+)/g)].at(-1)?.[1];
+	async function attachLauncher(previousEndpoint) {
+		browserEndpoint = await waitFor(() => {
+			const endpoint = readEndpoint();
+			return endpoint && endpoint !== previousEndpoint ? endpoint : false;
+		}, "development Electron debugging endpoint");
+		browser = await createCdpClient(browserEndpoint);
+		const target = await waitFor(async () => {
+			const response = await fetch(
+				`http://127.0.0.1:${new URL(browserEndpoint).port}/json/list`,
+			);
+			return (await response.json()).find(
+				(target) => target.type === "page" && target.url.includes("/launcher/"),
+			);
+		}, "development launcher target");
+		page = await createCdpClient(target.webSocketDebuggerUrl);
+		await waitFor(
+			() =>
+				evaluate(
+					page,
+					`Boolean(document.querySelector('button[aria-label="App settings"]')) && window.holtburgerLauncher.appSettings()`,
+				),
+			"mounted development launcher",
+		);
+	}
+	await attachLauncher(null);
+	const initialEndpoint = browserEndpoint;
+	await evaluate(
+		page,
+		`document.querySelector('button[aria-label="App settings"]').click()`,
+	);
+	await waitFor(
+		() =>
+			evaluate(
+				page,
+				`Boolean(document.querySelector('.app-settings-dialog select'))`,
+			),
+		"development settings modal",
+	);
+	await evaluate(
+		page,
+		`document.querySelector('.app-settings-dialog input[type=checkbox]').click()`,
+	);
+	await evaluate(
+		page,
+		`setTimeout(() => [...document.querySelectorAll('.app-settings-dialog button')].find((button) => button.textContent.trim() === 'Save and restart').click(), 0)`,
+	);
+	page.close();
+	browser.close();
+	await attachLauncher(initialEndpoint);
+	const settings = await evaluate(
+		page,
+		`window.holtburgerLauncher.appSettings()`,
+	);
+	requireCondition(
+		settings.settings.vsync === true && !settings.restartRequired,
+		"Replacement Electron did not load the saved preferences",
+	);
+	requireCondition(
+		(await fetch(`${origin}/launcher/index.html`)).ok,
+		"Development restart lost Vite",
+	);
+	requireCondition(
+		(output.match(/Using Vite port /g) ?? []).length === 1,
+		"Development restart rebuilt the frontend server",
+	);
+	report.scenarios.push(
+		"npm run dev:client restarts Electron, preserves the same Vite server, and applies saved settings",
+	);
+	await evaluate(
+		page,
+		`setTimeout(() => [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === 'Quit application').click(), 0)`,
+	);
+	page.close();
+	browser.close();
+	const deadline = Date.now() + 10000;
+	while (status === null && Date.now() < deadline)
+		await new Promise((done) => setTimeout(done, 100));
+	requireCondition(
+		status?.code === 0,
+		`Development Quit did not stop the supervisor cleanly: ${JSON.stringify(status)}`,
+	);
+	let viteStopped = false;
+	try {
+		await fetch(`${origin}/launcher/index.html`);
+	} catch {
+		viteStopped = true;
+	}
+	requireCondition(viteStopped, "Development Quit left Vite running");
+	report.scenarios.push(
+		"Quit stops the replacement Electron process and Vite and exits the npm launcher cleanly",
+	);
+	console.log(JSON.stringify(report, null, 2));
+}
+
 async function quitAndReport() {
 	const quitting = evaluate(page, "window.holtburgerClient.quit()").catch(
 		() => {},
@@ -1823,7 +2198,12 @@ try {
 	page?.close();
 	browser?.close();
 	inspector?.close();
-	if (child && status === null) child.kill();
+	if (child && status === null) {
+		// The dev probe owns npm, Electron, and Vite in one process group on POSIX.
+		if (values["dev-restart-only"] && process.platform !== "win32")
+			process.kill(-child.pid, "SIGTERM");
+		else child.kill();
+	}
 	preview?.kill();
 	if (child && status === null)
 		await Promise.race([

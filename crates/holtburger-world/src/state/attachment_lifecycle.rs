@@ -739,7 +739,7 @@ mod tests {
             assert!(world.scene.body(SpatialBodyId::Entity(guid)).is_none());
         }
         // Recreating a deleted endpoint cannot revive either level of its retired subtree.
-        world.tick();
+        world.tick(None);
         create(&mut world, replacement_root, None);
         for guid in [child, grandchild] {
             assert!(!world.is_entity_world_participant(guid));
@@ -826,7 +826,7 @@ mod tests {
         let mut replacement = Entity::new(parent, "replacement".into(), position());
         replacement.apply_remote_position_sample(position(), 1, 0, 0);
         world.add_entity(replacement);
-        world.tick();
+        world.tick(None);
         assert_eq!(
             world.entities.get(child).unwrap().placement_intent,
             EntityPlacementIntent::Independent
@@ -985,14 +985,14 @@ mod tests {
         create(&mut world, orphan, Some(absent_parent));
         create(&mut world, owned, Some(absent_parent));
         assert!(world.move_entity_into_container(owned, player, &mut Vec::new()));
-        world.tick();
+        world.tick(None);
         assert!(world.is_in_player_inventory(owned));
         assert!(!world.is_entity_world_participant(owned));
         world.server_time = Some(ServerTimeSync {
             server_time: super::super::liveness::ACE_DESTRUCTION_TIMEOUT_SECS + 1.0,
             local_time: Instant::now(),
         });
-        world.tick();
+        world.tick(None);
         assert!(world.entities.get(orphan).is_none());
         assert!(world.entities.get(owned).is_some());
         assert!(world.is_in_player_inventory(owned));

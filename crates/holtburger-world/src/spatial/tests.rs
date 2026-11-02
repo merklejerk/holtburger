@@ -519,7 +519,7 @@ fn spatial_scene_tracks_body_registration_update_and_removal() {
 
     let stored = scene.body(body_id).expect("body should be registered");
     assert_eq!(stored.pose, initial_pose);
-    assert_eq!(stored.authoritative_pose, Some(initial_pose));
+    assert_eq!(stored.authoritative_pose(), Some(initial_pose));
     assert_eq!(stored.sampling.mode, SpatialSampleMode::AuthoritativeOnly);
 
     let mut updated = body;
@@ -562,7 +562,7 @@ fn spatial_scene_allocates_ephemeral_bodies_monotonically() {
     assert_eq!(first, SpatialBodyId::Ephemeral(1));
     assert_eq!(second, SpatialBodyId::Ephemeral(2));
     assert_eq!(
-        scene.body(first).and_then(|body| body.authoritative_pose),
+        scene.body(first).and_then(|body| body.authoritative_pose()),
         None
     );
     assert_eq!(scene.body(second).map(|body| body.pose), Some(pose));
@@ -657,7 +657,7 @@ fn authoritative_body_reset_resets_sampling_on_forced_reposition() {
     let body = scene
         .body(body_id)
         .expect("body should exist after reconcile");
-    assert_eq!(body.authoritative_pose, Some(reset_pose));
+    assert_eq!(body.authoritative_pose(), Some(reset_pose));
     assert_eq!(body.pose, reset_pose);
     assert_eq!(body.retained.velocity, Vector3::zero());
     assert_eq!(body.retained.omega, Vector3::zero());
@@ -666,6 +666,53 @@ fn authoritative_body_reset_resets_sampling_on_forced_reposition() {
     assert_eq!(
         body.sampling.last_derived_at,
         start + Duration::from_secs(1)
+    );
+}
+
+#[test]
+fn remote_observation_preserves_runtime_continuation_and_simulation_clock() {
+    let mut scene = SpatialScene::new();
+    let id = SpatialBodyId::Entity(Guid(0x7000_0021));
+    let now = Instant::now();
+    let initial = WorldPosition {
+        landblock_id: Guid(0x0100_0001),
+        rotation: holtburger_common::Quaternion::identity(),
+        ..WorldPosition::default()
+    };
+    let vectors = AuthoritativeBodyVectors {
+        velocity: Vector3::new(1.0, 2.0, 3.0),
+        acceleration: Vector3::new(0.0, 0.0, -9.8),
+        omega: Vector3::new(0.0, 0.0, 1.0),
+    };
+    scene.apply_authoritative_body_effect(
+        id,
+        AuthoritativePoseEffect::Initialize { pose: initial },
+        vectors,
+        now,
+    );
+    let before = scene.body(id).unwrap().clone();
+    let observed = WorldPosition {
+        coords: Vector3::new(5.0, 6.0, 7.0),
+        ..initial
+    };
+    scene.apply_authoritative_body_effect(
+        id,
+        AuthoritativePoseEffect::Observe { pose: observed },
+        AuthoritativeBodyVectors::default(),
+        now + Duration::from_millis(10),
+    );
+    let after = scene.body(id).unwrap();
+    assert_eq!(after.authoritative_pose(), Some(observed));
+    assert_eq!(after.correction_pose(), None);
+    assert_eq!(after.pose, before.pose);
+    assert_eq!(after.retained, before.retained);
+    assert_eq!(after.nominal, before.nominal);
+    assert_eq!(after.accepted_motion, before.accepted_motion);
+    assert_eq!(after.contact, before.contact);
+    assert_eq!(after.reconciliation, before.reconciliation);
+    assert_eq!(
+        after.sampling.last_derived_at,
+        before.sampling.last_derived_at
     );
 }
 
@@ -724,7 +771,7 @@ fn authoritative_pose_effects_do_not_infer_initialization_or_replace_ordinary_ru
     ] {
         assert!(scene.apply_authoritative_body_effect(body_id, effect, vectors, now));
         let body = scene.body(body_id).expect("initialized body must survive");
-        assert_eq!(body.authoritative_pose, Some(target_pose));
+        assert_eq!(body.authoritative_pose(), Some(target_pose));
         assert_eq!(body.pose, runtime_pose);
     }
 
@@ -736,7 +783,7 @@ fn authoritative_pose_effects_do_not_infer_initialization_or_replace_ordinary_ru
     assert!(scene.apply_authoritative_body_vectors(body_id, updated_vectors, now));
     let body = scene.body(body_id).expect("vector update retains body");
     assert_eq!(body.pose, runtime_pose);
-    assert_eq!(body.authoritative_pose, Some(target_pose));
+    assert_eq!(body.authoritative_pose(), Some(target_pose));
     assert_eq!(body.retained.velocity, updated_vectors.velocity);
 }
 
@@ -780,7 +827,7 @@ fn authoritative_confirmation_preserves_locally_integrated_vectors() {
     ));
 
     let body = scene.body(body_id).expect("confirmed body must survive");
-    assert_eq!(body.authoritative_pose, Some(confirmed_pose));
+    assert_eq!(body.authoritative_pose(), Some(confirmed_pose));
     assert_eq!(body.pose, initial_pose);
     assert_eq!(body.retained.velocity, local_vectors.velocity);
     assert_eq!(body.retained.acceleration, local_vectors.acceleration);
@@ -895,7 +942,10 @@ fn spatial_scene_relocation_clears_runtime_motion_and_rebuilds_body() {
 
     let body = scene.body(body_id).expect("body should remain tracked");
     assert_eq!(body.pose, make_position(8.0, 9.0, 0.25));
-    assert_eq!(body.authoritative_pose, Some(make_position(8.0, 9.0, 0.25)));
+    assert_eq!(
+        body.authoritative_pose(),
+        Some(make_position(8.0, 9.0, 0.25))
+    );
     assert_eq!(body.retained.velocity, Vector3::zero());
     assert_eq!(body.retained.omega, Vector3::zero());
     assert_eq!(body.motion_state, None);

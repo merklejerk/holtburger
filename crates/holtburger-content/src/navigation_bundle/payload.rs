@@ -1,4 +1,4 @@
-//! Version-one prepared product schema. Field/variant changes require a format review.
+//! Prepared product schema. Field/variant changes require a format review.
 //!
 //! Geometry wire records describe resolved runtime geometry, not retail byte layouts. Ordered
 //! vectors/maps make generation deterministic; no model/render resources are decoded on read.
@@ -21,6 +21,8 @@ use crate::{
 /// One placed cell's navigation facts. Visual references and object placements are excluded.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NavigationCell {
+    /// Directed potentially visible local cells; the current cell is implicit.
+    pub visible_cell_selectors: Vec<u16>,
     /// Low-word cell identity within the block's normalized owner.
     pub selector: u16,
     /// Authored cell flags, with the stripped static-object bit cleared.
@@ -484,6 +486,19 @@ fn validate_cells(cells: &[NavigationCell]) -> Result<()> {
         return Err(NavigationArchiveError::Product(
             "cell selectors must be strictly increasing".into(),
         ));
+    }
+    for cell in cells {
+        for visible in &cell.visible_cell_selectors {
+            if cells
+                .binary_search_by_key(visible, |candidate| candidate.selector)
+                .is_err()
+            {
+                return Err(NavigationArchiveError::Product(format!(
+                    "cell {:04X} visibility references missing cell {visible:04X}",
+                    cell.selector
+                )));
+            }
+        }
     }
     Ok(())
 }

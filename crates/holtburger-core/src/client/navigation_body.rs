@@ -47,7 +47,7 @@ impl NavigationBodyFacts {
         }
         let body_id = SpatialBodyId::Entity(guid);
         let body = world.scene.body(body_id)?;
-        body.authoritative_pose?;
+        body.authoritative_pose()?;
         let is_contact_character =
             super::collision::is_contact_character(world.player.guid, entity);
         if !(is_contact_character

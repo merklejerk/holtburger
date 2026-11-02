@@ -378,7 +378,15 @@ impl ClientRuntime {
         }
 
         profile.checkpoint("movement_and_equipment");
-        let physics_events = self.world.tick();
+        let scene_snapshot = self
+            .collision_coordinator
+            .as_ref()
+            .map(|coordinator| coordinator.snapshot());
+        let physics_events = self.world.tick(
+            scene_snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.scene.as_ref()),
+        );
         for event in physics_events {
             self.handle_runtime_world_event(&event);
         }

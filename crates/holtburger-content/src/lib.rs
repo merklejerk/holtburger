@@ -76,9 +76,9 @@ pub use motion_sequence::{
 pub use navigation_scene::NavigationSceneSource;
 pub use navigation_source::{PreparedNavigationSource, SetupContentSource};
 pub use object_collision::{
-    BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale,
-    CollisionBall, CollisionBox, CollisionCylinder, CollisionPolygon, CollisionShape,
-    LandblockColliderAssembler, LandblockColliders, LandblockCollisionAsset,
+    BspSolid, CellCollisionPortal, CellCollisionPortalTarget, CellVisibility, CellVolume,
+    ColliderScale, CollisionBall, CollisionBox, CollisionCylinder, CollisionPolygon,
+    CollisionShape, LandblockColliderAssembler, LandblockColliders, LandblockCollisionAsset,
     LandblockRoomShellAssembler, OutdoorBuildingTransit, PlacedCollider, PlacedCollisionShape,
     StaticColliderPlacement, resolve_gfx_obj_collision_shape,
     resolve_setup_volume_collision_shapes,

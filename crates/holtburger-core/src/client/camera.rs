@@ -1287,6 +1287,10 @@ mod tests {
                 static_geometry: LandblockColliders::new(
                     Vec::new(),
                     vec![CellVolume {
+                        visibility: holtburger_content::CellVisibility {
+                            visible_cell_selectors: Vec::new(),
+                            seen_outside: false,
+                        },
                         cell_selector: 0x100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -1833,6 +1837,10 @@ mod tests {
                 static_geometry: LandblockColliders::new(
                     Vec::new(),
                     vec![CellVolume {
+                        visibility: holtburger_content::CellVisibility {
+                            visible_cell_selectors: Vec::new(),
+                            seen_outside: false,
+                        },
                         cell_selector: (cell.0 & 0xffff) as u16,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),

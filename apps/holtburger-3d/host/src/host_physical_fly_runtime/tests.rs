@@ -173,6 +173,10 @@ fn ramped_fly_control() -> PhysicalFlyInputAccumulator {
 
 fn thin_viewer_volumes(overlap_first_cell: bool) -> Vec<CellVolume> {
     let volume = |cell_selector, planes, portals| CellVolume {
+        visibility: holtburger_content::CellVisibility {
+            visible_cell_selectors: Vec::new(),
+            seen_outside: false,
+        },
         cell_selector,
         placement: LandblockPlacement {
             origin: Vector3::zero(),

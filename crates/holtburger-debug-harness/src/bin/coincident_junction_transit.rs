@@ -186,6 +186,10 @@ fn build_scene(direct: bool) -> CollisionScene {
         )
     };
     let cell_a = CellVolume {
+        visibility: holtburger_content::CellVisibility {
+            visible_cell_selectors: Vec::new(),
+            seen_outside: false,
+        },
         cell_selector: 0x0100,
         placement,
         planes: vec![
@@ -211,6 +215,10 @@ fn build_scene(direct: bool) -> CollisionScene {
         }],
     };
     let cell_b = CellVolume {
+        visibility: holtburger_content::CellVisibility {
+            visible_cell_selectors: Vec::new(),
+            seen_outside: false,
+        },
         cell_selector: 0x0101,
         placement,
         planes: vec![

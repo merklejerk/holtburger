@@ -29,6 +29,7 @@ fn cells() -> Vec<NavigationCell> {
     [FIRST, SECOND]
         .into_iter()
         .map(|selector| NavigationCell {
+            visible_cell_selectors: Vec::new(),
             selector,
             flags: 0,
             authored_cell_id: u32::from(selector),

@@ -681,7 +681,7 @@ mod tests {
                 .is_err()
         );
         assert!(client.close_container(ROOT).await.is_err());
-        client.world.tick();
+        client.world.tick(None);
         assert!(client.world.entities.get(PACK).is_none());
         assert!(client.closing_containers.is_empty());
         assert_eq!(client.world.world_container().root(), None);
@@ -726,7 +726,7 @@ mod tests {
                 .unwrap();
             assert_eq!(client.session.game_action_sequence, 1);
             client.close_container(ROOT).await.unwrap();
-            client.world.tick();
+            client.world.tick(None);
             // ACE removes a consumed source, or updates both quantities. Neither branch
             // sends containment of the source into the player's inventory.
             let remaining = source_quantity - source_quantity.min(10);
@@ -798,7 +798,7 @@ mod tests {
             assert_eq!(client.session.game_action_sequence, 1);
             assert_eq!(client.world.storage_location(OWNED_ITEM), original);
             client.close_container(ROOT).await.unwrap();
-            client.world.tick();
+            client.world.tick(None);
             assert!(client.world.is_owned_by_player(OWNED_ITEM));
             if accepted {
                 receive(
@@ -821,7 +821,7 @@ mod tests {
                         .unwrap()
                         .is_none()
                 );
-                client.world.tick();
+                client.world.tick(None);
                 assert!(client.world.entities.get(OWNED_ITEM).is_none());
             } else {
                 let mut published = client.subscribe_client_view_events();
@@ -903,7 +903,7 @@ mod tests {
                 "withdrawal must be dispatched"
             );
             client.close_container(ROOT).await.unwrap();
-            let events = client.world.tick();
+            let events = client.world.tick(None);
             client.handle_world_events(events).await.unwrap();
             assert!(!client.world.has_world_container_access(PACK));
             assert!(client.world.client_entity_facts(PACK).unwrap().is_none());

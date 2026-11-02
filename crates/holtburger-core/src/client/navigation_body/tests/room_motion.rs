@@ -169,6 +169,7 @@ fn prepared_source() -> (TempDir, Arc<PreparedNavigationSource>) {
         )
         .unwrap();
     let cells = [FIRST, SECOND].map(|selector| NavigationCell {
+        visible_cell_selectors: Vec::new(),
         selector,
         flags: 0,
         authored_cell_id: u32::from(selector),

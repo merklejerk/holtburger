@@ -1226,7 +1226,7 @@ mod tests {
         client.world.player.guid = guid;
         client.world.add_entity(projectable_entity(guid, start));
 
-        client.world.tick();
+        client.world.tick(None);
         let before = client.capture_dynamic_entity_tick_baseline();
         assert!(
             client
@@ -1373,7 +1373,7 @@ mod tests {
         let mut client = builder::build_test_client(ClientState::InWorld);
         client.world.player.guid = guid;
         client.world.add_entity(projectable_entity(guid, pose));
-        client.world.tick();
+        client.world.tick(None);
         let before = client.capture_dynamic_entity_tick_baseline();
         assert!(
             client
@@ -1422,7 +1422,7 @@ mod tests {
                     ..WorldPosition::default()
                 },
             ));
-            client.world.tick();
+            client.world.tick(None);
             let before = client.capture_dynamic_entity_tick_baseline();
             assert!(
                 client
@@ -1435,7 +1435,7 @@ mod tests {
             entity.set_int_prop(PropertyInt::Level, new_level);
             entity.physics.apply_authored_ethereal(true);
             if consume_journal {
-                client.world.tick();
+                client.world.tick(None);
             }
             assert!(
                 !client
@@ -1474,7 +1474,7 @@ mod tests {
                 ..WorldPosition::default()
             },
         ));
-        client.world.tick();
+        client.world.tick(None);
         let before = client.capture_dynamic_entity_tick_baseline();
         let setup_did = before.views[0].presentation.content.setup_did;
         let motion_table_did = 0x0900_0123;
@@ -1517,7 +1517,7 @@ mod tests {
                 },
             ));
         }
-        client.world.tick();
+        client.world.tick(None);
         let before = client.capture_dynamic_entity_tick_baseline();
 
         assert!(

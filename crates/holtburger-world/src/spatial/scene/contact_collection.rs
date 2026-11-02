@@ -38,7 +38,7 @@ impl CollectionActuator {
         } else {
             self.reconciliation
         };
-        if let (Some(state), Some(destination)) = (reconciliation.as_mut(), body.authoritative_pose)
+        if let (Some(state), Some(destination)) = (reconciliation.as_mut(), body.correction_pose())
         {
             let eligible = matches!(body.id, SpatialBodyId::Entity(_))
                 && body.physical.as_ref().is_some_and(|physical| {
@@ -48,7 +48,11 @@ impl CollectionActuator {
                             .as_ref()
                             .is_some_and(|dynamic| dynamic.collision.contact_response.yields())
                 });
+            // A grounded response describes the body's physics, not its current support.
+            // Unsupported travel can leave the last admitted grounded pose behind normally;
+            // observing it as a stall can place a correctly falling remote back on its ledge.
             let permitted = eligible
+                && body.contact.contact() == Some(true)
                 && match self.input.recovery_authority {
                     RecoveryAuthority::Disabled => false,
                     RecoveryAuthority::LatestSample => true,

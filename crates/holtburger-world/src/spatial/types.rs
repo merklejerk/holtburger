@@ -493,10 +493,28 @@ pub struct RuntimeSpatialBodyView {
     pub sample_mode: SpatialSampleMode,
 }
 
+/// The latest admitted pose carries its placement authority; observations cannot authorize recovery.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum BodyPoseAuthority {
+    /// A server observation retained without granting physical correction authority.
+    Observed(WorldPosition),
+    /// A sample whose admission policy permits physical correction and recovery.
+    Correctable(WorldPosition),
+}
+
+impl BodyPoseAuthority {
+    fn pose(self) -> WorldPosition {
+        match self {
+            Self::Observed(pose) | Self::Correctable(pose) => pose,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SpatialBody {
     pub id: SpatialBodyId,
-    pub authoritative_pose: Option<WorldPosition>,
+    /// Latest producer-authoritative pose and correction permission, absent for ephemeral bodies.
+    pub(crate) pose_authority: Option<BodyPoseAuthority>,
     pub pose: WorldPosition,
     /// Collision-free continuation seeded by fresh authority, never by accepted body motion.
     /// Survives correction completion and physical-definition changes; pose-only bodies retain
@@ -519,7 +537,7 @@ impl SpatialBody {
     pub fn new(id: SpatialBodyId, pose: WorldPosition, now: Instant) -> Self {
         Self {
             id,
-            authoritative_pose: Some(pose),
+            pose_authority: Some(BodyPoseAuthority::Correctable(pose)),
             pose,
             nominal: AuthoritativeBodyVectors::default(),
             retained: RetainedBodyKinematics::default(),
@@ -535,7 +553,7 @@ impl SpatialBody {
     pub fn new_ephemeral(id: SpatialBodyId, pose: WorldPosition, now: Instant) -> Self {
         Self {
             id,
-            authoritative_pose: None,
+            pose_authority: None,
             pose,
             nominal: AuthoritativeBodyVectors::default(),
             retained: RetainedBodyKinematics::default(),
@@ -577,6 +595,19 @@ impl SpatialBody {
         }
     }
 
+    /// Latest admitted producer pose, whether or not it authorizes physical correction.
+    pub fn authoritative_pose(&self) -> Option<WorldPosition> {
+        self.pose_authority.map(BodyPoseAuthority::pose)
+    }
+
+    /// Only correction-eligible samples may supply placement destinations or correction heading.
+    pub(crate) fn correction_pose(&self) -> Option<WorldPosition> {
+        match self.pose_authority {
+            Some(BodyPoseAuthority::Correctable(pose)) => Some(pose),
+            Some(BodyPoseAuthority::Observed(_)) | None => None,
+        }
+    }
+
     /// Whether this body has allocated authoritative-pose reconciliation state.
     pub fn has_pose_reconciliation_state(&self) -> bool {
         self.reconciliation.is_some()
@@ -610,7 +641,7 @@ impl SpatialBody {
 
     pub fn spatial_sample(&self) -> Option<SpatialEntitySample> {
         let guid = self.id.authoritative_guid()?;
-        let authoritative_pose = self.authoritative_pose.unwrap_or(self.pose);
+        let authoritative_pose = self.authoritative_pose().unwrap_or(self.pose);
         Some(SpatialEntitySample {
             guid,
             authoritative_pose,
@@ -626,7 +657,7 @@ impl SpatialBody {
     pub fn runtime_view(&self) -> RuntimeSpatialBodyView {
         RuntimeSpatialBodyView {
             body_id: self.id,
-            authoritative_pose: self.authoritative_pose,
+            authoritative_pose: self.authoritative_pose(),
             runtime_pose: self.pose,
             velocity: self.accepted_motion.velocity,
             acceleration: self.retained.acceleration,

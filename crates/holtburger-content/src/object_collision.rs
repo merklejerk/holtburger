@@ -592,6 +592,15 @@ fn uniform_placement<'a>(
     }))
 }
 
+/// Authored visibility of one interior cell, independent of camera or collision shadow lists.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CellVisibility {
+    /// Directed potentially visible cells within the same owner; the current cell is implicit.
+    pub visible_cell_selectors: Vec<u16>,
+    /// Whether this cell also participates in outdoor-neighborhood visibility.
+    pub seen_outside: bool,
+}
+
 /// One interior cell's convex containment volume, in its own authored space.
 ///
 /// Retail decides which cell a point occupies with retail point in cell, which walks the
@@ -600,6 +609,8 @@ fn uniform_placement<'a>(
 /// whole test reduces to the list of planes along that spine and no tree needs to be retained.
 #[derive(Debug, Clone)]
 pub struct CellVolume {
+    /// Authored retention visibility, resident atomically with this cell.
+    pub visibility: CellVisibility,
     /// Landblock-local cell selector: the low word of the position's landblock id.
     pub cell_selector: u16,
     /// Placement of the cell's authored space within the landblock.
@@ -1054,6 +1065,14 @@ impl LandblockRoomShellAssembler {
                 .collect::<Result<Vec<_>>>()?;
 
             cell_volumes.push(CellVolume {
+                visibility: CellVisibility {
+                    visible_cell_selectors: cell
+                        .visible_cell_ids
+                        .iter()
+                        .map(|id| *id as u16)
+                        .collect(),
+                    seen_outside: cell.seen_outside,
+                },
                 cell_selector: (cell.env_cell_id & 0xffff) as u16,
                 placement: cell.placement,
                 planes: cell_spine_planes(&structure.cell_bsp),
@@ -1374,6 +1393,10 @@ mod tests {
 
     fn synthetic_cell_volume() -> CellVolume {
         CellVolume {
+            visibility: CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
             cell_selector: 0x0100,
             placement: LandblockPlacement {
                 origin: Vector3::new(0.0, 0.0, 0.0),

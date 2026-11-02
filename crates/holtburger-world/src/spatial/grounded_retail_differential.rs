@@ -254,6 +254,10 @@ fn portal_visible_terrain_lip_is_a_walkable_lift_not_a_placement_veto() {
         normal: Vector3::new(0.0, 0.0, 1.0),
     };
     let volume = CellVolume {
+        visibility: holtburger_content::CellVisibility {
+            visible_cell_selectors: Vec::new(),
+            seen_outside: false,
+        },
         cell_selector: CELL as u16,
         placement: LandblockPlacement {
             origin: Vector3::zero(),
@@ -325,6 +329,10 @@ fn lowered_step_down_rebuild_reaches_horizontal_portal_support() {
         d: PORTAL_HEIGHT,
     };
     let volume = CellVolume {
+        visibility: holtburger_content::CellVisibility {
+            visible_cell_selectors: Vec::new(),
+            seen_outside: false,
+        },
         cell_selector: CELL as u16,
         placement: LandblockPlacement {
             origin: Vector3::zero(),

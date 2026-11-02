@@ -1,5 +1,7 @@
 mod contact_collection;
 
+use super::types::BodyPoseAuthority;
+
 #[cfg(test)]
 use super::PhysicalCollisionFilter;
 use super::collision::CollisionQueryError;
@@ -313,7 +315,7 @@ fn relocated_dynamic_body(
             pose.is_indoors().then_some(pose.landblock_id),
         ));
     }
-    body.authoritative_pose = Some(pose);
+    body.pose_authority = Some(BodyPoseAuthority::Correctable(pose));
     body.pose = pose;
     // A discontinuous placement retires the old destination as well as its motion history.
     body.reconciliation = None;
@@ -1173,7 +1175,7 @@ impl SpatialScene {
             // Fixed-position authority can select heading but cannot author mobile travel.
             if composition.source == PoseTranslationSource::Interpolation
                 && !composition.keep_heading
-                && let Some(authoritative) = body.authoritative_pose
+                && let Some(authoritative) = body.correction_pose()
             {
                 *rotation = authoritative.rotation;
             }
@@ -1402,9 +1404,19 @@ impl SpatialScene {
             }
         };
 
-        body.authoritative_pose = Some(pose);
+        body.pose_authority = Some(match effect {
+            AuthoritativePoseEffect::Observe { .. } => BodyPoseAuthority::Observed(pose),
+            AuthoritativePoseEffect::Initialize { .. }
+            | AuthoritativePoseEffect::Confirm { .. }
+            | AuthoritativePoseEffect::Interpolate { .. }
+            | AuthoritativePoseEffect::Snap { .. }
+            | AuthoritativePoseEffect::Reset { .. } => BodyPoseAuthority::Correctable(pose),
+        });
         body.sampling.last_authoritative_update = now;
-        body.sampling.last_derived_at = now;
+        // Observation does not consume simulation time between fixed ticks.
+        if !matches!(effect, AuthoritativePoseEffect::Observe { .. }) {
+            body.sampling.last_derived_at = now;
+        }
         let mobile_physical = body.physical.as_ref().is_some_and(|physical| {
             !matches!(
                 physical.definition,
@@ -1413,18 +1425,24 @@ impl SpatialScene {
         });
         // Routine mobile pose samples retarget the reference without erasing contact/motor
         // continuation. Explicit vector messages and discontinuous initialization remain replacements.
-        let preserves_continuation = matches!(effect, AuthoritativePoseEffect::Confirm { .. })
-            || mobile_physical
-                && matches!(
-                    effect,
-                    AuthoritativePoseEffect::Interpolate { .. }
-                        | AuthoritativePoseEffect::Snap { .. }
-                );
+        let preserves_continuation = matches!(
+            effect,
+            AuthoritativePoseEffect::Confirm { .. } | AuthoritativePoseEffect::Observe { .. }
+        ) || mobile_physical
+            && matches!(
+                effect,
+                AuthoritativePoseEffect::Interpolate { .. } | AuthoritativePoseEffect::Snap { .. }
+            );
         if !preserves_continuation {
             body.retained = vectors.into();
             body.nominal = vectors;
         }
         match effect {
+            AuthoritativePoseEffect::Observe { .. } => {
+                if let Some(state) = body.reconciliation.as_mut() {
+                    state.invalidate_recovery();
+                }
+            }
             AuthoritativePoseEffect::Interpolate { keep_heading, .. } if mobile_physical => {
                 body.reconciliation
                     .get_or_insert_with(|| Box::new(PoseReconciliationState::default()))
@@ -1539,7 +1557,7 @@ impl SpatialScene {
             .remove_body(body_id)
             .unwrap_or_else(|| SpatialBody::new(body_id, pose, now));
 
-        body.authoritative_pose = Some(pose);
+        body.pose_authority = Some(BodyPoseAuthority::Correctable(pose));
         body.pose = pose;
         body.retained.velocity = velocity;
         body.retained.omega = omega;
@@ -1687,14 +1705,14 @@ impl SpatialScene {
         let composed_translation = composition.translation + physical_translation;
         if composed_translation != accepted_translation {
             solved.pose =
-                project_pose_by_offset(body.pose, composed_translation, body.authoritative_pose);
+                project_pose_by_offset(body.pose, composed_translation, body.authoritative_pose());
             if delta_seconds > f32::EPSILON {
                 solved.accepted_motion.velocity = composed_translation / delta_seconds;
             }
         }
         if matches!(composition.source, PoseTranslationSource::Interpolation)
             && !composition.keep_heading
-            && let Some(authoritative) = body.authoritative_pose
+            && let Some(authoritative) = body.correction_pose()
         {
             solved.pose.rotation = integrate_angular_velocity(
                 authoritative.rotation,
@@ -1713,7 +1731,7 @@ impl SpatialScene {
                 .body(body_id)
                 .cloned()
                 .expect("body id came from the same single-threaded store");
-            if let Some(authoritative_pose) = body.authoritative_pose {
+            if let Some(authoritative_pose) = body.authoritative_pose() {
                 replace_unsolved_runtime_pose(&mut body, authoritative_pose);
             }
             body.reconciliation = None;
@@ -3102,7 +3120,8 @@ mod physical_body_tests {
             .unwrap();
         acquire_support(&mut scene, &collision, id, now);
         let authoritative = pose(Vector3::new(90.0, 96.0, 5.0));
-        scene.body_mut(id).unwrap().authoritative_pose = Some(authoritative);
+        scene.body_mut(id).unwrap().pose_authority =
+            Some(BodyPoseAuthority::Correctable(authoritative));
         scene.suspend_runtime_bodies(now);
         let body = scene.body(id).unwrap();
         assert_eq!(body.pose, authoritative);
@@ -3883,7 +3902,7 @@ mod physical_body_tests {
 
         let body = scene.body(id).unwrap();
         assert_eq!(body.pose, next);
-        assert_eq!(body.authoritative_pose, Some(initial));
+        assert_eq!(body.authoritative_pose(), Some(initial));
         assert_eq!(body.retained.velocity, velocity);
         assert_eq!(body.retained.acceleration, acceleration);
         assert_eq!(body.retained.omega, omega);
@@ -3913,7 +3932,7 @@ mod physical_body_tests {
             crate::SpatialMembership::outdoor()
         );
         assert_eq!(body.physical.as_ref().unwrap().response.cell(), None);
-        assert_eq!(body.authoritative_pose, Some(initial));
+        assert_eq!(body.authoritative_pose(), Some(initial));
 
         assert!(scene.apply_runtime_body_pose(
             id,
@@ -3929,7 +3948,7 @@ mod physical_body_tests {
             body.physical.as_ref().unwrap().response.cell(),
             Some(initial.landblock_id)
         );
-        assert_eq!(body.authoritative_pose, Some(initial));
+        assert_eq!(body.authoritative_pose(), Some(initial));
     }
 
     #[test]
@@ -4959,6 +4978,10 @@ mod physical_body_tests {
                                 center_cell
                                     .map(|cell_selector| {
                                         vec![CellVolume {
+                                            visibility: holtburger_content::CellVisibility {
+                                                visible_cell_selectors: Vec::new(),
+                                                seen_outside: false,
+                                            },
                                             cell_selector,
                                             placement: LandblockPlacement {
                                                 origin: Vector3::zero(),
@@ -4989,6 +5012,10 @@ mod physical_body_tests {
                 static_geometry: LandblockColliders::new(
                     Vec::new(),
                     vec![CellVolume {
+                        visibility: holtburger_content::CellVisibility {
+                            visible_cell_selectors: Vec::new(),
+                            seen_outside: false,
+                        },
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -5050,6 +5077,10 @@ mod physical_body_tests {
                 static_geometry: LandblockColliders::new(
                     Vec::new(),
                     vec![CellVolume {
+                        visibility: holtburger_content::CellVisibility {
+                            visible_cell_selectors: Vec::new(),
+                            seen_outside: false,
+                        },
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -5584,6 +5615,10 @@ mod physical_body_tests {
                 static_geometry: LandblockColliders::new(
                     Vec::new(),
                     vec![CellVolume {
+                        visibility: holtburger_content::CellVisibility {
+                            visible_cell_selectors: Vec::new(),
+                            seen_outside: false,
+                        },
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -6118,6 +6153,10 @@ mod physical_body_tests {
                 static_geometry: LandblockColliders::new(
                     Vec::new(),
                     vec![CellVolume {
+                        visibility: holtburger_content::CellVisibility {
+                            visible_cell_selectors: Vec::new(),
+                            seen_outside: false,
+                        },
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),
@@ -6187,6 +6226,10 @@ mod physical_body_tests {
                 static_geometry: LandblockColliders::new(
                     Vec::new(),
                     vec![CellVolume {
+                        visibility: holtburger_content::CellVisibility {
+                            visible_cell_selectors: Vec::new(),
+                            seen_outside: false,
+                        },
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),

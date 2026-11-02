@@ -6,7 +6,8 @@ use super::*;
 use crate::spatial::bsp_query::CONTACT_EPSILON;
 use crate::spatial::{
     ContactBodyUpdate, ContactStepActuation, MOBILE_CONTACT_CORRECTION_TRAVEL_RADIUS_RATIO,
-    MOBILE_CONTACT_TICK_SECONDS, PlacedMotionPath, advance_body_contacts,
+    MOBILE_CONTACT_TICK_SECONDS, PHYSICAL_RETURN_START_THRESHOLD_M, PhysicalReferenceDomain,
+    PlacedMotionPath, advance_body_contacts,
 };
 use holtburger_common::RigidTransform;
 
@@ -6401,6 +6402,144 @@ fn stalled_remote_return_recovers_across_wall_but_rejects_occupied_destination()
 }
 
 #[test]
+fn moving_ledge_jump_does_not_recover_to_its_prelaunch_position() {
+    use crate::spatial::pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS;
+
+    let height = GROUNDED_CONFIG.step_down_height * 4.0;
+    let platform_end_x = 92.0;
+    let collision = collision_with_polygons(HashMap::from([(
+        0,
+        CollisionPolygon {
+            vertices: vec![
+                Vector3::new(88.0, 94.0, height),
+                Vector3::new(platform_end_x, 94.0, height),
+                Vector3::new(platform_end_x, 98.0, height),
+                Vector3::new(88.0, 98.0, height),
+            ],
+            normal: Vector3::new(0.0, 0.0, 1.0),
+            d: -height,
+        },
+    )]));
+    let now = Instant::now();
+    let guid = Guid(1);
+    let id = SpatialBodyId::Entity(guid);
+    let definition = grounded_definition();
+    let primary = definition.spheres().primary();
+    let floor_z = primary.radius - primary.center.z;
+    let start = pose(Vector3::new(90.0, 96.0, floor_z + height));
+    let mut world = crate::WorldState::synthetic();
+    world.add_entity(crate::entity::Entity::new(
+        guid,
+        "Jumping player".to_owned(),
+        start,
+    ));
+    world
+        .scene
+        .set_dynamic_physical_body(
+            id,
+            Some(dynamic_definition(definition, false)),
+            PhysicalCollisionFilter::ALL,
+            None,
+        )
+        .unwrap();
+    acquire_support(&mut world.scene, &collision, id, now);
+
+    // A short correction was already waiting before takeoff in the captured incident.
+    // Keep that grounded anchor on the platform while independent prediction travels away.
+    let mut anchor = start;
+    anchor.coords.x -= PHYSICAL_RETURN_START_THRESHOLD_M * 3.0;
+    world.scene.apply_authoritative_body_effect(
+        id,
+        AuthoritativePoseEffect::Interpolate {
+            pose: anchor,
+            keep_heading: true,
+            adjusted_max_speed_mps: None,
+        },
+        AuthoritativeBodyVectors::default(),
+        now,
+    );
+    assert!(
+        !world
+            .scene
+            .body_mut(id)
+            .unwrap()
+            .reconciliation
+            .as_mut()
+            .unwrap()
+            .observe_recovery(
+                start,
+                anchor,
+                RECOVERY_WINDOW_SECONDS * 0.75,
+                true,
+                PhysicalReferenceDomain::Horizontal,
+            )
+    );
+
+    let launch_velocity = Vector3::new(4.0, 0.0, 4.0);
+    let ticks = (RECOVERY_WINDOW_SECONDS * 3.0 / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize;
+    let mut landed = false;
+    let mut saw_descent_below_platform = false;
+    for (position_sequence, tick) in (1_u16..).zip(0..ticks) {
+        let result = world
+            .scene
+            .advance_dynamic_entity_collection(
+                &collision,
+                MOBILE_CONTACT_TICK_SECONDS,
+                now + Duration::from_secs_f32(tick as f32 * MOBILE_CONTACT_TICK_SECONDS),
+                |_| {
+                    Ok(PhysicalBodyInput::referenced(
+                        PhysicalBodyActuation::Grounded(if tick == 0 {
+                            GroundedBodyActuation::coast()
+                                .with_launch(GroundedLaunch::new(launch_velocity).unwrap())
+                        } else {
+                            GroundedBodyActuation::coast()
+                        }),
+                        PhysicalReferenceInput::remote(None, start.rotation),
+                        true,
+                    ))
+                },
+            )
+            .unwrap();
+        assert!(
+            result
+                .outcomes
+                .iter()
+                .all(|outcome| !matches!(outcome, DynamicEntityBodyOutcome::RecoveredPlacement(_))),
+            "normal flight must not recover to the historical ledge: tick {tick}"
+        );
+        let body = world.scene.body(id).unwrap();
+        saw_descent_below_platform |= body.pose.coords.z < start.coords.z - CONTACT_EPSILON;
+        landed |= body.contact == ContactState::Grounded && body.pose.coords.z < start.coords.z;
+
+        // A gap in server updates must not let a prelaunch watchdog interrupt ordinary flight.
+        // Admit the landing packet through the real handler to retire the old destination.
+        let current = body.pose;
+        let contact = body.contact;
+        if contact == ContactState::Grounded {
+            let mut events = Vec::new();
+            assert!(world.apply_entity_position_pack(
+                guid,
+                &holtburger_protocol::messages::movement::PositionPack {
+                    pos: current,
+                    position_sequence,
+                    flags: holtburger_protocol::messages::movement::UpdatePositionFlag::HAS_CONTACT,
+                    ..Default::default()
+                },
+                &mut events
+            ));
+        }
+    }
+    assert!(saw_descent_below_platform, "fixture must leave the ledge");
+    assert!(landed, "the moving jump must reach the lower floor");
+    let body = world.scene.body(id).unwrap();
+    assert!((body.pose.coords.z - floor_z).abs() < CONTACT_EPSILON);
+    assert!(
+        body.pose.coords.x > platform_end_x,
+        "landing must be beyond the upper platform"
+    );
+}
+
+#[test]
 fn vertical_recovery_distinguishes_wrong_floor_from_nominal_flight() {
     use crate::spatial::pose_reconciliation::recovery::RECOVERY_WINDOW_SECONDS;
 
@@ -6423,6 +6562,8 @@ fn vertical_recovery_distinguishes_wrong_floor_from_nominal_flight() {
     enum Case {
         Stranded,
         StickyStranded,
+        ObservedStranded,
+        ResumedStranded,
         Falling,
         Jumping,
     }
@@ -6430,10 +6571,17 @@ fn vertical_recovery_distinguishes_wrong_floor_from_nominal_flight() {
     for case in [
         Case::Stranded,
         Case::StickyStranded,
+        Case::ObservedStranded,
+        Case::ResumedStranded,
         Case::Falling,
         Case::Jumping,
     ] {
-        let stranded = matches!(case, Case::Stranded | Case::StickyStranded);
+        let stranded = matches!(
+            case,
+            Case::Stranded | Case::StickyStranded | Case::ObservedStranded | Case::ResumedStranded
+        );
+        let observed = matches!(case, Case::ObservedStranded | Case::ResumedStranded);
+        let expects_recovery = stranded && !matches!(case, Case::ObservedStranded);
         let jumping = matches!(case, Case::Jumping);
         let now = Instant::now();
         let id = SpatialBodyId::Entity(Guid(1));
@@ -6472,9 +6620,47 @@ fn vertical_recovery_distinguishes_wrong_floor_from_nominal_flight() {
             AuthoritativeBodyVectors::default(),
             now,
         );
+        if observed {
+            // A new non-contact observation supersedes an almost-expired placement watchdog.
+            assert!(
+                !scene
+                    .body_mut(id)
+                    .unwrap()
+                    .reconciliation
+                    .as_mut()
+                    .unwrap()
+                    .observe_recovery(
+                        lower,
+                        upper,
+                        RECOVERY_WINDOW_SECONDS * 0.75,
+                        true,
+                        PhysicalReferenceDomain::Spatial,
+                    )
+            );
+            scene.apply_authoritative_body_effect(
+                id,
+                AuthoritativePoseEffect::Observe { pose: upper },
+                AuthoritativeBodyVectors::default(),
+                now,
+            );
+        }
         let ticks = (RECOVERY_WINDOW_SECONDS * 3.0 / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize;
         let mut recovered = false;
         for tick in 0..ticks {
+            if matches!(case, Case::ResumedStranded)
+                && tick == (RECOVERY_WINDOW_SECONDS / MOBILE_CONTACT_TICK_SECONDS).ceil() as usize
+            {
+                scene.apply_authoritative_body_effect(
+                    id,
+                    AuthoritativePoseEffect::Interpolate {
+                        pose: upper,
+                        keep_heading: true,
+                        adjusted_max_speed_mps: None,
+                    },
+                    AuthoritativeBodyVectors::default(),
+                    now + Duration::from_secs_f32(tick as f32 * MOBILE_CONTACT_TICK_SECONDS),
+                );
+            }
             // The flight counterexample has no platform: authority is a historical airborne pose.
             let result = scene
                 .advance_dynamic_entity_collection(
@@ -6516,15 +6702,22 @@ fn vertical_recovery_distinguishes_wrong_floor_from_nominal_flight() {
                 DynamicEntityBodyOutcome::RecoveredPlacement(body_id) if *body_id == id)
             }) {
                 assert!(
-                    stranded,
-                    "{case:?}: nominal flight must not snap to a historical pose"
+                    expects_recovery,
+                    "{case:?}: only correction-eligible authority permits recovery"
                 );
+                if matches!(case, Case::ResumedStranded) {
+                    assert!(
+                        (tick + 1) as f32 * MOBILE_CONTACT_TICK_SECONDS
+                            >= RECOVERY_WINDOW_SECONDS * 2.0,
+                        "a new correction must receive a full recovery window"
+                    );
+                }
                 assert!(!recovered, "accepted recovery must remain converged");
                 recovered = true;
             }
         }
-        assert_eq!(recovered, stranded, "{case:?}");
-        let expected = if stranded { upper } else { lower };
+        assert_eq!(recovered, expects_recovery, "{case:?}");
+        let expected = if expects_recovery { upper } else { lower };
         assert!(scene.body(id).unwrap().pose.distance_to(&expected) < CONTACT_EPSILON);
     }
 }

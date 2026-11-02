@@ -16,6 +16,7 @@ pub mod storage;
 pub mod tests;
 pub mod trade;
 pub mod types;
+mod visibility;
 mod world_container;
 pub use world_container::WorldContainerState;
 

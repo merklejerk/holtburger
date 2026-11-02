@@ -109,7 +109,7 @@ These modules own movement-facing invariants:
 - nearby-entity queries
 - player/entity movement synchronization
 - retention/visibility housekeeping for the world graph
-- conservative visibility tracking for prune deadlines
+- authored room/outdoor visibility and reason-bearing entity cleanup requests
 - authoritative player-entity helpers such as `set_player_position()` and
   `record_player_server_vectors()`; ordinary server samples remain entity facts without replacing
   locally integrated self kinematics at retail's default autonomy level
@@ -137,6 +137,13 @@ confirmed-travel constraint, and pending ordinary-snap state that executes the e
 force-position timestamps have no independent meaning in the retail receive path; only the
 quarantined, unobserved server-to-client autonomous-position opcode still retains its explicit
 reset behavior pending evidence.
+
+Every admitted remote position is retained in `Entity.position`, including samples without the
+contact flag. Those samples produce an observation effect: they update the body's latest authority
+without changing runtime pose, vectors, heading, or elapsed simulation time. The body's pose authority
+pairs the sample with correction permission. An observation invalidates any old recovery watchdog
+and cannot authorize recovery placement; a later correction-eligible sample restores that permission.
+Visibility cleanup reads accepted entity positions, independently of these physical correction rules.
 
 Reconciliation composes at the existing body tick boundary. Physical bodies compose it into their
 prepared actuation before collision; pose-only remotes compose the same translation and heading

@@ -712,7 +712,7 @@ fn authoritative_player_snapshots_do_not_clobber_active_local_runtime_motion() {
         .body(SpatialBodyId::LocalPlayer(player_guid))
         .expect("local player runtime body should exist");
     assert_eq!(body.pose, runtime_pose);
-    assert_eq!(body.authoritative_pose, Some(authoritative_update));
+    assert_eq!(body.authoritative_pose(), Some(authoritative_update));
     assert_eq!(body.sampling.mode, SpatialSampleMode::SimulatingMotionState);
 }
 
@@ -1434,7 +1434,7 @@ fn test_tick_does_not_integrate_player_velocity() {
     player_entity.velocity = Vector3::new(3.0, 4.0, 0.0);
     state.add_entity(player_entity);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(events.is_empty());
     assert_eq!(state.player_position(), Some(player_pos));
@@ -1463,7 +1463,7 @@ fn test_tick_does_not_require_runtime_resource_access() {
     player_entity.velocity = Vector3::new(1.0, 0.0, 0.0);
     state.add_entity(player_entity);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(events.is_empty());
     assert_eq!(state.player_position(), Some(player_pos));
@@ -3035,7 +3035,7 @@ fn test_future_object_delete_waits_for_matching_instance() {
 
     assert_eq!(create_disposition, EntityCreateDisposition::DeleteRequested);
     assert!(!state.is_entity_client_visible(guid));
-    let events = state.tick();
+    let events = state.tick(None);
     assert!(state.entities.get(guid).is_none());
     assert!(events.iter().any(|event| matches!(
         event,
@@ -3063,7 +3063,7 @@ fn test_newer_create_supersedes_queued_object_delete() {
     assert_eq!(create_disposition, EntityCreateDisposition::Active);
     assert!(state.is_entity_client_visible(guid));
     assert!(state.entity_lifecycle_state(guid).is_none());
-    assert!(state.tick().is_empty());
+    assert!(state.tick(None).is_empty());
 }
 
 #[test]
@@ -3082,7 +3082,7 @@ fn test_container_iid_update_tracks_player_inventory_and_clears_deadline() {
     let mut item = Entity::new(guid, "Item".to_string(), WorldPosition::default());
     item.position.landblock_id = Guid::NULL;
     state.entities.insert(item);
-    state.set_entity_prune_deadline(guid, state.current_server_time() - 1.0);
+    state.request_unretained_entity_prune(guid, state.current_server_time() - 1.0);
 
     let msg = GameMessage::PublicUpdatePropertyInstanceId(Box::new(UpdatePropertyInstanceId {
         sequence: 0,
@@ -3171,14 +3171,14 @@ fn test_retention_snapshot_reflects_lifecycle_metadata() {
     state.mark_trade_preview(guid);
     state.mark_container_preview(guid);
     state.mark_entity_explicit_delete(guid);
-    state.set_entity_prune_deadline(guid, 5.0);
+    state.request_unretained_entity_prune(guid, 5.0);
 
     let snapshot = state.retention_snapshot(guid, 10.0).unwrap();
     assert!(!snapshot.in_world);
     assert!(snapshot.trade_preview);
     assert!(snapshot.container_preview);
     assert!(snapshot.current_instance_delete_requested);
-    assert!(snapshot.prune_deadline_expired);
+    assert!(snapshot.prune_request_expired);
 }
 
 #[test]
@@ -3247,7 +3247,7 @@ fn test_add_entity_seeds_remote_body_sidecar() {
         .scene
         .body(SpatialBodyId::Entity(guid))
         .expect("remote entity body should be seeded");
-    assert_eq!(body.authoritative_pose, Some(position));
+    assert_eq!(body.authoritative_pose(), Some(position));
     assert_eq!(body.pose, position);
     assert_eq!(body.retained.velocity, Vector3::new(1.0, 2.0, 0.0));
     assert_eq!(body.retained.omega, Vector3::new(0.0, 0.0, 0.5));
@@ -3293,7 +3293,7 @@ fn player_confirmation_and_server_vectors_preserve_local_runtime_kinematics() {
         .scene
         .body(body_id)
         .expect("local player body should be reconciled from authoritative entity state");
-    assert_eq!(body.authoritative_pose, Some(moved));
+    assert_eq!(body.authoritative_pose(), Some(moved));
     assert_eq!(body.pose, initial_pos);
     assert_eq!(body.retained.velocity, local_velocity);
     assert_eq!(body.retained.omega, local_omega);
@@ -3332,7 +3332,7 @@ fn contacted_near_remote_position_preserves_runtime_pose_then_interpolates_on_ti
     let body_id = SpatialBodyId::Entity(remote_guid);
     let body = state.scene.body(body_id).expect("remote body");
     assert_eq!(body.pose, pose(8.0));
-    assert_eq!(body.authoritative_pose, Some(pose(10.0)));
+    assert_eq!(body.authoritative_pose(), Some(pose(10.0)));
     assert_eq!(body.contact, ContactState::Unknown);
 
     let ordinary = SolvedBodyKinematics {
@@ -3497,14 +3497,61 @@ fn newer_remote_teleport_resets_and_suspends_body_sampling() {
         .expect("remote body should remain present after correction");
     assert_eq!(body.pose.coords, Vector3::new(10.0, 20.0, 30.0));
     assert_eq!(
-        body.authoritative_pose.map(|pose| pose.coords),
+        body.authoritative_pose().map(|pose| pose.coords),
         Some(Vector3::new(10.0, 20.0, 30.0))
     );
     assert_eq!(body.sampling.mode, SpatialSampleMode::Suspended);
 }
 
 #[test]
-fn non_contact_remote_position_advances_only_sequence_then_contact_updates_vectors() {
+fn rejected_remote_position_does_not_replace_observation_or_correction_authority() {
+    use crate::state::attachment_lifecycle::DeferredPlacementMessage;
+    use holtburger_protocol::messages::UpdatePositionData;
+
+    for (instance_sequence, position_sequence, teleport_sequence) in
+        [(0, 0, 0), (0, 1, u16::MAX), (u16::MAX, 1, 0), (1, 1, 0)]
+    {
+        let mut state = WorldState::synthetic();
+        let guid = Guid(0x6200_0006);
+        let initial = WorldPosition {
+            landblock_id: Guid(0x0100_0001),
+            rotation: holtburger_common::Quaternion::identity(),
+            ..WorldPosition::default()
+        };
+        state.add_entity(Entity::new(guid, "Remote".into(), initial));
+        let before = state
+            .scene
+            .body(SpatialBodyId::Entity(guid))
+            .unwrap()
+            .clone();
+        state.receive_placement_message(
+            DeferredPlacementMessage::Position(UpdatePositionData {
+                guid,
+                pos: PositionPack {
+                    pos: WorldPosition {
+                        coords: Vector3::new(10.0, 0.0, 0.0),
+                        ..initial
+                    },
+                    instance_sequence,
+                    position_sequence,
+                    teleport_sequence,
+                    ..PositionPack::default()
+                },
+            }),
+            &mut Vec::new(),
+        );
+        let entity = state.entities.get(guid).unwrap();
+        assert_eq!(entity.position, initial);
+        assert_eq!(entity.position_sequence(), 0);
+        assert_eq!(
+            state.scene.body(SpatialBodyId::Entity(guid)).unwrap(),
+            &before
+        );
+    }
+}
+
+#[test]
+fn non_contact_remote_position_retains_observation_without_changing_simulation() {
     let mut state = WorldState::synthetic();
     let guid = Guid(0x6200_0005);
     let initial_pos = WorldPosition {
@@ -3526,7 +3573,7 @@ fn non_contact_remote_position_advances_only_sequence_then_contact_updates_vecto
                 rotation: holtburger_common::math::Quaternion::identity(),
             },
             velocity: Some(Vector3::new(-1.327_315_8, 5.460_433_5, -18.468_733)),
-            instance_sequence: 88,
+            instance_sequence: 0,
             position_sequence: 285,
             teleport_sequence: 0,
             force_position_sequence: 0,
@@ -3538,7 +3585,15 @@ fn non_contact_remote_position_advances_only_sequence_then_contact_updates_vecto
 
     assert!(applied);
     let entity = state.entities.get(guid).expect("entity should exist");
-    assert_eq!(entity.position, initial_pos);
+    assert_eq!(
+        entity.position.coords,
+        Vector3::new(9.745_981, -58.954_994, 0.004_999_995)
+    );
+    let body = state.scene.body(SpatialBodyId::Entity(guid)).unwrap();
+    assert_eq!(body.authoritative_pose(), Some(entity.position));
+    assert_eq!(body.pose, initial_pos);
+    assert_eq!(body.retained.velocity, Vector3::new(0.0, 0.0, 20.046_688));
+    assert_eq!(body.correction_pose(), None);
     assert_eq!(entity.velocity, Vector3::new(0.0, 0.0, 20.046_688));
     assert_eq!(entity.sequences[0], 285);
     assert!(falling_events.is_empty());
@@ -3552,7 +3607,7 @@ fn non_contact_remote_position_advances_only_sequence_then_contact_updates_vecto
                 coords: Vector3::new(9.745_981, -58.954_994, 0.004_999_995),
                 rotation: holtburger_common::math::Quaternion::identity(),
             },
-            instance_sequence: 88,
+            instance_sequence: 0,
             position_sequence: 286,
             teleport_sequence: 0,
             force_position_sequence: 0,
@@ -3577,6 +3632,10 @@ fn non_contact_remote_position_advances_only_sequence_then_contact_updates_vecto
         .expect("remote body should remain present after grounded snap");
     assert_eq!(body.retained.velocity, Vector3::zero());
     assert_eq!(body.nominal.velocity, Vector3::zero());
+    assert_eq!(
+        body.correction_pose(),
+        Some(state.entities.get(guid).unwrap().position)
+    );
     // A repeated contact sample must clear locally evolved nominal velocity even when the
     // cached server velocity is already zero; value inequality is not packet freshness.
     state
@@ -3590,7 +3649,7 @@ fn non_contact_remote_position_advances_only_sequence_then_contact_updates_vecto
         guid,
         &PositionPack {
             pos: contacted_pose,
-            instance_sequence: 88,
+            instance_sequence: 0,
             position_sequence: 287,
             flags: UpdatePositionFlag::HAS_CONTACT,
             ..PositionPack::default()
@@ -3673,7 +3732,7 @@ fn test_tick_sweeps_explicit_delete_without_movement() {
     ));
     state.mark_entity_explicit_delete(target_guid);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(target_guid).is_none());
     assert!(events.iter().any(
@@ -3697,9 +3756,9 @@ fn test_tick_sweeps_expired_deadline_without_movement() {
     let mut target = Entity::new(target_guid, "Target".to_string(), WorldPosition::default());
     target.position.landblock_id = Guid::NULL;
     state.entities.insert(target);
-    state.set_entity_prune_deadline(target_guid, state.current_server_time() - 1.0);
+    state.request_unretained_entity_prune(target_guid, state.current_server_time() - 1.0);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(target_guid).is_none());
     assert!(events.iter().any(
@@ -4314,9 +4373,9 @@ fn test_tick_does_not_sweep_unexpired_deadline() {
     let mut target = Entity::new(target_guid, "Target".to_string(), WorldPosition::default());
     target.position.landblock_id = Guid::NULL;
     state.entities.insert(target);
-    state.set_entity_prune_deadline(target_guid, state.current_server_time() + 60.0);
+    state.request_unretained_entity_prune(target_guid, state.current_server_time() + 60.0);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(target_guid).is_some());
     assert!(events.is_empty());
@@ -4334,7 +4393,7 @@ fn test_tick_runs_sweep_without_player_guid() {
     ));
     state.mark_entity_explicit_delete(guid);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(guid).is_none());
     assert!(events.iter().any(
@@ -4343,7 +4402,7 @@ fn test_tick_runs_sweep_without_player_guid() {
 }
 
 #[test]
-fn test_stationary_tick_starts_visibility_prune_deadline() {
+fn test_stationary_tick_starts_visibility_prune_request() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000130);
     let player_pos = WorldPosition {
@@ -4367,10 +4426,10 @@ fn test_stationary_tick_starts_visibility_prune_deadline() {
     let target_guid = Guid(0x60000130);
     state.add_entity(Entity::new(target_guid, "Distant".to_string(), far_pos));
 
-    let events = state.tick();
+    let events = state.tick(None);
     let deadline = state
         .entity_lifecycle_state(target_guid)
-        .and_then(|lifecycle| lifecycle.prune_deadline)
+        .and_then(|lifecycle| lifecycle.prune_request.map(|request| request.deadline))
         .expect("expected a destruction deadline to be assigned");
 
     assert!(events.is_empty());
@@ -4403,10 +4462,10 @@ fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
     let target_guid = Guid(0x60000131);
     state.add_entity(Entity::new(target_guid, "Distant".to_string(), far_pos));
 
-    let _ = state.tick();
+    let _ = state.tick(None);
     let deadline = state
         .entity_lifecycle_state(target_guid)
-        .and_then(|lifecycle| lifecycle.prune_deadline)
+        .and_then(|lifecycle| lifecycle.prune_request.map(|request| request.deadline))
         .expect("expected a destruction deadline to be assigned");
 
     state.server_time = Some(ServerTimeSync {
@@ -4414,7 +4473,7 @@ fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
         local_time: Instant::now(),
     });
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(target_guid).is_none());
     assert!(events.iter().any(
@@ -4423,7 +4482,7 @@ fn test_visibility_timeout_sweeps_world_entity_after_25_seconds() {
 }
 
 #[test]
-fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
+fn test_reentry_before_timeout_clears_visibility_prune_request() {
     let mut state = WorldState::synthetic();
     let player_guid = Guid(0x50000132);
     let player_pos = WorldPosition {
@@ -4447,11 +4506,11 @@ fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
     let target_guid = Guid(0x60000132);
     state.add_entity(Entity::new(target_guid, "Traveler".to_string(), far_pos));
 
-    let _ = state.tick();
+    let _ = state.tick(None);
     assert!(
         state
             .entity_lifecycle_state(target_guid)
-            .and_then(|lifecycle| lifecycle.prune_deadline)
+            .and_then(|lifecycle| lifecycle.prune_request.map(|request| request.deadline))
             .is_some()
     );
 
@@ -4467,53 +4526,13 @@ fn test_reentry_before_timeout_clears_visibility_prune_deadline() {
         player_pos,
         &mut events,
     );
-    let tick_events = state.tick();
+    let tick_events = state.tick(None);
 
     assert!(state.entities.get(target_guid).is_some());
     assert!(state.entity_lifecycle_state(target_guid).is_none());
     assert!(!tick_events.iter().any(
         |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == target_guid)
     ));
-}
-
-#[test]
-fn test_indoor_player_keeps_nearby_outdoor_entity_visible_under_conservative_heuristic() {
-    let mut state = WorldState::synthetic();
-    let player_guid = Guid(0x50000132);
-    let player_pos = WorldPosition {
-        landblock_id: Guid(0x0A0A0100),
-        coords: Vector3::new(96.0, 96.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
-    let nearby_outdoor_pos = WorldPosition {
-        landblock_id: Guid(0x0A0AFFFF),
-        coords: Vector3::new(100.0, 100.0, 0.0),
-        rotation: holtburger_common::math::Quaternion::identity(),
-    };
-
-    state.server_time = Some(ServerTimeSync {
-        server_time: 100.0,
-        local_time: Instant::now(),
-    });
-    state.player.guid = player_guid;
-    state.seed_local_player_entity(player_guid, "Player", player_pos);
-
-    let target_guid = Guid(0x60000136);
-    state.add_entity(Entity::new(
-        target_guid,
-        "SeenOutside-ish".to_string(),
-        nearby_outdoor_pos,
-    ));
-
-    let events = state.tick();
-
-    assert!(events.is_empty());
-    assert!(state.entities.get(target_guid).is_some());
-    assert!(
-        state
-            .entity_lifecycle_state(target_guid)
-            .is_none_or(|lifecycle| lifecycle.prune_deadline.is_none())
-    );
 }
 
 #[test]
@@ -4626,7 +4645,7 @@ fn test_reset_trade_sweeps_preview_only_entities() {
 
     let deadline = state
         .entity_lifecycle_state(preview_guid)
-        .and_then(|state| state.prune_deadline)
+        .and_then(|state| state.prune_request.map(|request| request.deadline))
         .expect("expected immediate prune eligibility after trade reset");
 
     assert!(state.entities.get(preview_guid).is_some());
@@ -4645,7 +4664,7 @@ fn test_reset_trade_sweeps_preview_only_entities() {
         local_time: Instant::now(),
     });
 
-    let tick_events = state.tick();
+    let tick_events = state.tick(None);
     assert!(state.entities.get(preview_guid).is_none());
     assert!(tick_events.iter().any(
         |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
@@ -4711,7 +4730,7 @@ fn test_close_trade_sweeps_preview_only_entities() {
 
     let deadline = state
         .entity_lifecycle_state(preview_guid)
-        .and_then(|state| state.prune_deadline)
+        .and_then(|state| state.prune_request.map(|request| request.deadline))
         .expect("expected preview-only trade entity to become sweep-eligible");
 
     assert!(state.trade.is_none());
@@ -4730,7 +4749,7 @@ fn test_close_trade_sweeps_preview_only_entities() {
         local_time: Instant::now(),
     });
 
-    let tick_events = state.tick();
+    let tick_events = state.tick(None);
     assert!(state.entities.get(preview_guid).is_none());
     assert!(tick_events.iter().any(
         |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
@@ -4781,7 +4800,7 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
 
     let deadline = state
         .entity_lifecycle_state(preview_guid)
-        .and_then(|state| state.prune_deadline)
+        .and_then(|state| state.prune_request.map(|request| request.deadline))
         .expect("expected preview-only trade entity to become sweep-eligible");
 
     assert!(state.entities.get(preview_guid).is_some());
@@ -4800,7 +4819,7 @@ fn test_trade_complete_preserves_real_owned_entity_while_pruning_preview_only_en
         local_time: Instant::now(),
     });
 
-    let tick_events = state.tick();
+    let tick_events = state.tick(None);
     assert!(state.entities.get(preview_guid).is_none());
     assert!(tick_events.iter().any(
         |event| matches!(event, WorldEvent::EntityDespawned { guid, .. } if *guid == preview_guid)
@@ -4867,7 +4886,7 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
     state.confirm_world_container(container_guid);
     state.mark_container_preview(preview_guid);
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(events.is_empty());
     assert!(state.entities.get(inventory_guid).is_some());
@@ -4876,17 +4895,17 @@ fn test_tick_does_not_prune_off_world_entities_with_inventory_equipment_or_open_
     assert!(
         state
             .entity_lifecycle_state(inventory_guid)
-            .is_none_or(|state| state.prune_deadline.is_none())
+            .is_none_or(|state| state.prune_request.is_none())
     );
     assert!(
         state
             .entity_lifecycle_state(equipped_guid)
-            .is_none_or(|state| state.prune_deadline.is_none())
+            .is_none_or(|state| state.prune_request.is_none())
     );
     assert!(
         state
             .entity_lifecycle_state(preview_guid)
-            .is_some_and(|state| state.prune_deadline.is_none() && state.container_preview)
+            .is_some_and(|state| state.prune_request.is_none() && state.container_preview)
     );
 }
 
@@ -5043,11 +5062,11 @@ fn test_remove_entity_marks_wielded_dependents_for_prune() {
     assert!(
         state
             .entity_lifecycle_state(item_guid)
-            .and_then(|state| state.prune_deadline)
+            .and_then(|state| state.prune_request.map(|request| request.deadline))
             .is_some()
     );
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(item_guid).is_none());
     assert!(events.iter().any(
@@ -5082,7 +5101,7 @@ fn test_orphaned_wielded_item_is_not_retained() {
     assert!(
         state
             .entity_lifecycle_state(item_guid)
-            .and_then(|state| state.prune_deadline)
+            .and_then(|state| state.prune_request.map(|request| request.deadline))
             .is_some()
     );
 }
@@ -5120,11 +5139,11 @@ fn test_remove_entity_marks_contained_dependents_for_prune() {
     assert!(
         state
             .entity_lifecycle_state(item_guid)
-            .and_then(|state| state.prune_deadline)
+            .and_then(|state| state.prune_request.map(|request| request.deadline))
             .is_some()
     );
 
-    let events = state.tick();
+    let events = state.tick(None);
 
     assert!(state.entities.get(item_guid).is_none());
     assert!(events.iter().any(
@@ -5166,7 +5185,7 @@ fn parent_event_waits_for_parent_before_applying_the_typed_attachment() {
         0xDA55_001C,
         10.0,
     ));
-    state.tick();
+    state.tick(None);
     assert_eq!(
         state.entities.get(item_guid).unwrap().position_sequence(),
         1

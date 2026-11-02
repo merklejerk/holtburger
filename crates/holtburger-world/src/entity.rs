@@ -1576,12 +1576,12 @@ impl Entity {
         true
     }
 
-    /// Advances only the remote position timestamp after retail admits a non-contact sample.
+    /// Advances the position timestamp for an admitted relationship transition without a pose.
     pub fn apply_remote_position_sequence_only(&mut self, position_sequence: u16) {
         self.sequences[OBJECT_POSITION_SEQUENCE_INDEX] = position_sequence;
     }
 
-    /// Commits one admitted remote position sample after world policy classifies its runtime effect.
+    /// Retains an admitted server pose independently of whether world policy corrects simulation.
     pub fn apply_remote_position_sample(
         &mut self,
         position: WorldPosition,

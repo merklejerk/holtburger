@@ -777,7 +777,7 @@ mod message_tests {
         assert_eq!(pending.description, EntityDescription::Pending);
         assert!(pending.owned_by_player);
 
-        world.tick();
+        world.tick(None);
         assert!(world.entities.get(PACK).is_none());
         assert_eq!(world.client_entity_facts(PACK).unwrap(), Some(pending));
         assert!(world.is_owned_by_player(ITEM));

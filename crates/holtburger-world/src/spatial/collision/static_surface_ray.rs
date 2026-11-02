@@ -544,6 +544,10 @@ mod tests {
 
     fn volume(selector: u16, portals: Vec<CellCollisionPortal>) -> CellVolume {
         CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
             cell_selector: selector,
             placement: LandblockPlacement {
                 origin: Vector3::zero(),

@@ -1718,7 +1718,7 @@ mod tests {
             mirror[&PACK].description,
             holtburger_world::entity_facts::EntityDescription::Pending
         );
-        for event in world.tick() {
+        for event in world.tick(None) {
             publisher.observe(&event);
         }
         assert_reconstructed(&mut world, &mut publisher, &mut mirror);

@@ -238,7 +238,8 @@ impl MotionRuntimeRegistry {
                     .get_or_insert_with(|| RemoteMotionState::new(pose.rotation))
                     .rotation = pose.rotation;
             }
-            AuthoritativePoseEffect::Confirm { .. }
+            AuthoritativePoseEffect::Observe { .. }
+            | AuthoritativePoseEffect::Confirm { .. }
             | AuthoritativePoseEffect::Interpolate {
                 keep_heading: true, ..
             } => {}

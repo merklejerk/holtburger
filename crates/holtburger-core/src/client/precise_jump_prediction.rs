@@ -806,6 +806,10 @@ pub(in crate::client) mod tests {
                 static_geometry: LandblockColliders::new(
                     vec![floor],
                     vec![CellVolume {
+                        visibility: holtburger_content::CellVisibility {
+                            visible_cell_selectors: Vec::new(),
+                            seen_outside: false,
+                        },
                         cell_selector: cell.0 as u16,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),

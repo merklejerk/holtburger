@@ -244,6 +244,7 @@ fn prepare_owner(
             });
         }
         prepared.cells.push(NavigationCell {
+            visible_cell_selectors: volume.visibility.visible_cell_selectors.clone(),
             selector,
             flags: cell.flags & !0x02,
             authored_cell_id: cell.authored_cell_id,

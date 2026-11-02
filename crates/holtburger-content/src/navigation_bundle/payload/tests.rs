@@ -14,6 +14,7 @@ fn placement() -> LandblockPlacement {
 
 fn cell() -> NavigationCell {
     NavigationCell {
+        visible_cell_selectors: Vec::new(),
         selector: 0x0100,
         flags: 9,
         authored_cell_id: 0x0100,
@@ -356,4 +357,54 @@ fn malformed_terrain_dimensions_and_choices_are_rejected() {
     assert!(validate_terrain(&wire).is_err());
     wire.diagonals.pop();
     assert!(validate_terrain(&wire).is_err());
+}
+
+#[test]
+fn visibility_lists_preserve_direction_and_reject_missing_targets() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("visibility.hnav");
+    let mut first = cell();
+    let mut second = cell();
+    second.selector += 1;
+    first.visible_cell_selectors = vec![second.selector];
+    let mut writer = NavigationArchiveWriter::create(&path).unwrap();
+    writer.add_cells(OWNER, &[first.clone(), second]).unwrap();
+    writer.finish().unwrap();
+    let decoded = NavigationArchive::open(&path)
+        .unwrap()
+        .cells(OWNER)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        decoded[0].visible_cell_selectors,
+        first.visible_cell_selectors
+    );
+    assert!(decoded[1].visible_cell_selectors.is_empty());
+    let broken = dir.path().join("broken.hnav");
+    let mut writer = NavigationArchiveWriter::create(&broken).unwrap();
+    let error = writer.add_cells(OWNER, &[first.clone()]).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("visibility references missing cell")
+    );
+    writer
+        .add_block(
+            NavigationBlockKey {
+                kind: NavigationBlockKind::Cells,
+                id: OWNER,
+            },
+            &rmp_serde::to_vec(&vec![first]).unwrap(),
+        )
+        .unwrap();
+    writer.finish().unwrap();
+    let error = NavigationArchive::open(&broken)
+        .unwrap()
+        .cells(OWNER)
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("visibility references missing cell")
+    );
 }

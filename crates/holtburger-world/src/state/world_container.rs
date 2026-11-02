@@ -402,7 +402,7 @@ mod tests {
         world.retain_inventory_transfer(PACK);
         world.retain_inventory_transfer(PACK);
         world.close_world_container();
-        world.tick();
+        world.tick(None);
         for guid in [PACK, ITEM] {
             assert!(world.entities.get(guid).is_some());
             assert!(world.client_entity_facts(guid).unwrap().is_none());
@@ -415,7 +415,7 @@ mod tests {
             },
         ));
         event(&mut world, reject.clone());
-        world.tick();
+        world.tick(None);
         assert!(world.entities.get(ITEM).is_some());
         event(&mut world, reject);
         // Explicitly sweep the child before its parent; cleanup must not rely on hash order.
@@ -433,7 +433,7 @@ mod tests {
             world.confirm_world_container(ROOT);
             world.retain_inventory_transfer(PACK);
             world.close_world_container();
-            world.tick();
+            world.tick(None);
             if succeeds {
                 event(
                     &mut world,
@@ -446,7 +446,7 @@ mod tests {
                         },
                     )),
                 );
-                world.tick();
+                world.tick(None);
                 for guid in [PACK, ITEM] {
                     let facts = world.client_entity_facts(guid).unwrap().unwrap();
                     assert!(facts.owned_by_player);

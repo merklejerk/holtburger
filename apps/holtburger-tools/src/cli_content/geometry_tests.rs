@@ -98,7 +98,7 @@ fn exported_shared_rooms_preserve_placement_portals_shells_and_terrain_at_runtim
             .zip(placements)
             .map(|(selector, placement)| LandblockEnvCell {
                 env_cell_id: full_id(selector),
-                flags: 0,
+                flags: u32::from(selector == CELLS[0]),
                 authored_cell_id: u32::from(selector),
                 structure: LandblockCellStructureRef {
                     environment_id: ENVIRONMENT,
@@ -106,10 +106,14 @@ fn exported_shared_rooms_preserve_placement_portals_shells_and_terrain_at_runtim
                 },
                 placement,
                 surface_ids: Vec::new(),
-                visible_cell_ids: Vec::new(),
+                visible_cell_ids: if selector == CELLS[0] {
+                    vec![full_id(CELLS[1])]
+                } else {
+                    Vec::new()
+                },
                 static_objects: Vec::new(),
                 restriction_object_id: None,
-                seen_outside: false,
+                seen_outside: selector == CELLS[0],
             })
             .collect(),
         environments: BTreeMap::from([(
@@ -186,6 +190,9 @@ fn exported_shared_rooms_preserve_placement_portals_shells_and_terrain_at_runtim
         Some(landblock.scene_class)
     );
     let loaded = source.load_collision(OWNER).unwrap().unwrap();
+    let full = LandblockRoomShellAssembler
+        .assemble(&landblock, &interior)
+        .unwrap();
     assert_eq!(loaded.static_geometry.colliders.len(), CELLS.len());
     assert!(Arc::ptr_eq(
         &loaded.static_geometry.colliders[0].shape,
@@ -193,6 +200,19 @@ fn exported_shared_rooms_preserve_placement_portals_shells_and_terrain_at_runtim
     ));
     for (index, selector) in CELLS.into_iter().enumerate() {
         let volume = loaded.static_geometry.cell_volume(selector).unwrap();
+        assert_eq!(
+            volume.visibility,
+            full.cell_volume(selector).unwrap().visibility
+        );
+        assert_eq!(volume.visibility.seen_outside, index == 0);
+        assert_eq!(
+            volume.visibility.visible_cell_selectors,
+            if index == 0 {
+                vec![CELLS[1]]
+            } else {
+                Vec::new()
+            }
+        );
         assert_eq!(volume.placement.origin, placements[index].origin);
         assert_eq!(volume.placement.orientation, placements[index].orientation);
         assert_eq!(volume.planes, vec![Plane { normal, d: 0.0 }]);

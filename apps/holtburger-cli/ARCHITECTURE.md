@@ -13,6 +13,9 @@ The frontend opens the HBA repository and navigation archive independently, load
 creation facts, and passes a `PreparedNavigationSource` through core's storage-independent
 `SceneContentSource` and `SetupContentSource` contracts. It explicitly selects reduced
 movement behavior independently of these providers. The content layer owns decoding, not path precedence.
+Prepared cells preserve the authored directed visibility lists and SeenOutside flags alongside
+containment geometry. Both reduced and full scene products supply those facts to shared world
+retention; the TUI does not infer entity lifetime from its display or geometric distance.
 
 Local approach/follow/scoot policy remains in `navigation.rs`, which submits bounded full-XYZ
 intent pulses toward known destinations. Core validates and commits positions, retains progress

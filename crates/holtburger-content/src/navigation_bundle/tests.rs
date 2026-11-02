@@ -156,7 +156,7 @@ fn wrong_magic_and_unsupported_version_are_distinct() {
         Err(NavigationArchiveError::Magic)
     ));
     let mut file = fixture(&[], &[]);
-    replace_header(&mut file, |h| h.version = NAVIGATION_FORMAT_VERSION + 1);
+    replace_header(&mut file, |h| h.version = NAVIGATION_FORMAT_VERSION - 1);
     assert!(matches!(
         NavigationArchive::open(file.path()),
         Err(NavigationArchiveError::Version(_))

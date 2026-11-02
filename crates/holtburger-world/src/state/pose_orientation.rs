@@ -172,7 +172,7 @@ mod tests {
                     .scene
                     .body(SpatialBodyId::Entity(guid))
                     .unwrap()
-                    .authoritative_pose,
+                    .authoritative_pose(),
                 Some(expected)
             );
         }

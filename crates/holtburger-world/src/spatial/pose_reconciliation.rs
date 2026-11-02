@@ -85,6 +85,11 @@ pub enum AuthoritativePoseResetCause {
 /// code executes it without re-deriving policy from body identity or update timing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AuthoritativePoseEffect {
+    /// Retain a server observation without authorizing interpolation or recovery placement.
+    Observe {
+        /// Latest admitted server pose, independent of simulated movement.
+        pose: WorldPosition,
+    },
     /// Seed a body with no runtime timeline and discard any stale reconciliation allocation.
     Initialize {
         /// Authoritative pose installed as both authority and runtime placement.
@@ -123,6 +128,7 @@ impl AuthoritativePoseEffect {
     pub const fn pose(self) -> WorldPosition {
         match self {
             Self::Initialize { pose }
+            | Self::Observe { pose }
             | Self::Confirm { pose }
             | Self::Interpolate { pose, .. }
             | Self::Snap { pose }
@@ -134,6 +140,7 @@ impl AuthoritativePoseEffect {
     pub const fn with_pose(self, pose: WorldPosition) -> Self {
         match self {
             Self::Initialize { .. } => Self::Initialize { pose },
+            Self::Observe { .. } => Self::Observe { pose },
             Self::Confirm { .. } => Self::Confirm { pose },
             Self::Interpolate {
                 keep_heading,

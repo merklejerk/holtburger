@@ -1700,6 +1700,10 @@ mod tests {
                 static_geometry: LandblockColliders::new(
                     Vec::new(),
                     vec![CellVolume {
+                        visibility: holtburger_content::CellVisibility {
+                            visible_cell_selectors: Vec::new(),
+                            seen_outside: false,
+                        },
                         cell_selector: 0x0100,
                         placement: LandblockPlacement {
                             origin: Vector3::zero(),

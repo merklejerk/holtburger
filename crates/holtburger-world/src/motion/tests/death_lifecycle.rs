@@ -282,7 +282,7 @@ fn world_creation_update_and_replacement_have_distinct_playback_lifetimes() {
             ..WorldPosition::default()
         },
     ));
-    world.tick();
+    world.tick(None);
     world.advance_authored_motion(Duration::from_millis(250));
     assert_eq!(
         world

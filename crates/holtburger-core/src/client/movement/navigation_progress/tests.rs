@@ -22,6 +22,10 @@ fn scene(rooms: &[(u32, f32)]) -> CollisionScene {
     let volumes = rooms
         .iter()
         .map(|&(cell, x)| CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
             cell_selector: cell as u16,
             placement: LandblockPlacement {
                 origin: Vector3::new(x, 0.0, 0.0),

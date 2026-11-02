@@ -624,7 +624,7 @@ impl WorldState {
             return false;
         }
 
-        self.set_entity_prune_deadline(guid, now);
+        self.request_unretained_entity_prune(guid, now);
         true
     }
 
@@ -773,27 +773,33 @@ impl WorldState {
             .is_none_or(|body| body.pose.landblock_id == Guid::NULL);
         // Retail unparents after sequence admission, before deciding whether to interpolate.
         // Missing-cell recovery applies even without contact.
+        let pos = recover_pose_orientation(guid, pos_pack.pos, Some(entity.position.rotation));
         self.entities
             .get_mut(guid)
             .expect("admitted entity")
-            .placement_intent = crate::EntityPlacementIntent::Independent;
+            .apply_remote_position_sample(
+                pos,
+                pos_pack.instance_sequence,
+                pos_pack.position_sequence,
+                pos_pack.teleport_sequence,
+            );
         if !teleported
             && !missing_runtime_cell
             && !pos_pack.flags.contains(UpdatePositionFlag::HAS_CONTACT)
         {
-            self.entities
-                .get_mut(guid)
-                .expect("admitted entity")
-                .apply_remote_position_sequence_only(pos_pack.position_sequence);
+            let (velocity, omega) = self
+                .entities
+                .get(guid)
+                .map(|entity| (entity.velocity, entity.omega))
+                .expect("admitted entity");
+            self.apply_authoritative_pose_effect(
+                guid,
+                velocity,
+                omega,
+                AuthoritativePoseEffect::Observe { pose: pos },
+            );
             return true;
         }
-        let pos = recover_pose_orientation(
-            guid,
-            pos_pack.pos,
-            self.entities
-                .get(guid)
-                .map(|entity| entity.position.rotation),
-        );
         if missing_runtime_cell {
             self.ensure_runtime_body(body_id);
         }
@@ -833,13 +839,6 @@ impl WorldState {
             .entities
             .get_mut(guid)
             .expect("entity admitted from this world turn must remain present");
-        entity.apply_remote_position_sample(
-            pos,
-            pos_pack.instance_sequence,
-            pos_pack.position_sequence,
-            pos_pack.teleport_sequence,
-        );
-
         let mut velocity_event = None;
         if let Some(velocity) = pos_pack.velocity {
             entity.velocity = velocity;
@@ -1673,7 +1672,7 @@ impl WorldState {
                 self.clear_container_preview(guid);
             } else {
                 // Preserve preview provenance through descriptions arriving after closure.
-                self.set_entity_prune_deadline(guid, now);
+                self.request_unretained_entity_prune(guid, now);
             }
         }
     }

@@ -1268,6 +1268,10 @@ mod tests {
                 )]),
             }));
             let volume = CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x0100,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),
@@ -1318,6 +1322,10 @@ mod tests {
         #[test]
         fn prior_cell_transits_to_its_neighbor_then_back_outdoors() {
             let first = CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x0100,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),
@@ -1346,6 +1354,10 @@ mod tests {
                 }],
             };
             let second = CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x0101,
                 placement: first.placement,
                 planes: vec![

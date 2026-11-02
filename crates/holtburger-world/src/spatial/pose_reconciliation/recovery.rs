@@ -3,14 +3,16 @@
 use super::*;
 
 /// Time allowed between meaningful improvements, also bounding failed placement retries. RETAIL
-/// DIVERGENCE: retail checks five frames against 30% expected speed and then falls back to
-/// placement. We use simulation time and minimum net distance, suspending for direct player
-/// contact. Sticky pursuit can recover only when its moving reference still agrees with
-/// authority; retail instead renews its watchdog while sticky. Copying retail would make
-/// patience frame-rate dependent and prevent this blocked return. The self-contained wall,
-/// wrong-floor, nominal-flight, unavailable-cell, stale-anchor sticky, player-contact and
-/// progress fixtures size the tested surface; no live-content census establishes equivalent
-/// timing for all actors.
+/// DIVERGENCE: Retail behavior is to evaluate interpolation progress during physical contact,
+/// check five frames against 30% expected speed, and then fall back to placement. We retain
+/// the contact requirement but use simulation time and minimum net distance, suspending for
+/// direct player contact. Sticky pursuit can recover only when its moving reference still
+/// agrees with authority; retail instead renews its watchdog while sticky. Copying retail's
+/// timing would make patience frame-rate dependent and prevent this blocked return. The wall,
+/// wrong-floor, nominal-flight, moving ledge jump with a prearmed timer, unavailable-cell,
+/// stale-anchor sticky, player-contact and progress fixtures size the tested surface. A live
+/// moving ledge jump corroborates the unsupported-travel exclusion; no census establishes
+/// equivalent timing for all actors.
 pub(crate) const RECOVERY_WINDOW_SECONDS: f32 = 2.0;
 
 /// One observation, distinct from both latest authority and the predicted moving reference.
@@ -25,6 +27,13 @@ pub(super) struct RecoveryObservation {
 }
 
 impl PoseReconciliationState {
+    /// A newer observation cannot carry a watchdog armed by an obsolete correction sample.
+    pub(crate) fn invalidate_recovery(&mut self) {
+        if let ReconciliationMode::Physical(correction) = &mut self.mode {
+            correction.recovery = None;
+        }
+    }
+
     /// A clear historical anchor cannot authorize a sticky snap after nominal intent leaves it.
     /// Compare XYZ here: horizontal return steering does not establish vertical agreement.
     pub(crate) fn reference_matches_authority(&self, authority: WorldPosition) -> bool {

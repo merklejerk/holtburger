@@ -848,7 +848,7 @@ impl ClientCollisionCoordinator {
                         self.body_target = None;
                         continue;
                     };
-                    if body.authoritative_pose.is_none() {
+                    if body.authoritative_pose().is_none() {
                         self.body_readiness = ClientBodyReadiness::Waiting;
                         continue;
                     }
@@ -1378,7 +1378,7 @@ fn client_remote_body_target(
         return None;
     }
     let body = world.scene.body(body_id)?;
-    body.authoritative_pose?;
+    body.authoritative_pose()?;
     let facts = client_entity_body_facts(world, guid).ok()?;
     let target = if facts.physics.dynamic_collision.target
         != EntityCollisionParticipation::Suppressed
@@ -3099,7 +3099,7 @@ mod tests {
             [destination.landblock_id]
         );
         let body = world.scene.body(SpatialBodyId::LocalPlayer(guid)).unwrap();
-        assert_eq!(body.authoritative_pose, Some(initial));
+        assert_eq!(body.authoritative_pose(), Some(initial));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

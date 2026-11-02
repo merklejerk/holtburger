@@ -1261,6 +1261,14 @@ impl CollisionScene {
         self.landblocks.get(&owner).map(|product| &product.asset)
     }
 
+    /// Authored retention visibility for an exact resident EnvCell; absence means unavailable.
+    pub fn cell_visibility(&self, cell: Guid) -> Option<&holtburger_content::CellVisibility> {
+        self.landblock_asset(landblock_key(cell))?
+            .static_geometry
+            .cell_volume(cell.0 as u16)
+            .map(|volume| &volume.visibility)
+    }
+
     /// Whether the current immutable snapshot contains one exact authored EnvCell.
     pub fn contains_env_cell(&self, cell: Guid) -> bool {
         if cell.0 & 0xffff < 0x0100 {
@@ -4457,6 +4465,10 @@ mod tests {
 
     fn volume(selector: u16, portals: Vec<CellCollisionPortal>) -> CellVolume {
         CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
             cell_selector: selector,
             placement: LandblockPlacement {
                 origin: Vector3::zero(),
@@ -4614,6 +4626,10 @@ mod tests {
     fn coincident_outdoor_cells() -> Vec<CellVolume> {
         vec![
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x010a,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),
@@ -4630,6 +4646,10 @@ mod tests {
                 )],
             },
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x010b,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),
@@ -5104,6 +5124,10 @@ mod tests {
         };
         let scene = placement_scene(vec![
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x010a,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),
@@ -5116,6 +5140,10 @@ mod tests {
                 portals: vec![source_to_target],
             },
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x010b,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),
@@ -5168,6 +5196,10 @@ mod tests {
     fn non_camera_sphere_path_keeps_thin_cell_entry_and_exit_with_matching_end_domains() {
         let thin_cell = Guid(0xda55_010b);
         let scene = placement_scene(vec![CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
             cell_selector: 0x010b,
             placement: LandblockPlacement {
                 origin: Vector3::zero(),
@@ -5248,6 +5280,10 @@ mod tests {
         // Adjacent owners may reuse the same local cell selector.
         for east_cell in [Guid(0xdb55_010b), Guid(0xdb55_010a)] {
             let chamber = |selector, origin, inward| CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: selector,
                 placement: LandblockPlacement {
                     origin: Vector3::new(origin, 0.0, 0.0),
@@ -5442,6 +5478,10 @@ mod tests {
         let source_cell = Guid(0xda55_010a);
         let mut cells = coincident_outdoor_cells();
         cells.push(CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
             cell_selector: 0x010c,
             placement: LandblockPlacement {
                 origin: Vector3::zero(),
@@ -5486,6 +5526,10 @@ mod tests {
     fn placed_motion_repairs_an_escaped_cell_to_outdoors() {
         let source_cell = Guid(0xda55_010a);
         let scene = placement_scene(vec![CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
             cell_selector: 0x010a,
             placement: LandblockPlacement {
                 origin: Vector3::zero(),
@@ -5528,6 +5572,10 @@ mod tests {
         let target_cell = Guid(0xda55_010b);
         let scene = placement_scene(vec![
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x010a,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),
@@ -5540,6 +5588,10 @@ mod tests {
                 portals: Vec::new(),
             },
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x010b,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),
@@ -5586,6 +5638,10 @@ mod tests {
         let first_candidate = Guid(0xda55_010b);
         let second_candidate = Guid(0xda55_010c);
         let open_candidate = |cell_selector| CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
             cell_selector,
             placement: LandblockPlacement {
                 origin: Vector3::zero(),
@@ -5596,6 +5652,10 @@ mod tests {
         };
         let scene = placement_scene(vec![
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x010a,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),
@@ -5672,6 +5732,10 @@ mod tests {
             outdoor_building: None,
         };
         let cell = |cell_selector, planes, portals| CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
             cell_selector,
             placement: LandblockPlacement {
                 origin: Vector3::zero(),
@@ -5745,6 +5809,10 @@ mod tests {
         let target_cell = Guid(0xda55_010b);
         let scene = placement_scene(vec![
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x010a,
                 // CE95-style decimal translations make the world-space boundary a few float ULPs
                 // short when transformed back to local space on a second placement pass.
@@ -5769,6 +5837,10 @@ mod tests {
                 }],
             },
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x010b,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),
@@ -5833,6 +5905,10 @@ mod tests {
         let target_cell = Guid(0xda55_011a);
         let scene = placement_scene(vec![
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x0126,
                 placement: LandblockPlacement {
                     origin: Vector3::new(92.0, 83.0, -43.6),
@@ -5859,6 +5935,10 @@ mod tests {
                 }],
             },
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x011a,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),
@@ -5933,6 +6013,10 @@ mod tests {
         let target_cell = Guid(0xda55_010b);
         let scene = placement_scene(vec![
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x010a,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),
@@ -5948,6 +6032,10 @@ mod tests {
                 )],
             },
             CellVolume {
+                visibility: holtburger_content::CellVisibility {
+                    visible_cell_selectors: Vec::new(),
+                    seen_outside: false,
+                },
                 cell_selector: 0x010b,
                 placement: LandblockPlacement {
                     origin: Vector3::zero(),

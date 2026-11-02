@@ -2509,6 +2509,10 @@ async fn reduced_gap_packets_use_committed_pose_and_report_the_next_accepted_cel
         (0x0101, Vector3::new(1.0, 0.0, 0.0), -9.0),
     ]
     .map(|(cell_selector, normal, d)| CellVolume {
+        visibility: holtburger_content::CellVisibility {
+            visible_cell_selectors: Vec::new(),
+            seen_outside: false,
+        },
         cell_selector,
         placement: LandblockPlacement {
             origin: Vector3::zero(),

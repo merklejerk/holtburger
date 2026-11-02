@@ -980,6 +980,10 @@ fn upward_recovery_preserves_upper_only_cell_reach_and_motion_provenance() {
     asset.static_geometry = LandblockColliders::new(
         Vec::new(),
         vec![CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
             cell_selector: 0x0100,
             placement: LandblockPlacement {
                 origin: Vector3::zero(),
@@ -1373,6 +1377,10 @@ fn dungeon_ramp_seam() -> CollisionScene {
             .unwrap(),
         );
         volumes.push(CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
             cell_selector: selector,
             placement,
             planes: vec![

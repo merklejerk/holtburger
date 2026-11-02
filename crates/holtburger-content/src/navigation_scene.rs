@@ -11,9 +11,9 @@ use std::{
 use anyhow::{Context, Result, ensure};
 
 use crate::{
-    CellCollisionPortal, CellCollisionPortalTarget, CellVolume, ColliderScale, LandblockColliders,
-    LandblockCollisionAsset, LandblockSceneClass, OutdoorBuildingTransit, PlacedCollider,
-    StaticColliderPlacement, TerrainCollisionSurface,
+    CellCollisionPortal, CellCollisionPortalTarget, CellVisibility, CellVolume, ColliderScale,
+    LandblockColliders, LandblockCollisionAsset, LandblockSceneClass, OutdoorBuildingTransit,
+    PlacedCollider, StaticColliderPlacement, TerrainCollisionSurface,
     navigation_bundle::{
         NavigationArchive, NavigationCell, NavigationRoomGeometry, NavigationTerrain,
     },
@@ -109,6 +109,10 @@ impl NavigationSceneSource {
                 })
             }).collect::<Result<Vec<_>>>()?;
             volumes.push(CellVolume {
+                visibility: CellVisibility {
+                    visible_cell_selectors: cell.visible_cell_selectors.clone(),
+                    seen_outside: cell.flags & 0x01 != 0,
+                },
                 cell_selector: cell.selector,
                 placement: cell.placement,
                 planes: room.planes.clone(),

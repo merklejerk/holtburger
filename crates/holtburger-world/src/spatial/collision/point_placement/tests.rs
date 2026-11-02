@@ -11,6 +11,10 @@ const SECOND: u16 = 0x0101;
 
 fn room(selector: u16, origin: Vector3) -> CellVolume {
     CellVolume {
+        visibility: holtburger_content::CellVisibility {
+            visible_cell_selectors: Vec::new(),
+            seen_outside: false,
+        },
         cell_selector: selector,
         placement: LandblockPlacement {
             origin,

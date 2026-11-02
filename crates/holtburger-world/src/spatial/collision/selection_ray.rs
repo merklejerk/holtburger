@@ -247,6 +247,10 @@ mod tests {
         let target = Guid(0xda55_010b);
         let disconnected = Guid(0xda55_010c);
         let volume = |selector, portals| CellVolume {
+            visibility: holtburger_content::CellVisibility {
+                visible_cell_selectors: Vec::new(),
+                seen_outside: false,
+            },
             cell_selector: selector,
             placement: LandblockPlacement {
                 origin: Vector3::zero(),

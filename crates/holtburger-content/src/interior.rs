@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use anyhow::{Context, Result, ensure};
@@ -192,6 +192,17 @@ impl LandblockInteriorSystemAssembler {
             decoded_cells.push(env_cell);
         }
 
+        let cell_ids: HashSet<_> = decoded_cells.iter().map(|cell| cell.id).collect();
+        for cell in &decoded_cells {
+            for visible in &cell.visible_cells {
+                let target = (landblock.landblock_id & 0xffff_0000) | u32::from(*visible);
+                ensure!(
+                    cell_ids.contains(&target),
+                    "EnvCell 0x{:08X} visibility references missing EnvCell 0x{target:08X}",
+                    cell.id
+                );
+            }
+        }
         let topology = build_portal_topology(landblock, &decoded_cells)?;
         let cells = decoded_cells
             .iter()
@@ -566,6 +577,37 @@ mod tests {
                 environment_id,
                 local_selector: 0x11,
             }
+        );
+    }
+
+    #[test]
+    fn interior_assembly_rejects_visibility_to_an_absent_cell() {
+        let environment_id = 0x0d00_0001;
+        let mut cell = synthetic_env_cell(0xda55_0100, Vec::new());
+        cell.visible_cells = vec![0x0101];
+        let source = Arc::new(CountingSource::new(HashMap::from([
+            (
+                (EOR_CELL_NAMESPACE.to_string(), cell.id),
+                pack_env_cell(&cell),
+            ),
+            (
+                (EOR_PORTAL_NAMESPACE.to_string(), environment_id),
+                minimal_environment_bytes(environment_id, &[0x10]),
+            ),
+        ])));
+        let repository = ContentRepository::from_mounts(vec![source]);
+        let mut landblock = synthetic_landblock();
+        landblock.env_cell_refs = vec![LandblockEnvCellRef {
+            source_index: 0,
+            env_cell_id: cell.id,
+        }];
+        let error = LandblockInteriorSystemAssembler
+            .assemble(&repository, &ContentDecodeCache::new(), &landblock)
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("visibility references missing EnvCell")
         );
     }
 

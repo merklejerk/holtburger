@@ -5509,6 +5509,10 @@ mod tests {
                 static_geometry: LandblockColliders::new(
                     Vec::new(),
                     vec![holtburger_content::CellVolume {
+                        visibility: holtburger_content::CellVisibility {
+                            visible_cell_selectors: Vec::new(),
+                            seen_outside: false,
+                        },
                         cell_selector: 0x0100,
                         placement: holtburger_content::LandblockPlacement {
                             origin: Vector3::zero(),
@@ -5830,7 +5834,7 @@ mod tests {
             interest.clone(),
             flat_collision_scene_for_interest(&interest),
         );
-        client.world.tick();
+        client.world.tick(None);
         let metadata_boundary = client.world.entities.mutation_boundary();
         let before = client.capture_dynamic_entity_tick_baseline();
         let dt = Duration::from_millis(PHYSICS_TICK_MS);

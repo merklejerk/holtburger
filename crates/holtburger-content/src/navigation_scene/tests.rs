@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     BspSolid, CollisionBox, CollisionShape, LandblockCellStructureRef, LandblockPlacement,
-    LandblockTerrain, TERRAIN_GRID_CELLS, TerrainCellDiagonals,
+    TERRAIN_GRID_CELLS, TerrainCellDiagonals,
     navigation_bundle::{
         NavigationArchiveWriter, NavigationBuilding, NavigationBuildingPortal,
         NavigationPortalConnection, NavigationPortalGeometry,
@@ -31,8 +31,7 @@ fn cells() -> Vec<NavigationCell> {
         .map(|selector| NavigationCell {
             visible_cell_selectors: Vec::new(),
             selector,
-            flags: 0,
-            authored_cell_id: u32::from(selector),
+            seen_outside: false,
             structure: LandblockCellStructureRef {
                 environment_id: ENVIRONMENT,
                 local_selector: STRUCTURE,
@@ -42,9 +41,7 @@ fn cells() -> Vec<NavigationCell> {
                 flags: if selector == FIRST { 0x02 } else { 0x04 },
                 polygon_id: APERTURE,
                 other_cell_id: SECOND,
-                other_portal_id: 0,
             }],
-            restriction_object_id: None,
         })
         .collect()
 }
@@ -96,28 +93,19 @@ fn terrain() -> NavigationTerrain {
     let grid_size = TERRAIN_GRID_CELLS + 1;
     NavigationTerrain {
         scene_class: LandblockSceneClass::OutdoorWithEnvCells,
-        terrain: LandblockTerrain {
-            grid_size,
-            tile_size: 24.0,
-            height_indices: vec![0; grid_size * grid_size],
-            heights: vec![0.0; grid_size * grid_size],
-            terrain_samples: vec![0; grid_size * grid_size],
-            cell_diagonals: TerrainCellDiagonals::from_cell_bytes(&vec![
-                0;
-                TERRAIN_GRID_CELLS.pow(2)
-            ])
+        grid_size,
+        tile_size: 24.0,
+        heights: vec![0.0; grid_size * grid_size],
+        terrain_samples: vec![0; grid_size * grid_size],
+        cell_diagonals: TerrainCellDiagonals::from_cell_bytes(&vec![0; TERRAIN_GRID_CELLS.pow(2)])
             .unwrap(),
-        },
         buildings: vec![NavigationBuilding {
             placement: placement(),
             portals: vec![NavigationBuildingPortal {
-                flags: 0,
                 other_cell_id: SECOND,
                 other_portal_id: 0,
-                linked_cells: vec![SECOND],
             }],
         }],
-        restrictions: BTreeMap::new(),
     }
 }
 

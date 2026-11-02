@@ -16,8 +16,7 @@ fn cell() -> NavigationCell {
     NavigationCell {
         visible_cell_selectors: Vec::new(),
         selector: 0x0100,
-        flags: 9,
-        authored_cell_id: 0x0100,
+        seen_outside: true,
         structure: LandblockCellStructureRef {
             environment_id: ENVIRONMENT,
             local_selector: 2,
@@ -27,9 +26,7 @@ fn cell() -> NavigationCell {
             flags: 1,
             polygon_id: 3,
             other_cell_id: 0x0101,
-            other_portal_id: 2,
         }],
-        restriction_object_id: Some(0x0200_0010),
     }
 }
 
@@ -199,24 +196,18 @@ fn terrain() -> NavigationTerrain {
     let size = crate::terrain_topology::TERRAIN_GRID_CELLS + 1;
     NavigationTerrain {
         scene_class: LandblockSceneClass::OutdoorWithEnvCells,
-        terrain: LandblockTerrain {
-            grid_size: size,
-            tile_size: 24.0,
-            height_indices: vec![3; size * size],
-            heights: vec![12.5; size * size],
-            terrain_samples: vec![0x40; size * size],
-            cell_diagonals: TerrainCellDiagonals::for_landblock(OWNER),
-        },
+        grid_size: size,
+        tile_size: 24.0,
+        heights: vec![12.5; size * size],
+        terrain_samples: vec![0x40; size * size],
+        cell_diagonals: TerrainCellDiagonals::for_landblock(OWNER),
         buildings: vec![NavigationBuilding {
             placement: placement(),
             portals: vec![NavigationBuildingPortal {
-                flags: 2,
                 other_cell_id: 0x0100,
                 other_portal_id: 1,
-                linked_cells: vec![0x0100, 0x0101],
             }],
         }],
-        restrictions: BTreeMap::from([(0x0100, 0x0200_0010)]),
     }
 }
 
@@ -234,25 +225,14 @@ fn terrain_and_entrance_metadata_are_ready_without_a_region_archive() {
         .unwrap()
         .unwrap();
     assert_eq!(source.scene_class, decoded.scene_class);
-    assert_eq!(
-        source.terrain.height_indices,
-        decoded.terrain.height_indices
-    );
-    assert_eq!(source.terrain.heights, decoded.terrain.heights);
-    assert_eq!(
-        source.terrain.terrain_samples,
-        decoded.terrain.terrain_samples
-    );
-    assert_eq!(
-        source.terrain.cell_diagonals,
-        decoded.terrain.cell_diagonals
-    );
-    assert_eq!(source.terrain.tile_size, decoded.terrain.tile_size);
+    assert_eq!(source.heights, decoded.heights);
+    assert_eq!(source.terrain_samples, decoded.terrain_samples);
+    assert_eq!(source.cell_diagonals, decoded.cell_diagonals);
+    assert_eq!(source.tile_size, decoded.tile_size);
     assert_eq!(
         rmp_serde::to_vec(&source.buildings).unwrap(),
         rmp_serde::to_vec(&decoded.buildings).unwrap()
     );
-    assert_eq!(source.restrictions, decoded.restrictions);
 }
 
 #[test]
@@ -333,14 +313,12 @@ fn malformed_terrain_dimensions_and_choices_are_rejected() {
     let source = terrain();
     let mut wire = TerrainWire {
         class: SceneClassWire::Mixed,
-        grid_size: source.terrain.grid_size as u32,
-        tile_size: source.terrain.tile_size,
-        height_indices: source.terrain.height_indices,
-        heights: source.terrain.heights,
-        samples: source.terrain.terrain_samples,
-        diagonals: source.terrain.cell_diagonals.to_cell_bytes(),
+        grid_size: source.grid_size as u32,
+        tile_size: source.tile_size,
+        heights: source.heights,
+        samples: source.terrain_samples,
+        diagonals: source.cell_diagonals.to_cell_bytes(),
         buildings: source.buildings,
-        restrictions: source.restrictions,
     };
     let grid = wire.grid_size;
     wire.grid_size -= 1;

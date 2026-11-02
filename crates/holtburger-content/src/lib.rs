@@ -94,8 +94,8 @@ pub use selection_envelope::{
 pub use setup_dimensions::{SetupDimensionCatalog, SetupDimensions};
 pub use soul_emote::{SoulEmoteCatalog, SoulEmotePose, SoulEmoteResolution, SoulEmoteToken};
 pub use terrain_collision::{
-    TERRAIN_WATER_COLLISION_DEPTH, TerrainCollisionCell, TerrainCollisionSurface,
-    TerrainCollisionTriangle,
+    TERRAIN_WATER_COLLISION_DEPTH, TerrainCollisionCell, TerrainCollisionGrid,
+    TerrainCollisionSurface, TerrainCollisionTriangle,
 };
 pub use terrain_topology::{TERRAIN_GRID_CELLS, TerrainCellDiagonals};
 pub use texture_pixels::{ResolvedSurfaceTexturePixels, TexturePixelFormat};

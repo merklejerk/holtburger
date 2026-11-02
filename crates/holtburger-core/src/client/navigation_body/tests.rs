@@ -256,13 +256,8 @@ async fn navigation_activation_waits_for_coverage_then_enters_without_model_body
     use holtburger_content::navigation_bundle::{
         NAVIGATION_FILE, NavigationArchiveWriter, NavigationTerrain,
     };
-    use holtburger_content::{
-        LandblockSceneClass, LandblockTerrain, TERRAIN_GRID_CELLS, TerrainCellDiagonals,
-    };
-    use std::{
-        collections::BTreeMap,
-        time::{Duration, Instant},
-    };
+    use holtburger_content::{LandblockSceneClass, TERRAIN_GRID_CELLS, TerrainCellDiagonals};
+    use std::time::{Duration, Instant};
 
     let (temp, _hba_source) = source(Vec::new());
     let owner = Guid(0x1234_ffff);
@@ -273,17 +268,13 @@ async fn navigation_activation_waits_for_coverage_then_enters_without_model_body
             owner.0,
             &NavigationTerrain {
                 scene_class: LandblockSceneClass::OutdoorOnly,
-                terrain: LandblockTerrain {
-                    grid_size,
-                    tile_size: holtburger_common::position::METERS_PER_LANDBLOCK
-                        / TERRAIN_GRID_CELLS as f32,
-                    height_indices: vec![0; grid_size * grid_size],
-                    heights: vec![0.0; grid_size * grid_size],
-                    terrain_samples: vec![0; grid_size * grid_size],
-                    cell_diagonals: TerrainCellDiagonals::for_landblock(owner.0),
-                },
+                grid_size,
+                tile_size: holtburger_common::position::METERS_PER_LANDBLOCK
+                    / TERRAIN_GRID_CELLS as f32,
+                heights: vec![0.0; grid_size * grid_size],
+                terrain_samples: vec![0; grid_size * grid_size],
+                cell_diagonals: TerrainCellDiagonals::for_landblock(owner.0),
                 buildings: Vec::new(),
-                restrictions: BTreeMap::new(),
             },
         )
         .unwrap();

@@ -15,7 +15,7 @@ use super::{
 };
 use crate::{
     BspSolid, CollisionBox, CollisionPolygon, CollisionShape, LandblockCellStructureRef,
-    LandblockPlacement, LandblockSceneClass, LandblockTerrain, TerrainCellDiagonals,
+    LandblockPlacement, LandblockSceneClass, TerrainCellDiagonals,
 };
 
 /// One placed cell's navigation facts. Visual references and object placements are excluded.
@@ -25,31 +25,25 @@ pub struct NavigationCell {
     pub visible_cell_selectors: Vec<u16>,
     /// Low-word cell identity within the block's normalized owner.
     pub selector: u16,
-    /// Authored cell flags, with the stripped static-object bit cleared.
-    pub flags: u32,
-    /// Source-authored identity, retained independently from the archive key for inspection.
-    pub authored_cell_id: u32,
+    /// Whether the outdoor neighborhood contributes to this cell's visibility.
+    pub seen_outside: bool,
     /// Shared structure containing this cell's shell and containment geometry.
     pub structure: LandblockCellStructureRef,
     /// Authored placement in the owner's coordinate frame, including negative coordinates.
     pub placement: LandblockPlacement,
     /// Ordered authored portal connections; geometry resides in the shared structure.
     pub portals: Vec<NavigationPortalConnection>,
-    /// Preserved restriction identity; no restriction model is loaded as an obstacle.
-    pub restriction_object_id: Option<u32>,
 }
 
 /// Per-instance portal semantics, separate from the structure's shared aperture geometry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NavigationPortalConnection {
-    /// Authored side/exact/outside flags.
+    /// Side and outdoor-transition flags consumed by traversal.
     pub flags: u16,
     /// Polygon identity within the shared room structure.
     pub polygon_id: u16,
     /// Target local cell selector, or authored outdoor marker.
     pub other_cell_id: u16,
-    /// Reciprocal portal-vector selector for graph validation and inspection.
-    pub other_portal_id: u16,
 }
 
 /// Resolved aperture in a room structure's local coordinates.
@@ -77,12 +71,18 @@ pub struct NavigationRoomGeometry {
 pub struct NavigationTerrain {
     /// Canonical classification used for geographic demand and activation.
     pub scene_class: LandblockSceneClass,
-    /// Resolved terrain heights, material/water samples, and triangulation.
-    pub terrain: LandblockTerrain,
+    /// Width of the resolved square terrain grid.
+    pub grid_size: usize,
+    /// Distance between adjacent terrain vertices in metres.
+    pub tile_size: f32,
+    /// Resolved vertex heights; source height-table indices are not needed.
+    pub heights: Vec<f32>,
+    /// Authored samples supplying the collision water classification.
+    pub terrain_samples: Vec<u16>,
+    /// Resolved triangle diagonals used by terrain collision.
+    pub cell_diagonals: TerrainCellDiagonals,
     /// Ordered building registrations needed to associate outdoor entrances with cell portals.
     pub buildings: Vec<NavigationBuilding>,
-    /// Authored restriction lookup, preserved without resolving restriction object models.
-    pub restrictions: BTreeMap<u32, u32>,
 }
 
 /// Building transition metadata; model geometry and visual identity are deliberately excluded.
@@ -97,14 +97,10 @@ pub struct NavigationBuilding {
 /// One building's registration of a cell-to-outdoor portal.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NavigationBuildingPortal {
-    /// Authored transition flags.
-    pub flags: u16,
     /// Local indoor destination selector.
     pub other_cell_id: u16,
     /// Portal-vector selector in that destination cell.
     pub other_portal_id: u16,
-    /// Authored linked cell selectors used by entrance/topology inspection.
-    pub linked_cells: Vec<u16>,
 }
 
 /// Stable tree schema, preserving all runtime physics-node facts.
@@ -343,12 +339,10 @@ struct TerrainWire {
     class: SceneClassWire,
     grid_size: u32,
     tile_size: f32,
-    height_indices: Vec<u8>,
     heights: Vec<f32>,
     samples: Vec<u16>,
     diagonals: Vec<u8>,
     buildings: Vec<NavigationBuilding>,
-    restrictions: BTreeMap<u32, u32>,
 }
 
 impl NavigationArchiveWriter {
@@ -385,21 +379,19 @@ impl NavigationArchiveWriter {
 
     /// Writes resolved outdoor facts without source DAT records or region lookups.
     pub fn add_terrain(&mut self, owner: u32, terrain: &NavigationTerrain) -> Result<()> {
-        let t = &terrain.terrain;
         let wire = TerrainWire {
             class: match terrain.scene_class {
                 LandblockSceneClass::DungeonOnly => SceneClassWire::Dungeon,
                 LandblockSceneClass::OutdoorOnly => SceneClassWire::Outdoor,
                 LandblockSceneClass::OutdoorWithEnvCells => SceneClassWire::Mixed,
             },
-            grid_size: u32::try_from(t.grid_size).map_err(|_| NavigationArchiveError::Size)?,
-            tile_size: t.tile_size,
-            height_indices: t.height_indices.clone(),
-            heights: t.heights.clone(),
-            samples: t.terrain_samples.clone(),
-            diagonals: t.cell_diagonals.to_cell_bytes(),
+            grid_size: u32::try_from(terrain.grid_size)
+                .map_err(|_| NavigationArchiveError::Size)?,
+            tile_size: terrain.tile_size,
+            heights: terrain.heights.clone(),
+            samples: terrain.terrain_samples.clone(),
+            diagonals: terrain.cell_diagonals.to_cell_bytes(),
             buildings: terrain.buildings.clone(),
-            restrictions: terrain.restrictions.clone(),
         };
         validate_terrain(&wire)?;
         self.add_block(
@@ -464,16 +456,12 @@ impl NavigationArchive {
                 SceneClassWire::Outdoor => LandblockSceneClass::OutdoorOnly,
                 SceneClassWire::Mixed => LandblockSceneClass::OutdoorWithEnvCells,
             },
-            terrain: LandblockTerrain {
-                grid_size: wire.grid_size as usize,
-                tile_size: wire.tile_size,
-                height_indices: wire.height_indices,
-                heights: wire.heights,
-                terrain_samples: wire.samples,
-                cell_diagonals,
-            },
+            grid_size: wire.grid_size as usize,
+            tile_size: wire.tile_size,
+            heights: wire.heights,
+            terrain_samples: wire.samples,
+            cell_diagonals,
             buildings: wire.buildings,
-            restrictions: wire.restrictions,
         }))
     }
 }
@@ -510,10 +498,7 @@ fn validate_terrain(terrain: &TerrainWire) -> Result<TerrainCellDiagonals> {
         ));
     }
     let count = (crate::terrain_topology::TERRAIN_GRID_CELLS + 1).pow(2);
-    if terrain.height_indices.len() != count
-        || terrain.heights.len() != count
-        || terrain.samples.len() != count
-    {
+    if terrain.heights.len() != count || terrain.samples.len() != count {
         return Err(NavigationArchiveError::Product(
             "terrain sample counts do not match the grid".into(),
         ));

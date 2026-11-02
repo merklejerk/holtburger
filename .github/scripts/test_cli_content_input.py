@@ -110,6 +110,7 @@ class CliContentInputTests(unittest.TestCase):
         cases = (("bootstrap.hba", b"not an HBA", "HBA header"),
                  ("navigation.hnav", b"truncated", "truncated"),
                  ("navigation.hnav", b"notmagic" + bytes(NAVIGATION_HEADER.size - 8), "navigation header"),
+                 ("navigation.hnav", NAVIGATION_HEADER.pack(b"HLTBNAV\0", NAVIGATION_FORMAT_VERSION - 1, 0, NAVIGATION_HEADER.size), "Unsupported CLI navigation format"),
                  ("navigation.hnav", NAVIGATION_HEADER.pack(b"HLTBNAV\0", NAVIGATION_FORMAT_VERSION + 1, 0, NAVIGATION_HEADER.size), "Unsupported CLI navigation format"))
         for name, payload, message in cases:
             payloads = components()

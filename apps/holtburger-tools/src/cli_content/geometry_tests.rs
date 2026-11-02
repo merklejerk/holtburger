@@ -107,7 +107,7 @@ fn exported_shared_rooms_preserve_placement_portals_shells_and_terrain_at_runtim
                 placement,
                 surface_ids: Vec::new(),
                 visible_cell_ids: if selector == CELLS[0] {
-                    vec![full_id(CELLS[1])]
+                    vec![full_id(CELLS[1]), full_id(CELLS[0])]
                 } else {
                     Vec::new()
                 },
@@ -208,7 +208,7 @@ fn exported_shared_rooms_preserve_placement_portals_shells_and_terrain_at_runtim
         assert_eq!(
             volume.visibility.visible_cell_selectors,
             if index == 0 {
-                vec![CELLS[1]]
+                CELLS.to_vec()
             } else {
                 Vec::new()
             }

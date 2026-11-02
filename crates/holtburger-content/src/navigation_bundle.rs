@@ -27,7 +27,7 @@ pub use payload::{
 
 const MAGIC: [u8; 8] = *b"HLTBNAV\0";
 /// Prepared navigation format version, independent of the application's version.
-pub const NAVIGATION_FORMAT_VERSION: u32 = 3;
+pub const NAVIGATION_FORMAT_VERSION: u32 = 4;
 /// Bootstrap companion filename in a generated content directory.
 pub const BOOTSTRAP_FILE: &str = "bootstrap.hba";
 /// Prepared scene companion filename in a generated content directory.

@@ -40,7 +40,8 @@ The public client release bundles the companions; it does not add a separate con
 user download. Retail DATs and full HBAs are local generator inputs and must not enter CI or
 public release assets.
 
-HNAV format 3 includes authored cell visibility for shared entity retention. Source builds and
+HNAV format 4 retains authored cell visibility and runtime navigation facts while omitting unused
+source inspection and restriction metadata. Source builds and
 release inputs must use matching navigation formats; a format change requires regenerating the
 content pair and selecting a fresh approved ZIP through the descriptor above.
 

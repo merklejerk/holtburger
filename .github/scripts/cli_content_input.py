@@ -10,7 +10,7 @@ import zipfile
 
 
 CONTENT_FILES = ("bootstrap.hba", "navigation.hnav")
-NAVIGATION_FORMAT_VERSION = 2
+NAVIGATION_FORMAT_VERSION = 4
 NAVIGATION_HEADER = struct.Struct("<8sIIQ")
 
 

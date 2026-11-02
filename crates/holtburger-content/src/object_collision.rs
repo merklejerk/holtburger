@@ -1064,13 +1064,14 @@ impl LandblockRoomShellAssembler {
                 })
                 .collect::<Result<Vec<_>>>()?;
 
+            // Visibility is a set: canonical order preserves membership and compresses repeated
+            // neighboring lists without carrying the source's incidental enumeration order.
+            let mut visible_cell_selectors: Vec<_> =
+                cell.visible_cell_ids.iter().map(|id| *id as u16).collect();
+            visible_cell_selectors.sort_unstable();
             cell_volumes.push(CellVolume {
                 visibility: CellVisibility {
-                    visible_cell_selectors: cell
-                        .visible_cell_ids
-                        .iter()
-                        .map(|id| *id as u16)
-                        .collect(),
+                    visible_cell_selectors,
                     seen_outside: cell.seen_outside,
                 },
                 cell_selector: (cell.env_cell_id & 0xffff) as u16,

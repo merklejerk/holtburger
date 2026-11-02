@@ -12,8 +12,7 @@ use holtburger_content::navigation_bundle::{
 };
 use holtburger_content::{
     BspSolid, CollisionBox, CollisionPolygon, CollisionShape, LandblockCellStructureRef,
-    LandblockPlacement, LandblockSceneClass, LandblockTerrain, TERRAIN_GRID_CELLS,
-    TerrainCellDiagonals,
+    LandblockPlacement, LandblockSceneClass, TERRAIN_GRID_CELLS, TerrainCellDiagonals,
 };
 use holtburger_dat::physics::{BspLeaf, BspNode};
 use std::{
@@ -154,36 +153,29 @@ fn prepared_source() -> (TempDir, Arc<PreparedNavigationSource>) {
             OWNER,
             &NavigationTerrain {
                 scene_class: LandblockSceneClass::DungeonOnly,
-                terrain: LandblockTerrain {
-                    grid_size,
-                    tile_size: holtburger_common::position::METERS_PER_LANDBLOCK
-                        / TERRAIN_GRID_CELLS as f32,
-                    height_indices: vec![0; grid_size * grid_size],
-                    heights: vec![0.0; grid_size * grid_size],
-                    terrain_samples: vec![0; grid_size * grid_size],
-                    cell_diagonals: TerrainCellDiagonals::for_landblock(OWNER),
-                },
+                grid_size,
+                tile_size: holtburger_common::position::METERS_PER_LANDBLOCK
+                    / TERRAIN_GRID_CELLS as f32,
+                heights: vec![0.0; grid_size * grid_size],
+                terrain_samples: vec![0; grid_size * grid_size],
+                cell_diagonals: TerrainCellDiagonals::for_landblock(OWNER),
                 buildings: Vec::new(),
-                restrictions: BTreeMap::new(),
             },
         )
         .unwrap();
     let cells = [FIRST, SECOND].map(|selector| NavigationCell {
         visible_cell_selectors: Vec::new(),
         selector,
-        flags: 0,
-        authored_cell_id: u32::from(selector),
+        seen_outside: false,
         structure: LandblockCellStructureRef {
             environment_id: ENVIRONMENT,
             local_selector: u32::from(selector),
         },
         placement: placement(),
-        restriction_object_id: None,
         portals: vec![NavigationPortalConnection {
             flags: if selector == FIRST { 0 } else { 0x02 },
             polygon_id: APERTURE,
             other_cell_id: if selector == FIRST { SECOND } else { FIRST },
-            other_portal_id: 0,
         }],
     });
     writer.add_cells(OWNER, &cells).unwrap();

@@ -13,7 +13,7 @@ use anyhow::{Context, Result, ensure};
 use crate::{
     CellCollisionPortal, CellCollisionPortalTarget, CellVisibility, CellVolume, ColliderScale,
     LandblockColliders, LandblockCollisionAsset, LandblockSceneClass, OutdoorBuildingTransit,
-    PlacedCollider, StaticColliderPlacement, TerrainCollisionSurface,
+    PlacedCollider, StaticColliderPlacement, TerrainCollisionGrid, TerrainCollisionSurface,
     navigation_bundle::{
         NavigationArchive, NavigationCell, NavigationRoomGeometry, NavigationTerrain,
     },
@@ -111,7 +111,7 @@ impl NavigationSceneSource {
             volumes.push(CellVolume {
                 visibility: CellVisibility {
                     visible_cell_selectors: cell.visible_cell_selectors.clone(),
-                    seen_outside: cell.flags & 0x01 != 0,
+                    seen_outside: cell.seen_outside,
                 },
                 cell_selector: cell.selector,
                 placement: cell.placement,
@@ -122,7 +122,13 @@ impl NavigationSceneSource {
         let surface = match terrain.scene_class {
             LandblockSceneClass::DungeonOnly => TerrainCollisionSurface::empty(),
             LandblockSceneClass::OutdoorOnly | LandblockSceneClass::OutdoorWithEnvCells => {
-                TerrainCollisionSurface::from_terrain(&terrain.terrain)?
+                TerrainCollisionSurface::from_grid(TerrainCollisionGrid {
+                    grid_size: terrain.grid_size,
+                    tile_size: terrain.tile_size,
+                    heights: &terrain.heights,
+                    terrain_samples: &terrain.terrain_samples,
+                    cell_diagonals: &terrain.cell_diagonals,
+                })?
             }
         };
         Ok(Some(LandblockCollisionAsset {

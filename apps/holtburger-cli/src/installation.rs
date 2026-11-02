@@ -85,10 +85,8 @@ mod tests {
     use super::*;
     use holtburger_content::navigation_bundle::{NavigationArchiveWriter, NavigationTerrain};
     use holtburger_content::{
-        LandblockSceneClass, LandblockTerrain, SceneContentSource, TERRAIN_GRID_CELLS,
-        TerrainCellDiagonals,
+        LandblockSceneClass, SceneContentSource, TERRAIN_GRID_CELLS, TerrainCellDiagonals,
     };
-    use std::collections::BTreeMap;
 
     const OWNER: u32 = 0x1234_ffff;
     use holtburger_dat::{HbaStreamWriter, ResourceKey};
@@ -108,17 +106,13 @@ mod tests {
                 OWNER,
                 &NavigationTerrain {
                     scene_class: LandblockSceneClass::OutdoorOnly,
-                    terrain: LandblockTerrain {
-                        grid_size,
-                        tile_size: holtburger_common::position::METERS_PER_LANDBLOCK
-                            / TERRAIN_GRID_CELLS as f32,
-                        height_indices: vec![0; grid_size * grid_size],
-                        heights: vec![0.0; grid_size * grid_size],
-                        terrain_samples: vec![0; grid_size * grid_size],
-                        cell_diagonals: TerrainCellDiagonals::for_landblock(OWNER),
-                    },
+                    grid_size,
+                    tile_size: holtburger_common::position::METERS_PER_LANDBLOCK
+                        / TERRAIN_GRID_CELLS as f32,
+                    heights: vec![0.0; grid_size * grid_size],
+                    terrain_samples: vec![0; grid_size * grid_size],
+                    cell_diagonals: TerrainCellDiagonals::for_landblock(OWNER),
                     buildings: Vec::new(),
-                    restrictions: BTreeMap::new(),
                 },
             )
             .unwrap();

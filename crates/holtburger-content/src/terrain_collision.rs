@@ -7,7 +7,34 @@
 use anyhow::{Result, ensure};
 use holtburger_common::math::Vector3;
 
-use crate::{LandblockTerrain, TERRAIN_GRID_CELLS};
+use crate::{LandblockTerrain, TERRAIN_GRID_CELLS, TerrainCellDiagonals};
+
+/// Borrowed resolved grid facts used by collision, independent of source height-table indices.
+#[derive(Debug, Clone, Copy)]
+pub struct TerrainCollisionGrid<'a> {
+    /// Width of the square vertex grid.
+    pub grid_size: usize,
+    /// Distance between adjacent vertices in metres.
+    pub tile_size: f32,
+    /// Resolved vertex heights in row-major order.
+    pub heights: &'a [f32],
+    /// Authored samples supplying water classification for each vertex.
+    pub terrain_samples: &'a [u16],
+    /// The resolved triangle choice for each terrain cell.
+    pub cell_diagonals: &'a TerrainCellDiagonals,
+}
+
+impl<'a> From<&'a LandblockTerrain> for TerrainCollisionGrid<'a> {
+    fn from(terrain: &'a LandblockTerrain) -> Self {
+        Self {
+            grid_size: terrain.grid_size,
+            tile_size: terrain.tile_size,
+            heights: &terrain.heights,
+            terrain_samples: &terrain.terrain_samples,
+            cell_diagonals: &terrain.cell_diagonals,
+        }
+    }
+}
 
 /// Retail's full-water depth, applied vertically at authored water collision vertices.
 pub const TERRAIN_WATER_COLLISION_DEPTH: f32 = 0.9;
@@ -48,6 +75,11 @@ impl TerrainCollisionSurface {
 
     /// Builds obstruction triangles from one validated canonical terrain asset.
     pub fn from_terrain(terrain: &LandblockTerrain) -> Result<Self> {
+        Self::from_grid(terrain.into())
+    }
+
+    /// Builds the same collision surface from full or prepared resolved terrain facts.
+    pub fn from_grid(terrain: TerrainCollisionGrid<'_>) -> Result<Self> {
         let expected_grid_size = TERRAIN_GRID_CELLS + 1;
         ensure!(
             terrain.grid_size == expected_grid_size,
@@ -121,7 +153,7 @@ impl TerrainCollisionSurface {
     }
 }
 
-fn terrain_vertex_is_water(terrain: &LandblockTerrain, column: usize, row: usize) -> bool {
+fn terrain_vertex_is_water(terrain: TerrainCollisionGrid<'_>, column: usize, row: usize) -> bool {
     // Retail's fixed `SurfChar` table marks terrain types 16 through 20 as water.
     terrain_sample_is_water(terrain.terrain_samples[row * terrain.grid_size + column])
 }
@@ -140,7 +172,11 @@ impl TerrainCollisionTriangle {
     }
 }
 
-fn terrain_collision_vertex(terrain: &LandblockTerrain, column: usize, row: usize) -> Vector3 {
+fn terrain_collision_vertex(
+    terrain: TerrainCollisionGrid<'_>,
+    column: usize,
+    row: usize,
+) -> Vector3 {
     let authored_height = terrain.heights[row * terrain.grid_size + column];
     // RETAIL DIVERGENCE: Retail selects discontinuous 0.1/0.45 quarter-cell depths and a 0.9
     // fully-flooded plane offset. Lowering water vertices instead makes the existing collision
@@ -279,10 +315,10 @@ mod tests {
         for row in 0..8 {
             for column in 0..8 {
                 let cell = &surface.cells[row * 8 + column];
-                let southwest = terrain_collision_vertex(&terrain, column, row);
-                let southeast = terrain_collision_vertex(&terrain, column + 1, row);
-                let northwest = terrain_collision_vertex(&terrain, column, row + 1);
-                let northeast = terrain_collision_vertex(&terrain, column + 1, row + 1);
+                let southwest = terrain_collision_vertex((&terrain).into(), column, row);
+                let southeast = terrain_collision_vertex((&terrain).into(), column + 1, row);
+                let northwest = terrain_collision_vertex((&terrain).into(), column, row + 1);
+                let northeast = terrain_collision_vertex((&terrain).into(), column + 1, row + 1);
                 let expected = if terrain
                     .cell_diagonals
                     .uses_southwest_to_northeast_cut(column, row)

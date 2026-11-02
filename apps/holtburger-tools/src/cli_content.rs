@@ -224,34 +224,23 @@ fn prepare_owner(
                     vertices: aperture.aperture_vertices.clone(),
                 },
             );
-            let (other_cell_id, other_portal_id) = match source.endpoint {
-                LandblockPortalEndpoint::Internal {
-                    other_cell_id,
-                    other_portal_id,
-                    ..
-                }
-                | LandblockPortalEndpoint::Outside {
-                    other_cell_id,
-                    other_portal_id,
-                    ..
-                } => (other_cell_id, other_portal_id),
+            let other_cell_id = match source.endpoint {
+                LandblockPortalEndpoint::Internal { other_cell_id, .. }
+                | LandblockPortalEndpoint::Outside { other_cell_id, .. } => other_cell_id,
             };
             connections.push(NavigationPortalConnection {
-                flags: source.flags,
+                flags: source.flags & 0x06,
                 polygon_id: source.polygon_id,
                 other_cell_id,
-                other_portal_id,
             });
         }
         prepared.cells.push(NavigationCell {
             visible_cell_selectors: volume.visibility.visible_cell_selectors.clone(),
             selector,
-            flags: cell.flags & !0x02,
-            authored_cell_id: cell.authored_cell_id,
+            seen_outside: volume.visibility.seen_outside,
             structure: cell.structure,
             placement: cell.placement,
             portals: connections,
-            restriction_object_id: cell.restriction_object_id,
         });
     }
     prepared.cells.sort_by_key(|cell| cell.selector);
@@ -261,7 +250,11 @@ fn prepare_owner(
 fn prepare_terrain(landblock: &LandblockAsset) -> NavigationTerrain {
     NavigationTerrain {
         scene_class: landblock.scene_class,
-        terrain: landblock.terrain.clone(),
+        grid_size: landblock.terrain.grid_size,
+        tile_size: landblock.terrain.tile_size,
+        heights: landblock.terrain.heights.clone(),
+        terrain_samples: landblock.terrain.terrain_samples.clone(),
+        cell_diagonals: landblock.terrain.cell_diagonals.clone(),
         buildings: landblock
             .buildings
             .iter()
@@ -271,18 +264,11 @@ fn prepare_terrain(landblock: &LandblockAsset) -> NavigationTerrain {
                     .portals
                     .iter()
                     .map(|portal| NavigationBuildingPortal {
-                        flags: portal.flags,
                         other_cell_id: portal.other_cell_id,
                         other_portal_id: portal.other_portal_id,
-                        linked_cells: portal.stab_cell_ids.clone(),
                     })
                     .collect(),
             })
-            .collect(),
-        restrictions: landblock
-            .restrictions
-            .iter()
-            .map(|r| (r.cell_id, r.restriction_object_id))
             .collect(),
     }
 }

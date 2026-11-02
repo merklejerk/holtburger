@@ -235,7 +235,7 @@ const clientEntityFactsSchema = z
 		salvage: salvageCandidateSchema,
 		scenePlacement: z.enum(["available", "unavailable"]),
 		/** World-owned acquisition category, independent of rendering and disposition. */
-		targeting: z.enum(["ineligible", "creature", "non-creature"]),
+		targeting: z.enum(["ineligible", "creature", "non-creature", "projectile"]),
 		/** World-resolved ability of another player to harm us under current PvP statuses. */
 		playerThreat: z.boolean(),
 		/** Session-local confirmed-open state; null identifies every non-corpse entity. */

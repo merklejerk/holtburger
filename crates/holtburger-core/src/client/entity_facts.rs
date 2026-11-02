@@ -140,6 +140,7 @@ impl EntityFactsPublication {
             | WorldEvent::EntityIdentified(entity) => Some(entity.guid),
             WorldEvent::PlayerInfo(data) => Some(data.entity.guid),
             WorldEvent::PropertiesUpdated { guid, .. }
+            | WorldEvent::EntityStateUpdated { guid, .. }
             | WorldEvent::EntityScenePlacementChanged { guid, .. }
             | WorldEvent::EntityDespawned { guid, .. } => Some(*guid),
             _ => None,
@@ -336,6 +337,53 @@ mod tests {
     const PLAYER: Guid = Guid(1);
     const PACK: Guid = Guid(2);
     const ITEM: Guid = Guid(3);
+
+    #[test]
+    fn projectile_state_changes_reconstruct_the_same_targeting_as_snapshots() {
+        use holtburger_common::properties::{
+            ItemType, PhysicsState, WorldObjectPropertyAccessorsMut,
+        };
+        use holtburger_protocol::messages::SetStateData;
+        use holtburger_world::{entity::Entity, entity_facts::EntityTargetingCategory};
+
+        let mut world = WorldState::synthetic();
+        world.seed_local_player_entity(PLAYER, "Player", Default::default());
+        let mut entity = Entity::new(ITEM, "Thrown weapon".into(), Default::default());
+        entity.position.landblock_id = Guid(0xda55_0100);
+        entity.set_int_prop(PropertyInt::ItemType, ItemType::MELEE_WEAPON.bits() as i32);
+        world.add_entity(entity);
+        let mut publisher = EntityFactsPublication::default();
+        let mut mirror = BTreeMap::new();
+        assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+        assert_eq!(
+            mirror[&ITEM].targeting,
+            EntityTargetingCategory::NonCreature
+        );
+
+        for (sequence, physics_state, expected) in [
+            (
+                1,
+                PhysicsState::MISSILE,
+                EntityTargetingCategory::Projectile,
+            ),
+            (
+                2,
+                PhysicsState::empty(),
+                EntityTargetingCategory::NonCreature,
+            ),
+        ] {
+            for event in world.handle_message(&GameMessage::SetState(Box::new(SetStateData {
+                guid: ITEM,
+                physics_state,
+                instance_sequence: 0,
+                state_sequence: sequence,
+            }))) {
+                publisher.observe(&event);
+            }
+            assert_reconstructed(&mut world, &mut publisher, &mut mirror);
+            assert_eq!(mirror[&ITEM].targeting, expected);
+        }
+    }
 
     #[test]
     fn vendor_terms_republish_owned_sale_verdicts_without_item_updates() {

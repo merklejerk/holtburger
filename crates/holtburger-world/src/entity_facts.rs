@@ -202,9 +202,11 @@ pub enum SceneAvailability {
 pub enum EntityTargetingCategory {
     /// Missing public type, hidden identity, or no independent world placement.
     Ineligible,
-    /// Public ItemType::CREATURE, including players and friendly creatures.
+    /// Non-projectile public ItemType::CREATURE, including players and friendly creatures.
     Creature,
-    /// An eligible world entity without the creature item-type bit.
+    /// Server-classified missile, retained through local impact retirement until reconciliation.
+    Projectile,
+    /// An eligible non-projectile world entity without the creature item-type bit.
     NonCreature,
 }
 
@@ -547,7 +549,9 @@ impl WorldState {
                     && matches!(location, EntityStorageLocation::None)
                     && matches!(resolved, crate::ResolvedScenePlacement::Independent) =>
             {
-                if is_creature {
+                if entity.physics.is_authoritative_projectile() {
+                    EntityTargetingCategory::Projectile
+                } else if is_creature {
                     EntityTargetingCategory::Creature
                 } else {
                     EntityTargetingCategory::NonCreature
@@ -1124,6 +1128,48 @@ mod tests {
                 .unwrap()
                 .targeting,
             EntityTargetingCategory::Ineligible
+        );
+    }
+
+    #[test]
+    fn targeting_retains_projectile_classification_until_server_reconciliation() {
+        use crate::entity_physics::resolve_effective_entity_physics_state;
+        use holtburger_common::properties::PhysicsState;
+
+        let mut world = WorldState::synthetic();
+        let guid = Guid(4);
+        let mut entity = Entity::new(guid, "Projectile".into(), Default::default());
+        entity.position.landblock_id = Guid(0xda55_0104);
+        entity.set_int_prop(PropertyInt::ItemType, ItemType::MELEE_WEAPON.bits() as i32);
+        entity
+            .physics
+            .reconcile(resolve_effective_entity_physics_state(
+                PhysicsState::MISSILE,
+            ));
+        world.entities.insert(entity);
+        assert_eq!(
+            world.client_entity_facts(guid).unwrap().unwrap().targeting,
+            EntityTargetingCategory::Projectile
+        );
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .physics
+            .clear_after_collision(PhysicsState::MISSILE);
+        assert_eq!(
+            world.client_entity_facts(guid).unwrap().unwrap().targeting,
+            EntityTargetingCategory::Projectile
+        );
+        world
+            .entities
+            .get_mut(guid)
+            .unwrap()
+            .physics
+            .reconcile(resolve_effective_entity_physics_state(PhysicsState::empty()));
+        assert_eq!(
+            world.client_entity_facts(guid).unwrap().unwrap().targeting,
+            EntityTargetingCategory::NonCreature
         );
     }
 

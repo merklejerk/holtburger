@@ -205,7 +205,7 @@ export const CLIENT_TUNING = {
 			forwardHalfSpaceRearOffsetMeters: 1,
 			/** First band width; subsequent widths double with distance. */
 			initialDistanceBandMeters: 2.5,
-			/** Horizontal half-angle for immediate acquisition; elevation does not restrict it. */
+			/** Smart Tab acquisition half-angle; elevation does not restrict it. */
 			immediateMaxAngleDegrees: 15,
 		},
 		/** Modest staleness is sufficient for cursor feedback and selection range expiry. */

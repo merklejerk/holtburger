@@ -203,6 +203,8 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			/** Height above the player. */
 			height?: number;
 			creature: boolean;
+			/** Server-classified projectile, independent of public item type or usability. */
+			projectile?: boolean;
 			/** Player identity, independent of whether PvP permits harm. */
 			player?: boolean;
 			/** World-produced PvP relationship; fixtures never reconstruct it from radar style. */
@@ -235,7 +237,11 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 							const facts = entityFacts(record.guid, {
 								corpse: record.corpse ?? null,
 								playerThreat: record.playerThreat ?? false,
-								targeting: record.creature ? "creature" : "non-creature",
+								targeting: record.projectile
+									? "projectile"
+									: record.creature
+										? "creature"
+										: "non-creature",
 							});
 							if (facts.description.kind !== "known")
 								throw new Error(
@@ -270,6 +276,37 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 	try {
 		keyboard.returnToGame();
 		const bandWidth = CYCLE_POLICY.initialDistanceBandMeters;
+		replace([
+			{
+				guid: 42,
+				distance: bandWidth * 0.2,
+				creature: false,
+				projectile: true,
+			},
+			{
+				guid: 43,
+				distance: bandWidth * 0.3,
+				creature: false,
+				projectile: true,
+				usable: true,
+			},
+			{
+				guid: 40,
+				distance: bandWidth * 0.7,
+				lateral: bandWidth * 0.1,
+				creature: false,
+				usable: true,
+			},
+			{ guid: 41, distance: bandWidth * 0.9, creature: true },
+		]);
+		press("Tab");
+		expectSelected(
+			40,
+			"nearer usable object beats a better-aligned creature in the same band",
+		);
+		press("Tab");
+		expectSelected(41, "traversal continues after the nearer usable object");
+		selection.select(null);
 		const base: Parameters<typeof replace>[0] = [
 			{ guid: 2, distance: bandWidth * 1.2, creature: true },
 			{ guid: 3, distance: bandWidth * 1.4, creature: true },
@@ -286,9 +323,12 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		expectSelected(2, "reverse traversal");
 		replace([...base, { guid: 5, distance: bandWidth * 1.05, creature: true }]);
 		press("Tab", false, true);
-		expectSelected(5, "new immediate interrupts reverse traversal");
+		expectSelected(
+			5,
+			"reverse traversal reaches the newly inserted predecessor",
+		);
 		press("Tab");
-		expectSelected(2, "unchanged immediate permits traversal");
+		expectSelected(2, "forward traversal continues from the cursor");
 		press("Tab", true);
 		expectSelected(9, "first object operation acquires its immediate");
 		press("v");
@@ -327,7 +367,12 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			);
 		}
 		press("Tab", true);
-		expectSelected(55, "object acquisition includes opened corpses");
+		expectSelected(
+			54,
+			"object filter continues from the shared usable-object cursor",
+		);
+		press("Tab", true);
+		expectSelected(55, "object traversal includes opened corpses");
 		press("Tab", true);
 		expectSelected(56, "object traversal includes unopened corpses");
 		press("Tab", true);
@@ -432,11 +477,12 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			type: "keydown" | "keyup",
 			ctrlKey: boolean,
 			shiftKey: boolean,
+			key: "Tab" | "v",
 		) => {
 			(document.activeElement ?? document.body).dispatchEvent(
 				new KeyboardEvent(type, {
-					key: "Tab",
-					code: "Tab",
+					key,
+					code: key,
 					ctrlKey,
 					shiftKey,
 					bubbles: true,
@@ -448,18 +494,60 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			new Promise<void>((resolve) =>
 				setTimeout(resolve, CLIENT_TUNING.entitySelection.holdDelayMs),
 			);
+		for (const placement of [
+			{ distance: -bandWidth * 0.1 },
+			{ distance: 0, lateral: bandWidth * 0.1 },
+			{ distance: 0 },
+		]) {
+			replace([
+				{ guid: 70, ...placement, creature: false, corpse: "unopened" },
+				{
+					guid: 71,
+					distance: bandWidth * 0.2,
+					creature: false,
+					corpse: "unopened",
+				},
+			]);
+			for (const [key, ctrlKey] of [
+				["Tab", true],
+				["v", false],
+			] as const) {
+				selection.select(null);
+				press(key, ctrlKey);
+				expectSelected(
+					70,
+					"object and corpse cold taps acquire nearest regardless of bearing",
+				);
+				press(key, ctrlKey);
+				expectSelected(
+					71,
+					"object and corpse taps continue traversal after acquisition",
+				);
+				dispatchHeld("keydown", ctrlKey, false, key);
+				await waitForHold();
+				expectSelected(
+					70,
+					"object and corpse holds reacquire nearest regardless of bearing",
+				);
+				dispatchHeld("keyup", ctrlKey, false, key);
+				expectSelected(
+					70,
+					"object and corpse hold release preserves acquisition",
+				);
+			}
+		}
 		selection.select(null);
 		replace([
 			{ guid: 20, distance: 2, lateral: 2, creature: true },
 			{ guid: 21, distance: 8, height: 6, creature: true },
 		]);
-		dispatchHeld("keydown", false, false);
+		dispatchHeld("keydown", false, false, "Tab");
 		await waitForHold();
 		expectSelected(
 			21,
 			"horizontal cone admits elevation and excludes a nearer sideways target",
 		);
-		dispatchHeld("keyup", false, false);
+		dispatchHeld("keyup", false, false, "Tab");
 		press("Tab");
 		expectSelected(
 			20,
@@ -469,33 +557,33 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		for (const ctrlKey of [false, true]) {
 			for (const shiftKey of [false, true]) {
 				selection.select(3);
-				dispatchHeld("keydown", ctrlKey, shiftKey);
+				dispatchHeld("keydown", ctrlKey, shiftKey, "Tab");
 				expectSelected(
 					3,
 					"held chord leaves selection unchanged before threshold",
 				);
 				await waitForHold();
 				expectSelected(
-					ctrlKey ? 3 : 2,
-					"held chord selects an immediate or retains selection when none is in the cone",
+					ctrlKey ? 9 : 2,
+					"held chord uses nearest in every direction for objects and the cone for Smart Tab",
 				);
-				dispatchHeld("keyup", ctrlKey, shiftKey);
-				expectSelected(ctrlKey ? 3 : 2, "completed hold consumes release");
+				dispatchHeld("keyup", ctrlKey, shiftKey, "Tab");
+				expectSelected(ctrlKey ? 9 : 2, "completed hold consumes release");
 			}
 		}
 		selection.select(3);
-		dispatchHeld("keydown", false, false);
+		dispatchHeld("keydown", false, false, "Tab");
 		const beforeFocusWait = scans;
 		editor.focus();
 		await waitForHold();
 		expectSelected(3, "focus cancels held acquisition");
 		if (scans !== beforeFocusWait)
 			throw new Error("Cancelled hold scanned candidates.");
-		dispatchHeld("keyup", false, false);
+		dispatchHeld("keyup", false, false, "Tab");
 		keyboard.returnToGame();
 
 		selection.select(3);
-		dispatchHeld("keydown", false, false);
+		dispatchHeld("keydown", false, false, "Tab");
 		const beforeRemap = scans;
 		const remappedCycle = clientKeyboardSettingsSchema.parse(
 			replaceClientBinding(
@@ -513,7 +601,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		expectSelected(3, "configuration replacement cancels hold timer");
 		if (scans !== beforeRemap)
 			throw new Error("Cancelled remap hold scanned candidates");
-		dispatchHeld("keyup", false, false);
+		dispatchHeld("keyup", false, false, "Tab");
 		expectSelected(3, "old key release after remap cannot select");
 		press("q");
 		expectSelected(2, "new cycle binding acquires immediate");
@@ -568,13 +656,20 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			{ guid: 21, distance: 8, height: 6, creature: true },
 			{ guid: 22, distance: 8, creature: true },
 		]);
-		press("Tab");
+		press("Tab", false, true);
+		expectSelected(
+			20,
+			"changed immediate preserves reverse traversal from the cursor",
+		);
+		dispatchHeld("keydown", false, false, "Tab");
+		await waitForHold();
 		expectSelected(
 			22,
-			"changed alignment immediately reacquires preferred target",
+			"hold explicitly reacquires the nearest target in the cone",
 		);
+		dispatchHeld("keyup", false, false, "Tab");
 		press("Tab");
-		expectSelected(20, "already selected immediate advances");
+		expectSelected(20, "hold seeds subsequent traversal");
 
 		// Camera sees behind the player; the shifted half-space admits only the nearby rear strip.
 		view = {
@@ -610,13 +705,13 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			"shifted half-space excludes targets beyond its rear plane",
 		);
 		selection.select(20);
-		dispatchHeld("keydown", false, false);
+		dispatchHeld("keydown", false, false, "Tab");
 		await waitForHold();
 		expectSelected(
 			20,
 			"rear half-space allowance does not move the immediate cone",
 		);
-		dispatchHeld("keyup", false, false);
+		dispatchHeld("keyup", false, false, "Tab");
 		replace([{ guid: 23, distance: -8, creature: true, monster: true }]);
 		press("Tab");
 		expectSelected(
@@ -671,10 +766,10 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 					`${mode} hostile-only smart Tab excludes friendlies and objects`,
 				);
 			}
-			dispatchHeld("keydown", false, false);
+			dispatchHeld("keydown", false, false, "Tab");
 			await waitForHold();
 			expectSelected(4, "hostile-only hold acquires a monster");
-			dispatchHeld("keyup", false, false);
+			dispatchHeld("keyup", false, false, "Tab");
 		}
 		press("Tab", true);
 		expectSelected(

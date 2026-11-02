@@ -35,7 +35,7 @@ export interface CycleSelectionPolicy {
 	readonly radiusMeters: number;
 	/** Width of the innermost radial band; each subsequent band doubles in width. */
 	readonly initialDistanceBandMeters: number;
-	/** Maximum horizontal angle from player facing for immediate acquisition, in degrees. */
+	/** Maximum horizontal angle from player facing for Smart Tab acquisition, in degrees. */
 	readonly immediateMaxAngleDegrees: number;
 	/** Extra horizontal/vertical half-width in meters; no behind-camera admission. */
 	readonly viewMarginMeters: number;
@@ -46,14 +46,14 @@ export interface CycleSelectionPolicy {
 export interface CycleCandidate {
 	/** Stable identity used for membership and final selection. */
 	readonly guid: number;
-	/** Squared player-to-origin distance; breaks equal-band, equal-angle ties. */
+	/** Squared player-to-origin distance; acquisition rank and equal-band, equal-angle traversal tie. */
 	readonly distanceSquared: number;
 	/** Player-relative radial band, computed by the candidate sampler. */
 	readonly distanceBand: number;
 	/** Cosine of the 3D angle to horizontal player forward; larger values rank first. */
 	readonly forwardAlignment: number;
-	/** Sampler-owned horizontal cone admission; ordinary traversal remains unrestricted. */
-	readonly immediateEligible: boolean;
+	/** Sampler-owned horizontal cone admission for Smart Tab acquisition only. */
+	readonly inImmediateCone: boolean;
 	/** Sampler-owned admission per filter; absence means ineligible for that filter. */
 	readonly filters: Readonly<Partial<Record<CycleFilter, CycleMembership>>>;
 }
@@ -164,6 +164,7 @@ export function sampleCycleCandidates(
 				if (facts.corpse === "unopened") filters["unopened-corpse"] = "cycle";
 				if (
 					!preferences.smartTabHostileOnly &&
+					facts.targeting !== "projectile" &&
 					facts.corpse === null &&
 					inTargetView
 				) {
@@ -185,7 +186,7 @@ export function sampleCycleCandidates(
 				// Coincident origins have no direction: rank them like a perpendicular target.
 				forwardAlignment: distance === 0 ? 0 : forwardDistance / distance,
 				// Vertically aligned/coincident origins have no horizontal bearing.
-				immediateEligible:
+				inImmediateCone:
 					horizontalDistance > 0 &&
 					forwardDistance / horizontalDistance >= minimumHorizontalAlignment,
 				filters,
@@ -212,7 +213,7 @@ function smartCombatMembership(
 	return "immediate-only";
 }
 
-/** One total ordering shared by cycling and immediate acquisition. */
+/** Broad traversal favors nearby bands, then facing alignment within each band. */
 function preferredFirst(left: CycleCandidate, right: CycleCandidate): number {
 	return (
 		left.distanceBand - right.distanceBand ||
@@ -229,8 +230,6 @@ export class ClientCycleSelectionController {
 	readonly #unsubscribe: () => void;
 	/** Last acquisition winner, shared by all binding filters. */
 	#cursor: number | null = null;
-	/** Each filter interrupts traversal only when its own immediate target changes. */
-	readonly #immediates = new Map<CycleFilter, number | null>();
 	#destroyed = false;
 
 	constructor(options: {
@@ -250,8 +249,6 @@ export class ClientCycleSelectionController {
 		const sampled = this.#candidates(filter);
 		if (sampled === null) return;
 		const { immediate, matching } = sampled;
-		const changed = this.#immediates.get(filter) !== (immediate?.guid ?? null);
-		this.#immediates.set(filter, immediate?.guid ?? null);
 		if (matching.length === 0) return;
 		const selected = this.#selection.selectedGuid();
 		const cursorIndex = matching.findIndex(
@@ -259,7 +256,7 @@ export class ClientCycleSelectionController {
 		);
 		let start = direction === 1 ? -1 : 0;
 		if (cursorIndex >= 0) start = cursorIndex;
-		if (immediate !== undefined && (changed || cursorIndex < 0)) {
+		if (immediate !== undefined && cursorIndex < 0) {
 			// Begin just before the immediate; the shared traversal skips it if already selected.
 			start = matching.indexOf(immediate) - direction;
 		}
@@ -278,14 +275,13 @@ export class ClientCycleSelectionController {
 		}
 	}
 
-	/** Hold acquisition uses the same preference as taps and seeds subsequent traversal. */
+	/** Hold reacquires the nearest target allowed by the filter and seeds subsequent traversal. */
 	selectImmediate(filter: CycleFilter): void {
 		if (this.#destroyed) return;
 		const intent = this.#selection.beginAcquisition("external");
 		const sampled = this.#candidates(filter);
 		if (sampled === null) return;
 		const { immediate } = sampled;
-		this.#immediates.set(filter, immediate?.guid ?? null);
 		if (immediate === undefined) return;
 		this.#cursor = immediate.guid;
 		this.#selection.commitAcquisition(intent, immediate.guid);
@@ -298,7 +294,7 @@ export class ClientCycleSelectionController {
 	}
 
 	#candidates(filter: CycleFilter): {
-		/** Best ranked candidate inside the horizontal cone, if any. */
+		/** Nearest candidate allowed by the filter; only Smart Tab requires the horizontal cone. */
 		readonly immediate: CycleCandidate | undefined;
 		/** Broad traversal ring, including the immediate-only winner when present. */
 		readonly matching: CycleCandidate[];
@@ -313,7 +309,19 @@ export class ClientCycleSelectionController {
 			.sort(preferredFirst);
 		// Resolve immediate from the broad pool before restricting traversal. The winning
 		// immediate-only entity stays in the ring; all other immediate-only entities are skipped.
-		const immediate = ranked.find((candidate) => candidate.immediateEligible);
+		// Acquisition uses actual distance so a farther, better-aligned origin cannot beat
+		// a nearby door. Object/corpse searches admit every direction, including coincident
+		// origins. Once seeded, traversal follows the cursor despite a new winner.
+		let immediate: CycleCandidate | undefined;
+		for (const candidate of ranked) {
+			if (
+				(filter !== "smart-combat" || candidate.inImmediateCone) &&
+				(immediate === undefined ||
+					(candidate.distanceSquared - immediate.distanceSquared ||
+						preferredFirst(candidate, immediate)) < 0)
+			)
+				immediate = candidate;
+		}
 		return {
 			immediate,
 			matching: ranked.filter(
@@ -325,6 +333,5 @@ export class ClientCycleSelectionController {
 
 	#reset(): void {
 		this.#cursor = null;
-		this.#immediates.clear();
 	}
 }

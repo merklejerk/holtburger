@@ -49,7 +49,7 @@ function candidate(
 			Math.log2(1 + distance / POLICY.initialDistanceBandMeters),
 		),
 		forwardAlignment,
-		immediateEligible:
+		inImmediateCone:
 			forwardAlignment >=
 			Math.cos((POLICY.immediateMaxAngleDegrees * Math.PI) / 180),
 		filters: { [filter]: "cycle" },
@@ -83,6 +83,80 @@ function fixture() {
 }
 
 describe("immediate target traversal", () => {
+	it.each(["non-creature", "unopened-corpse"] as const)(
+		"%s acquires the nearest target behind, beside, or coincident with the player",
+		(filter) => {
+			for (const [distance, alignment] of [
+				[POLICY.initialDistanceBandMeters * 0.1, -1],
+				[POLICY.initialDistanceBandMeters * 0.1, 0],
+				[0, 0],
+			] as const) {
+				for (const action of ["forward", "reverse", "hold"] as const) {
+					const f = fixture();
+					f.set([
+						candidate(2, POLICY.initialDistanceBandMeters * 0.2, 1, filter),
+						candidate(3, distance, alignment, filter),
+					]);
+					if (action === "hold") f.cycle.selectImmediate(filter);
+					else f.cycle.cycle(filter, action === "forward" ? 1 : -1);
+					expect(f.selection.selectedGuid()).toBe(3);
+					f.cycle.cycle(filter, 1);
+					expect(f.selection.selectedGuid()).toBe(2);
+				}
+			}
+		},
+	);
+	it.each(["tap", "hold"] as const)(
+		"%s acquires a nearer usable object ahead of a better-aligned creature in the same band",
+		(action) => {
+			const f = fixture();
+			const door = candidate(2, POLICY.initialDistanceBandMeters * 0.7, 0.98);
+			const creature = candidate(3, POLICY.initialDistanceBandMeters * 0.9);
+			f.set([
+				creature,
+				{
+					...door,
+					filters: { "smart-combat": "cycle", "non-creature": "cycle" },
+				},
+			]);
+			if (action === "tap") f.cycle.cycle("smart-combat", 1);
+			else f.cycle.selectImmediate("smart-combat");
+			expect(f.selection.selectedGuid()).toBe(door.guid);
+			f.cycle.cycle("smart-combat", 1);
+			expect(f.selection.selectedGuid()).toBe(creature.guid);
+		},
+	);
+	it("breaks equal acquisition distances by alignment, then GUID", () => {
+		const f = fixture();
+		const distance = POLICY.initialDistanceBandMeters;
+		f.set([
+			candidate(2, distance, 0.98),
+			candidate(4, distance),
+			candidate(3, distance),
+		]);
+		f.cycle.selectImmediate("smart-combat");
+		expect(f.selection.selectedGuid()).toBe(3);
+	});
+	it("preserves traversal when another candidate moves closer and a hold explicitly reacquires it", () => {
+		const f = fixture();
+		const distance = POLICY.initialDistanceBandMeters;
+		f.set([
+			candidate(2, distance),
+			candidate(3, distance * 1.2),
+			candidate(4, distance * 1.4),
+		]);
+		f.cycle.cycle("smart-combat", 1);
+		f.cycle.cycle("smart-combat", 1);
+		f.set([
+			candidate(2, distance * 0.8),
+			candidate(3, distance * 1.2),
+			candidate(4, distance * 0.6),
+		]);
+		f.cycle.cycle("smart-combat", -1);
+		expect(f.selection.selectedGuid()).toBe(2);
+		f.cycle.selectImmediate("smart-combat");
+		expect(f.selection.selectedGuid()).toBe(4);
+	});
 	it.each([1, -1] as const)(
 		"cycles outside the cone without an immediate in direction %s",
 		(direction) => {
@@ -138,16 +212,22 @@ describe("immediate target traversal", () => {
 				candidate(6, 16, 1, filter),
 				candidate(7, 4, -1, filter),
 			]);
-			for (const guid of [6, 7, 3, 4, 5, 2, 6]) {
+			const expected =
+				filter === "smart-combat"
+					? [6, 7, 3, 4, 5, 2, 6]
+					: [7, 3, 4, 5, 2, 6, 7];
+			for (const guid of expected) {
 				f.cycle.cycle(filter, 1);
 				expect(f.selection.selectedGuid()).toBe(guid);
 			}
 			f.cycle.cycle(filter, -1);
-			expect(f.selection.selectedGuid()).toBe(2);
+			expect(f.selection.selectedGuid()).toBe(
+				filter === "smart-combat" ? 2 : 6,
+			);
 		},
 	);
 	it.each([1, -1] as const)(
-		"new immediate wins in direction %s unless already selected",
+		"continues from the cursor despite a new immediate in direction %s",
 		(direction) => {
 			const f = fixture();
 			f.set([candidate(2, 6), candidate(3, 8), candidate(4, 10)]);
@@ -155,7 +235,7 @@ describe("immediate target traversal", () => {
 			expect(f.selection.selectedGuid()).toBe(2);
 			f.set([candidate(2, 6, 0.5), candidate(3, 8), candidate(4, 10)]);
 			f.cycle.cycle("smart-combat", direction);
-			expect(f.selection.selectedGuid()).toBe(3);
+			expect(f.selection.selectedGuid()).toBe(direction === 1 ? 3 : 4);
 			f.selection.select(4);
 			f.set([candidate(2, 6, 0.5), candidate(3, 8, 0.5), candidate(4, 10)]);
 			f.cycle.cycle("smart-combat", direction);
@@ -185,7 +265,7 @@ describe("immediate target traversal", () => {
 		f.cycle.cycle("smart-combat", 1);
 		expect(f.selection.selectedGuid()).toBe(3);
 	});
-	it("remembers immediates per filter and shares the cursor for overlapping memberships", () => {
+	it("shares the cursor across filters and reacquires when it is absent from a filter", () => {
 		const f = fixture();
 		const objects: CycleCandidate[] = [
 			{
@@ -254,7 +334,7 @@ describe("immediate target traversal", () => {
 		f.cycle.cycle("smart-combat", 1);
 		expect(f.selection.selectedGuid()).toBe(2);
 	});
-	it("hold selects immediate rather than nearest and seeds the next tap", () => {
+	it("hold selects nearest inside the cone and seeds the next tap", () => {
 		const f = fixture();
 		f.set([candidate(2, 6, 0.5), candidate(3, 8), candidate(4, 10)]);
 		f.cycle.selectImmediate("smart-combat");
@@ -378,7 +458,7 @@ describe("smart combat stance policy", () => {
 			}
 		},
 	);
-	it("a non-threatening player becomes immediate before traversal restrictions apply", () => {
+	it("holds acquire a newly nearest non-threatening player without interrupting traversal", () => {
 		const f = scenario("melee");
 		f.cycle.cycle("smart-combat", 1);
 		f.cycle.cycle("smart-combat", 1);
@@ -388,11 +468,11 @@ describe("smart combat stance policy", () => {
 		f.motion.apply({ kind: "upserted", entity: moved });
 		f.refresh();
 		f.cycle.cycle("smart-combat", 1);
+		expect(f.selection.selectedGuid()).toBe(5);
+		f.cycle.selectImmediate("smart-combat");
 		expect(f.selection.selectedGuid()).toBe(3);
 		f.cycle.cycle("smart-combat", 1);
 		expect(f.selection.selectedGuid()).toBe(4);
-		f.cycle.selectImmediate("smart-combat");
-		expect(f.selection.selectedGuid()).toBe(3);
 	});
 	it("stance changes alter traversal on the next operation", () => {
 		const f = scenario("melee");
@@ -428,6 +508,53 @@ describe("smart combat stance policy", () => {
 });
 
 describe("on-demand accepted candidate geometry", () => {
+	it.each(["direct", "unsupported"] as const)(
+		"excludes projectiles with %s use capability from smart Tab while retaining object-filter membership",
+		(useCapability) => {
+			const entities = new ClientEntityMirror();
+			const projectile = entityFacts(2, { targeting: "projectile" });
+			if (projectile.description.kind !== "known")
+				throw new Error("Fixture requires a known description.");
+			entities.commit(
+				entities.prepareSnapshot(
+					{
+						...playerEntitySnapshot(1),
+						entities: [
+							entityFacts(1),
+							{
+								...projectile,
+								description: { ...projectile.description, useCapability },
+							},
+						],
+					},
+					1,
+				),
+			);
+			const motion = new DynamicEntityMirror();
+			const object = targetingEntity(2, 1);
+			object.placement.pose.coords.y = POLICY.initialDistanceBandMeters;
+			motion.prepareSnapshot({
+				entities: [targetingEntity(1, 1), object],
+				hostTime: { seconds: 0 },
+			})();
+			const candidates = sampleCycleCandidates(
+				entities,
+				motion,
+				TARGETING_TEST_VIEW,
+				POLICY,
+				{ targetOnlyInView: false, smartTabHostileOnly: false },
+				PEACE_CONTEXT,
+			);
+			expect(candidates?.map(({ filters }) => filters)).toEqual([
+				{ "non-creature": "cycle" },
+			]);
+			const f = fixture();
+			f.set(candidates);
+			f.cycle.cycle("smart-combat", 1);
+			f.cycle.selectImmediate("smart-combat");
+			expect(f.selection.selectedGuid()).toBeNull();
+		},
+	);
 	it("offsets the view half-space behind the player without moving the immediate cone", () => {
 		const entities = new ClientEntityMirror();
 		const policy = { ...POLICY, forwardHalfSpaceRearOffsetMeters: 1.25 };
@@ -477,12 +604,12 @@ describe("on-demand accepted candidate geometry", () => {
 			);
 		expect(
 			sample(policy.forwardHalfSpaceRearOffsetMeters, true)?.map(
-				({ guid, immediateEligible }) => ({ guid, immediateEligible }),
+				({ guid, inImmediateCone }) => ({ guid, inImmediateCone }),
 			),
 		).toEqual([
-			{ guid: 2, immediateEligible: false },
-			{ guid: 4, immediateEligible: false },
-			{ guid: 5, immediateEligible: true },
+			{ guid: 2, inImmediateCone: false },
+			{ guid: 4, inImmediateCone: false },
+			{ guid: 5, inImmediateCone: true },
 		]);
 		expect(sample(0, true)?.map(({ guid }) => guid)).toEqual([5]);
 		expect(sample(0, false)?.map(({ guid }) => guid)).toEqual([2, 3, 4, 5]);
@@ -534,9 +661,14 @@ describe("on-demand accepted candidate geometry", () => {
 			{ targetOnlyInView: false, smartTabHostileOnly: false },
 			PEACE_CONTEXT,
 		);
-		expect(candidates?.map((candidate) => candidate.immediateEligible)).toEqual(
-			[true, true, false, false, false, false],
-		);
+		expect(candidates?.map((candidate) => candidate.inImmediateCone)).toEqual([
+			true,
+			true,
+			false,
+			false,
+			false,
+			false,
+		]);
 		expect(candidates?.[0]).toMatchObject({
 			distanceSquared: 148,
 			distanceBand: 1,

@@ -799,17 +799,15 @@ mod tests {
     use super::*;
     use crate::client::builder::build_test_client;
     use crate::client::movement_types::{CharacterDrive, PlayerDriveIntent};
+    use crate::client::test_support::captured_actions;
     use crate::client::types::{BusyOperationKind, ClientCombatStatus};
     use crate::client::types::{BusyOperationResult, ClientExitCause, ClientViewEvent};
-    use byteorder::{LittleEndian, ReadBytesExt};
     use holtburger_common::position::WorldPosition;
     use holtburger_common::properties::{ItemType, PropertyInt, WorldObjectPropertyAccessorsMut};
     use holtburger_protocol::errors::WeenieError;
     use holtburger_protocol::messages::movement::{
         MoveToObject, MoveToParameters, MovementInvalid, Origin,
     };
-    use holtburger_protocol::messages::transport::{FragmentHeader, PacketHeader, packet_flags};
-    use holtburger_protocol::traits::ProtocolUnpack;
     use holtburger_world::WorldState;
     use holtburger_world::entity::{
         EntityMotionAdmission, EntityMotionDirective, EntityTurnToParameters, OrderedMotionScalar,
@@ -817,7 +815,6 @@ mod tests {
     use holtburger_world::motion::begin_server_directed_motion;
     use holtburger_world::spell::{MagicSchool, SpellCatalog, SpellExtrasInfo, SpellInfo};
     use std::collections::HashMap;
-    use std::io::{Cursor, Read};
     use std::sync::Arc;
     use std::time::{Duration, Instant};
     fn spell_info(school: MagicSchool, bitfield: u32, non_component_target_type: u32) -> SpellInfo {
@@ -2201,37 +2198,6 @@ mod tests {
             .await
             .unwrap();
         assert!(client.active_busy_operation.is_none());
-    }
-
-    fn captured_actions(file: &tempfile::NamedTempFile) -> Vec<GameAction> {
-        let bytes = std::fs::read(file.path()).unwrap();
-        let mut capture = Cursor::new(bytes.as_slice());
-        let mut actions = Vec::new();
-        while (capture.position() as usize) < bytes.len() {
-            assert_eq!(
-                capture.read_u8().unwrap(),
-                holtburger_session::capture::Direction::Outbound as u8
-            );
-            capture.read_u64::<LittleEndian>().unwrap();
-            let address_len = capture.read_u16::<LittleEndian>().unwrap();
-            capture.set_position(capture.position() + u64::from(address_len));
-            let packet_len = capture.read_u32::<LittleEndian>().unwrap();
-            let mut packet = vec![0; packet_len as usize];
-            capture.read_exact(&mut packet).unwrap();
-            let mut offset = 0;
-            let header = PacketHeader::unpack(&packet, &mut offset).unwrap();
-            assert_eq!(header.flags, packet_flags::BLOB_FRAGMENTS);
-            let fragment = FragmentHeader::unpack(&packet, &mut offset).unwrap();
-            assert_eq!(fragment.count, 1);
-            let GameMessage::GameAction(message) =
-                GameMessage::unpack(&packet, &mut offset).unwrap()
-            else {
-                panic!("movement fixture emitted a non-action message");
-            };
-            assert_eq!(offset, packet.len());
-            actions.push(message.action);
-        }
-        actions
     }
 
     #[tokio::test]

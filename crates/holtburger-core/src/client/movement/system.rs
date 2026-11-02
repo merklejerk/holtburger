@@ -1227,6 +1227,20 @@ impl MovementSystem {
             .record_server_control_sequence(server_control_sequence);
     }
 
+    /// Retail behavior is to cancel autorun and publish the resulting movement after teleport.
+    /// Publish idle at the installed destination even though the previous movement epoch is gone.
+    pub(crate) async fn publish_teleport_idle(
+        &mut self,
+        world: &WorldState,
+        session: &mut Session,
+        now: Instant,
+    ) -> Result<()> {
+        self.send_stop_pulse(world, session, MovementPacketMetadata::default(), now)
+            .await?;
+        self.note_stop_published();
+        Ok(())
+    }
+
     fn should_send_stop_pulse(&self) -> bool {
         self.movement_publication_required || self.published_motion.is_some()
     }

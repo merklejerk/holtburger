@@ -5,7 +5,7 @@ use super::super::common::{
 };
 use super::*;
 use crate::client::movement_types::{Gait, LongitudinalMotion};
-use byteorder::{LittleEndian, ReadBytesExt};
+use crate::client::test_support::captured_actions;
 use holtburger_common::position::WorldPosition;
 use holtburger_common::properties::{
     ItemType, PropertyDataId, PropertyInt, WorldObjectPropertyAccessorsMut,
@@ -16,8 +16,6 @@ use holtburger_protocol::messages::game_message::{GameMessage, RawMotionFlags, R
 use holtburger_protocol::messages::movement::{
     HoldKey, MotionStance, MovementEventData, MovementInvalid, MovementType, MovementTypeData,
 };
-use holtburger_protocol::messages::transport::{FragmentHeader, PacketHeader, packet_flags};
-use holtburger_protocol::traits::ProtocolUnpack;
 use holtburger_session::Session;
 use holtburger_world::entity::{
     Entity, EntityMotionAdmission, EntityMotionDirective, EntityMotionSnapshot,
@@ -29,7 +27,6 @@ use holtburger_world::state::motion_resolution::test_support::{
 };
 use holtburger_world::stats::{Attribute, AttributeType, Skill, SkillType, TrainingLevel};
 use holtburger_world::{AuthoritativePoseEffect, WorldState};
-use std::io::{Cursor, Read};
 
 const FIXTURE_MOTION_TABLE_ID: u32 = 0x0900_0020;
 
@@ -2483,37 +2480,6 @@ fn client_directed_updates_do_not_clear_existing_locomotion() {
     );
     movement.process_control_commands(now, &mut world, false);
     assert!(!world.has_manual_locomotion(guid));
-}
-
-/// Decode actual session output from the unencrypted, unfragmented packets this fixture emits.
-fn captured_actions(file: &tempfile::NamedTempFile) -> Vec<GameAction> {
-    let bytes = std::fs::read(file.path()).unwrap();
-    let mut capture = Cursor::new(bytes.as_slice());
-    let mut actions = Vec::new();
-    while (capture.position() as usize) < bytes.len() {
-        assert_eq!(
-            capture.read_u8().unwrap(),
-            holtburger_session::capture::Direction::Outbound as u8
-        );
-        capture.read_u64::<LittleEndian>().unwrap();
-        let address_len = capture.read_u16::<LittleEndian>().unwrap();
-        capture.set_position(capture.position() + u64::from(address_len));
-        let packet_len = capture.read_u32::<LittleEndian>().unwrap();
-        let mut packet = vec![0; packet_len as usize];
-        capture.read_exact(&mut packet).unwrap();
-        let mut offset = 0;
-        let header = PacketHeader::unpack(&packet, &mut offset).unwrap();
-        assert_eq!(header.flags, packet_flags::BLOB_FRAGMENTS);
-        let fragment = FragmentHeader::unpack(&packet, &mut offset).unwrap();
-        assert_eq!(fragment.count, 1);
-        let GameMessage::GameAction(message) = GameMessage::unpack(&packet, &mut offset).unwrap()
-        else {
-            panic!("movement fixture emitted a non-action message");
-        };
-        assert_eq!(offset, packet.len());
-        actions.push(message.action);
-    }
-    actions
 }
 
 #[tokio::test]

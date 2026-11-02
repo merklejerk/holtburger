@@ -89,6 +89,9 @@ pub mod trade;
 pub mod types;
 pub mod vendor_transaction;
 mod world_container;
+
+#[cfg(test)]
+mod test_support;
 pub use builder::ClientRuntimeBuilder;
 use camera::ClientCameraSettlement;
 pub use camera::{
@@ -786,9 +789,15 @@ impl ClientRuntime {
             return Ok(());
         }
 
+        let initial_entry = activation.phase == ClientWorldActivationPhase::InitialEntry;
+        if !initial_entry {
+            // Replace ACE's retained pre-teleport motion before making the player visible.
+            self.movement
+                .publish_teleport_idle(&self.world, &mut self.session, Instant::now())
+                .await?;
+        }
         self.send_login_complete().await?;
         self.establish_attack_repeat_policy().await?;
-        let initial_entry = activation.phase == ClientWorldActivationPhase::InitialEntry;
         self.activation = None;
         self.state = ClientState::InWorld;
         self.send_status_event();

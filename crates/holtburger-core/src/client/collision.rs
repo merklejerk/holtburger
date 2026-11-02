@@ -1562,9 +1562,12 @@ mod tests {
         camera::ClientCameraStartRequest, types::ClientState,
     };
     use super::*;
+    use crate::client::movement_types::{CharacterDrive, PlayerDriveIntent};
+    use crate::client::test_support::captured_actions;
     use holtburger_common::properties::{PhysicsState, WorldObjectPropertyAccessorsMut};
     use holtburger_common::{Quaternion, Vector3};
     use holtburger_content::{LandblockCollisionAsset, TerrainCollisionSurface};
+    use holtburger_protocol::messages::game_action::GameAction;
     use holtburger_world::{
         AuthoritativeBodyVectors, AuthoritativePoseEffect, DynamicBodyCollisionDefinition,
         DynamicPhysicalBodyDefinition, EntityCollisionReportPolicy, EntityDynamicCollisionPolicy,
@@ -2225,8 +2228,27 @@ mod tests {
             let guid = Guid(0x5000_0001);
             client
                 .world
-                .seed_local_player_entity(guid, "Player", position(0x1234_0001));
+                .seed_local_player_entity(guid, "Player", position(0x2234_0001));
             facts(&mut client.world, guid);
+            let forward =
+                PlayerDriveIntent::ManualHeld(CharacterDrive::builder().run().forward().build());
+            if cause == ClientWorldActivationState::Teleport {
+                client
+                    .movement
+                    .enqueue_drive_intent(forward, Instant::now());
+                client
+                    .movement
+                    .tick(Instant::now(), &mut client.world, &mut client.session)
+                    .await
+                    .unwrap();
+                assert!(client.movement.has_active_manual_drive());
+            }
+            let capture = tempfile::NamedTempFile::new().unwrap();
+            client
+                .session
+                .set_capture(capture.path().to_str().unwrap())
+                .unwrap();
+            let bytes_before_activation = client.session.bytes_out;
             client.requires_external_world_reveal = true;
             client.collision_coordinator = Some(ClientCollisionCoordinator::new(Arc::new(
                 FakeSource::default(),
@@ -2234,6 +2256,15 @@ mod tests {
             client.start_world_activation(ClientWorldActivationState::Teleport, guid);
             let retired_generation = client.activation.as_ref().unwrap().generation;
             client.start_world_activation(cause, guid);
+            client
+                .world
+                .seed_local_player_entity(guid, "Player", position(0x1234_0001));
+            facts(&mut client.world, guid);
+            client.world.player.last_server_motion_style =
+                Some(holtburger_protocol::messages::movement::MotionStance::NonCombat);
+            client.world.player.teleport_sequence = 13;
+            client.world.player.force_position_sequence = 17;
+            client.world.player.server_control_sequence = 11;
             let mut events = client.subscribe_client_view_events();
             client
                 .acknowledge_world_reveal(retired_generation)
@@ -2261,7 +2292,7 @@ mod tests {
                 .unwrap();
             client.try_complete_world_activation().await.unwrap();
             assert!(client.activation.is_some());
-            assert_eq!(client.session.bytes_out, 0);
+            assert_eq!(client.session.bytes_out, bytes_before_activation);
             let coordinator = client.collision_coordinator.as_mut().unwrap();
             coordinator.observe(&mut client.world);
             wait_for_readiness(coordinator, &mut client.world, |ready| {
@@ -2278,7 +2309,7 @@ mod tests {
                 .await
                 .unwrap();
             assert!(client.activation.is_some());
-            assert_eq!(client.session.bytes_out, 0);
+            assert_eq!(client.session.bytes_out, bytes_before_activation);
             client.acknowledge_world_reveal(generation).await.unwrap();
             assert!(client.activation.is_none());
             assert_eq!(client.state, ClientState::InWorld);
@@ -2287,11 +2318,84 @@ mod tests {
                 client.housing_snapshot().refreshing,
                 cause == ClientWorldActivationState::InitialEntry
             );
+            let actions = captured_actions(&capture);
+            let login_index = actions
+                .iter()
+                .position(|action| matches!(action, GameAction::LoginComplete(_)))
+                .unwrap();
+            let movement_packets: Vec<_> = actions
+                .iter()
+                .enumerate()
+                .filter_map(|(index, action)| {
+                    if let GameAction::MoveToState(packet) = action {
+                        Some((index, packet))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            if cause == ClientWorldActivationState::Teleport {
+                let [(idle_index, idle)] = movement_packets.as_slice() else {
+                    panic!("teleport must publish exactly one destination movement state");
+                };
+                assert!(*idle_index < login_index);
+                assert_eq!(
+                    idle.position,
+                    client.world.local_player_runtime_pose().unwrap()
+                );
+                assert_eq!(
+                    idle.position.landblock_id,
+                    position(0x1234_0001).landblock_id
+                );
+                assert_eq!(
+                    idle.teleport_sequence,
+                    client.world.player.teleport_sequence
+                );
+                assert_eq!(
+                    idle.force_position_sequence,
+                    client.world.player.force_position_sequence
+                );
+                assert_eq!(
+                    idle.server_control_sequence,
+                    client.world.player.server_control_sequence
+                );
+                assert_eq!(
+                    idle.instance_sequence,
+                    client.world.player.instance_sequence
+                );
+                assert_eq!(
+                    idle.raw_motion_state.current_style,
+                    client
+                        .world
+                        .player
+                        .last_server_motion_style
+                        .map(|stance| stance as u32)
+                );
+                assert_eq!(idle.raw_motion_state.forward_command, None);
+                assert_eq!(idle.raw_motion_state.sidestep_command, None);
+                assert_eq!(idle.raw_motion_state.turn_command, None);
+                assert!(!client.movement.has_active_manual_drive());
+            } else {
+                assert!(movement_packets.is_empty());
+            }
             let completed_sequence = client.session.game_action_sequence;
             client.try_complete_world_activation().await.unwrap();
             assert_eq!(
                 client.session.game_action_sequence, completed_sequence,
                 "completed activation cannot query housing again"
+            );
+            assert_eq!(captured_actions(&capture).len(), actions.len());
+            client
+                .movement
+                .enqueue_drive_intent(forward, Instant::now());
+            client
+                .movement
+                .tick(Instant::now(), &mut client.world, &mut client.session)
+                .await
+                .unwrap();
+            assert!(client.movement.has_active_manual_drive());
+            assert!(
+                matches!(captured_actions(&capture).last(), Some(GameAction::MoveToState(packet)) if packet.raw_motion_state.forward_command.is_some())
             );
             let mut snapshots = Vec::new();
             while let Ok(event) = events.try_recv() {

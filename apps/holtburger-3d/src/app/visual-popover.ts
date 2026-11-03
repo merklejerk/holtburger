@@ -8,10 +8,15 @@ export function showVisualPopover(element: HTMLElement, bounds: DOMRect): void {
 		inset: "auto",
 		margin: "0",
 		anchorName: "none",
-		left: `${bounds.left}px`,
-		top: `${bounds.top}px`,
-		width: `${bounds.width}px`,
-		height: `${bounds.height}px`,
 	});
 	element.showPopover();
+	// Top-layer surfaces retain inherited zoom. Read it after showing the popover,
+	// then convert viewport bounds back to its local CSS units exactly once.
+	const scale = element.currentCSSZoom;
+	Object.assign(element.style, {
+		left: `${bounds.left / scale}px`,
+		top: `${bounds.top / scale}px`,
+		width: `${bounds.width / scale}px`,
+		height: `${bounds.height / scale}px`,
+	});
 }

@@ -8,6 +8,12 @@ export async function probeItemCellPulse(client, evaluate) {
 			const { pulseItemCell } = await import(
 				new URL("/src/app/item-cell-pulse.ts", location.origin).href
 			);
+			const { applyUiScale } = await import(
+				new URL("/src/app/ui-scale.ts", location.origin).href
+			);
+			const { CLIENT_UI_SCALE } = await import(
+				new URL("/src/client/client-settings-values.ts", location.origin).href
+			);
 			const { bindContentsActivation } = await import(
 				new URL("/src/client/client-contents-activation.ts", location.origin)
 					.href
@@ -66,6 +72,48 @@ export async function probeItemCellPulse(client, evaluate) {
 				}
 			};
 			try {
+				const scaling = applyUiScale(fixture, CLIENT_UI_SCALE.initial);
+				for (const scale of [
+					CLIENT_UI_SCALE.minimum,
+					CLIENT_UI_SCALE.initial,
+					CLIENT_UI_SCALE.initial + CLIENT_UI_SCALE.step,
+					CLIENT_UI_SCALE.maximum,
+				]) {
+					scaling.update(scale);
+					for (const kind of ["item-grid-cell", "action-cell"]) {
+						cell.className = `ui-item-cell ${kind}`;
+						const source = cell.getBoundingClientRect();
+						pulseItemCell(cell, "interaction");
+						const copy = fixture.querySelector(".ui-item-cell-pulse");
+						check(copy !== null, `${kind} must pulse at UI scale ${scale}`);
+						const animation = copy.getAnimations()[0];
+						animation.pause();
+						animation.currentTime = 0;
+						const start = copy.getBoundingClientRect();
+						for (const property of ["left", "top", "width", "height"]) {
+							check(
+								Math.abs(start[property] - source[property]) < 1,
+								`${kind} pulse ${property} at UI scale ${scale}: source=${source[property]}, copy=${start[property]}`,
+							);
+						}
+						animation.currentTime = animation.effect.getTiming().duration * 0.4;
+						const peak = copy.getBoundingClientRect();
+						check(
+							peak.width > source.width &&
+								Math.abs(
+									peak.left + peak.width / 2 - source.left - source.width / 2,
+								) < 1 &&
+								Math.abs(
+									peak.top + peak.height / 2 - source.top - source.height / 2,
+								) < 1,
+							`${kind} pulse must expand around its source center at UI scale ${scale}`,
+						);
+						stop();
+						await frame();
+					}
+				}
+				scaling.update(CLIENT_UI_SCALE.initial);
+				cell.className = "item-grid-cell ui-item-cell";
 				cell.focus();
 				const before = cell.getBoundingClientRect();
 				cell.click();
@@ -219,6 +267,7 @@ export async function probeItemCellPulse(client, evaluate) {
 				);
 				return {
 					topLayer: true,
+					scaledAlignment: true,
 					layoutAndInputRetained: true,
 					restartAndCoalescing: true,
 					targeting: true,

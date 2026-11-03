@@ -181,7 +181,7 @@
 				}}
 			>
 				<div class="vendor-content" inert={current.quantityRequest !== null}>
-					<div class="vendor-catalog">
+					<div class="vendor-catalog" data-vendor-catalog={current.vendor}>
 						<p class="vendor-hint">
 							Double-click or Enter to buy. Stackable items prompt for quantity.
 							Right-click or Examine ({examineShortcut.description}) to inspect.
@@ -540,10 +540,12 @@
 		.vendor-problem {
 			margin: 0;
 		}
-		.vendor-queue:global([data-inventory-drop="accepted"]) {
+		.vendor-queue:global([data-inventory-drop="accepted"]),
+		.vendor-catalog:global([data-inventory-drop="accepted"]) {
 			outline: 2px solid var(--ui-color-success);
 		}
-		.vendor-queue:global([data-inventory-drop="rejected"]) {
+		.vendor-queue:global([data-inventory-drop="rejected"]),
+		.vendor-catalog:global([data-inventory-drop="rejected"]) {
 			outline: 2px solid var(--ui-color-warning);
 		}
 	}

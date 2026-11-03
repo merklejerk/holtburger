@@ -1,3 +1,7 @@
+import {
+	selectOfferItems,
+	type ClientOfferSelection,
+} from "./client-offer-selection";
 import type { UiIconOwner, UiIconRepository } from "../app/ui-icon-repository";
 import type {
 	ClientLifecycleSession,
@@ -137,33 +141,57 @@ export class ClientTradeState {
 		);
 	}
 
-	/** A drop captures the exact offer revision so a reset cannot retarget an old gesture. */
-	acceptsDrop(partner: number, revision: number, item: number): boolean {
-		const read = this.session.entities.read();
-		return (
-			!this.#recovering &&
-			read.kind === "current" &&
-			this.session.state().lifecycle?.kind === "in-world" &&
-			this.#snapshot.trade?.partner_guid === partner &&
-			this.#snapshot.trade.revision === revision &&
-			!(
-				this.#snapshot.trade.self_side.accepted &&
-				this.#snapshot.trade.partner_side.accepted
-			) &&
-			!this.#snapshot.trade.self_side.items.includes(item) &&
-			!this.#snapshot.pending_items.includes(item) &&
-			read.level.entities.get(item)?.canOfferTrade === true
+	/** The same pack selection controls dimming, hover admission, and release. */
+	#selection(
+		partner: number,
+		revision: number,
+		item: number,
+	): ClientOfferSelection {
+		const trade = this.#snapshot.trade;
+		if (
+			this.#recovering ||
+			this.session.state().lifecycle?.kind !== "in-world" ||
+			trade === null ||
+			trade.partner_guid !== partner ||
+			trade.revision !== revision ||
+			(trade.self_side.accepted && trade.partner_side.accepted)
+		)
+			return {
+				kind: "unavailable",
+				reason: "That trade offer is no longer available.",
+			};
+		return selectOfferItems(
+			this.session.entities.read(),
+			item,
+			(facts) =>
+				facts.canOfferTrade &&
+				!trade.self_side.items.includes(facts.guid) &&
+				!this.#snapshot.pending_items.includes(facts.guid),
 		);
 	}
 
+	/** A drop captures the exact offer revision so a reset cannot retarget an old gesture. */
+	acceptsDrop(partner: number, revision: number, item: number): boolean {
+		const selection = this.#selection(partner, revision, item);
+		return selection.kind === "selected" && selection.items.length > 0;
+	}
+
 	add(partner: number, revision: number, item: number): void {
-		if (!this.acceptsDrop(partner, revision, item)) {
-			this.reportFailure(
-				"That item cannot join the current trade. Offer an owned item or empty container.",
-			);
+		const selection = this.#selection(partner, revision, item);
+		if (selection.kind === "unavailable") {
+			this.reportFailure(selection.reason);
 			return;
 		}
-		this.#submit({ kind: "add", partner, revision, item });
+		if (selection.items.length === 0) {
+			this.reportFailure("No eligible items to add to this trade.");
+			return;
+		}
+		this.#submit({
+			kind: "add",
+			partner,
+			revision,
+			items: selection.items.map((item) => item.guid),
+		});
 	}
 
 	accept(revision: number): void {

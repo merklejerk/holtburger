@@ -33,7 +33,7 @@ pub(super) fn reduce_action(state: &mut GameState, action: AppAction) -> UpdateR
                     .push(ClientCommand::Trade(TradeRequest::Add {
                         partner: trade.partner_guid,
                         revision: trade.revision,
-                        item: guid,
+                        items: vec![guid],
                     }));
             }
         }

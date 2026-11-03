@@ -1,3 +1,4 @@
+import { offerPackFixture } from "./client-offer-pack-fixture";
 import { entityFacts } from "../../client/client-entity-mirror.test-support";
 import {
 	tradeRequestSchema,
@@ -20,6 +21,15 @@ export function createTradeFixture(options: {
 	const publish = (pending_items: readonly number[] = []) =>
 		options.emit("client-trade-snapshot", { trade, pending_items });
 	return {
+		packs() {
+			options.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				removed: [],
+				upserts: offerPackFixture(0),
+			});
+		},
 		begin() {
 			options.baseline();
 			trade = null;

@@ -219,6 +219,8 @@ export interface ClientTuning {
 	};
 	/** App-local vendor window and trade reach. */
 	readonly vendor: {
+		/** Maximum wait for a local draft quote, including stock refreshes. */
+		readonly previewTimeoutMs: number;
 		/** Maximum player-to-vendor world distance while the shop remains usable. */
 		readonly maximumDistanceMeters: number;
 	};

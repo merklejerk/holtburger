@@ -1,3 +1,7 @@
+import {
+	selectOfferItems,
+	type ClientOfferSelection,
+} from "./client-offer-selection";
 import type { UiIconOwner, UiIconRepository } from "../app/ui-icon-repository";
 import type { ClientEntityFacts } from "./client-entity-mirror";
 import { PYREAL_ICON_SPEC } from "./client-inventory-art";
@@ -98,6 +102,10 @@ interface PendingPreview {
 	readonly sequence: number;
 	readonly draft: VendorDraft;
 	readonly reportRejection: boolean;
+	/** Refreshes of the same candidate share one bounded lifetime. */
+	readonly deadline: number;
+	/** The deadline timer belongs to this preview and retires with it. */
+	readonly timer: ReturnType<typeof setTimeout>;
 }
 
 let nextSequence = 0;
@@ -131,6 +139,7 @@ export class ClientVendorState {
 	/** Cached reach availability invalidates the quote view when poses arrive. */
 	#canReachVendor = false;
 	#disposed = false;
+	#recovering = false;
 
 	constructor(
 		readonly session: VendorSession,
@@ -211,11 +220,12 @@ export class ClientVendorState {
 			currency: this.#snapshot.currency,
 			quote: this.#quote,
 			currencyIconKeys: this.#currencyIcons,
-			pending: this.#preview !== null,
+			pending: this.#recovering || this.#preview !== null,
 			phase: this.#execution?.phase ?? null,
 			problem: this.#problem,
 			canTrade:
 				canReachVendor &&
+				!this.#recovering &&
 				this.#execution === null &&
 				this.#preview === null &&
 				this.#quantityRequest === null &&
@@ -316,32 +326,60 @@ export class ClientVendorState {
 		this.#request(draft, true);
 	}
 
+	/** Inventory dimming describes eligible contents for non-empty packs. */
+	inventoryItemUnavailable(item: number): boolean {
+		const vendor = this.visibleVendor();
+		if (vendor === null) return false;
+		const selection = this.#saleSelection(vendor, item);
+		return selection.kind !== "selected" || selection.items.length === 0;
+	}
+
+	acceptsSaleDrop(vendor: number, item: number): boolean {
+		if (!this.acceptsDrop(vendor)) return false;
+		const selection = this.#saleSelection(vendor, item);
+		return selection.kind === "selected" && selection.items.length > 0;
+	}
+
+	#saleSelection(vendor: number, item: number): ClientOfferSelection {
+		return selectOfferItems(
+			this.session.entities.read(),
+			item,
+			(facts) =>
+				facts.vendorSale?.vendor === vendor &&
+				facts.vendorSale.accepted &&
+				!this.#draft?.sells.includes(facts.guid),
+		);
+	}
+
 	queueSell(item: number): void {
-		if (
-			!this.#editable() ||
-			this.#draft === null ||
-			this.#draft.sells.includes(item)
-		)
-			return;
-		const read = this.session.entities.read();
-		const source =
-			read.kind === "current" ? read.level.entities.get(item) : undefined;
-		if (source?.description.kind !== "known" || !source.ownedByPlayer) {
-			this.reportFailure(
-				"Only your own described items can be queued for sale",
-			);
+		if (!this.#editable() || this.#draft === null) return;
+		const selection = this.#saleSelection(this.#draft.vendor, item);
+		if (selection.kind === "unavailable") {
+			this.reportFailure(selection.reason);
 			return;
 		}
-		const description = source.description;
-		const iconKey = this.icons.retain(this.#owner, {
-			kind: "item",
-			...description.icon,
-			itemType: description.itemType,
-		});
-		this.#retained.add(iconKey);
-		this.#sales.set(item, { name: description.name, iconKey });
+		if (selection.items.length === 0) {
+			this.reportFailure("No eligible items to queue for sale.");
+			return;
+		}
+		for (const source of selection.items) {
+			const description = source.description;
+			const iconKey = this.icons.retain(this.#owner, {
+				kind: "item",
+				...description.icon,
+				itemType: description.itemType,
+			});
+			this.#retained.add(iconKey);
+			this.#sales.set(source.guid, { name: description.name, iconKey });
+		}
 		this.#request(
-			{ ...this.#draft, sells: [...this.#draft.sells, item] },
+			{
+				...this.#draft,
+				sells: [
+					...this.#draft.sells,
+					...selection.items.map((item) => item.guid),
+				],
+			},
 			true,
 		);
 	}
@@ -401,7 +439,7 @@ export class ClientVendorState {
 		this.#view = null;
 		if (this.#execution === null && this.#draft !== null) {
 			this.#draft = { vendor: this.#draft.vendor, buys: [], sells: [] };
-			this.#preview = null;
+			this.#retirePreview();
 			this.#quote = null;
 			this.#collectArtwork();
 		}
@@ -409,6 +447,7 @@ export class ClientVendorState {
 
 	destroy(): void {
 		this.#disposed = true;
+		this.#retirePreview();
 		this.#unsubscribe();
 		this.icons.releaseOwner(this.#owner);
 	}
@@ -416,6 +455,7 @@ export class ClientVendorState {
 	#editable(): boolean {
 		return (
 			this.#visible &&
+			!this.#recovering &&
 			this.#checkRange() &&
 			this.#execution === null &&
 			this.#preview === null &&
@@ -444,17 +484,45 @@ export class ClientVendorState {
 		return canReachVendor;
 	}
 
+	#retirePreview(): void {
+		if (this.#preview !== null) clearTimeout(this.#preview.timer);
+		this.#preview = null;
+	}
+
 	#request(draft: VendorDraft, reportRejection: boolean): void {
-		const pending = { sequence: sequence(), draft, reportRejection };
+		if (this.#recovering) return;
+		const deadline =
+			this.#preview?.deadline ??
+			performance.now() + CLIENT_TUNING.vendor.previewTimeoutMs;
+		this.#retirePreview();
+		const pending: PendingPreview = {
+			sequence: sequence(),
+			draft,
+			reportRejection,
+			deadline,
+			timer: setTimeout(
+				() => {
+					if (this.#preview !== pending) return;
+					this.#retirePreview();
+					this.#problem =
+						"Vendor preview timed out. Your previous draft has been retained.";
+					this.#view = null;
+					this.#collectArtwork();
+					this.reportFailure(this.#problem);
+				},
+				Math.max(0, deadline - performance.now()),
+			),
+		};
 		this.#preview = pending;
 		this.#view = null;
 		void this.session
 			.previewVendor({ sequence: pending.sequence, draft: pending.draft })
 			.catch((error: unknown) => {
 				if (this.#preview !== pending || this.#disposed) return;
-				this.#preview = null;
+				this.#retirePreview();
 				this.#problem = `Vendor preview failed: ${String(error)}`;
 				this.#view = null;
+				this.#collectArtwork();
 				if (reportRejection) this.reportFailure(this.#problem);
 			});
 	}
@@ -473,7 +541,7 @@ export class ClientVendorState {
 				snapshot === null
 					? null
 					: { vendor: snapshot.vendor, buys: [], sells: [] };
-			this.#preview = null;
+			this.#retirePreview();
 			this.#quote = null;
 			this.#problem = null;
 			this.#sales.clear();
@@ -502,7 +570,15 @@ export class ClientVendorState {
 	}
 
 	#receive(event: ClientLifecycleSessionEvent): void {
-		if (event.type === "trade-snapshot" && event.trade.trade !== null)
+		if (event.type === "resyncing") {
+			this.#recovering = true;
+			this.#retirePreview();
+			this.#view = null;
+			this.#collectArtwork();
+		} else if (event.type === "current-state") {
+			this.#recovering = false;
+			this.#replaceSnapshot(this.session.vendorSnapshot());
+		} else if (event.type === "trade-snapshot" && event.trade.trade !== null)
 			this.close();
 		else if (event.type === "vendor-approached") {
 			this.#visible = true;
@@ -517,7 +593,7 @@ export class ClientVendorState {
 				event.result.vendor !== this.#draft?.vendor
 			)
 				return;
-			this.#preview = null;
+			this.#retirePreview();
 			if (event.result.outcome.kind === "ready") {
 				this.#draft = pending.draft;
 				this.#quote = event.result.outcome.quote;

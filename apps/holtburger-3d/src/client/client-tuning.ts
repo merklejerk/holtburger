@@ -261,6 +261,8 @@ export const CLIENT_TUNING = {
 		openingGrid: { minColumns: 4, maxColumns: 5, maxRows: 4 },
 	},
 	vendor: {
+		/** Maximum wait for a local draft quote, including stock refreshes. */
+		previewTimeoutMs: 10_000,
 		/** Generous reach beyond the vendor's use radius, checked in world space. */
 		maximumDistanceMeters: 15,
 	},

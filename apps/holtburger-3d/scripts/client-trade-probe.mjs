@@ -99,7 +99,10 @@ export async function probeTrade(client, evaluateExpression) {
 		clickCount: 1,
 	});
 	const add = await read(`${fixture}.request()`);
-	if (add.kind !== "add" || add.item !== 6001)
+	if (
+		add.kind !== "add" ||
+		JSON.stringify(add.items) !== JSON.stringify([6001])
+	)
 		throw new Error("Inventory drop did not submit a trade addition");
 	await read(`${fixture}.pending()`);
 	await wait(
@@ -346,7 +349,145 @@ export async function probeTrade(client, evaluateExpression) {
 	})()`);
 	await read(`${fixture}.close()`);
 	await wait("document.querySelector('[data-trade-panel]') === null");
+	await read(`${fixture}.register()`);
+	await read(`${fixture}.packs()`);
+	await wait(`document.querySelector('[data-trade-offer="5001"]') !== null`);
+	await wait(
+		`document.querySelector('.client-inventory .contents-packs [data-item-guid="8000"]')?.dataset.dimmed === 'false'`,
+	);
+	const dragPack = async (selector) => {
+		const from = await point(selector);
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mousePressed",
+			...from,
+			button: "left",
+			buttons: 1,
+			clickCount: 1,
+		});
+		const to = await point('[data-trade-offer="5001"]');
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseMoved",
+			...to,
+			button: "left",
+			buttons: 1,
+		});
+		await read(`(() => {
+			const source = document.querySelector(${JSON.stringify(selector)});
+			const cell = source.matches('.contents-header')
+				? source.closest('[data-contents-root]').querySelector('.item-grid-cell[data-item-guid="' + source.dataset.itemGuid + '"]')
+				: source;
+			const preview = cell.querySelector('[data-drag-preview]');
+			const artwork = preview.querySelector('[data-drag-artwork]');
+			const ghost = document.querySelector('.item-drag-ghost');
+			const bounds = preview.getBoundingClientRect();
+			if (ghost.hidden || !artwork.isEqualNode(ghost.querySelector('[data-drag-artwork]')))
+				throw new Error('Pack drag ghost does not match its displayed item icon');
+			if (Math.abs(parseFloat(ghost.style.width) - bounds.width) > 0.1 || Math.abs(parseFloat(ghost.style.height) - bounds.height) > 0.1)
+				throw new Error('Pack drag ghost does not use its displayed item icon size');
+		})()`);
+		if (
+			(await read(
+				`document.querySelector('[data-trade-offer="5001"]').dataset.inventoryDrop`,
+			)) !== "accepted"
+		)
+			throw new Error("Eligible pack did not highlight the trade drop target");
+		await client.send("Input.dispatchMouseEvent", {
+			type: "mouseReleased",
+			...to,
+			button: "left",
+			buttons: 0,
+			clickCount: 1,
+		});
+		return read(`${fixture}.request()`);
+	};
+	const packAdd = await dragPack(
+		'.client-inventory .contents-packs [data-item-guid="8000"]',
+	);
+	if (
+		packAdd.kind !== "add" ||
+		JSON.stringify(packAdd.items) !== JSON.stringify([8010, 8011])
+	)
+		throw new Error(
+			"Non-empty pack did not offer only its eligible direct contents",
+		);
+	const emptyPackAdd = await dragPack(
+		'.client-inventory .contents-packs [data-item-guid="8001"]',
+	);
+	if (
+		emptyPackAdd.kind !== "add" ||
+		JSON.stringify(emptyPackAdd.items) !== JSON.stringify([8001])
+	)
+		throw new Error("Empty pack did not offer itself");
+	const headerPackAdd = await dragPack(
+		'.client-inventory .contents-header[data-item-guid="8000"]',
+	);
+	if (JSON.stringify(headerPackAdd) !== JSON.stringify(packAdd))
+		throw new Error(
+			"Pack header did not use the same contents selection as the pack strip",
+		);
+	const emptyHeaderAdd = await dragPack(
+		'.client-inventory .contents-header[data-item-guid="8001"]',
+	);
+	if (JSON.stringify(emptyHeaderAdd) !== JSON.stringify(emptyPackAdd))
+		throw new Error("Empty pack header did not offer the pack itself");
+	const mainPackAdd = await dragPack(
+		'.client-inventory .contents-packs [data-item-guid="1"]',
+	);
+	if (
+		mainPackAdd.kind !== "add" ||
+		JSON.stringify(mainPackAdd.items) !== JSON.stringify([6001])
+	)
+		throw new Error(
+			"Main Pack did not select only eligible items on its own page",
+		);
+	const mainHeaderAdd = await dragPack(
+		'.client-inventory .contents-header[data-item-guid="1"]',
+	);
+	if (JSON.stringify(mainHeaderAdd) !== JSON.stringify(mainPackAdd))
+		throw new Error(
+			"Main Pack header did not use the same selection as the strip",
+		);
+	const inventoryRequests = () =>
+		read(
+			`${api}.inventoryDragCommands().filter(entry => entry.command === 'preview_client_inventory' || entry.command === 'submit_client_inventory').length`,
+		);
+	const beforeRootMove = await inventoryRequests();
+	const root = await point(
+		'.client-inventory .contents-header[data-item-guid="1"]',
+	);
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mousePressed",
+		...root,
+		button: "left",
+		buttons: 1,
+		clickCount: 1,
+	});
+	const destination = await point(
+		'.client-inventory .contents-header[data-item-guid="8000"]',
+	);
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseMoved",
+		...destination,
+		button: "left",
+		buttons: 1,
+	});
+	await client.send("Input.dispatchMouseEvent", {
+		type: "mouseReleased",
+		...destination,
+		button: "left",
+		buttons: 0,
+		clickCount: 1,
+	});
+	if ((await inventoryRequests()) !== beforeRootMove)
+		throw new Error("Main Pack gesture attempted to move the character root");
+	await read(`${fixture}.close()`);
+	await wait("document.querySelector('[data-trade-panel]') === null");
 	return {
+		headerPackAdd,
+		mainPackAdd,
+		mainHeaderAdd,
+		packAdd,
+		emptyPackAdd,
 		contextualExamine,
 		open,
 		add,

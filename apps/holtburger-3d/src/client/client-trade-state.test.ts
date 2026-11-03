@@ -96,7 +96,14 @@ async function fixture() {
 			},
 			worldContainer: { kind: "closed" },
 			entities: [
-				entityFacts(PLAYER),
+				entityFacts(PLAYER, {
+					storage: {
+						kind: "container",
+						roster: "announced",
+						itemCapacity: 24,
+						packCapacity: 7,
+					},
+				}),
 				entityFacts(PARTNER, { canTrade: true }),
 				entityFacts(ITEM, {
 					ownedByPlayer: true,
@@ -137,6 +144,124 @@ async function fixture() {
 }
 
 describe("P2P trade HUD authority", () => {
+	it("offers Main Pack's direct items without offering the character", async () => {
+		const f = await fixture();
+		f.snapshot(f.trade);
+		expect(f.model.acceptsDrop(PARTNER, f.trade.revision, PLAYER)).toBe(true);
+		f.model.add(PARTNER, f.trade.revision, PLAYER);
+		expect(f.invoke).toHaveBeenLastCalledWith("submit_client_trade", {
+			request: {
+				kind: "add",
+				partner: PARTNER,
+				revision: f.trade.revision,
+				items: [ITEM],
+			},
+		});
+	});
+
+	it("offers eligible pack contents once and permits reset/close while they await acknowledgment", async () => {
+		const f = await fixture();
+		const pack = entityFacts(20, {
+			ownedByPlayer: true,
+			location: {
+				kind: "contained",
+				parentGuid: PLAYER,
+				slot: { kind: "pack", index: 0, entryKind: "container" },
+			},
+			storage: {
+				kind: "container",
+				roster: "announced",
+				itemCapacity: 24,
+				packCapacity: 0,
+			},
+		});
+		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
+			salvage: null,
+			worldContainer: null,
+			removed: [],
+			upserts: [
+				pack,
+				...[21, 22, 23].map((guid) =>
+					entityFacts(guid, {
+						ownedByPlayer: true,
+						canOfferTrade: guid !== 23,
+						location: {
+							kind: "contained",
+							parentGuid: pack.guid,
+							slot: { kind: "item", index: guid },
+						},
+					}),
+				),
+			],
+		});
+		f.snapshot(f.trade);
+		expect(f.model.inventoryItemUnavailable(pack.guid)).toBe(false);
+		f.model.add(PARTNER, f.trade.revision, pack.guid);
+		expect(f.invoke).toHaveBeenLastCalledWith("submit_client_trade", {
+			request: {
+				kind: "add",
+				partner: PARTNER,
+				revision: f.trade.revision,
+				items: [21, 22],
+			},
+		});
+		f.snapshot(f.trade, [21, 22]);
+		expect(f.model.acceptsDrop(PARTNER, f.trade.revision, pack.guid)).toBe(
+			false,
+		);
+		expect(f.model.read()?.canAccept).toBe(false);
+		f.model.reset();
+		expect(f.invoke).toHaveBeenLastCalledWith("submit_client_trade", {
+			request: { kind: "reset", partner: PARTNER },
+		});
+		f.model.close();
+		expect(f.invoke).toHaveBeenLastCalledWith("submit_client_trade", {
+			request: { kind: "close", partner: PARTNER },
+		});
+		f.snapshot({ ...f.trade, revision: f.trade.revision + 1 });
+		const count = f.invoke.mock.calls.length;
+		f.model.add(PARTNER, f.trade.revision, pack.guid);
+		expect(f.invoke).toHaveBeenCalledTimes(count);
+	});
+
+	it("offers an empty pack itself", async () => {
+		const f = await fixture();
+		f.emit("client-entity-facts-changed", {
+			projectileSupply: null,
+			salvage: null,
+			worldContainer: null,
+			removed: [],
+			upserts: [
+				entityFacts(20, {
+					ownedByPlayer: true,
+					canOfferTrade: true,
+					location: {
+						kind: "contained",
+						parentGuid: PLAYER,
+						slot: { kind: "pack", index: 0, entryKind: "container" },
+					},
+					storage: {
+						kind: "container",
+						roster: "announced",
+						itemCapacity: 24,
+						packCapacity: 0,
+					},
+				}),
+			],
+		});
+		f.snapshot(f.trade);
+		f.model.add(PARTNER, f.trade.revision, 20);
+		expect(f.invoke).toHaveBeenLastCalledWith("submit_client_trade", {
+			request: {
+				kind: "add",
+				partner: PARTNER,
+				revision: f.trade.revision,
+				items: [20],
+			},
+		});
+	});
+
 	it("opens only after registration, including incoming registrations", async () => {
 		const f = await fixture();
 		f.model.open(PARTNER);
@@ -156,7 +281,7 @@ describe("P2P trade HUD authority", () => {
 				kind: "add",
 				partner: PARTNER,
 				revision: f.trade.revision,
-				item: ITEM,
+				items: [ITEM],
 			},
 		});
 		f.snapshot(f.trade, [ITEM]);

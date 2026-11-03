@@ -1,6 +1,7 @@
 //! Shared P2P command admission and wire execution for every frontend.
 
 use holtburger_common::Guid;
+use std::collections::{BTreeSet, HashMap};
 use std::time::{Duration, Instant};
 
 use holtburger_protocol::messages::*;
@@ -19,11 +20,14 @@ const TRADE_ADDITION_TIMEOUT: Duration = Duration::from_secs(10);
 pub enum TradeRequest {
     /// Initiate negotiations; server registration establishes the session.
     Open { partner: Guid },
-    /// Offer exactly one owned item or whole stack against the displayed offer revision.
+    /// Offer whole sources admitted against one displayed revision; acknowledgments remain per item.
     Add {
+        /// Negotiation identity captured by the gesture.
         partner: Guid,
+        /// Exact displayed offer, checked before any additions are sent.
         revision: u32,
-        item: Guid,
+        /// Whole sources selected by the frontend, deduplicated during admission.
+        items: Vec<Guid>,
     },
     /// Accept only the exact published offer revision.
     Accept { partner: Guid, revision: u32 },
@@ -57,7 +61,20 @@ impl TradeRequest {
     }
 }
 
-fn prepare_trade(world: &WorldState, request: &TradeRequest) -> Result<GameAction, &'static str> {
+/// Admitted actions and item-specific refusals; no pending batch survives command execution.
+#[derive(Debug)]
+struct PreparedTrade {
+    /// Ordinary wire actions, sent in selection order without waiting for acknowledgments.
+    actions: Vec<GameAction>,
+    /// Changed item eligibility is reported without rejecting the remaining selection.
+    skipped: Vec<String>,
+}
+
+fn prepare_trade(
+    world: &WorldState,
+    request: &TradeRequest,
+    pending: &HashMap<Guid, Instant>,
+) -> Result<PreparedTrade, &'static str> {
     if let TradeRequest::Open { partner } = *request {
         if world.trade.is_some() {
             return Err("You are already trading.");
@@ -65,31 +82,62 @@ fn prepare_trade(world: &WorldState, request: &TradeRequest) -> Result<GameActio
         if !world.trade_partner_candidate(partner) {
             return Err("Select another nearby player to trade with.");
         }
-        return Ok(GameAction::OpenTradeNegotiations(Box::new(
-            OpenTradeNegotiationsActionData {
-                trade_partner_guid: partner,
-            },
-        )));
+        return Ok(PreparedTrade {
+            actions: vec![GameAction::OpenTradeNegotiations(Box::new(
+                OpenTradeNegotiationsActionData {
+                    trade_partner_guid: partner,
+                },
+            ))],
+            skipped: Vec::new(),
+        });
     }
     let trade = world.trade.as_ref().ok_or("There is no active trade.")?;
     if trade.partner_guid != request.partner() {
         return Err("The trading partner has changed.");
     }
-    Ok(match *request {
-        TradeRequest::Add { item, revision, .. } => {
+    let action = match *request {
+        TradeRequest::Add {
+            revision,
+            ref items,
+            ..
+        } => {
             if trade.revision != revision {
-                return Err("The trade offer changed. Drop the item again.");
+                return Err("The trade offer changed. Drop the items again.");
             }
-            if trade.self_side.items.contains(&item) {
-                return Err("That item is already offered.");
+            if trade.self_side.accepted && trade.partner_side.accepted {
+                return Err("The trade is already transferring.");
             }
-            if let Some(reason) = world.trade_item_rejection(item) {
-                return Err(reason);
+            if items.is_empty() {
+                return Err("No items were selected for trade.");
             }
-            GameAction::AddToTrade(Box::new(AddToTradeActionData {
-                item_guid: item,
-                trade_slot: 0,
-            }))
+            let mut prepared = PreparedTrade {
+                actions: Vec::new(),
+                skipped: Vec::new(),
+            };
+            let mut seen = BTreeSet::new();
+            for &item in items {
+                if !seen.insert(item) {
+                    continue;
+                }
+                let rejection = if trade.self_side.items.contains(&item) {
+                    Some("That item is already offered.")
+                } else if pending.contains_key(&item) {
+                    Some("That trade item is still awaiting acknowledgment.")
+                } else {
+                    world.trade_item_rejection(item)
+                };
+                if let Some(reason) = rejection {
+                    prepared.skipped.push(format!("Item {item}: {reason}"));
+                } else {
+                    prepared
+                        .actions
+                        .push(GameAction::AddToTrade(Box::new(AddToTradeActionData {
+                            item_guid: item,
+                            trade_slot: 0,
+                        })));
+                }
+            }
+            return Ok(prepared);
         }
         TradeRequest::Accept { revision, .. } => {
             if trade.revision != revision {
@@ -115,6 +163,10 @@ fn prepare_trade(world: &WorldState, request: &TradeRequest) -> Result<GameActio
             GameAction::CloseTradeNegotiations(Box::new(CloseTradeNegotiationsActionData {}))
         }
         TradeRequest::Open { .. } => unreachable!(),
+    };
+    Ok(PreparedTrade {
+        actions: vec![action],
+        skipped: Vec::new(),
     })
 }
 
@@ -183,17 +235,14 @@ impl ClientRuntime {
             TradeRequest::Accept { .. } if !self.trade_additions.is_empty() => {
                 Some("Wait for the server to acknowledge your offered items.")
             }
-            TradeRequest::Add { item, .. } if self.trade_additions.contains_key(&item) => {
-                Some("That trade item is still awaiting acknowledgment.")
-            }
             _ => None,
         };
         if let Some(message) = blocked {
             self.report_trade_failure(message.into());
             return Ok(());
         }
-        let action = match prepare_trade(&self.world, &request) {
-            Ok(action) => action,
+        let prepared = match prepare_trade(&self.world, &request, &self.trade_additions) {
+            Ok(prepared) => prepared,
             Err(message) => {
                 self.report_trade_failure(message.into());
                 return Ok(());
@@ -201,27 +250,36 @@ impl ClientRuntime {
         };
         // Trade initiation follows the same peace-before-open policy for every frontend.
         // ACE Player_Trade.cs requires both players in non-combat mode and owns approach.
-        let sent = async {
-            if matches!(request, TradeRequest::Open { .. })
-                && self.world.player_combat_mode() != CombatMode::NonCombat
-            {
-                self.handle_combat_command(super::types::ClientCommand::SetCombatMode(
+        if matches!(request, TradeRequest::Open { .. })
+            && self.world.player_combat_mode() != CombatMode::NonCombat
+            && let Err(error) = self
+                .handle_combat_command(super::types::ClientCommand::SetCombatMode(
                     CombatMode::NonCombat,
                 ))
-                .await?;
-            }
-            self.send_game_action(action).await
+                .await
+        {
+            self.report_trade_failure(format!("Trade request failed: {error}"));
+            return Ok(());
         }
-        .await;
-        match sent {
-            Ok(()) => {
-                if let TradeRequest::Add { item, .. } = request {
-                    self.trade_additions
-                        .insert(item, Instant::now() + TRADE_ADDITION_TIMEOUT);
-                }
-                self.emit_trade_state_updated();
+        for message in prepared.skipped {
+            self.report_trade_failure(message);
+        }
+        for action in prepared.actions {
+            let item = match &action {
+                GameAction::AddToTrade(data) => Some(data.item_guid),
+                _ => None,
+            };
+            if let Err(error) = self.send_game_action(action).await {
+                self.report_trade_failure(format!(
+                    "Trade request failed; remaining additions were not sent: {error}"
+                ));
+                break;
             }
-            Err(error) => self.report_trade_failure(format!("Trade request failed: {error}")),
+            if let Some(item) = item {
+                self.trade_additions
+                    .insert(item, Instant::now() + TRADE_ADDITION_TIMEOUT);
+            }
+            self.emit_trade_state_updated();
         }
         Ok(())
     }
@@ -230,11 +288,199 @@ impl ClientRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use holtburger_common::properties::{
+        InventoryEntryKind, ItemType, PropertyInt, WorldObjectPropertyAccessorsMut,
+    };
+    use holtburger_world::entity::Entity;
     use holtburger_world::state::{TradeSide, TradeState};
 
     const SELF: Guid = Guid(0x5000_0001);
     const PARTNER: Guid = Guid(0x5000_0002);
     const REVISION: u32 = 7;
+
+    fn owned_item(world: &mut WorldState, item: Guid) {
+        let mut entity = Entity::new(item, "Trade item".into(), Default::default());
+        entity.set_int_prop(PropertyInt::ItemType, ItemType::FOOD.bits() as i32);
+        world.add_entity(entity);
+        world.handle_message(&GameMessage::GameEvent(Box::new(GameEventMessage {
+            target: SELF,
+            sequence: 1,
+            event: GameEvent::InventoryPutObjInContainer(Box::new(
+                InventoryPutObjInContainerEventData {
+                    item_guid: item,
+                    container_guid: SELF,
+                    slot: 0,
+                    container_type: InventoryEntryKind::Item,
+                },
+            )),
+        })));
+    }
+
+    #[test]
+    fn batch_admission_keeps_eligible_sources_and_skips_duplicates_pending_and_changed_items() {
+        let mut world = world();
+        let first = Guid(20);
+        let second = Guid(21);
+        let pending_item = Guid(22);
+        for item in [first, second, pending_item] {
+            owned_item(&mut world, item);
+        }
+        let pending = HashMap::from([(pending_item, Instant::now() + TRADE_ADDITION_TIMEOUT)]);
+        let request = TradeRequest::Add {
+            partner: PARTNER,
+            revision: REVISION,
+            items: vec![
+                first,
+                first,
+                Guid(0x8000_0001),
+                pending_item,
+                Guid(99),
+                second,
+            ],
+        };
+        let prepared = prepare_trade(&world, &request, &pending).unwrap();
+        let items: Vec<_> = prepared
+            .actions
+            .iter()
+            .map(|action| {
+                let GameAction::AddToTrade(data) = action else {
+                    panic!("expected addition")
+                };
+                data.item_guid
+            })
+            .collect();
+        assert_eq!(items, vec![first, second]);
+        assert_eq!(prepared.skipped.len(), 3);
+        assert!(
+            prepared
+                .skipped
+                .iter()
+                .any(|reason| reason.contains("items you own"))
+        );
+        assert!(
+            prepared
+                .skipped
+                .iter()
+                .any(|reason| reason.contains("already offered"))
+        );
+        assert!(
+            prepared
+                .skipped
+                .iter()
+                .any(|reason| reason.contains("awaiting acknowledgment"))
+        );
+        world.trade.as_mut().unwrap().revision += 1;
+        assert!(
+            prepare_trade(&world, &request, &pending)
+                .unwrap_err()
+                .contains("offer changed")
+        );
+    }
+
+    #[test]
+    fn batch_admission_rejects_empty_selections_replaced_partners_and_transferring_trades() {
+        let mut world = world();
+        let request = |partner, revision, items| TradeRequest::Add {
+            partner,
+            revision,
+            items,
+        };
+        assert!(
+            prepare_trade(&world, &request(PARTNER, REVISION, vec![]), &HashMap::new())
+                .unwrap_err()
+                .contains("No items")
+        );
+        assert!(
+            prepare_trade(
+                &world,
+                &request(SELF, REVISION, vec![Guid(20)]),
+                &HashMap::new()
+            )
+            .unwrap_err()
+            .contains("partner has changed")
+        );
+        let trade = world.trade.as_mut().unwrap();
+        trade.self_side.accepted = true;
+        trade.partner_side.accepted = true;
+        assert!(
+            prepare_trade(
+                &world,
+                &request(PARTNER, REVISION, vec![Guid(20)]),
+                &HashMap::new()
+            )
+            .unwrap_err()
+            .contains("transferring")
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_submission_tracks_each_sent_item_and_retires_failures_independently() {
+        let mut client = super::super::builder::build_test_client(ClientState::InWorld);
+        client.world = world();
+        for item in [Guid(20), Guid(21)] {
+            owned_item(&mut client.world, item);
+        }
+        client
+            .submit_trade(TradeRequest::Add {
+                partner: PARTNER,
+                revision: REVISION,
+                items: vec![Guid(20), Guid(21)],
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            client.trade_snapshot().pending_items,
+            vec![Guid(20), Guid(21)]
+        );
+        client.observe_trade_reply(&GameEvent::TradeFailure(Box::new(TradeFailureEventData {
+            object_guid: Guid(20),
+            ..Default::default()
+        })));
+        assert_eq!(client.trade_snapshot().pending_items, vec![Guid(21)]);
+        client.poll_trade_addition_timeout(Instant::now() + TRADE_ADDITION_TIMEOUT);
+        assert!(client.trade_snapshot().pending_items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn batch_send_failure_stops_remaining_sends_without_creating_acknowledgment_waits() {
+        let mut client = super::super::builder::build_test_client(ClientState::InWorld);
+        client.world = world();
+        for item in [Guid(20), Guid(21)] {
+            owned_item(&mut client.world, item);
+        }
+        // The IPv4 production socket cannot send to this IPv6 destination.
+        client.session = holtburger_session::Session::new("[::1]:9000".parse().unwrap())
+            .await
+            .unwrap();
+        let mut events = client.subscribe_client_view_events();
+        client
+            .submit_trade(TradeRequest::Add {
+                partner: PARTNER,
+                revision: REVISION,
+                items: vec![Guid(20), Guid(21)],
+            })
+            .await
+            .unwrap();
+        assert_eq!(client.session.game_action_sequence, 1);
+        assert!(client.trade_snapshot().pending_items.is_empty());
+        assert!(client.active_busy_operation.is_none());
+        let mut reported_failure = false;
+        while let Ok(event) = events.try_recv() {
+            if let ClientViewEvent::ServerMessage { message, .. } = event {
+                reported_failure |= message.contains("remaining additions were not sent");
+            }
+        }
+        assert!(reported_failure);
+    }
+
+    fn prepare_single(world: &WorldState, request: &TradeRequest) -> Result<GameAction, String> {
+        let mut prepared = prepare_trade(world, request, &HashMap::new()).map_err(str::to_owned)?;
+        assert_eq!(prepared.actions.len() + prepared.skipped.len(), 1);
+        if let Some(reason) = prepared.skipped.pop() {
+            return Err(reason);
+        }
+        Ok(prepared.actions.remove(0))
+    }
 
     fn world() -> WorldState {
         let mut world = WorldState::synthetic();
@@ -262,7 +508,7 @@ mod tests {
     fn trade_acceptance_names_the_reviewed_offer_and_current_partner_acceptance() {
         let mut world = world();
         world.trade.as_mut().unwrap().partner_side.accepted = true;
-        let action = prepare_trade(
+        let action = prepare_single(
             &world,
             &TradeRequest::Accept {
                 partner: PARTNER,
@@ -277,7 +523,7 @@ mod tests {
         assert_eq!(data.initiator_guid, SELF);
         assert_eq!(data.partner_accepts, 1);
         assert!(
-            prepare_trade(
+            prepare_single(
                 &world,
                 &TradeRequest::Accept {
                     partner: PARTNER,
@@ -293,13 +539,13 @@ mod tests {
     fn trade_commands_reject_replaced_and_absent_negotiations() {
         let mut world = world();
         assert!(
-            prepare_trade(&world, &TradeRequest::Close { partner: SELF })
+            prepare_single(&world, &TradeRequest::Close { partner: SELF })
                 .unwrap_err()
                 .contains("partner has changed")
         );
         world.trade = None;
         assert!(
-            prepare_trade(
+            prepare_single(
                 &world,
                 &TradeRequest::Accept {
                     partner: PARTNER,
@@ -310,12 +556,12 @@ mod tests {
             .contains("no active trade")
         );
         assert!(
-            prepare_trade(
+            prepare_single(
                 &world,
                 &TradeRequest::Add {
                     partner: PARTNER,
                     revision: REVISION,
-                    item: Guid(2)
+                    items: vec![Guid(2)]
                 }
             )
             .is_err()
@@ -326,11 +572,11 @@ mod tests {
     fn trade_withdrawal_and_reset_have_distinct_wire_actions() {
         let world = world();
         assert!(matches!(
-            prepare_trade(&world, &TradeRequest::Withdraw { partner: PARTNER }).unwrap(),
+            prepare_single(&world, &TradeRequest::Withdraw { partner: PARTNER }).unwrap(),
             GameAction::DeclineTrade(_)
         ));
         assert!(matches!(
-            prepare_trade(&world, &TradeRequest::Reset { partner: PARTNER }).unwrap(),
+            prepare_single(&world, &TradeRequest::Reset { partner: PARTNER }).unwrap(),
             GameAction::ResetTrade(_)
         ));
     }
@@ -339,24 +585,24 @@ mod tests {
     fn trade_addition_rejects_duplicate_and_unowned_sources() {
         let world = world();
         assert!(
-            prepare_trade(
+            prepare_single(
                 &world,
                 &TradeRequest::Add {
                     partner: PARTNER,
                     revision: REVISION,
-                    item: Guid(0x8000_0001)
+                    items: vec![Guid(0x8000_0001)]
                 }
             )
             .unwrap_err()
             .contains("already offered")
         );
         assert!(
-            prepare_trade(
+            prepare_single(
                 &world,
                 &TradeRequest::Add {
                     partner: PARTNER,
                     revision: REVISION,
-                    item: Guid(0x8000_0003)
+                    items: vec![Guid(0x8000_0003)]
                 }
             )
             .unwrap_err()
@@ -369,15 +615,15 @@ mod tests {
         let request = TradeRequest::Add {
             partner: PARTNER,
             revision: REVISION,
-            item: Guid(0x8000_0003),
+            items: vec![Guid(0x8000_0003)],
         };
         let trade = world.trade.as_mut().unwrap();
         trade.self_side.items.clear();
         trade.partner_side.items.clear();
         trade.revision += 1;
         assert_eq!(
-            prepare_trade(&world, &request).unwrap_err(),
-            "The trade offer changed. Drop the item again."
+            prepare_single(&world, &request).unwrap_err(),
+            "The trade offer changed. Drop the items again."
         );
     }
 

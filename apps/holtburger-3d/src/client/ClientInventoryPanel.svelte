@@ -88,8 +88,6 @@
 			: null,
 	);
 	let view = $state<ClientInventoryView | null>(null);
-	/** Sampled alongside inventory; closing the vendor restores ordinary cell presentation. */
-	let visibleVendor = $state<number | null>(null);
 	/** One sampled set keeps markup free of live workflow reads. */
 	let workflowDimmed = $state<ReadonlySet<number>>(new Set());
 	/** Row hover is local UI state; compatible locations come from sampled world facts. */
@@ -210,13 +208,13 @@
 			repository: inventory.icons,
 			intervalMs: CLIENT_TUNING.inventory.displayIntervalMs,
 			read: () => {
-				visibleVendor = vendor?.visibleVendor() ?? null;
 				const items = inventory.readItems().items;
 				const next = inventory.read();
 				workflowDimmed = new Set(
 					[...items.values()]
 						.filter(
 							(item) =>
+								vendor?.inventoryItemUnavailable(item.guid) === true ||
 								trade?.inventoryItemUnavailable(item.guid) === true ||
 								(salvage?.visible === true && !salvage.canQueue(item.guid)),
 						)
@@ -361,9 +359,6 @@
 			dimItem={(item) =>
 				!pending &&
 				(workflowDimmed.has(item.guid) ||
-					(item.vendorSale !== null &&
-						item.vendorSale.vendor === visibleVendor &&
-						!item.vendorSale.accepted) ||
 					(hoveredEquipmentSlot !== null &&
 						!(
 							item.description.kind === "known" &&

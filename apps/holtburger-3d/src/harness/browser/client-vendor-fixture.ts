@@ -1,3 +1,4 @@
+import { offerPackFixture } from "./client-offer-pack-fixture";
 import { CLIENT_TUNING } from "../../client/client-tuning";
 import type { ClientEntityFacts } from "../../client/client-entity-mirror";
 import { entityFacts } from "../../client/client-entity-mirror.test-support";
@@ -111,6 +112,15 @@ export function createVendorFixture(options: {
 					CLIENT_TUNING.inventory.displayIntervalMs * 2,
 				),
 			),
+		packs() {
+			options.emit("client-entity-facts-changed", {
+				projectileSupply: null,
+				salvage: null,
+				worldContainer: null,
+				removed: [],
+				upserts: offerPackFixture(vendor),
+			});
+		},
 		begin() {
 			baseline();
 			emit("client-entity-facts-changed", {
@@ -134,17 +144,6 @@ export function createVendorFixture(options: {
 					sequence: pending.sequence,
 					vendor,
 					outcome: { kind: "ready", quote },
-				}),
-			);
-		},
-		reject(reason: string) {
-			const pending = request("preview_client_vendor");
-			emit(
-				"client-vendor-preview",
-				vendorPreviewSchema.parse({
-					sequence: pending.sequence,
-					vendor,
-					outcome: { kind: "rejected", reason },
 				}),
 			);
 		},

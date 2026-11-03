@@ -70,7 +70,12 @@ interface DragSource {
 	readonly item: number;
 	/** Gesture origin is fixed even if authoritative rendering moves or detaches the cell. */
 	readonly origin:
-		"contents" | "equipment" | "pack" | "vendor" | ActionCellAddress;
+		| "contents"
+		| "equipment"
+		| "pack"
+		| "main-pack"
+		| "vendor"
+		| ActionCellAddress;
 	/** Captured surface identity prevents root replacement from retargeting a gesture. */
 	readonly root: number | null;
 	readonly element: HTMLElement;
@@ -111,6 +116,8 @@ type DragTarget =
 			readonly kind: "vendor";
 			readonly element: HTMLElement;
 			readonly vendor: number;
+			/** The queue accepts purchase offers; the catalog accepts owned sales only. */
+			readonly acceptsPurchases: boolean;
 	  }
 	| {
 			readonly kind: "action";
@@ -205,7 +212,11 @@ export class ClientItemDrag {
 		/** Vendor offers and owned sources join a draft, never an inventory move. */
 		private readonly vendor: Pick<
 			ClientVendorState,
-			"canDragOffer" | "acceptsDrop" | "queueBuy" | "queueSell"
+			| "canDragOffer"
+			| "acceptsDrop"
+			| "acceptsSaleDrop"
+			| "queueBuy"
+			| "queueSell"
 		> | null,
 		/** Salvage queue edits remain local; drag-out captures its exact draft lifetime. */
 		private readonly salvage: Pick<
@@ -250,7 +261,7 @@ export class ClientItemDrag {
 				if (
 					event.target instanceof Element &&
 					event.target.closest(
-						".item-grid-cell, [data-action-cell], [data-vendor-offer], [data-salvage-item]",
+						".item-grid-cell, .contents-header, [data-action-cell], [data-vendor-offer], [data-salvage-item]",
 					)
 				)
 					event.preventDefault();
@@ -430,11 +441,12 @@ export class ClientItemDrag {
 		const element =
 			event.target instanceof Element
 				? event.target.closest<HTMLElement>(
-						".item-grid-cell[data-item-guid]:not(:disabled), [data-action-cell][data-action-item]",
+						".item-grid-cell[data-item-guid]:not(:disabled), .contents-header[data-item-guid]:not(:disabled), [data-action-cell][data-action-item]",
 					)
 				: null;
 		if (element === null || !this.#root.contains(element)) return;
-		if (this.session.entities.read().kind !== "current") return;
+		const read = this.session.entities.read();
+		if (read.kind !== "current") return;
 		const actionCell = this.#actionCell(element);
 		const surface = this.#surface(element);
 		if (
@@ -450,19 +462,25 @@ export class ClientItemDrag {
 		const origin =
 			actionCell !== null
 				? actionCell
-				: element.closest(".contents-packs") !== null
-					? "pack"
-					: element.closest(".equipment-row") !== null
-						? "equipment"
-						: "contents";
+				: surface?.root === item && item === read.level.playerGuid
+					? "main-pack"
+					: element.closest(".contents-packs") !== null
+						? "pack"
+						: element.closest(".equipment-row") !== null
+							? "equipment"
+							: "contents";
 		if (actionCell === null) {
 			const facts = this.#worldEntity(item);
 			if (
 				facts?.description.kind !== "known" ||
-				!(facts.ownedByPlayer || facts.worldContainerContent)
+				!(
+					facts.ownedByPlayer ||
+					facts.worldContainerContent ||
+					origin === "main-pack"
+				)
 			)
 				return;
-			if (surface?.root === item) return;
+			if (surface?.root === item && origin !== "main-pack") return;
 			if (
 				origin === "pack" &&
 				(facts.location.kind !== "contained" ||
@@ -579,6 +597,7 @@ export class ClientItemDrag {
 		if (
 			gesture?.kind !== "dragging" ||
 			gesture.source.origin === "vendor" ||
+			gesture.source.origin === "main-pack" ||
 			typeof gesture.source.origin !== "string"
 		)
 			return;
@@ -636,6 +655,17 @@ export class ClientItemDrag {
 			return;
 		}
 		const hit = document.elementFromPoint(this.#cursor.x, this.#cursor.y);
+		// Main Pack represents the character, so its gesture can only contribute page contents.
+		if (
+			gesture.source.origin === "main-pack" &&
+			!hit?.closest(
+				"[data-trade-offer], [data-vendor-queue], [data-vendor-catalog]",
+			)
+		) {
+			this.#clearHighlight();
+			gesture.target = null;
+			return;
+		}
 		const payment = hit?.closest<HTMLElement>("[data-housing-payment]");
 		if (payment != null && this.#root.contains(payment)) {
 			this.#clearHighlight();
@@ -676,12 +706,24 @@ export class ClientItemDrag {
 				: "rejected";
 			return;
 		}
-		const queue = hit?.closest<HTMLElement>("[data-vendor-queue]");
-		if (queue != null && this.#root.contains(queue)) {
+		const vendorDrop = hit?.closest<HTMLElement>(
+			"[data-vendor-queue], [data-vendor-catalog]",
+		);
+		if (vendorDrop != null && this.#root.contains(vendorDrop)) {
 			this.#clearHighlight();
-			const vendor = Number(queue.dataset.vendorQueue);
-			gesture.target = { kind: "vendor", element: queue, vendor };
-			queue.dataset.inventoryDrop = this.#canQueue(gesture.source, vendor)
+			const acceptsPurchases = vendorDrop.hasAttribute("data-vendor-queue");
+			const target: Extract<DragTarget, { kind: "vendor" }> = {
+				kind: "vendor",
+				element: vendorDrop,
+				acceptsPurchases,
+				vendor: Number(
+					acceptsPurchases
+						? vendorDrop.dataset.vendorQueue
+						: vendorDrop.dataset.vendorCatalog,
+				),
+			};
+			gesture.target = target;
+			vendorDrop.dataset.inventoryDrop = this.#canQueue(gesture.source, target)
 				? "accepted"
 				: "rejected";
 			return;
@@ -835,15 +877,21 @@ export class ClientItemDrag {
 		);
 	}
 	/** Surface ownership is local; exact price and sale eligibility are quoted by world. */
-	#canQueue(source: DragSource, vendor: number): boolean {
+	#canQueue(
+		source: DragSource,
+		target: Extract<DragTarget, { kind: "vendor" }>,
+	): boolean {
+		const vendor = target.vendor;
 		if (!this.vendor?.acceptsDrop(vendor)) return false;
 		if (source.origin === "vendor")
 			return (
-				source.root === vendor && this.vendor.canDragOffer(vendor, source.item)
+				target.acceptsPurchases &&
+				source.root === vendor &&
+				this.vendor.canDragOffer(vendor, source.item)
 			);
 		return (
 			typeof source.origin === "string" &&
-			this.#worldEntity(source.item)?.ownedByPlayer === true
+			this.vendor.acceptsSaleDrop(vendor, source.item)
 		);
 	}
 
@@ -880,14 +928,25 @@ export class ClientItemDrag {
 		if (gesture === null) return false;
 		const source = gesture.source;
 		const facts = this.#worldEntity(source.item);
+		const read = this.session.entities.read();
+		const mainPackCurrent =
+			source.origin === "main-pack" &&
+			read.kind === "current" &&
+			source.item === read.level.playerGuid &&
+			source.root === source.item;
 		const invalidSource =
 			source.origin === "vendor"
 				? source.root === null ||
 					this.vendor?.canDragOffer(source.root, source.item) !== true
 				: typeof source.origin === "string" &&
 					(facts?.description.kind !== "known" ||
-						!(facts.ownedByPlayer || facts.worldContainerContent) ||
+						!(
+							facts.ownedByPlayer ||
+							facts.worldContainerContent ||
+							mainPackCurrent
+						) ||
 						(source.origin === "equipment" && !facts.ownedByPlayer) ||
+						(source.origin === "main-pack" && !mainPackCurrent) ||
 						(source.root !== null &&
 							this.#surface(source.element)?.root !== source.root));
 		const target = gesture.kind === "pressed" ? null : gesture.target;
@@ -1201,23 +1260,25 @@ export class ClientItemDrag {
 		}
 		if (gesture.target?.kind === "trade") {
 			const { source, target } = gesture;
-			const accepted = this.#canOffer(source, target.partner, target.revision);
 			this.#finishGesture();
-			if (accepted)
+			if (typeof source.origin === "string" && source.origin !== "vendor")
 				this.trade?.add(target.partner, target.revision, source.item);
 			else this.trade?.reportFailure("That item cannot join this trade.");
 			return;
 		}
 		if (gesture.target?.kind === "vendor") {
 			const { source, target } = gesture;
-			const accepted = this.#canQueue(source, target.vendor);
+			const accepted = this.#canQueue(source, target);
 			this.#finishGesture();
-			if (!accepted)
-				this.reportNotice(
-					"Drag a vendor offer or an owned item into this trade.",
-				);
-			else if (source.origin === "vendor") this.vendor?.queueBuy(source.item);
-			else this.vendor?.queueSell(source.item);
+			if (source.origin === "vendor" && accepted)
+				this.vendor?.queueBuy(source.item);
+			else if (
+				typeof source.origin === "string" &&
+				source.origin !== "vendor" &&
+				this.vendor?.acceptsDrop(target.vendor)
+			)
+				this.vendor.queueSell(source.item);
+			else this.reportNotice("That vendor is not accepting this drop.");
 			return;
 		}
 
@@ -1328,10 +1389,22 @@ export class ClientItemDrag {
 
 	/** Reuse authored artwork for all shortcut/item drags without another display lease. */
 	#showGhost(source: HTMLElement): void {
+		let visual = source;
+		if (source.matches(".contents-header[data-item-guid]")) {
+			// Headers share the displayed icon and its size with their navigation/grid cell.
+			const cell = source
+				.closest("[data-contents-root]")
+				?.querySelector<HTMLElement>(
+					`.item-grid-cell[data-item-guid="${source.dataset.itemGuid}"]`,
+				);
+			if (cell == null)
+				throw new Error("Contents header has no corresponding item cell");
+			visual = cell;
+		}
 		showUiDragGhost(
 			this.#ghost,
-			source,
-			source.getAttribute("aria-label") ?? "",
+			visual,
+			visual.getAttribute("aria-label") ?? visual.textContent?.trim() ?? "",
 		);
 		this.#root.dataset.itemDragging = "true";
 	}

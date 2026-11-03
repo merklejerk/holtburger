@@ -33,7 +33,7 @@ export const tradeRequestSchema = z.discriminatedUnion("kind", [
 			kind: z.literal("add"),
 			partner: unsigned,
 			revision: unsigned,
-			item: unsigned,
+			items: z.array(unsigned).nonempty(),
 		})
 		.strict(),
 	z

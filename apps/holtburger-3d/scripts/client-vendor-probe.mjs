@@ -37,6 +37,17 @@ export async function probeVendor(client, evaluateExpression, capture) {
 			button: "left",
 			buttons: 1,
 		});
+		if (target === offer || target === catalogHint) {
+			const admission = await read(
+				`document.querySelector('[data-vendor-catalog="5000"]').dataset.inventoryDrop`,
+			);
+			const expected =
+				source === offer || source === owned(6003) ? "rejected" : "accepted";
+			if (admission !== expected)
+				throw new Error(
+					`Unexpected vendor inventory drop admission: ${admission}`,
+				);
+		}
 		await client.send("Input.dispatchMouseEvent", {
 			type: "mouseReleased",
 			...to,
@@ -49,6 +60,7 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		read(`document.querySelector(${JSON.stringify(selector)}).click()`);
 	const offer = '[data-vendor-offer="7001"]';
 	const queue = '[data-vendor-queue="5000"]';
+	const catalogHint = '[data-vendor-catalog="5000"] .vendor-hint';
 	const owned = (id) =>
 		`.client-inventory .contents-scroll [data-item-guid="${id}"]`;
 	const countInventoryRequests = () =>
@@ -225,6 +237,16 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		throw new Error("Vendor offer entered inventory movement preview");
 	if ((await read(`${api}.capture().selectedGuid`)) !== selectionBefore)
 		throw new Error("Vendor offer was selected as a world entity");
+	const previewBeforeCatalogDrop = await read(`${fixture}.pending().sequence`);
+	await drag(offer, catalogHint);
+	if (
+		(await read(`${fixture}.pending().sequence`)) !==
+			previewBeforeCatalogDrop ||
+		(await read("document.querySelector('.vendor-quantity-dialog') !== null"))
+	)
+		throw new Error(
+			"Dropping vendor stock into its own inventory queued a purchase",
+		);
 	await drag(offer, queue);
 	await wait("document.querySelector('.vendor-quantity-dialog') !== null");
 	const quantity = await read(
@@ -271,7 +293,9 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	await quote(buys, [], [currencies[0], unchangedCurrencies[1]]);
 	const sells = [];
 	for (const item of [6001, 6002]) {
-		await drag(owned(item), queue);
+		await drag(owned(item), item === 6001 ? offer : queue);
+		if (!(await read(`${fixture}.pending().draft.sells.includes(${item})`)))
+			throw new Error("Owned inventory drop did not stage the sale");
 		sells.push({ item, amount: 80, total: 3500, merge_key: 500 });
 		await quote(buys, sells);
 	}
@@ -315,8 +339,12 @@ export async function probeVendor(client, evaluateExpression, capture) {
 		throw new Error("Double-click did not queue a second offer");
 	buys.push({ item: 7002, amount: 1, total: 10, merge_key: null });
 	await quote(buys, sells);
-	await drag(owned(6003), queue);
-	await read(`${fixture}.reject('Retained items cannot be sold')`);
+	const previewBeforeRejectedSale = await read(`${fixture}.pending().sequence`);
+	await drag(owned(6003), catalogHint);
+	if (
+		(await read(`${fixture}.pending().sequence`)) !== previewBeforeRejectedSale
+	)
+		throw new Error("Ineligible inventory drop submitted a sale candidate");
 	await read(`${fixture}.settle()`);
 	await wait(
 		`document.querySelector(${JSON.stringify(offer)})?.disabled === false`,
@@ -667,6 +695,101 @@ export async function probeVendor(client, evaluateExpression, capture) {
     })()`);
 	if (!negativeBalanceHighlighted)
 		throw new Error("Negative projected balance, not its delta, should be red");
+	await click(".vendor-footer button:first-child");
+	await quote([], [], unchangedCurrencies);
+	await read(`${fixture}.packs()`);
+	await read(`${fixture}.settle()`);
+	await quote([], [], unchangedCurrencies);
+	await wait(
+		`document.querySelector('.client-inventory .contents-packs [data-item-guid="8000"]')?.dataset.dimmed === 'false'`,
+	);
+	await drag(
+		'.client-inventory .contents-packs [data-item-guid="8000"]',
+		queue,
+	);
+	const packDraft = await read(`${fixture}.pending().draft`);
+	if (JSON.stringify(packDraft.sells) !== JSON.stringify([8010, 8011]))
+		throw new Error("Vendor pack drop did not select eligible direct contents");
+	const packSales = [8010, 8011].map((item) => ({
+		item,
+		amount: 1,
+		total: 10,
+		merge_key: null,
+	}));
+	await quote([], packSales);
+	await wait(
+		`document.querySelector('.client-inventory .contents-packs [data-item-guid="8000"]')?.dataset.dimmed === 'true'`,
+	);
+	await drag(
+		'.client-inventory .contents-packs [data-item-guid="8001"]',
+		queue,
+	);
+	const emptyPackDraft = await read(`${fixture}.pending().draft`);
+	if (
+		JSON.stringify(emptyPackDraft.sells) !== JSON.stringify([8010, 8011, 8001])
+	)
+		throw new Error(
+			"Empty vendor pack did not stage itself alongside existing sales",
+		);
+	await quote(
+		[],
+		[...packSales, { item: 8001, amount: 1, total: 10, merge_key: null }],
+	);
+	await click(".vendor-footer button:first-child");
+	await quote([], [], unchangedCurrencies);
+	await drag(
+		'.client-inventory .contents-header[data-item-guid="8000"]',
+		catalogHint,
+	);
+	const headerPackDraft = await read(`${fixture}.pending().draft`);
+	if (JSON.stringify(headerPackDraft.sells) !== JSON.stringify(packDraft.sells))
+		throw new Error(
+			"Vendor pack header did not stage the same contents as the strip",
+		);
+	await quote([], packSales);
+	await drag(
+		'.client-inventory .contents-header[data-item-guid="8001"]',
+		queue,
+	);
+	if (
+		JSON.stringify(await read(`${fixture}.pending().draft.sells`)) !==
+		JSON.stringify(emptyPackDraft.sells)
+	)
+		throw new Error("Empty vendor pack header did not stage itself");
+	await quote(
+		[],
+		[...packSales, { item: 8001, amount: 1, total: 10, merge_key: null }],
+	);
+	await click(".vendor-footer button:first-child");
+	await quote([], [], unchangedCurrencies);
+	await drag('.client-inventory .contents-packs [data-item-guid="1"]', queue);
+	const mainPackDraft = await read(`${fixture}.pending().draft`);
+	if (JSON.stringify(mainPackDraft.sells) !== JSON.stringify([6001, 6002]))
+		throw new Error(
+			"Vendor Main Pack drop included navigation packs or missed page items",
+		);
+	const mainSales = [6001, 6002].map((item) => ({
+		item,
+		amount: 80,
+		total: 10,
+		merge_key: null,
+	}));
+	await quote([], mainSales);
+	await click(".vendor-footer button:first-child");
+	await quote([], [], unchangedCurrencies);
+	await drag(
+		'.client-inventory .contents-header[data-item-guid="1"]',
+		catalogHint,
+	);
+	const mainHeaderDraft = await read(`${fixture}.pending().draft`);
+	if (
+		JSON.stringify(mainHeaderDraft.sells) !==
+		JSON.stringify(mainPackDraft.sells)
+	)
+		throw new Error(
+			"Vendor Main Pack header did not stage the same page items as the strip",
+		);
+	await quote([], mainSales);
 	await read(`${fixture}.close()`);
 	await wait("document.querySelector('[data-vendor-panel]') === null");
 	if (
@@ -678,6 +801,13 @@ export async function probeVendor(client, evaluateExpression, capture) {
 	return {
 		...summary,
 		negativeBalanceHighlighted,
+		packDraft,
+		emptyPackDraft,
+		headerPackDraft,
+		mainPackDraft,
+		mainHeaderDraft,
 		dismissalSurvivesAppraisal: true,
+		catalogSaleDrops: true,
+		catalogRejectsPurchases: true,
 	};
 }

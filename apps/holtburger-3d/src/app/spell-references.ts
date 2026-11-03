@@ -159,16 +159,18 @@ export class SpellReferences {
 			const batch = missing.slice(offset, offset + MAX_SPELL_REFERENCE_BATCH);
 			const task = this.#tail.then(() => this.#loadBatch(batch));
 			this.#tail = task.then(() => undefined);
-			for (const id of batch)
-				this.#entries.set(
-					id,
-					task.then((results) => {
-						const result = results.find((result) => result.id === id);
-						if (result === undefined)
-							throw new Error(`Missing validated spell reference ${id}.`);
-						return result;
-					}),
-				);
+			for (const id of batch) {
+				const entry = task.then((results) => {
+					const result = results.find((result) => result.id === id);
+					if (result === undefined)
+						throw new Error(`Missing validated spell reference ${id}.`);
+					// A failed request is retryable; confirmed missing definitions remain immutable.
+					if (result.kind === "failed" && this.#entries.get(id) === entry)
+						this.#entries.delete(id);
+					return result;
+				});
+				this.#entries.set(id, entry);
+			}
 		}
 		return Promise.all(
 			ids.map((id) => {

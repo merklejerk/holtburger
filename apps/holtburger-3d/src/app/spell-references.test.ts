@@ -60,6 +60,65 @@ describe("SpellReferences", () => {
 		expect(await source.load([2])).toEqual([{ kind: "missing", id: 2 }]);
 	});
 
+	it("coalesces failed requests and retries without discarding confirmed definitions", async () => {
+		const invoke = vi
+			.fn()
+			.mockResolvedValueOnce([{ kind: "missing", id: 1 }])
+			.mockRejectedValueOnce(new Error("Content transport unavailable"))
+			.mockResolvedValueOnce([{ kind: "missing", id: 2 }]);
+		const source = new SpellReferences({ invoke });
+		await source.load([1]);
+		const first = source.load([2]);
+		const concurrent = source.load([2]);
+		const failed = [
+			{ kind: "failed", id: 2, detail: "Content transport unavailable" },
+		];
+		expect(await first).toEqual(failed);
+		expect(await concurrent).toEqual(failed);
+		expect(invoke).toHaveBeenCalledTimes(2);
+		expect(await source.load([1, 2])).toEqual([
+			{ kind: "missing", id: 1 },
+			{ kind: "missing", id: 2 },
+		]);
+		expect(invoke.mock.calls[2]).toEqual([
+			"load_spell_references",
+			{ request: { spellIds: [2] } },
+		]);
+		await source.load([1, 2]);
+		expect(invoke).toHaveBeenCalledTimes(3);
+	});
+
+	it("retains named definitions even when their artwork is unavailable", async () => {
+		const reference = {
+			kind: "known",
+			id: 6115,
+			name: "Incantation of Summoning Mastery Other",
+			details: {
+				castingRoute: "selected-target",
+				classification: {
+					beneficial: true,
+					level: 8,
+					recipient: "creature",
+					fellowship: false,
+					damage: null,
+				},
+				description: "Increases the target's Summoning skill by 45 points.",
+				school: 4,
+				usesProjectileHandler: false,
+				baseMana: 1,
+				manaPerTarget: 0,
+				durationSeconds: null,
+				cantripTier: null,
+			},
+			artwork: { kind: "failed", detail: "Artwork unavailable" },
+		};
+		const invoke = vi.fn().mockResolvedValue([reference]);
+		const source = new SpellReferences({ invoke });
+		expect(await source.load([6115])).toEqual([reference]);
+		expect(await source.load([6115])).toEqual([reference]);
+		expect(invoke).toHaveBeenCalledTimes(1);
+	});
+
 	it("does not publish successful references from a retired content source", async () => {
 		let resolve: (value: unknown) => void = () => {
 			throw new Error("Lookup not started.");

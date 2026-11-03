@@ -1374,6 +1374,10 @@
 		readonly probeSpells: () => Promise<unknown>;
 		/** Deliver a shared resolved snapshot through the real browser session event path. */
 		readonly setEnchantments: (resolved: ResolvedEnchantments) => void;
+		/** Count content requests to detect accidental polling-driven retries. */
+		readonly spellReferenceRequests: () => number;
+		/** Fail the next reference batch before returning immutable definitions. */
+		readonly failNextSpellReferences: () => void;
 		/** Inject coherent character facts and correlated quotes through session listeners. */
 		readonly setCharacterSheet: (sheet: unknown) => void;
 		/** Exercise portal admission through the production lifecycle listener. */
@@ -4985,6 +4989,8 @@
 		);
 		trade = tradeOwner;
 		let spellReferenceRequests = 0;
+		/** One-shot transport failure for reference retry coverage. */
+		let failSpellReferences = false;
 		const references = new SpellReferences({
 			invoke: async (command, args) => {
 				spellReferenceRequests++;
@@ -5008,6 +5014,10 @@
 						},
 					];
 				if (spellReferenceGate !== null) await spellReferenceGate;
+				if (failSpellReferences) {
+					failSpellReferences = false;
+					throw new Error("Fixture spell-reference failure");
+				}
 				const ids = z
 					.object({ request: z.object({ spellIds: z.array(z.number()) }) })
 					.parse(args).request.spellIds;
@@ -5735,6 +5745,10 @@
 					throw new Error(
 						"Enchantment update was not accepted by the browser session.",
 					);
+			},
+			spellReferenceRequests: () => spellReferenceRequests,
+			failNextSpellReferences: () => {
+				failSpellReferences = true;
 			},
 			setCharacterSheet: (sheet) => {
 				emitInteractionEvent("client-character-sheet-updated", sheet);

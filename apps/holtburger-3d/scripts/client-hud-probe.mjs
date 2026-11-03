@@ -2366,6 +2366,7 @@ const synergies = document.querySelector('[aria-label="Strength skill synergies"
 	} finally {
 		await client.send("Emulation.setEmulatedMedia", { features: [] });
 	}
+	const spellNames = await probeCharacterSpellNames(client, evaluateExpression);
 	await evaluateExpression(
 		client,
 		`(() => {
@@ -2379,7 +2380,99 @@ const synergies = document.querySelector('[aria-label="Strength skill synergies"
 		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
 		if (panel && !panel.textContent.includes('Waiting for character details')) throw new Error('Retired character details remained visible in the panel.');
 		if (document.querySelector('.character-hud progress')?.value !== 0) throw new Error('Retired character experience remained visible in the HUD.');
-		return { ...${JSON.stringify(neutral)}, titles: { ...${JSON.stringify(titles)}, optimistic: true, reconciled: true }, feedback: ${JSON.stringify({ normal: feedback, reduced: reducedFeedback })}, retired: true };
+		return { ...${JSON.stringify(neutral)}, titles: { ...${JSON.stringify(titles)}, optimistic: true, reconciled: true }, feedback: ${JSON.stringify({ normal: feedback, reduced: reducedFeedback })}, spellNames: ${JSON.stringify(spellNames)}, retired: true };
+	})()`,
+	);
+}
+
+/** Exercise changing modifier identities without reopening their retained disclosures. */
+async function probeCharacterSpellNames(client, evaluateExpression) {
+	return await evaluateExpression(
+		client,
+		`(async () => {
+		const harness = globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__;
+		const base = globalThis.__CHARACTER_SHEET_PROBE_BASE__;
+		const panel = document.querySelector('.character-sheet');
+		const { CLIENT_TUNING } = await import('/src/client/client-tuning.ts');
+		const wait = async (predicate, detail) => {
+			const deadline = performance.now() + 5000;
+			while (!predicate()) {
+				if (performance.now() > deadline) throw new Error(detail);
+				await new Promise(requestAnimationFrame);
+			}
+		};
+		const tab = (label) => [...panel.querySelectorAll('[role="tab"]')].find((node) => node.textContent === label).click();
+		const row = (label) => [...panel.querySelectorAll('details.stat-row')].find((node) => node.querySelector('summary').textContent.includes(label));
+		const named = (id) => 'Spell ' + String(id).padStart(4, '0') + (id % 2 === 0 ? ' Frost Protection Self' : ' Acid Protection Other');
+		const modifier = (id, channel = 'ordinary') => ({ operation: 'additive', channel, effective: { spellId: id, layer: 1 }, overridden: [], value: 4 });
+		const sheet = (direct, inherited = 123, wide = []) => {
+			const result = structuredClone(base);
+			const breakdown = result.skills[0].stat.breakdown;
+			breakdown.modifiers.contributions = [modifier(direct)];
+			breakdown.formula.Applied.first.modifiers = [modifier(inherited)];
+			breakdown.wide_modifiers = wide;
+			return result;
+		};
+		tab('Progression');
+		harness.setCharacterSheet(base);
+		await wait(() => row('Heavy Weapons')?.previousElementSibling?.textContent.trim() === 'Specialized', 'Specialized skill fixture did not mount');
+		const skill = row('Heavy Weapons');
+		skill.open = true;
+		harness.setCharacterSheet(sheet(6115, 6116, [modifier(6117, 'attackSkills')]));
+		await wait(() => [6115, 6116, 6117].every((id) => skill.textContent.includes(named(id))), 'Live direct, inherited, or wide modifier name did not resolve');
+		if (!skill.open) throw new Error('Skill disclosure closed during name resolution');
+		const requests = harness.spellReferenceRequests();
+		const changedValue = sheet(6115, 6116, [modifier(6117, 'attackSkills')]);
+		changedValue.skills[0].stat.breakdown.modifiers.contributions[0].value = 8;
+		harness.setCharacterSheet(changedValue);
+		await wait(() => skill.textContent.includes(': +8'), 'Modifier value did not update');
+		if (harness.spellReferenceRequests() !== requests) throw new Error('Unchanged spell identities requested more metadata');
+
+		harness.failNextSpellReferences();
+		harness.setCharacterSheet(sheet(6120));
+		await wait(() => skill.textContent.includes('lookup failed: Fixture spell-reference failure'), 'Lookup failure was hidden');
+		const failedRequests = harness.spellReferenceRequests();
+		await new Promise((resolve) => setTimeout(resolve, CLIENT_TUNING.characterSheet.displayIntervalMs * 2));
+		if (harness.spellReferenceRequests() !== failedRequests) throw new Error('Failed names retried on display polling');
+		[...panel.querySelectorAll('button')].find((node) => node.textContent.trim() === 'Retry spell names').click();
+		await wait(() => skill.textContent.includes(named(6120)), 'Explicit retry did not recover');
+		if (panel.textContent.includes('Unable to load some spell names')) throw new Error('Recovered request retained its error');
+
+		harness.deferEnchantmentReferences();
+		harness.setCharacterSheet(sheet(6121));
+		await wait(() => panel.textContent.includes('Loading spell names'), 'Delayed lookup did not start');
+		harness.setCharacterSheet(sheet(999999));
+		await wait(() => skill.textContent.includes('Spell 999999'), 'Replacement spell demand did not reach the view');
+		harness.releaseEnchantmentReferences();
+		await wait(() => skill.textContent.includes('Spell 999999 (definition missing)'), 'Missing definition was not distinguished from failure');
+		if (skill.textContent.includes(named(6121))) throw new Error('Retired lookup overwrote current demand');
+
+		const shortcut = document.querySelector('nav[aria-label="Game shortcuts"] button[aria-label="Character"]');
+		shortcut.click();
+		await new Promise(requestAnimationFrame);
+		const hiddenRequests = harness.spellReferenceRequests();
+		harness.setCharacterSheet(sheet(6122));
+		await new Promise((resolve) => setTimeout(resolve, CLIENT_TUNING.characterSheet.displayIntervalMs * 2));
+		if (harness.spellReferenceRequests() !== hiddenRequests) throw new Error('Hidden Character window requested spell names');
+		shortcut.click();
+		await wait(() => skill.textContent.includes(named(6122)), 'Retained window did not resolve current names on reopening');
+
+		tab('Defenses');
+		const armor = row('Armor');
+		armor.open = true;
+		const defense = (id) => ({ cooldowns: [], instances: [{ key: { spellId: id, layer: 1 }, spellCategory: 7, powerLevel: 5, kind: 'beneficial', remainingSeconds: null, statModType: 1, statModKey: 1, statModValue: 4 }], groups: [{ affectedStat: { kind: 'armor' }, operation: 'additive', channel: 'ordinary', spellCategory: 7, effective: { spellId: id, layer: 1 }, overridden: [] }] });
+		harness.setEnchantments(defense(6123));
+		await wait(() => armor.textContent.includes(named(6123)), 'Live armor name did not resolve');
+		harness.deferEnchantmentReferences();
+		harness.setEnchantments(defense(6124));
+		await wait(() => panel.textContent.includes('Loading spell names'), 'Delayed defense lookup did not start');
+		tab('Progression');
+		await wait(() => skill.textContent.includes(named(6122)), 'Tab switch did not restore progression names');
+		harness.releaseEnchantmentReferences();
+		await new Promise((resolve) => setTimeout(resolve, CLIENT_TUNING.characterSheet.displayIntervalMs * 2));
+		if (!skill.textContent.includes(named(6122))) throw new Error('Defense completion overwrote progression names');
+		harness.setCharacterSheet(base);
+		return { liveModifiers: true, stableDemand: true, retry: true, staleResults: true, missing: true, retainedWindow: true, defenses: true };
 	})()`,
 	);
 }

@@ -28,6 +28,7 @@
 	import type { ClientTimedEnchantments } from "./client-lifecycle-session";
 	import { enchantmentKey } from "./client-enchantments-view";
 	import type { ClientSpellServices } from "./client-spells";
+	import type { SpellReference } from "../app/spell-references";
 	import { CLIENT_TUNING } from "./client-tuning";
 
 	interface Props {
@@ -105,8 +106,29 @@
 	type SkillRow = CharacterSheet["skills"][number];
 	// The panel is keyed to its session owner; this initial read closes the mount-to-poll gap.
 	let display = $state.raw(untrack(() => owner.read()));
-	let spellNames = $state<Record<number, string>>({});
-	let spellLoadError = $state<string | null>(null);
+	/** One active-tab request; immutable reference caching belongs to the spell service. */
+	type SpellLookup =
+		| { readonly kind: "idle" | "loading" }
+		| {
+				readonly kind: "ready";
+				/** Per-spell outcomes, including confirmed missing definitions and request failures. */
+				readonly references: readonly SpellReference[];
+		  }
+		| {
+				readonly kind: "failed";
+				/** Request-wide failure displayed alongside the retry control. */
+				readonly detail: string;
+		  };
+	let spellLookup = $state.raw<SpellLookup>({ kind: "idle" });
+	const spellReferences = $derived(
+		spellLookup.kind === "ready" ? spellLookup.references : [],
+	);
+	/** Explicit retries must not follow the character sheet's display polling cadence. */
+	let spellRetry = $state(0);
+	const spellLookupFailed = $derived(
+		spellLookup.kind === "failed" ||
+			spellReferences.some((reference) => reference.kind === "failed"),
+	);
 	// Only purchase-control hover and keyboard focus drive the shared cost readout.
 	let hoveredAction = $state<string | null>(null);
 	let focusedAction = $state<string | null>(null);
@@ -233,7 +255,7 @@
 			operation: "additive" | "multiplicative" | "other",
 		): string => {
 			const instance = instances.get(enchantmentKey(key));
-			const label = spellNames[key.spellId] ?? `Spell ${key.spellId}`;
+			const label = spellLabel(key.spellId);
 			if (instance === undefined) return label;
 			const modifier =
 				operation === "additive"
@@ -253,11 +275,6 @@
 		if (enchantments === null) return ["Effect details are unavailable"];
 		const lines = effectLines(stat);
 		return lines.length > 0 ? lines : ["No active effects"];
-	}
-	async function resolveEffectSpells(stat: EffectStat): Promise<void> {
-		await resolveSpellIds(
-			effectGroups(stat).map((group) => group.effective.spellId),
-		);
 	}
 	function targetPending(target: StatTarget): boolean {
 		const key = progressionTargetKey(target);
@@ -362,9 +379,7 @@
 		return "Applied" in formula ? formula.Applied : formula;
 	}
 	function modifierLine(modifier: Modifier, source?: string): string {
-		const label =
-			spellNames[modifier.effective.spellId] ??
-			`Spell ${modifier.effective.spellId}`;
+		const label = spellLabel(modifier.effective.spellId);
 		const value =
 			modifier.operation === "additive"
 				? `${modifier.value >= 0 ? "+" : ""}${modifier.value}`
@@ -429,26 +444,93 @@
 		if ("wide_modifiers" in stat.breakdown) add(stat.breakdown.wide_modifiers);
 		return [...new Set(ids)];
 	}
-	async function resolveSpells(stat: Stat): Promise<void> {
-		await resolveSpellIds(modifierSpellIds(stat));
-	}
-	async function resolveSpellIds(ids: readonly number[]): Promise<void> {
-		if (spells === null) return;
-		for (const id of new Set(ids)) {
-			if (spellNames[id] !== undefined) continue;
-			try {
-				const reference = await spells.reference(id);
-				spellNames = {
-					...spellNames,
-					[id]: reference.kind === "known" ? reference.name : `Spell ${id}`,
-				};
-			} catch (error) {
-				spellLoadError = `Unable to load spell details: ${String(error)}`;
-				spellNames = { ...spellNames, [id]: `Spell ${id}` };
-			}
+	// Depend on identity rather than snapshot revision: modifier values can change without a lookup.
+	const spellIdSignature = $derived.by(() => {
+		if (sheet === null || activeTab === "spells") return "";
+		const ids =
+			activeTab === "progression"
+				? [
+						...sheet.attributes,
+						...sheet.vitals,
+						...skills.map((row) => row.stat),
+					].flatMap(modifierSpellIds)
+				: [
+						...effectGroups({ kind: "armor" }).map(
+							(group) => group.effective.spellId,
+						),
+						...RESISTANCE_ROWS.flatMap(({ key }) =>
+							effectGroups({ kind: "floatProperty", key }).map(
+								(group) => group.effective.spellId,
+							),
+						),
+						...(sheet.vitae !== 1
+							? effectGroups({ kind: "vitae" }).map(
+									(group) => group.effective.spellId,
+								)
+							: []),
+					];
+		return [...new Set(ids)].sort((a, b) => a - b).join(",");
+	});
+
+	$effect(() => {
+		const service = spells;
+		const signature = spellIdSignature;
+		// A retry reruns this request even when its spell identities are unchanged.
+		void spellRetry;
+		spellLookup = { kind: "idle" };
+		if (!visible || signature === "") return;
+		if (service === null) {
+			spellLookup = {
+				kind: "failed",
+				detail: "Spell-reference service is unavailable.",
+			};
+			return;
 		}
+		let active = true;
+		spellLookup = { kind: "loading" };
+		void service
+			.load(signature.split(",").map(Number))
+			.then((references) => {
+				if (!active) return;
+				spellLookup = { kind: "ready", references };
+			})
+			.catch((error: unknown) => {
+				if (!active) return;
+				spellLookup = {
+					kind: "failed",
+					detail: error instanceof Error ? error.message : String(error),
+				};
+			});
+		return () => {
+			active = false;
+		};
+	});
+
+	function spellLabel(id: number): string {
+		const reference = spellReferences.find((candidate) => candidate.id === id);
+		if (reference?.kind === "known") return reference.name;
+		if (reference?.kind === "missing")
+			return `Spell ${id} (definition missing)`;
+		if (reference?.kind === "failed")
+			return `Spell ${id} (lookup failed: ${reference.detail})`;
+		return `Spell ${id}`;
 	}
 </script>
+
+{#snippet spellFeedback()}
+	{#if spellLookup.kind === "loading"}
+		<p role="status" class="feedback">Loading spell names…</p>
+	{:else if spellLookupFailed}
+		<p role="status" class="feedback">
+			{spellLookup.kind === "failed"
+				? spellLookup.detail
+				: "Unable to load some spell names. See the affected modifiers for details."}
+			<button class="ui-button" onclick={() => spellRetry++}
+				>Retry spell names</button
+			>
+		</p>
+	{/if}
+{/snippet}
 
 {#snippet actionButtons(
 	statName: string,
@@ -527,9 +609,6 @@
 			class="stat-row"
 			data-progression-target={progressionTargetKey(target)}
 			name="character-stat"
-			ontoggle={(event) => {
-				if (event.currentTarget.open) void resolveSpells(stat);
-			}}
 		>
 			<summary>
 				<span
@@ -684,9 +763,7 @@
 								</div>
 							{/if}
 						</header>
-						{#if spellLoadError !== null}<p role="status" class="feedback">
-								{spellLoadError}
-							</p>{/if}
+						{@render spellFeedback()}
 						<h2 class="ui-section-heading">Vitals</h2>
 						{#each sheet.vitals as stat (stat.vital_type)}
 							{@const target = { Vital: stat.vital_type } as const}
@@ -696,9 +773,6 @@
 								class="stat-row"
 								data-progression-target={progressionTargetKey(target)}
 								name="character-stat"
-								ontoggle={(event) => {
-									if (event.currentTarget.open) void resolveSpells(stat);
-								}}
 							>
 								<summary>
 									<span
@@ -726,9 +800,6 @@
 								class="stat-row"
 								data-progression-target={progressionTargetKey(target)}
 								name="character-stat"
-								ontoggle={(event) => {
-									if (event.currentTarget.open) void resolveSpells(stat);
-								}}
 							>
 								<summary>
 									<span
@@ -809,18 +880,9 @@
 			{#if sheet === null}
 				<p role="status">Waiting for character details…</p>
 			{:else}
-				{#if spellLoadError !== null}<p role="status" class="feedback">
-						{spellLoadError}
-					</p>{/if}
+				{@render spellFeedback()}
 				<h2 class="ui-section-heading">Defenses</h2>
-				<details
-					class="stat-row"
-					name="character-defense"
-					ontoggle={(event) => {
-						if (event.currentTarget.open)
-							void resolveEffectSpells({ kind: "armor" });
-					}}
-				>
+				<details class="stat-row" name="character-defense">
 					<summary><span>Armor</span><strong>{sheet.armor}</strong></summary>
 					<ul>
 						{#each defenseEffectLines({ kind: "armor" }) as line}<li>
@@ -832,17 +894,7 @@
 					{@const resistancePercent = Math.round(
 						(1 - sheet.resistances[resistance.field]) * 100,
 					)}
-					<details
-						class="stat-row"
-						name="character-defense"
-						ontoggle={(event) => {
-							if (event.currentTarget.open)
-								void resolveEffectSpells({
-									kind: "floatProperty",
-									key: resistance.key,
-								});
-						}}
-					>
+					<details class="stat-row" name="character-defense">
 						<summary
 							><span>{resistance.label}</span><strong
 								title="Damage reduction from this resistance. Negative values indicate vulnerability. Excludes armor and other damage modifiers; some attacks can bypass resistance."
@@ -861,10 +913,6 @@
 				{#if vitaePenaltyPercent !== 0}<details
 						class="stat-row"
 						name="character-defense"
-						ontoggle={(event) => {
-							if (event.currentTarget.open)
-								void resolveEffectSpells({ kind: "vitae" });
-						}}
 					>
 						<summary
 							><span>Vitae penalty</span><strong>{vitaePenaltyPercent}%</strong

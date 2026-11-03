@@ -3665,7 +3665,7 @@ fn sleeping_body_tolerates_small_contact_displacement_after_the_peer_leaves() {
             _ => None,
         })
         .unwrap();
-    assert!(pushed.supported_motion.externally_driven);
+    assert!(pushed.supported_motion.external_translation);
     assert!(scene.body(sleeper).unwrap().pose.coords.x > origin.coords.x);
     assert_eq!(
         scene.body(sleeper).unwrap().accepted_motion.velocity,
@@ -3917,7 +3917,7 @@ fn authored_input_survives_settling_and_residency_reactivation() {
         let body = scene.body(id).unwrap();
         assert!(body.pose.coords.y > start.coords.y);
         assert!(update.supported_motion.accepted.velocity.y > 0.0);
-        assert!(!update.supported_motion.externally_driven);
+        assert!(!update.supported_motion.external_translation);
         assert!(
             (body.pose.coords - (start.coords + offset.translation)).length() < CONTACT_EPSILON
         );
@@ -4920,6 +4920,97 @@ fn sustained_authored_turning_keeps_nominal_and_actual_motion_aligned() {
             .unwrap()
             .is_settled()
     );
+}
+
+#[test]
+fn stationary_facing_corrections_preserve_animation_ownership() {
+    // Captured remote facing differs from its heading reconstruction despite the same visible yaw.
+    let reported = Quaternion {
+        w: 0.900_554_7,
+        x: 0.0,
+        y: 0.0,
+        z: -0.434_741_6,
+    };
+    let current = Quaternion::from_heading(reported.to_heading());
+    let turned = Quaternion::from_heading(current.to_heading() + 0.2);
+    for authority in [
+        current,
+        reported,
+        Quaternion {
+            w: -current.w,
+            x: -current.x,
+            y: -current.y,
+            z: -current.z,
+        },
+        turned,
+    ] {
+        let now = Instant::now();
+        let collision = flat_collision_scene();
+        let mut scene = SpatialScene::new();
+        let id = SpatialBodyId::Entity(Guid(1));
+        let definition = grounded_definition();
+        let sphere = definition.spheres().primary();
+        let start = WorldPosition {
+            rotation: current,
+            ..pose(Vector3::new(90.0, 96.0, sphere.radius - sphere.center.z))
+        };
+        scene.register_body(SpatialBody::new(id, start, now));
+        scene
+            .set_dynamic_physical_body(
+                id,
+                Some(dynamic_definition(definition, false)),
+                PhysicalCollisionFilter::ALL,
+                None,
+            )
+            .unwrap();
+        acquire_support(&mut scene, &collision, id, now);
+        for tick in 0..4 {
+            let time = now + Duration::from_secs_f32(tick as f32 * MOBILE_CONTACT_TICK_SECONDS);
+            if tick % 2 == 0 {
+                scene.apply_authoritative_body_effect(
+                    id,
+                    AuthoritativePoseEffect::Interpolate {
+                        pose: WorldPosition {
+                            rotation: authority,
+                            ..scene.body(id).unwrap().pose
+                        },
+                        keep_heading: false,
+                        adjusted_max_speed_mps: None,
+                    },
+                    AuthoritativeBodyVectors::default(),
+                    time,
+                );
+            }
+            scene.wake_dynamic_body(id);
+            let outcome = scene
+                .advance_dynamic_entity_collection(
+                    &collision,
+                    MOBILE_CONTACT_TICK_SECONDS,
+                    time,
+                    |_| {
+                        Ok(PhysicalBodyInput::referenced(
+                            PhysicalBodyActuation::Grounded(GroundedBodyActuation::coast()),
+                            PhysicalReferenceInput::body(None),
+                            true,
+                        ))
+                    },
+                )
+                .unwrap();
+            let [DynamicEntityBodyOutcome::Integrated(update)] = outcome.outcomes.as_slice() else {
+                panic!("expected one integrated character");
+            };
+            assert!(!update.supported_motion.external_translation);
+            assert_eq!(update.supported_motion.accepted.velocity, Vector3::zero());
+            // Facing still changes physically, including a real turn; it never selects locomotion.
+            let forward = Vector3::new(0.0, 1.0, 0.0);
+            assert!(
+                (scene.body(id).unwrap().pose.rotation.rotate_vector(forward)
+                    - authority.rotate_vector(forward))
+                .length()
+                    < CONTACT_EPSILON
+            );
+        }
+    }
 }
 
 #[test]
@@ -6205,7 +6296,7 @@ fn proportional_return_scales_with_distance_and_converges_without_overshoot() {
                 let DynamicEntityBodyOutcome::Integrated(first) = &update.outcomes[0] else {
                     panic!("expected swept return");
                 };
-                assert!(first.supported_motion.externally_driven);
+                assert!(first.supported_motion.external_translation);
                 assert!(
                     (body.retained.velocity.x - distance * PHYSICAL_RETURN_GAIN).abs()
                         < CONTACT_EPSILON

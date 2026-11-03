@@ -147,8 +147,8 @@ pub struct PreparedBodyMovement {
     /// Nominal continuation rate: character drive includes authored travel; free flight excludes
     /// its non-retained kinematic travel. Compare this with actual retained velocity at completion.
     pub nominal_velocity: Vector3,
-    /// Supported return or authority facing requested an external presentation override.
-    pub(super) external_drive: bool,
+    /// Supported positional return requested an external translation drive.
+    pub(super) external_translation: bool,
 }
 
 impl PhysicalBodyInput {
@@ -350,14 +350,14 @@ pub struct AcceptedBodyMotion {
     pub omega: Vector3,
 }
 
-/// Accepted supported travel paired with the solver's reason to override authored playback.
+/// Accepted supported travel paired with its external-translation provenance.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct SupportedBodyMotion {
     /// Accepted supported translation and yaw, used to rate an observed gait.
     pub accepted: AcceptedBodyMotion,
-    /// A return/facing drive was applied or a supported contact push was accepted this tick.
-    /// Ordinary animation offsets alone never grant observed playback ownership.
-    pub externally_driven: bool,
+    /// A supported positional return was requested or a contact push was accepted this tick.
+    /// Facing corrections and ordinary animation offsets never grant this eligibility.
+    pub external_translation: bool,
 }
 
 /// Complete finite vector replacement for one locally simulated dynamic body.

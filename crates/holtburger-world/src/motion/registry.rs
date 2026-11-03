@@ -767,8 +767,7 @@ impl BodyMotionRuntime {
             LocomotionPlayback::new(table, self.state.style, LocomotionAuthority::Presentation)
         });
         locomotion.authority = LocomotionAuthority::Presentation;
-        locomotion.command_active =
-            order.forward.is_some() || order.sidestep.is_some() || order.turn.is_some();
+        locomotion.command_active = order.has_channels();
         let resolution = apply_order(
             table,
             &mut locomotion.state,
@@ -926,7 +925,7 @@ impl BodyMotionRuntime {
             super::CharacterMotionPresentation::Grounded
                 | super::CharacterMotionPresentation::StanceDefault
         );
-        let moving = order.forward.is_some() || order.sidestep.is_some() || order.turn.is_some();
+        let moving = order.has_channels();
         let order = order.with_character_presentation(presentation);
         if self.local_command_owned && !moving && grounded {
             return self.advance_local_command(table, quantum);
@@ -1330,19 +1329,19 @@ impl MotionRuntimeRegistry {
             return Ok(());
         };
         runtime.bind_table(table);
+        if runtime.has_manual_locomotion() {
+            return Ok(());
+        }
         let commanded = runtime.state.substate.is_locomotion_command()
             || runtime
                 .state
                 .modifiers()
                 .iter()
                 .any(|active| active.command.is_locomotion_command());
-        if observation.presentation == super::CharacterMotionPresentation::Grounded
-            && !commanded
-            && !observation.motion.externally_driven
-        {
-            if !runtime.has_manual_locomotion() {
-                runtime.locomotion = None;
-            }
+        let requires_observed =
+            commanded || observation.presentation != super::CharacterMotionPresentation::Grounded;
+        if !requires_observed && !observation.motion.external_translation {
+            runtime.locomotion = None;
             return Ok(());
         }
         let order = observed_locomotion_order(
@@ -1353,6 +1352,12 @@ impl MotionRuntimeRegistry {
             observation.presentation,
             observation.object_scale,
         )?;
+        // An ineffective return must leave the standing cursor and its hooks uninterrupted.
+        // A blocked movement command still needs observed standing instead of its authored gait.
+        if !requires_observed && !order.has_channels() {
+            runtime.locomotion = None;
+            return Ok(());
+        }
         runtime.present_locomotion(table, order, quantum);
         Ok(())
     }

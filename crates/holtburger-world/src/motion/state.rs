@@ -343,6 +343,11 @@ impl CharacterMotionPresentation {
 }
 
 impl MotionOrder {
+    /// Whether the order selects a forward, sidestep, or turn channel beyond its style.
+    pub(super) fn has_channels(self) -> bool {
+        self.forward.is_some() || self.sidestep.is_some() || self.turn.is_some()
+    }
+
     /// Reads one server-reported motion snapshot as an order.
     ///
     /// Speeds on the wire are multipliers applied to the selected motion, defaulting to 1.0 — ACE

@@ -15,8 +15,8 @@ struct CollectionActuator {
     reconciliation: Option<PoseReconciliationState>,
     /// Independent final nominal continuation used to decide return completion.
     nominal_velocity: Vector3,
-    /// Supported return or authority-facing drive applied during this collection.
-    external_drive: bool,
+    /// Supported positional return requested during this collection.
+    external_translation: bool,
 }
 
 impl CollectionActuator {
@@ -269,7 +269,7 @@ impl SpatialScene {
                         input,
                         reconciliation,
                         nominal_velocity: body.nominal.velocity,
-                        external_drive: false,
+                        external_translation: false,
                     },
                 );
             }
@@ -302,7 +302,7 @@ impl SpatialScene {
                         .input
                         .step(body, ground, interval, &mut actuator.reconciliation)?;
                 actuator.nominal_velocity = input.nominal_velocity;
-                actuator.external_drive |= input.external_drive;
+                actuator.external_translation |= input.external_translation;
                 Ok(input.actuation)
             },
         )?;
@@ -350,7 +350,7 @@ impl SpatialScene {
             // Contact preparation has already matched actuation to the installed definition.
             let is_character =
                 matches!(actuator.input.actuation, PhysicalBodyActuation::Grounded(_));
-            let externally_driven = actuator.external_drive || update.supported_push;
+            let external_translation = actuator.external_translation || update.supported_push;
             if let Some(destination) = actuator.finish(
                 &mut body,
                 &update,
@@ -406,7 +406,7 @@ impl SpatialScene {
                             velocity: update.supported_velocity,
                             omega: update.accepted_motion.omega,
                         },
-                        externally_driven,
+                        external_translation,
                     },
                 },
             ));

@@ -2382,7 +2382,7 @@ fn observed_gaits_follow_commands_external_work_and_support() {
                 velocity: Vector3::new(0.0, OBSERVED_LINEAR_IDLE_SPEED_MPS * 2.0, 0.0),
                 omega: Vector3::zero(),
             },
-            externally_driven: false,
+            external_translation: false,
         },
         orientation: Quaternion::identity(),
         presentation: CharacterMotionPresentation::Grounded,
@@ -2448,7 +2448,7 @@ fn observed_gaits_follow_commands_external_work_and_support() {
             guid,
             ObservedCharacterMotion {
                 motion: crate::SupportedBodyMotion {
-                    externally_driven: true,
+                    external_translation: true,
                     ..observation.motion
                 },
                 ..observation
@@ -2466,8 +2466,20 @@ fn observed_gaits_follow_commands_external_work_and_support() {
             .animation_id(),
         WALK_ANIM
     );
+    // Positional return can remain requested after contact clips its accepted travel to zero.
     registry
-        .observe_locomotion(table, guid, observation, 0.25)
+        .observe_locomotion(
+            table,
+            guid,
+            ObservedCharacterMotion {
+                motion: crate::SupportedBodyMotion {
+                    external_translation: true,
+                    ..Default::default()
+                },
+                ..observation
+            },
+            0.25,
+        )
         .unwrap();
     assert!(registry.motion_playback(guid).unwrap().locomotion.is_none());
     let restored = registry.get(guid).unwrap();
@@ -2496,6 +2508,58 @@ fn observed_gaits_follow_commands_external_work_and_support() {
 }
 
 #[test]
+fn ineffective_external_translation_preserves_standing_playback_across_styles() {
+    let catalog = catalog_with_combat_default(COMBAT_STAND);
+    let table = catalog.table(0x0900_0001).unwrap();
+    let guid = holtburger_common::Guid(1);
+    for style in [STYLE, COMBAT_STYLE] {
+        let mut registry = MotionRuntimeRegistry::new();
+        registry.drive(
+            table,
+            guid,
+            MotionOrder {
+                style: Some(MotionCommand(style)),
+                ..MotionOrder::default()
+            },
+            0.25,
+        );
+        let before = registry.get(guid).unwrap().clone();
+        let ordinary = registry.motion_playback(guid).unwrap().ordinary;
+        for external_translation in [true, false, true, false] {
+            for speed in [0.0, OBSERVED_LINEAR_IDLE_SPEED_MPS * 0.5] {
+                registry
+                    .observe_locomotion(
+                        table,
+                        guid,
+                        ObservedCharacterMotion {
+                            motion: crate::SupportedBodyMotion {
+                                accepted: crate::AcceptedBodyMotion {
+                                    velocity: Vector3::new(0.0, speed, 0.0),
+                                    omega: Vector3::zero(),
+                                },
+                                external_translation,
+                            },
+                            orientation: Quaternion::identity(),
+                            presentation: CharacterMotionPresentation::Grounded,
+                            object_scale: 1.0,
+                        },
+                        0.25,
+                    )
+                    .unwrap();
+                let playback = registry.motion_playback(guid).unwrap();
+                assert_eq!(playback.ordinary, ordinary);
+                assert!(playback.locomotion.is_none());
+                assert_eq!(registry.get(guid).unwrap().tick(), before.tick());
+                assert_eq!(
+                    registry.get(guid).unwrap().sequence().frame_number(),
+                    before.sequence().frame_number()
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn retiring_observed_gait_preserves_manual_control() {
     let catalog = catalog();
     let table = catalog.table(0x0900_0001).unwrap();
@@ -2518,7 +2582,10 @@ fn retiring_observed_gait_preserves_manual_control() {
             table,
             guid,
             ObservedCharacterMotion {
-                motion: crate::SupportedBodyMotion::default(),
+                motion: crate::SupportedBodyMotion {
+                    external_translation: true,
+                    ..Default::default()
+                },
                 orientation: Quaternion::identity(),
                 presentation: CharacterMotionPresentation::Grounded,
                 object_scale: 1.0,
@@ -2592,7 +2659,7 @@ fn world_locomotion_sources_preserve_physics_and_action_priority() {
                 body_id,
                 LocomotionPresentationSource::Observed(crate::SupportedBodyMotion {
                     accepted,
-                    externally_driven: false,
+                    external_translation: false,
                 }),
                 CharacterMotionPresentation::Grounded,
                 std::time::Duration::from_secs_f32(0.25),
@@ -2611,7 +2678,7 @@ fn world_locomotion_sources_preserve_physics_and_action_priority() {
             body_id,
             LocomotionPresentationSource::Observed(crate::SupportedBodyMotion {
                 accepted: observed,
-                externally_driven: true,
+                external_translation: true,
             }),
             CharacterMotionPresentation::Grounded,
             std::time::Duration::from_secs_f32(1.5),

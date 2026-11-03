@@ -223,14 +223,14 @@ impl PhysicalBodyInput {
             ground,
             actual_authored,
         )?;
-        let mut external_drive = false;
+        let mut external_translation = false;
         if let (Some(state), Some(ordinary)) = (correction.as_mut(), ordinary) {
             let authority_heading = state.take_correction_heading();
-            // Consume authority once even when explicit sticky facing owns this interval.
+            // Retail behavior is that a nearby facing correction updates the frame without
+            // selecting a turn animation. Consume it even when sticky facing owns this interval.
             if let Some(rotation) = authority_heading
                 && sticky_heading.is_none()
             {
-                external_drive |= rotation != body.pose.rotation;
                 heading = Some(rotation.to_heading());
             }
             let error = PhysicalReferenceDomain::for_definition(physical.definition)
@@ -258,7 +258,7 @@ impl PhysicalBodyInput {
                         let correction_velocity =
                             reference_velocity(error - support.normal * error.dot(&support.normal));
                         let returning = correction_velocity != Vector3::zero();
-                        external_drive |= returning;
+                        external_translation = returning;
                         let drive = actuation.with_supported_drive(
                             nominal_velocity + correction_velocity,
                             support.normal,
@@ -292,7 +292,7 @@ impl PhysicalBodyInput {
         Ok(PreparedBodyMovement {
             actuation,
             nominal_velocity,
-            external_drive,
+            external_translation,
         })
     }
 }

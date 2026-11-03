@@ -1,3 +1,5 @@
+import type { RealizedEntitySelectionSource } from "../lib/game/selection/entity-selection-bounds";
+import type { CycleSelectionPresentationFrame } from "./client-cycle-selection-controller";
 import {
 	ClientLockFeedbackEffects,
 	type ClientLockFeedbackFrame,
@@ -285,7 +287,8 @@ export type ClientGameplayPresentationCameraController =
 	>;
 
 /** Runtime surface consumed by the client orchestration seam and injected by focused tests. */
-export interface ClientGameplayRuntime extends MapTerrainSource {
+export interface ClientGameplayRuntime
+	extends MapTerrainSource, RealizedEntitySelectionSource {
 	setDynamicPresentationOverride(
 		level: DynamicPresentationOverride | null,
 	): Promise<void>;
@@ -780,11 +783,19 @@ export class ClientGameplayPresentation {
 		this.#activeResources?.runtime.resetRendererFrameProfile?.();
 	}
 
-	/** Borrow the primary camera last presented; no portal-clipped views enter targeting. */
-	targetingView(): PrimaryCameraView | null {
-		return this.camera.status().kind === "active"
-			? this.#lastPrimaryView
-			: null;
+	/** Capture one acquisition owner; geometry remains borrowed inside the synchronous callback. */
+	withCycleSelectionFrame<T>(
+		visit: (frame: CycleSelectionPresentationFrame) => T,
+	): T | null {
+		const resources = this.#activeResources;
+		if (this.#destroyed || resources === null || this.#status.kind !== "ready")
+			return null;
+		return visit({
+			view:
+				this.camera.status().kind === "active" ? this.#lastPrimaryView : null,
+			visitRealizedEntitySelectionBounds: (consume) =>
+				resources.runtime.visitRealizedEntitySelectionBounds(consume),
+		});
 	}
 
 	/** Sample host-query and exact-render rays from the exact camera and viewport last presented. */

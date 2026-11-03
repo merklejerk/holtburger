@@ -5,13 +5,11 @@ use super::character_kinematics::{
 };
 use super::movement_types::{CharacterDrive, Gait, LateralMotion, LongitudinalMotion, Turn};
 use holtburger_common::Vector3;
-use holtburger_world::motion::{MotionCommand, MotionOrder};
+use holtburger_world::motion::{MotionCommand, MotionOrder, RETAIL_BACKWARD_SPEED_FACTOR};
 use thiserror::Error;
 
 /// Retail sidestep state velocity from retail movement state velocity query.
 const RETAIL_SIDESTEP_BASE_SPEED_MPS: f32 = 1.25;
-/// Retail backward scaling from retail movement adjust motion.
-const RETAIL_BACKWARD_FACTOR: f32 = 0.65;
 /// Retail sidestep scaling from retail movement adjust motion.
 const RETAIL_SIDESTEP_FACTOR: f32 = 0.5;
 /// Retail cap applied to the interpreted sidestep animation rate.
@@ -130,7 +128,7 @@ pub fn adjust_character_axes_for_run_rate(
         }),
         Some(LongitudinalMotion::Forward) => Some(AdjustedForwardAxis::Walk { speed_mod: 1.0 }),
         Some(LongitudinalMotion::Backward) => Some(AdjustedForwardAxis::Walk {
-            speed_mod: -RETAIL_BACKWARD_FACTOR * if running { run_rate } else { 1.0 },
+            speed_mod: -RETAIL_BACKWARD_SPEED_FACTOR * if running { run_rate } else { 1.0 },
         }),
         None => None,
     };

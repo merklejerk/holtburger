@@ -25,6 +25,8 @@
 	const { keyboard } = provideAppInputPolicy();
 	let snapshot = $state<LauncherSnapshot | null>(null);
 	let failure = $state<string | null>(null);
+	/** Capture the selected diagnostic so refreshes cannot replace text being read. */
+	let errorDetails = $state<string | null>(null);
 	/** Native diagnostics survive refresh; dismissal belongs only to this launcher document. */
 	let dismissedSnapshotFailure = $state<string | null>(null);
 	const notice = $derived(
@@ -248,6 +250,15 @@
 		<p class="launcher-error-message">{notice}</p>
 		<div class="ui-icon-actions">
 			<button
+				class="ui-button ui-icon-button pregame-quiet launcher-error-inspect"
+				type="button"
+				aria-label="View full error"
+				title="View full error"
+				onclick={() => (errorDetails = notice)}
+				><span class="pregame-icon" aria-hidden="true"><EyeIcon /></span
+				></button
+			>
+			<button
 				class="ui-button ui-icon-button pregame-quiet"
 				type="button"
 				aria-label="Dismiss error"
@@ -263,7 +274,12 @@
 	showPortalLogo={true}
 	backdrop={false}
 	onDefaultKeydown={(event) => {
-		if (editor === null && !browsingServers && !editingAppSettings)
+		if (
+			editor === null &&
+			!browsingServers &&
+			!editingAppSettings &&
+			errorDetails === null
+		)
 			submitPregameOnEnter(
 				event,
 				playButton,
@@ -549,6 +565,24 @@
 			></button
 		>
 	{/snippet}
+	{#if errorDetails !== null}
+		<UiDialog
+			title="Error details"
+			className="launcher-error-dialog"
+			onCancel={() => (errorDetails = null)}
+		>
+			<div class="launcher-error-details" role="region" aria-label="Full error">
+				{errorDetails}
+			</div>
+			<div class="ui-dialog-actions">
+				<button
+					class="pregame-action ui-button"
+					type="button"
+					onclick={() => (errorDetails = null)}>Close</button
+				>
+			</div>
+		</UiDialog>
+	{/if}
 	{#if editingAppSettings}<AppSettingsDialog
 			onCancel={() => (editingAppSettings = false)}
 		/>{/if}
@@ -798,16 +832,34 @@
 			display: grid;
 			grid-template-columns: minmax(0, 1fr) auto;
 			grid-template-rows: minmax(0, 1fr);
-			align-items: stretch;
+			align-items: center;
 			gap: 12px;
 			padding: 12px;
 			color: var(--ui-color-danger);
 		}
-		.launcher-error .ui-icon-actions {
-			align-self: start;
+		.launcher-error-inspect {
+			opacity: 0;
+		}
+		.launcher-error:hover .launcher-error-inspect,
+		.launcher-error:focus-within .launcher-error-inspect {
+			opacity: 1;
+		}
+		@media (hover: none) {
+			.launcher-error-inspect {
+				opacity: 1;
+			}
 		}
 		.launcher-error-message {
 			margin: 0;
+			min-width: 0;
+			white-space: nowrap;
+			text-overflow: ellipsis;
+			overflow: hidden;
+		}
+		.launcher-error-details {
+			margin: 0;
+			max-height: 55vh;
+			font: inherit;
 			white-space: pre-wrap;
 			overflow-wrap: anywhere;
 			min-height: 0;

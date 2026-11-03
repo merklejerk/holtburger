@@ -639,8 +639,10 @@ impl BodyMotionRuntime {
         }
         for (channel, resolution) in current_resolution.newly_present_since(previous_resolution) {
             match resolution {
-                MotionChannelResolution::Unmodelled { command } => log::warn!(
-                    "body 0x{guid:08X} motion table 0x{:08X} cannot play admitted {channel} command 0x{:08X} in style 0x{:08X}",
+                // Missing content and state-based refusals are ordinary selector outcomes,
+                // just like unsupported action routes; neither alone indicates a runtime fault.
+                MotionChannelResolution::Unmodelled { command } => log::debug!(
+                    "body 0x{guid:08X} motion table 0x{:08X} rejected {channel} command 0x{:08X} in style 0x{:08X}",
                     table.id,
                     command.raw(),
                     self.state.style.raw(),

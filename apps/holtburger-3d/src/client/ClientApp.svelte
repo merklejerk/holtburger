@@ -2284,19 +2284,22 @@
 		const cycle = new ClientCycleSelectionController({
 			selection,
 			sample: () =>
-				sampleCycleCandidates(
-					owner.entities,
-					owner.mirror,
-					gameplayPresentation?.targetingView() ?? null,
-					CLIENT_TUNING.entitySelection.cycle,
-					userSettings.input,
-					{
-						combatMode: owner.state().combatMode,
-						partyMembers: new Set(
-							owner.partySnapshot()?.members.map((member) => member.guid) ?? [],
-						),
-					},
-				),
+				gameplayPresentation?.withCycleSelectionFrame((frame) =>
+					sampleCycleCandidates(
+						owner.entities,
+						owner.mirror,
+						frame,
+						CLIENT_TUNING.entitySelection.cycle,
+						userSettings.input,
+						{
+							combatMode: owner.state().combatMode,
+							partyMembers: new Set(
+								owner.partySnapshot()?.members.map((member) => member.guid) ??
+									[],
+							),
+						},
+					),
+				) ?? null,
 		});
 		const input = new ClientSelectionInput({
 			keyboard,

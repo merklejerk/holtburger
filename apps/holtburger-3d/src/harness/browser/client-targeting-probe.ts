@@ -27,6 +27,7 @@ import { createInputDefaults } from "../../lib/input/input-defaults";
 import { ClientInputArbiter } from "../../client/client-input-arbiter";
 import { CLIENT_TUNING } from "../../client/client-tuning";
 import {
+	realizedSelectionFrame,
 	targetingEntity,
 	TARGETING_TEST_VIEW,
 } from "../../client/client-targeting.test-support";
@@ -41,7 +42,7 @@ import {
 } from "../../lib/game/runtime/dynamic-entity-feed";
 import type { KeyboardInputPolicy } from "../../lib/input/keyboard-input-policy";
 import { landblockVector3 } from "../../lib/assets/ac-frame";
-import { Quat, Vec3 } from "../../lib/game/math/types";
+import { AABB3, Quat, Vec3 } from "../../lib/game/math/types";
 
 /** Fixture-owned geometry policy; changing production tuning must not rewrite targeting scenarios. */
 const CYCLE_POLICY: CycleSelectionPolicy = {
@@ -118,7 +119,18 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 			return sampleCycleCandidates(
 				entities,
 				motion,
-				view,
+				realizedSelectionFrame(
+					view,
+					[...motion.currentEntities()]
+						.filter((entity) => entity.placement.kind === "world")
+						.map((entity) => ({
+							entity,
+							bounds: new AABB3(
+								new Vec3(-0.25, -0.25, -0.25),
+								new Vec3(0.25, 0.25, 0.25),
+							),
+						})),
+				),
 				CYCLE_POLICY,
 				{ targetOnlyInView, smartTabHostileOnly },
 				{ combatMode, partyMembers },
@@ -308,20 +320,23 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		expectSelected(41, "traversal continues after the nearer usable object");
 		selection.select(null);
 		const base: Parameters<typeof replace>[0] = [
-			{ guid: 2, distance: bandWidth * 1.2, creature: true },
-			{ guid: 3, distance: bandWidth * 1.4, creature: true },
-			{ guid: 4, distance: bandWidth * 1.6, creature: true },
+			{ guid: 2, distance: bandWidth * 0.4, creature: true },
+			{ guid: 3, distance: bandWidth * 0.6, creature: true },
+			{ guid: 4, distance: bandWidth * 0.8, creature: true },
 			{ guid: 9, distance: -5, creature: false, corpse: "unopened" },
 			{ guid: 10, distance: -8, creature: false, corpse: "unopened" },
 		];
 		replace(base);
 		press("Tab");
-		expectSelected(2, "cross-EnvCell acquisition without realization");
+		expectSelected(
+			2,
+			"cross-EnvCell acquisition from the realized fixture population",
+		);
 		press("Tab");
 		expectSelected(3, "forward traversal");
 		press("Tab", false, true);
 		expectSelected(2, "reverse traversal");
-		replace([...base, { guid: 5, distance: bandWidth * 1.05, creature: true }]);
+		replace([...base, { guid: 5, distance: bandWidth * 0.3, creature: true }]);
 		press("Tab", false, true);
 		expectSelected(
 			5,
@@ -539,7 +554,12 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		selection.select(null);
 		replace([
 			{ guid: 20, distance: 2, lateral: 2, creature: true },
-			{ guid: 21, distance: 8, height: 6, creature: true },
+			{
+				guid: 21,
+				distance: CYCLE_POLICY.initialDistanceBandMeters * 0.4,
+				height: CYCLE_POLICY.initialDistanceBandMeters * 0.4,
+				creature: true,
+			},
 		]);
 		dispatchHeld("keydown", false, false, "Tab");
 		await waitForHold();
@@ -637,7 +657,7 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		if (systemMenuRequests !== beforeMenu + 1)
 			throw new Error("Empty Escape stack did not reach the system menu.");
 
-		// Ranking includes vertical displacement, with no cell or renderer dependency.
+		// Ranking includes vertical displacement for the explicit realized box population.
 		selection.select(null);
 		replace([
 			{ guid: 20, distance: 8, lateral: 2, creature: true },
@@ -654,12 +674,16 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		replace([
 			{ guid: 20, distance: 8, lateral: 4, creature: true },
 			{ guid: 21, distance: 8, height: 6, creature: true },
-			{ guid: 22, distance: 8, creature: true },
+			{
+				guid: 22,
+				distance: CYCLE_POLICY.initialDistanceBandMeters * 0.6,
+				creature: true,
+			},
 		]);
 		press("Tab", false, true);
 		expectSelected(
-			20,
-			"changed immediate preserves reverse traversal from the cursor",
+			22,
+			"changed immediate takes priority over reverse cursor traversal",
 		);
 		dispatchHeld("keydown", false, false, "Tab");
 		await waitForHold();
@@ -685,12 +709,12 @@ export async function probeClientTargeting(keyboard: KeyboardInputPolicy) {
 		replace([
 			{
 				guid: 24,
-				distance: -CYCLE_POLICY.forwardHalfSpaceRearOffsetMeters / 2,
+				distance: -CYCLE_POLICY.forwardHalfSpaceRearOffsetMeters * 0.8,
 				creature: true,
 			},
 			{
 				guid: 25,
-				distance: -CYCLE_POLICY.forwardHalfSpaceRearOffsetMeters - 0.1,
+				distance: -CYCLE_POLICY.forwardHalfSpaceRearOffsetMeters - 0.5,
 				creature: true,
 			},
 		]);

@@ -1067,14 +1067,42 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 				const notice = document.querySelector('.launcher-error').getBoundingClientRect();
 				const brand = document.querySelector('.pregame-brand').getBoundingClientRect();
 				return { height: profile.clientHeight, scrollHeight: profile.scrollHeight, contentTop: content.top, contentHeight: content.height,
-					messageHeight: message.clientHeight, messageScrollHeight: message.scrollHeight,
-					scrolls: message.scrollHeight > message.clientHeight && message.clientHeight > 0,
+					truncated: message.scrollWidth > message.clientWidth && getComputedStyle(message).textOverflow === 'ellipsis' && getComputedStyle(message).whiteSpace === 'nowrap',
 					contained: notice.left >= brand.right && notice.right <= innerWidth && notice.bottom <= content.top };
 			})()`,
 			);
 			requireCondition(
-				before.scrolls && before.contained,
-				`Error did not scroll inside branding height: ${JSON.stringify(before)}`,
+				before.truncated && before.contained,
+				`Error did not truncate inside branding height: ${JSON.stringify(before)}`,
+			);
+			await click("View full error");
+			await waitFor(
+				() =>
+					evaluate(
+						page,
+						"document.querySelector('.launcher-error-dialog')?.open",
+					),
+				"full error dialog",
+			);
+			requireCondition(
+				await evaluate(
+					page,
+					`(() => {
+					const details = document.querySelector('.launcher-error-details');
+					return details.textContent === document.querySelector('.launcher-error-message').textContent &&
+						details.scrollHeight > details.clientHeight && getComputedStyle(details).overflowY === 'auto';
+				})()`,
+				),
+				"Full error text was not preserved in a scrollable dialog",
+			);
+			await click("Close");
+			await waitFor(
+				() =>
+					evaluate(
+						page,
+						"document.querySelector('.launcher-error-dialog') === null",
+					),
+				"closed error dialog",
 			);
 			await click("Dismiss error");
 			const after = await evaluate(
@@ -1094,7 +1122,7 @@ delete globalThis.__originalGpuInfo; delete globalThis.__releaseGpuInfo;
 			);
 		}
 		report.scenarios.push(
-			"Advanced starts collapsed, supports keyboard toggling, and frames content overrides; long errors scroll without changing form geometry at desktop and narrow widths",
+			"Advanced starts collapsed, supports keyboard toggling, and frames content overrides; long errors truncate and open full scrollable details without changing form geometry at desktop and narrow widths",
 			"CLI initializes once despite unreadable credentials; profile paths preserve whitespace, dirty/revert, saved clearing, A/default/B attempts, recovery isolation, and launcher restoration pass",
 		);
 		await quitAndReport();

@@ -1,3 +1,11 @@
+import { selectionBoxDistanceSquared } from "../lib/game/selection/entity-selection-volume";
+import type {
+	EntitySelectionBounds,
+	RealizedEntitySelectionSource,
+} from "../lib/game/selection/entity-selection-bounds";
+import type { FrustumPlane } from "../lib/game/math/frustum";
+import { createLandblockWorldOrigin } from "../lib/game/landblocks";
+import { scaleVec3, dotVec3 } from "../lib/game/math/vector-utils";
 import type { SceneVec3 } from "../lib/assets/ac-frame";
 import {
 	createEntityFacingCameraYaw,
@@ -18,6 +26,12 @@ import type {
 } from "./client-entity-mirror";
 import type { ClientEntitySelection } from "./client-entity-selection";
 
+/** One synchronous acquisition view; no geometry is retained after candidate sampling. */
+export interface CycleSelectionPresentationFrame extends RealizedEntitySelectionSource {
+	/** Primary camera is optional when a binding does not require view admission. */
+	readonly view: PrimaryCameraView | null;
+}
+
 /** Binding-specific eligibility over one shared traversal cursor; memberships may overlap. */
 export type CycleFilter = "smart-combat" | "non-creature" | "unopened-corpse";
 /** Whether a filter admits ordinary traversal or only its best-ranked candidate. */
@@ -31,7 +45,7 @@ export interface CycleSelectionContext {
 }
 /** App-local acquisition knobs, sampled only on input. */
 export interface CycleSelectionPolicy {
-	/** Player-to-origin acquisition radius in meters for every filter. */
+	/** Player-to-volume acquisition radius in meters for every filter. */
 	readonly radiusMeters: number;
 	/** Width of the innermost radial band; each subsequent band doubles in width. */
 	readonly initialDistanceBandMeters: number;
@@ -46,55 +60,23 @@ export interface CycleSelectionPolicy {
 export interface CycleCandidate {
 	/** Stable identity used for membership and final selection. */
 	readonly guid: number;
-	/** Squared player-to-origin distance; acquisition rank and equal-band, equal-angle traversal tie. */
+	/** Squared player-to-volume distance; ordinary acquisition and traversal distance tie. */
 	readonly distanceSquared: number;
 	/** Player-relative radial band, computed by the candidate sampler. */
 	readonly distanceBand: number;
-	/** Cosine of the 3D angle to horizontal player forward; larger values rank first. */
+	/** Cosine of the 3D root-origin angle to horizontal player forward; larger ranks first. */
 	readonly forwardAlignment: number;
-	/** Sampler-owned horizontal cone admission for Smart Tab acquisition only. */
-	readonly inImmediateCone: boolean;
+	/** Nearest distance inside the facing cone, applicable view region, and strict innermost band. */
+	readonly smartImmediate: { readonly distanceSquared: number } | null;
 	/** Sampler-owned admission per filter; absence means ineligible for that filter. */
 	readonly filters: Readonly<Partial<Record<CycleFilter, CycleMembership>>>;
 }
 
-/** Cheap origin-based camera test; intentionally ignores portal scopes and occlusion. */
-export function approximateTargetView(
-	view: PrimaryCameraView,
-	marginMeters: number,
-): (position: SceneVec3) => boolean {
-	const { camera, extent } = view;
-	const forward = rotateRenderVector(
-		new Vec3(0, 0, -1),
-		camera.placement.rotation,
-	);
-	const right = rotateRenderVector(
-		new Vec3(1, 0, 0),
-		camera.placement.rotation,
-	);
-	const up = rotateRenderVector(new Vec3(0, 1, 0), camera.placement.rotation);
-	const verticalTangent = Math.tan((camera.fov * Math.PI) / 360);
-	const horizontalTangent = (verticalTangent * extent.width) / extent.height;
-	return (position) => {
-		const x = position.x - camera.placement.position.x;
-		const y = position.y - camera.placement.position.y;
-		const z = position.z - camera.placement.position.z;
-		const depth = x * forward.x + y * forward.y + z * forward.z;
-		return (
-			depth >= 0 &&
-			Math.abs(x * right.x + y * right.y + z * right.z) <=
-				depth * horizontalTangent + marginMeters &&
-			Math.abs(x * up.x + y * up.y + z * up.z) <=
-				depth * verticalTangent + marginMeters
-		);
-	};
-}
-
-/** Read accepted poses consistently, including entities never realized or reached by portal views. */
+/** Acquire only installed selectable geometry; semantic eligibility remains session-owned. */
 export function sampleCycleCandidates(
 	entities: ClientEntityMirror,
 	motion: DynamicEntityMirror,
-	view: PrimaryCameraView | null,
+	presentation: CycleSelectionPresentationFrame,
 	policy: CycleSelectionPolicy,
 	preferences: Pick<
 		ClientInputConfiguration,
@@ -109,91 +91,259 @@ export function sampleCycleCandidates(
 		read.level.playerGuid === null
 	)
 		return null;
-	const placements = new Map<number, DynamicEntityWorldPlacement>();
-	// A borrowed, unsorted iteration avoids making mirror/UI ordering part of this hot input path.
+	let playerPlacement: DynamicEntityWorldPlacement | null = null;
 	for (const entity of motion.currentEntities()) {
-		if (entity.placement.kind === "world")
-			placements.set(entity.identity.guid, entity.placement);
+		if (
+			entity.identity.guid === read.level.playerGuid &&
+			entity.placement.kind === "world"
+		) {
+			playerPlacement = entity.placement;
+			break;
+		}
 	}
-	const playerPlacement = placements.get(read.level.playerGuid);
-	if (playerPlacement === undefined) return null;
+	if (playerPlacement === null) return null;
 	const player = dynamicEntityWorldOrigin(playerPlacement);
 	const yaw = createEntityFacingCameraYaw(playerPlacement.pose.rotation);
 	const forward = new Vec3(Math.sin(yaw), 0, -Math.cos(yaw));
-	const inView =
-		view === null ? null : approximateTargetView(view, policy.viewMarginMeters);
-	const candidates: CycleCandidate[] = [];
-	const radiusSquared = policy.radiusMeters * policy.radiusMeters;
-	const minimumHorizontalAlignment = Math.cos(
-		(policy.immediateMaxAngleDegrees * Math.PI) / 180,
+	const cone = immediateConePlanes(
+		player,
+		forward,
+		policy.immediateMaxAngleDegrees,
 	);
-	for (const [guid, placement] of placements) {
-		const position = dynamicEntityWorldOrigin(placement);
-		if (guid === read.level.playerGuid) continue;
+	const view = targetViewPlanes(presentation.view, player, forward, policy);
+	const immediatePlanes = preferences.targetOnlyInView
+		? [...cone, ...view]
+		: cone;
+	const candidates: CycleCandidate[] = [];
+	presentation.visitRealizedEntitySelectionBounds((entity, bounds) => {
+		const guid = entity.identity.guid;
+		if (guid === read.level.playerGuid) return;
 		const facts = read.level.entities.get(guid);
-		if (facts === undefined || facts.targeting === "ineligible") continue;
-		const distanceSquared =
-			(position.x - player.x) ** 2 +
-			(position.y - player.y) ** 2 +
-			(position.z - player.z) ** 2;
-		if (distanceSquared <= radiusSquared) {
-			const forwardDistance =
-				(position.x - player.x) * forward.x +
-				(position.z - player.z) * forward.z;
-			const visible =
-				forwardDistance >= -policy.forwardHalfSpaceRearOffsetMeters &&
-				inView !== null &&
-				inView(position);
-			const distance = Math.sqrt(distanceSquared);
-			const horizontalDistance = Math.hypot(
-				position.x - player.x,
-				position.z - player.z,
+		if (facts === undefined || facts.targeting === "ineligible") return;
+		const memberships = cycleMemberships(facts, context, preferences);
+		if (Object.keys(memberships).length === 0) return;
+		const geometry = sampleVolumeGeometry(
+			bounds,
+			player,
+			forward,
+			preferences.targetOnlyInView &&
+				presentation.view !== null &&
+				memberships["smart-combat"] !== undefined
+				? view
+				: null,
+			memberships["smart-combat"] !== undefined &&
+				(!preferences.targetOnlyInView || presentation.view !== null)
+				? immediatePlanes
+				: null,
+			policy,
+		);
+		if (geometry === null) return;
+		// View restriction applies only to Smart Tab; object/corpse bindings retain admission.
+		const { "smart-combat": smart, ...unrestricted } = memberships;
+		const filters =
+			smart !== undefined && preferences.targetOnlyInView && !geometry.inView
+				? unrestricted
+				: memberships;
+		if (Object.keys(filters).length === 0) return;
+		candidates.push({ guid, ...geometry.candidate, filters });
+	});
+	return candidates;
+}
+
+/** One volume decision set, computed while the runtime's posed matrices are borrowed. */
+function sampleVolumeGeometry(
+	bounds: EntitySelectionBounds,
+	player: SceneVec3,
+	forward: Vec3,
+	view: readonly FrustumPlane[] | null,
+	immediatePlanes: readonly FrustumPlane[] | null,
+	policy: CycleSelectionPolicy,
+): {
+	readonly candidate: Omit<CycleCandidate, "guid" | "filters">;
+	readonly inView: boolean;
+} | null {
+	const origin = createLandblockWorldOrigin(bounds.landblockId);
+	const localPlayer = new Vec3(
+		player.x - origin.x,
+		player.y,
+		player.z - origin.z,
+	);
+	const localPlanes = (planes: readonly FrustumPlane[]) =>
+		planes.map((plane) => ({
+			...plane,
+			constant: plane.constant + plane.x * origin.x + plane.z * origin.z,
+		}));
+	const localView = view === null ? null : localPlanes(view);
+	const localImmediate =
+		immediatePlanes === null ? null : localPlanes(immediatePlanes);
+	let distanceSquared = Infinity;
+	let immediateDistanceSquared = Infinity;
+	let inView = false;
+	for (const part of bounds.parts) {
+		const ordinary = selectionBoxDistanceSquared(
+			part.localBounds,
+			part.sourceToLandblock,
+			localPlayer,
+			[],
+		);
+		if (ordinary === null) continue;
+		distanceSquared = Math.min(distanceSquared, ordinary);
+		if (localView !== null && !inView)
+			inView =
+				selectionBoxDistanceSquared(
+					part.localBounds,
+					part.sourceToLandblock,
+					localPlayer,
+					localView,
+				) !== null;
+		if (
+			localImmediate !== null &&
+			ordinary < policy.initialDistanceBandMeters ** 2
+		) {
+			const immediate = selectionBoxDistanceSquared(
+				part.localBounds,
+				part.sourceToLandblock,
+				localPlayer,
+				localImmediate,
 			);
-			const inTargetView = !preferences.targetOnlyInView || visible;
-			const filters: Partial<Record<CycleFilter, CycleMembership>> = {};
-			if (facts.targeting === "creature") {
-				if (!inTargetView) continue;
-				const hostile =
-					facts.playerThreat ||
-					(facts.description.kind === "known" &&
-						facts.description.mapCategory === "mob");
-				if (!preferences.smartTabHostileOnly || hostile)
-					filters["smart-combat"] = smartCombatMembership(facts, context);
-			} else {
-				filters["non-creature"] = "cycle";
-				if (facts.corpse === "unopened") filters["unopened-corpse"] = "cycle";
-				if (
-					!preferences.smartTabHostileOnly &&
-					facts.targeting !== "projectile" &&
-					facts.corpse === null &&
-					inTargetView
-				) {
-					const usable =
-						facts.description.kind === "known" &&
-						(facts.description.useCapability === "direct" ||
-							facts.description.useCapability === "targeted" ||
-							facts.description.useCapability === "salvage-tool");
-					filters["smart-combat"] = usable ? "cycle" : "immediate-only";
-				}
-			}
-			candidates.push({
-				guid,
-				distanceSquared,
-				// Boundaries are w, 3w, 7w, ...; a boundary belongs to the outer band.
-				distanceBand: Math.floor(
-					Math.log2(1 + distance / policy.initialDistanceBandMeters),
-				),
-				// Coincident origins have no direction: rank them like a perpendicular target.
-				forwardAlignment: distance === 0 ? 0 : forwardDistance / distance,
-				// Vertically aligned/coincident origins have no horizontal bearing.
-				inImmediateCone:
-					horizontalDistance > 0 &&
-					forwardDistance / horizontalDistance >= minimumHorizontalAlignment,
-				filters,
-			});
+			if (immediate !== null)
+				immediateDistanceSquared = Math.min(
+					immediateDistanceSquared,
+					immediate,
+				);
 		}
 	}
-	return candidates;
+	if (distanceSquared > policy.radiusMeters ** 2) return null;
+	const root = new Vec3(
+		bounds.sourceToLandblock.m41 - localPlayer.x,
+		bounds.sourceToLandblock.m42 - localPlayer.y,
+		bounds.sourceToLandblock.m43 - localPlayer.z,
+	);
+	const rootDistance = Math.hypot(root.x, root.y, root.z);
+	return {
+		inView,
+		candidate: {
+			distanceSquared,
+			// Boundaries are w, 3w, 7w, ...; a boundary belongs to the outer band.
+			distanceBand: Math.floor(
+				Math.log2(
+					1 + Math.sqrt(distanceSquared) / policy.initialDistanceBandMeters,
+				),
+			),
+			forwardAlignment:
+				rootDistance === 0 ? 0 : dotVec3(root, forward) / rootDistance,
+			smartImmediate:
+				immediateDistanceSquared < policy.initialDistanceBandMeters ** 2
+					? { distanceSquared: immediateDistanceSquared }
+					: null,
+		},
+	};
+}
+
+/** Inward plane through one anchor, with the margin expressed in the normal's axis units. */
+function planeAt(normal: Vec3, anchor: Vec3, margin: number): FrustumPlane {
+	return {
+		x: normal.x,
+		y: normal.y,
+		z: normal.z,
+		constant: margin - dotVec3(normal, anchor),
+	};
+}
+
+/** Convex horizontal wedge; exact endpoints avoid near-zero trigonometric residuals. */
+function immediateConePlanes(
+	player: SceneVec3,
+	forward: Vec3,
+	degrees: number,
+): readonly FrustumPlane[] {
+	if (!Number.isFinite(degrees) || degrees < 0 || degrees > 90)
+		throw new Error(
+			"Immediate targeting half-angle must be between zero and 90 degrees.",
+		);
+	const sine = degrees === 0 ? 0 : Math.sin((degrees * Math.PI) / 180);
+	const cosine = degrees === 90 ? 0 : Math.cos((degrees * Math.PI) / 180);
+	const right = new Vec3(-forward.z, 0, forward.x);
+	return [
+		planeAt(forward, player, 0),
+		...[1, -1].map((sign) =>
+			planeAt(
+				scaleVec3(forward, sine).add(scaleVec3(right, sign * cosine)),
+				player,
+				0,
+			),
+		),
+	];
+}
+
+/** Padded primary camera region, deliberately independent of renderer near/far/portal clipping. */
+function targetViewPlanes(
+	view: PrimaryCameraView | null,
+	player: SceneVec3,
+	forward: Vec3,
+	policy: CycleSelectionPolicy,
+): readonly FrustumPlane[] {
+	if (view === null) return [];
+	const camera = view.camera;
+	const axes = {
+		forward: rotateRenderVector(new Vec3(0, 0, -1), camera.placement.rotation),
+		right: rotateRenderVector(new Vec3(1, 0, 0), camera.placement.rotation),
+		up: rotateRenderVector(new Vec3(0, 1, 0), camera.placement.rotation),
+	};
+	const verticalTangent = Math.tan((camera.fov * Math.PI) / 360);
+	const horizontalTangent =
+		(verticalTangent * view.extent.width) / view.extent.height;
+	return [
+		planeAt(axes.forward, camera.placement.position, 0),
+		planeAt(forward, player, policy.forwardHalfSpaceRearOffsetMeters),
+		...[
+			{ axis: axes.right, tangent: horizontalTangent },
+			{ axis: axes.up, tangent: verticalTangent },
+		].flatMap(({ axis, tangent }) =>
+			[1, -1].map((sign) =>
+				planeAt(
+					scaleVec3(axes.forward, tangent).add(scaleVec3(axis, sign)),
+					camera.placement.position,
+					policy.viewMarginMeters,
+				),
+			),
+		),
+	];
+}
+
+/** Session semantics choose memberships before any expensive geometry queries. */
+function cycleMemberships(
+	facts: ClientEntityFacts,
+	context: CycleSelectionContext,
+	preferences: Pick<ClientInputConfiguration, "smartTabHostileOnly">,
+): CycleCandidate["filters"] {
+	if (facts.targeting === "creature") {
+		const hostile =
+			facts.playerThreat ||
+			(facts.description.kind === "known" &&
+				facts.description.mapCategory === "mob");
+		return !preferences.smartTabHostileOnly || hostile
+			? { "smart-combat": smartCombatMembership(facts, context) }
+			: {};
+	}
+	const filters: Partial<Record<CycleFilter, CycleMembership>> = {
+		"non-creature": "cycle",
+	};
+	if (facts.corpse === "unopened") filters["unopened-corpse"] = "cycle";
+	if (
+		!preferences.smartTabHostileOnly &&
+		facts.targeting !== "projectile" &&
+		facts.corpse === null
+	) {
+		const traversable =
+			facts.description.kind === "known" &&
+			facts.description.mapCategory !== "door" &&
+			facts.description.mapCategory !== "door-no-direct-use" &&
+			["direct", "targeted", "salvage-tool"].includes(
+				facts.description.useCapability,
+			);
+		filters["smart-combat"] = traversable ? "cycle" : "immediate-only";
+	}
+	return filters;
 }
 
 /** Only player identities are stance-restricted; NPCs and monsters remain ordinary targets. */
@@ -230,6 +380,8 @@ export class ClientCycleSelectionController {
 	readonly #unsubscribe: () => void;
 	/** Last acquisition winner, shared by all binding filters. */
 	#cursor: number | null = null;
+	/** Last sampled Smart Tab immediate; a changed winner takes priority over traversal. */
+	#smartImmediate: number | null = null;
 	#destroyed = false;
 
 	constructor(options: {
@@ -249,6 +401,12 @@ export class ClientCycleSelectionController {
 		const sampled = this.#candidates(filter);
 		if (sampled === null) return;
 		const { immediate, matching } = sampled;
+		const changedImmediate =
+			filter === "smart-combat" &&
+			immediate !== undefined &&
+			immediate.guid !== this.#smartImmediate;
+		if (filter === "smart-combat")
+			this.#smartImmediate = immediate?.guid ?? null;
 		if (matching.length === 0) return;
 		const selected = this.#selection.selectedGuid();
 		const cursorIndex = matching.findIndex(
@@ -256,7 +414,7 @@ export class ClientCycleSelectionController {
 		);
 		let start = direction === 1 ? -1 : 0;
 		if (cursorIndex >= 0) start = cursorIndex;
-		if (immediate !== undefined && cursorIndex < 0) {
+		if (immediate !== undefined && (cursorIndex < 0 || changedImmediate)) {
 			// Begin just before the immediate; the shared traversal skips it if already selected.
 			start = matching.indexOf(immediate) - direction;
 		}
@@ -282,6 +440,8 @@ export class ClientCycleSelectionController {
 		const sampled = this.#candidates(filter);
 		if (sampled === null) return;
 		const { immediate } = sampled;
+		if (filter === "smart-combat")
+			this.#smartImmediate = immediate?.guid ?? null;
 		if (immediate === undefined) return;
 		this.#cursor = immediate.guid;
 		this.#selection.commitAcquisition(intent, immediate.guid);
@@ -294,7 +454,7 @@ export class ClientCycleSelectionController {
 	}
 
 	#candidates(filter: CycleFilter): {
-		/** Nearest candidate allowed by the filter; only Smart Tab requires the horizontal cone. */
+		/** Nearest candidate; Smart Tab requires the cone and innermost distance band. */
 		readonly immediate: CycleCandidate | undefined;
 		/** Broad traversal ring, including the immediate-only winner when present. */
 		readonly matching: CycleCandidate[];
@@ -309,19 +469,26 @@ export class ClientCycleSelectionController {
 			.sort(preferredFirst);
 		// Resolve immediate from the broad pool before restricting traversal. The winning
 		// immediate-only entity stays in the ring; all other immediate-only entities are skipped.
-		// Acquisition uses actual distance so a farther, better-aligned origin cannot beat
+		// Acquisition uses the sampler-owned volume distance so a farther, better-aligned object cannot beat
 		// a nearby door. Object/corpse searches admit every direction, including coincident
-		// origins. Once seeded, traversal follows the cursor despite a new winner.
-		let immediate: CycleCandidate | undefined;
+		// volumes. Smart Tab gives a changed immediate priority over its traversal cursor.
+		let winner:
+			| { readonly candidate: CycleCandidate; readonly distanceSquared: number }
+			| undefined;
 		for (const candidate of ranked) {
+			const acquisition =
+				filter === "smart-combat"
+					? candidate.smartImmediate
+					: { distanceSquared: candidate.distanceSquared };
+			if (acquisition === null) continue;
 			if (
-				(filter !== "smart-combat" || candidate.inImmediateCone) &&
-				(immediate === undefined ||
-					(candidate.distanceSquared - immediate.distanceSquared ||
-						preferredFirst(candidate, immediate)) < 0)
+				winner === undefined ||
+				(acquisition.distanceSquared - winner.distanceSquared ||
+					preferredFirst(candidate, winner.candidate)) < 0
 			)
-				immediate = candidate;
+				winner = { candidate, distanceSquared: acquisition.distanceSquared };
 		}
+		const immediate = winner?.candidate;
 		return {
 			immediate,
 			matching: ranked.filter(
@@ -333,5 +500,6 @@ export class ClientCycleSelectionController {
 
 	#reset(): void {
 		this.#cursor = null;
+		this.#smartImmediate = null;
 	}
 }

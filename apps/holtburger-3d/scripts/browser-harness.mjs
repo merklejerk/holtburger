@@ -5162,7 +5162,12 @@ async function runClientHudHarness({ viteUrl }) {
 					client,
 					evaluateExpression,
 					delay,
+					1,
+					options.screenshotPath,
 				),
+				screenshot: options.screenshotPath
+					? (await client.send("Page.captureScreenshot")).data
+					: undefined,
 				state: {
 					viewport: {
 						width: options.viewportWidth,

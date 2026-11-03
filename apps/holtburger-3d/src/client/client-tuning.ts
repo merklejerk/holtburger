@@ -132,6 +132,26 @@ export const CLIENT_TUNING = {
 	/** Maximum publication cadence for asynchronously prepared spell artwork. */
 	spells: { iconDisplayIntervalMs: 100 },
 	statIcons: { displayIntervalMs: 100 },
+	xpFeedback: {
+		/** Time to traverse the full bar; shorter gains take proportionally less time. */
+		gainMs: 520,
+		/** Gold level-up highlight and number-pop duration, independent of fill travel. */
+		levelUpMs: 1_050,
+		/** Accessible color highlight duration, independent of bar travel speed. */
+		reducedMotionHighlightMs: 520,
+		/** Flight lifetime measured from the burst at fill completion. */
+		sparkleMs: 1_800,
+		/** Number of particles emitted on arrival at the new XP position. */
+		sparkleCount: 8,
+		/** Fixed pool bounds overlapping flights without clearing them on new gains. */
+		sparkleCapacity: 32,
+		/** Constant downward acceleration in CSS pixels per second squared. */
+		sparkleGravity: 18,
+		/** Random rightward launch speed in CSS pixels per second. */
+		sparkleHorizontalSpeed: { min: 8, max: 24 },
+		/** Peak level-number scale during the gold celebration. */
+		levelScale: 1.25,
+	},
 	characterSheet: {
 		/** Mounted sheet sampling cadence, independent of host stat publication. */
 		displayIntervalMs: 150,

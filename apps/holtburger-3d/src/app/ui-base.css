@@ -362,6 +362,17 @@
 		--ui-spell-component-label-gap: 6px;
 		/* Shared HUD, character-sheet, and item XP bars use a saturated green. */
 		--ui-character-xp-color: #32d85b;
+		/* Shared fill material for native progress bars and the animated HUD fill. */
+		--ui-progress-fill-image: none;
+		/* XP celebration paint; optional --ui-xp-sparkle-color defaults to this at its consumer. */
+		--ui-xp-celebration-color: #ffd770;
+		--ui-xp-celebration-brightness: 0.8;
+		/* Optional --ui-xp-edge-color defaults to the theme highlight at its consumer. */
+		--ui-xp-edge-width: 2px;
+		--ui-xp-edge-outset: 2px;
+		--ui-xp-edge-glow-radius: 7px;
+		--ui-xp-sparkle-size: 9px;
+		--ui-xp-sparkle-glow-radius: 3px;
 		/* Character HUD spacing: identity-to-vitals gap and gaps within the identity row. */
 		--ui-character-hud-gap: 0px;
 		--ui-character-hud-inline-gap: calc(6em / 13);
@@ -1548,10 +1559,12 @@
 		background: color-mix(in srgb, var(--ui-color-well) 30%, transparent);
 	}
 	.ui-progress::-webkit-progress-value {
-		background: currentColor;
+		background-color: currentColor;
+		background-image: var(--ui-progress-fill-image);
 	}
 	.ui-progress::-moz-progress-bar {
-		background: currentColor;
+		background-color: currentColor;
+		background-image: var(--ui-progress-fill-image);
 	}
 }
 

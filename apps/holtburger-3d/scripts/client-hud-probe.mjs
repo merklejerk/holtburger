@@ -1871,6 +1871,7 @@ export async function probeCharacterSheet(
 	evaluateExpression,
 	delay,
 	characterGuid = 1,
+	screenshotPath = null,
 ) {
 	await evaluateExpression(
 		client,
@@ -2356,12 +2357,31 @@ const synergies = document.querySelector('[aria-label="Strength skill synergies"
   const { probeProgressionFeedback } = await import('/src/harness/browser/client-progression-feedback-probe.ts');
   return await probeProgressionFeedback(globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__, globalThis.__CHARACTER_SHEET_PROBE_BASE__);
  })()`;
+	const xpExpression = `(async () => {
+  const { probeXpFeedback } = await import('/src/harness/browser/client-xp-feedback-probe.ts');
+  return await probeXpFeedback(globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__, globalThis.__CHARACTER_SHEET_PROBE_BASE__);
+ })()`;
+	const settleXp = `import('/src/harness/browser/client-xp-feedback-probe.ts').then(module => module.settleXpFeedback())`;
+	const xp = await evaluateExpression(client, xpExpression);
+	if (screenshotPath !== null) {
+		const capture = await client.send("Page.captureScreenshot", {
+			format: "png",
+		});
+		await writeFile(
+			`${screenshotPath}.xp-gain.png`,
+			Buffer.from(capture.data, "base64"),
+		);
+	}
+	await evaluateExpression(client, settleXp);
 	const feedback = await evaluateExpression(client, feedbackExpression);
 	let reducedFeedback;
+	let reducedXp;
 	await client.send("Emulation.setEmulatedMedia", {
 		features: [{ name: "prefers-reduced-motion", value: "reduce" }],
 	});
 	try {
+		reducedXp = await evaluateExpression(client, xpExpression);
+		await evaluateExpression(client, settleXp);
 		reducedFeedback = await evaluateExpression(client, feedbackExpression);
 	} finally {
 		await client.send("Emulation.setEmulatedMedia", { features: [] });
@@ -2380,7 +2400,7 @@ const synergies = document.querySelector('[aria-label="Strength skill synergies"
 		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
 		if (panel && !panel.textContent.includes('Waiting for character details')) throw new Error('Retired character details remained visible in the panel.');
 		if (document.querySelector('.character-hud progress')?.value !== 0) throw new Error('Retired character experience remained visible in the HUD.');
-		return { ...${JSON.stringify(neutral)}, titles: { ...${JSON.stringify(titles)}, optimistic: true, reconciled: true }, feedback: ${JSON.stringify({ normal: feedback, reduced: reducedFeedback })}, spellNames: ${JSON.stringify(spellNames)}, retired: true };
+		return { ...${JSON.stringify(neutral)}, titles: { ...${JSON.stringify(titles)}, optimistic: true, reconciled: true }, xp: ${JSON.stringify({ normal: xp, reduced: reducedXp })}, feedback: ${JSON.stringify({ normal: feedback, reduced: reducedFeedback })}, spellNames: ${JSON.stringify(spellNames)}, retired: true };
 	})()`,
 	);
 }

@@ -78,7 +78,33 @@ export interface ClientTuning {
 	readonly spells: { readonly iconDisplayIntervalMs: number };
 	/** Bounded display sampling for creation and progression artwork. */
 	readonly statIcons: { readonly displayIntervalMs: number };
-	/** Mounted Character panel sampling; world stat publication remains host-owned. */
+	/** HUD experience gain and level-up presentation. */
+	readonly xpFeedback: {
+		/** Full-width fill travel time; shorter movements scale with distance. */
+		readonly gainMs: number;
+		/** Level-up highlight and number-pop duration. */
+		readonly levelUpMs: number;
+		/** Color-only feedback duration when reduced motion is enabled. */
+		readonly reducedMotionHighlightMs: number;
+		/** Particle flight lifetime after emission at fill completion. */
+		readonly sparkleMs: number;
+		/** Particles emitted per endpoint burst. */
+		readonly sparkleCount: number;
+		/** Maximum number of simultaneous particle flights. */
+		readonly sparkleCapacity: number;
+		/** Downward acceleration in CSS pixels per second squared. */
+		readonly sparkleGravity: number;
+		/** Rightward launch speed range in CSS pixels per second. */
+		readonly sparkleHorizontalSpeed: {
+			/** Slowest launch speed. */
+			readonly min: number;
+			/** Fastest launch speed. */
+			readonly max: number;
+		};
+		/** Peak scale of the level number. */
+		readonly levelScale: number;
+	};
+	/** Character sheet sampling and purchase feedback. */
 	readonly characterSheet: {
 		readonly displayIntervalMs: number;
 		/** Progression reward motion and independent floating-label lifetime. */

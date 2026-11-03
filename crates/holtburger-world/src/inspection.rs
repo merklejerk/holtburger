@@ -1438,16 +1438,22 @@ fn get_wield_requirements(object: &InspectionSource<'_>) -> Vec<WieldRequirement
     for (req_prop, skill_prop, diff_prop) in configs {
         let skill_id = object.get_int_prop(skill_prop).map(|value| value as u32);
         let difficulty = object.get_int_prop(diff_prop);
-        let Some(requirement_type) = object
-            .get_int_prop(req_prop)
-            .and_then(|value| WieldRequirementType::from_repr(value as usize))
-        else {
+        let Some(raw_requirement_type) = object.get_int_prop(req_prop) else {
             if skill_id.is_some() || difficulty.is_some() {
-                log::warn!(
-                    "object {:?} has an incomplete wield requirement at {req_prop:?}",
+                // An absent type means no requirement, even if companion fields remain.
+                log::debug!(
+                    "object {:?} has wield requirement fields without a type at {req_prop:?}",
                     object.guid
                 );
             }
+            continue;
+        };
+        let Some(requirement_type) = WieldRequirementType::from_repr(raw_requirement_type as usize)
+        else {
+            log::warn!(
+                "object {:?} has an unknown wield requirement type {raw_requirement_type} at {req_prop:?}",
+                object.guid
+            );
             continue;
         };
         if requirement_type == WieldRequirementType::Invalid {

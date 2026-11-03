@@ -139,6 +139,7 @@ export async function probeWorldContainer(options: {
 			characterManagement: { kind: "idle" },
 			playerVisualCapture: null,
 			entityCollisionDisabled: false,
+			socialMotionReady: false,
 			canTeleportFromMap: false,
 			recallDestinations: [],
 			housing: emptyHousing(),

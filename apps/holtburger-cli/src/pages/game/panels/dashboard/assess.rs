@@ -1,9 +1,10 @@
 use crate::utils::wrap_text;
 use holtburger_common::properties::AttunedStatus;
 use holtburger_world::inspection::{
-    BondedStatus, BonusKind, CreatureIdentity, CreatureInspection, Effect, InspectionSpellRole,
-    InspectionUseEffect, ItemInspection, ItemManaKind, ObjectInspection, ObjectInspectionDetails,
-    PortalRestriction, WieldRequirement,
+    BondedStatus, BonusKind, CreatureIdentity, CreatureInspection, Effect, GearRatingKind,
+    InspectionSpellRole, InspectionUseEffect, ItemInspection, ItemManaKind, ObjectInspection,
+    ObjectInspectionDetails, PortalMaximumLevel, PortalRestriction, RemainingLifetime,
+    SkillActivationRequirement, UseRequirement, WieldRequirement,
 };
 use holtburger_world::item_progression::ItemAdvancement;
 use holtburger_world::spell::SpellCatalog;
@@ -34,6 +35,54 @@ fn format_wield_requirement(requirement: &WieldRequirement) -> String {
         BoolStat { property, value } => format!("PropertyBool {property:?}: {value}"),
         CreatureType { creature_type } => format!("Creature Type: {creature_type}"),
         Heritage { heritage } => format!("Heritage: {heritage}"),
+        Owner { name } => format_owner_requirement(name.as_deref()),
+    }
+}
+
+fn format_owner_requirement(name: Option<&str>) -> String {
+    match name.filter(|name| !name.is_empty()) {
+        Some(name) => format!("Restricted to {name}"),
+        None => "Original owner only".to_owned(),
+    }
+}
+
+fn format_use_requirement(requirement: &UseRequirement) -> String {
+    match requirement {
+        UseRequirement::Skill { skill, requirement } => {
+            let value = match requirement {
+                SkillActivationRequirement::Minimum { minimum } => minimum.to_string(),
+                SkillActivationRequirement::Training { training, minimum } => match minimum {
+                    Some(minimum) => format!("{minimum} ({training})"),
+                    None => training.to_string(),
+                },
+            };
+            format!("{skill}: {value}")
+        }
+        UseRequirement::Level { level } => format!("Level: {level}"),
+        UseRequirement::Attribute { attribute, minimum } => format!("{attribute}: {minimum}"),
+        UseRequirement::Vital { vital, minimum } => format!("{vital}: {minimum}"),
+        UseRequirement::Heritage { heritage } => format!("Heritage: {heritage}"),
+        UseRequirement::AllegianceRank { rank } => format!("Allegiance rank: {rank}"),
+        UseRequirement::Owner { name } => format_owner_requirement(name.as_deref()),
+    }
+}
+
+fn gear_rating_label(kind: GearRatingKind) -> &'static str {
+    match kind {
+        GearRatingKind::Damage => "Damage rating",
+        GearRatingKind::DamageResistance => "Damage resistance rating",
+        GearRatingKind::Critical => "Critical rating",
+        GearRatingKind::CriticalResistance => "Critical resistance rating",
+        GearRatingKind::CriticalDamage => "Critical damage rating",
+        GearRatingKind::CriticalDamageResistance => "Critical damage resistance rating",
+        GearRatingKind::HealingBoost => "Healing boost rating",
+        GearRatingKind::NetherResistance => "Nether resistance rating",
+        GearRatingKind::LifeResistance => "Life resistance rating",
+        GearRatingKind::MaxHealth => "Maximum health",
+        GearRatingKind::PlayerKillerDamage => "Player killer damage rating",
+        GearRatingKind::PlayerKillerDamageResistance => "Player killer damage resistance rating",
+        GearRatingKind::Overpower => "Overpower rating",
+        GearRatingKind::OverpowerResistance => "Overpower resistance rating",
     }
 }
 
@@ -201,6 +250,63 @@ fn push_item_info(
     item: &ItemInspection,
     spell_lookup: Option<&SpellCatalog>,
 ) {
+    if let Some(levels) = &item.portal_levels {
+        push_section(lines, "Portal");
+        if let Some(minimum) = levels.minimum {
+            push_labeled(lines, "Minimum level", minimum, Color::White);
+        }
+        if let Some(maximum) = &levels.maximum {
+            let value = match maximum {
+                PortalMaximumLevel::Unlimited => "No upper limit".to_owned(),
+                PortalMaximumLevel::Level { level } => level.to_string(),
+            };
+            push_labeled(lines, "Maximum level", value, Color::White);
+        }
+    }
+    if let Some(set) = &item.equipment_set {
+        let name = set
+            .name
+            .clone()
+            .unwrap_or_else(|| format!("Unknown set ({})", set.id));
+        push_labeled(lines, "Equipment set", name, Color::Cyan);
+    }
+    if let Some(lifetime) = &item.lifetime {
+        if let Some(seconds) = lifetime.lifespan_seconds {
+            push_labeled(
+                lines,
+                "Lifespan",
+                format_inspection_duration(f64::from(seconds)),
+                Color::White,
+            );
+        }
+        if let Some(remaining) = &lifetime.remaining {
+            let value = match remaining {
+                RemainingLifetime::Expired => "Expired".to_owned(),
+                RemainingLifetime::Remaining { seconds } => {
+                    format_inspection_duration(f64::from(*seconds))
+                }
+            };
+            push_labeled(lines, "Remaining at appraisal", value, Color::Yellow);
+        }
+    }
+    if let Some(stone) = &item.mana_stone {
+        if let Some(efficiency) = stone.efficiency {
+            push_labeled(
+                lines,
+                "Mana recovery efficiency",
+                format!("{:.0}%", efficiency * 100.0),
+                Color::White,
+            );
+        }
+        if let Some(chance) = stone.destruction_chance {
+            push_labeled(
+                lines,
+                "Stone destruction chance",
+                format!("{:.0}%", chance * 100.0),
+                Color::Yellow,
+            );
+        }
+    }
     if let Some(restrictions) = &item.portal_restrictions {
         for restriction in restrictions {
             let text = match restriction {
@@ -366,6 +472,26 @@ fn push_item_info(
         }
     }
 
+    if !item.use_requirements.is_empty() {
+        push_section(lines, "Use Requirements");
+        for requirement in &item.use_requirements {
+            let text = format_use_requirement(requirement);
+            lines.push(Line::from(format!("  {text}")));
+        }
+    }
+
+    if !item.gear_ratings.is_empty() {
+        push_section(lines, "Gear ratings");
+        for rating in &item.gear_ratings {
+            push_labeled(
+                lines,
+                gear_rating_label(rating.kind),
+                rating.value,
+                Color::White,
+            );
+        }
+    }
+
     if !item.bonuses.is_empty() {
         push_section(lines, "Bonuses");
         for bonus in &item.bonuses {
@@ -435,27 +561,21 @@ fn push_item_info(
         }
     }
 
-    if item
-        .spells
-        .iter()
-        .any(|spell| spell.role != InspectionSpellRole::OnUse)
-    {
-        push_section(lines, "Spells");
-        for spell in item
-            .spells
-            .iter()
-            .filter(|spell| spell.role != InspectionSpellRole::OnUse)
-        {
+    for (heading, role) in [
+        ("Spells", InspectionSpellRole::Item),
+        ("Triggered effects", InspectionSpellRole::Triggered),
+        ("Active spells", InspectionSpellRole::ActiveEnchantment),
+    ] {
+        if !item.spells.iter().any(|spell| spell.role == role) {
+            continue;
+        }
+        push_section(lines, heading);
+        for spell in item.spells.iter().filter(|spell| spell.role == role) {
             let name = spell_lookup
                 .and_then(|catalog| catalog.get(spell.id))
                 .map(|info| info.name.clone())
                 .unwrap_or_else(|| format!("Unknown Spell ({})", spell.id));
-            let suffix = if spell.role == InspectionSpellRole::ActiveEnchantment {
-                " (active)"
-            } else {
-                ""
-            };
-            lines.push(Line::from(format!("  - {name}{suffix}")));
+            lines.push(Line::from(format!("  - {name}")));
         }
     }
 
@@ -470,6 +590,29 @@ fn push_item_info(
             .filter(|name| !name.is_empty())
         {
             lines.push(Line::from(format!("      -- {scribe}")));
+        }
+    }
+    if item.gems.is_some() || item.attribution.is_some() {
+        push_section(lines, "Details");
+        if let Some(gems) = &item.gems {
+            push_labeled(
+                lines,
+                "Embedded gems",
+                format!("{} × {}", gems.count, gems.material),
+                Color::White,
+            );
+        }
+        if let Some(attribution) = &item.attribution {
+            for (label, value) in [
+                ("Craftsman", &attribution.craftsman),
+                ("Tinker", &attribution.tinker),
+                ("Imbuer", &attribution.imbuer),
+                ("Plating", &attribution.plating),
+            ] {
+                if let Some(value) = value {
+                    push_labeled(lines, label, value, Color::White);
+                }
+            }
         }
     }
 }
@@ -525,6 +668,9 @@ fn push_item_status(lines: &mut Vec<Line<'static>>, item: &ItemInspection) {
     }
     if item.status.sellable == Some(false) {
         statuses.push("Not sellable".to_string());
+    }
+    if item.status.dyeable == Some(true) {
+        statuses.push("Dyeable".to_string());
     }
     if item.status.ivoryable == Some(true) {
         statuses.push("Ivoryable".to_string());
@@ -755,6 +901,71 @@ mod tests {
             holtburger_world::inspection::InspectionContext::new(&titles),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn item_appraisal_displays_primary_facts_and_finishes_with_secondary_details() {
+        use holtburger_common::properties::{MaterialType, PropertyDataId};
+        let mut entity = Entity::new(Guid(1), "Equipment".into(), WorldPosition::default());
+        for (property, value) in [
+            (PropertyInt::EquipmentSetId, 13),
+            (PropertyInt::GearCritDamage, 3),
+            (PropertyInt::Lifespan, 10800),
+            (PropertyInt::RemainingLifespan, 3600),
+            (
+                PropertyInt::ItemAttributeLimit,
+                holtburger_world::inspection::AttributeType::SelfAttr as i32,
+            ),
+            (PropertyInt::ItemAttributeLevelLimit, 295),
+            (PropertyInt::MinLevel, 80),
+            (PropertyInt::MaxLevel, 0),
+            (PropertyInt::GemCount, 2),
+            (PropertyInt::GemType, MaterialType::Ruby as i32),
+        ] {
+            entity.set_int_prop(property, value);
+        }
+        entity.set_bool_prop(PropertyBool::Dyable, true);
+        entity.set_did_prop(PropertyDataId::ProcSpell, Guid(42));
+        entity.spell_book = vec![42];
+        entity.set_string_prop(PropertyString::TinkerName, "Test Tinker".into());
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for expected in [
+            "Soldier's",
+            "Critical damage rating:  3",
+            "Remaining at appraisal:  1h",
+            "No upper limit",
+            "Dyeable",
+            "Self: 295",
+            "Triggered effects:",
+            "2 × Ruby",
+            "Test Tinker",
+        ] {
+            assert!(text.contains(expected), "missing {expected}: {text}");
+        }
+        assert!(text.find("Triggered effects:").unwrap() < text.find("Details:").unwrap());
+    }
+
+    #[test]
+    fn summoning_inspection_displays_activation_requirements() {
+        let mut entity = Entity::new(Guid(1), "Essence".into(), WorldPosition::default());
+        entity.set_int_prop(
+            PropertyInt::UseRequiresSkillSpec,
+            holtburger_common::stats::SkillType::Summoning as i32,
+        );
+        entity.set_int_prop(PropertyInt::UseRequiresSkillLevel, 570);
+        entity.set_int_prop(PropertyInt::UseRequiresLevel, 180);
+        let text = get_assess_info(&inspect_entity(&entity), None, None)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(text.contains("Use Requirements:"));
+        assert!(text.contains("Summoning: 570 (Specialized)"));
+        assert!(text.contains("Level: 180"));
     }
 
     #[test]

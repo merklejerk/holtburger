@@ -184,10 +184,19 @@ export async function probeObjectInspection(
                 (row) => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()])`),
 			[
 				["Destination", "Holtburg (42.1N, 33.6E)."],
+				["Minimum level", "80"],
+				["Maximum level", "150"],
 				["Recall & tie", "Prohibited"],
 				["Summoning", "Prohibited"],
 			],
 		);
+		assert.deepEqual(
+			await read(
+				`Array.from(document.querySelectorAll('[data-inspection-use-requirements] li'), (row) => row.textContent.trim())`,
+			),
+			["Summoning: 570 (Specialized)", "Level: 180", "Self: 295"],
+		);
+
 		assert.deepEqual(
 			await read(`[
 				...document.querySelectorAll('.inspection-cantrip-pill'),
@@ -226,7 +235,7 @@ export async function probeObjectInspection(
 		const spellGroups = await read(`[
 			...document.querySelectorAll('.inspection-item section'),
 		]
-			.filter((section) => ['Spells', 'Active Spells'].includes(section.querySelector('h3')?.textContent))
+			.filter((section) => ['Spells', 'Triggered effects', 'Active Spells'].includes(section.querySelector('h3')?.textContent))
 			.map((section) => ({
 				heading: section.querySelector('h3').textContent,
 				spells: [...section.querySelectorAll('.inspection-spell > summary')].map((summary) => summary.textContent.trim()),
@@ -243,8 +252,41 @@ export async function probeObjectInspection(
 					"Spell 999999 (definition missing)",
 				],
 			},
+			{ heading: "Triggered effects", spells: ["Harm Other I"] },
 			{ heading: "Active Spells", spells: ["Harm Other I"] },
 		]);
+		const primaryFacts = await read(
+			`Array.from(document.querySelectorAll('[data-inspection-item-limits] dl > div, [data-inspection-gear-ratings] dl > div'), row => [row.querySelector('dt').textContent.trim(), row.querySelector('dd').textContent.trim()])`,
+		);
+		assert.deepEqual(primaryFacts, [
+			["Equipment set", "Soldier's"],
+			["Lifespan", "3h"],
+			["Remaining at appraisal", "1h"],
+			["Mana recovery efficiency", "80%"],
+			["Stone destruction chance", "0%"],
+			["Critical Damage rating", "3"],
+			["Maximum health", "25"],
+		]);
+		assert.equal(
+			await read(`document.querySelector('[data-inspection-details]').open`),
+			false,
+		);
+		await read(
+			`document.querySelector('[data-inspection-details]').open = true`,
+		);
+		assert.match(
+			await read(
+				`document.querySelector('[data-inspection-details]').textContent`,
+			),
+			/2 × Ruby/,
+		);
+		assert.match(
+			await read(
+				`document.querySelector('[data-inspection-details]').textContent`,
+			),
+			/Harness Tinker/,
+		);
+
 		assert.match(item.window.text, /definition missing/);
 		const cantripPills = await read(`[
 			...document.querySelectorAll('.inspection-cantrip-pill'),

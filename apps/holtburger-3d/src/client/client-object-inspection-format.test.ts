@@ -1,6 +1,8 @@
 import { formatDuration } from "../app/duration-format";
 import { formatQuantity } from "../app/quantity-format";
 import { describe, expect, it } from "vitest";
+import fixture from "./fixtures/object-inspection-wire.json";
+import { decodeObjectInspectionResult } from "./client-object-inspection-contract";
 import {
 	formatInspectionDamageTypes,
 	formatInspectionEffect,
@@ -11,6 +13,7 @@ import {
 	formatPortalInspection,
 	formatPlayerKillerStatus,
 	formatWieldRequirement,
+	formatUseRequirement,
 	humanizeInspectionName,
 	itemProgressPercent,
 	truncateInspectionDescription,
@@ -159,6 +162,7 @@ describe("object inspection formatting", () => {
 				isLocked: null,
 				sellable: null,
 				ivoryable: null,
+				dyeable: null,
 				unenchantable: true,
 			}),
 		).toEqual(["Unenchantable"]);
@@ -178,4 +182,86 @@ describe("object inspection formatting", () => {
 			}),
 		).toBe("Slayer: Olthoi (15%)");
 	});
+});
+
+it("formats activation skill thresholds, training-only clauses, and character levels", () => {
+	expect(
+		formatUseRequirement({
+			type: "skill",
+			data: {
+				skill: "Summoning",
+				requirement: {
+					kind: "training",
+					training: "specialized",
+					minimum: 570,
+				},
+			},
+		}),
+	).toBe("Summoning: 570 (Specialized)");
+	expect(
+		formatUseRequirement({
+			type: "skill",
+			data: {
+				skill: "Summoning",
+				requirement: { kind: "training", training: "trained", minimum: null },
+			},
+		}),
+	).toBe("Summoning: Trained");
+	expect(formatUseRequirement({ type: "level", data: { level: 180 } })).toBe(
+		"Level: 180",
+	);
+});
+
+it("formats threshold-only, attribute, vital, heritage and owner requirements", () => {
+	expect(
+		formatUseRequirement({
+			type: "skill",
+			data: {
+				skill: "ArcaneLore",
+				requirement: { kind: "minimum", minimum: 250 },
+			},
+		}),
+	).toBe("Arcane Lore: 250");
+	expect(
+		formatUseRequirement({
+			type: "attribute",
+			data: { attribute: "self", minimum: 295 },
+		}),
+	).toBe("Self: 295");
+	expect(
+		formatUseRequirement({
+			type: "vital",
+			data: { vital: "max-mana", minimum: 300 },
+		}),
+	).toBe("Max Mana: 300");
+	expect(formatUseRequirement({ type: "owner", data: { name: null } })).toBe(
+		"Original owner only",
+	);
+	expect(
+		formatUseRequirement({ type: "owner", data: { name: "Crafter" } }),
+	).toBe("Restricted to Crafter");
+	expect(
+		formatUseRequirement({
+			type: "heritage",
+			data: { heritage: "gear-knight" },
+		}),
+	).toBe("Heritage: Gear Knight");
+	expect(
+		formatUseRequirement({ type: "allegiance-rank", data: { rank: 4 } }),
+	).toBe("Allegiance rank: 4");
+});
+
+it("formats the Self requirement from the Rust-produced inspection fixture", () => {
+	const result = decodeObjectInspectionResult(fixture.item);
+	if (
+		result.outcome.kind !== "ready" ||
+		result.outcome.inspection.details.kind !== "item"
+	) {
+		throw new Error("Expected ready item inspection fixture");
+	}
+	expect(
+		result.outcome.inspection.details.details.useRequirements.map(
+			formatUseRequirement,
+		),
+	).toContain("Self: 295");
 });

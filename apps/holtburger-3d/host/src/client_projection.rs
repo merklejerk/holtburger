@@ -2319,7 +2319,7 @@ mod tests {
     use crate::protocol::{ProtocolFrame, StdioEventSink};
     use holtburger_common::legacy_hash::legacy_string_hash;
     use holtburger_common::properties::{
-        DamageType, EquipMask, ObjectDescriptionFlag, PropertyInt, PropertyString,
+        DamageType, EquipMask, ObjectDescriptionFlag, PropertyBool, PropertyInt, PropertyString,
         WorldObjectPropertyAccessorsMut,
     };
     use holtburger_core::client::types::{ChatChannelInfo, ChatSpeaker};
@@ -2803,6 +2803,39 @@ mod tests {
             Guid(42),
         );
         item.spell_book = vec![43, 42, 0x8000_002A];
+        // Full item appraisal fixture exercises the shared wire additions in both languages.
+        for (property, value) in [
+            (PropertyInt::EquipmentSetId, 13),
+            (PropertyInt::GearCritDamage, 3),
+            (PropertyInt::MinLevel, 80),
+            (PropertyInt::MaxLevel, 0),
+            (PropertyInt::Lifespan, 10800),
+            (PropertyInt::RemainingLifespan, 3600),
+            (PropertyInt::GemCount, 2),
+            (
+                PropertyInt::GemType,
+                holtburger_common::properties::MaterialType::Ruby as i32,
+            ),
+            (
+                PropertyInt::AppraisalItemSkill,
+                holtburger_common::stats::SkillType::Summoning as i32,
+            ),
+            (PropertyInt::ItemSkillLevelLimit, 570),
+            (
+                PropertyInt::ItemAttributeLimit,
+                holtburger_world::inspection::AttributeType::SelfAttr as i32,
+            ),
+            (PropertyInt::ItemAttributeLevelLimit, 295),
+        ] {
+            item.set_int_prop(property, value);
+        }
+        item.set_bool_prop(PropertyBool::Dyable, true);
+        item.set_did_prop(
+            holtburger_common::properties::PropertyDataId::ProcSpell,
+            Guid(43),
+        );
+        item.set_string_prop(PropertyString::TinkerName, "Test Tinker".to_owned());
+
         item.set_string_prop(
             PropertyString::AppraisalPortalDestination,
             "Holtburg (42.1N, 33.6E).".into(),

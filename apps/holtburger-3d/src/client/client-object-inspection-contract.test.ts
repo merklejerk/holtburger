@@ -3,6 +3,29 @@ import fixture from "./fixtures/object-inspection-wire.json";
 import { decodeObjectInspectionResult } from "./client-object-inspection-contract";
 
 describe("object inspection host contract", () => {
+	it("preserves activation skill requirements with optional thresholds", () => {
+		const item = structuredClone(fixture.item);
+		for (const minimum of [null, 570]) {
+			Object.assign(item.outcome.inspection.details.details, {
+				useRequirements: [
+					{
+						type: "skill",
+						data: {
+							skill: "Summoning",
+							requirement: {
+								kind: "training",
+								training: "specialized",
+								minimum,
+							},
+						},
+					},
+					{ type: "level", data: { level: 180 } },
+				],
+			});
+			expect(decodeObjectInspectionResult(item)).toEqual(item);
+		}
+	});
+
 	it("preserves disclosed portal restrictions and distinguishes empty from absent", () => {
 		for (const portalRestrictions of [
 			null,

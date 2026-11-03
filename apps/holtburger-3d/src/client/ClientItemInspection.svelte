@@ -27,8 +27,10 @@
 		formatItemStatuses,
 		formatPortalInspection,
 		formatWieldRequirement,
+		formatUseRequirement,
 		humanizeInspectionName,
 		inspectionBonusLabel,
+		inspectionGearRatingLabel,
 		inspectionEnchantmentClass,
 		itemProgressPercent,
 		truncateInspectionDescription,
@@ -96,6 +98,12 @@
 				heading: "Spells",
 				indexes: item.spells.flatMap((spell, index) =>
 					spell.role === "item" ? [index] : [],
+				),
+			},
+			{
+				heading: "Triggered effects",
+				indexes: item.spells.flatMap((spell, index) =>
+					spell.role === "triggered" ? [index] : [],
 				),
 			},
 			{
@@ -263,7 +271,7 @@
 		</div>
 	</header>
 
-	{#if item.portalDestination !== null || item.portalRestrictions !== null}
+	{#if item.portalDestination !== null || item.portalRestrictions !== null || item.portalLevels !== null}
 		<section data-inspection-portal>
 			<h3 class="ui-section-heading">Portal</h3>
 			<dl class="inspection-facts">
@@ -281,6 +289,20 @@
 						{/if}
 					</dd>
 				</div>
+				{#if item.portalLevels !== null}
+					{#if item.portalLevels.minimum !== null}<div>
+							<dt>Minimum level</dt>
+							<dd>{formatInspectionNumber(item.portalLevels.minimum)}</dd>
+						</div>{/if}
+					{#if item.portalLevels.maximum !== null}<div>
+							<dt>Maximum level</dt>
+							<dd>
+								{item.portalLevels.maximum.kind === "unlimited"
+									? "No upper limit"
+									: formatInspectionNumber(item.portalLevels.maximum.level)}
+							</dd>
+						</div>{/if}
+				{/if}
 				{#if portalFacts.recallAndTie !== null}
 					<div class="inspection-wide">
 						<dt>Recall &amp; tie</dt>
@@ -559,12 +581,74 @@
 		</section>
 	{/if}
 
+	{#if item.equipmentSet !== null || item.lifetime !== null || item.manaStone !== null}
+		<section data-inspection-item-limits>
+			<h3 class="ui-section-heading">Item properties</h3>
+			<dl class="inspection-facts">
+				{#if item.equipmentSet !== null}<div class="inspection-wide">
+						<dt>Equipment set</dt>
+						<dd>
+							{item.equipmentSet.name ??
+								`Unknown set (${item.equipmentSet.id})`}
+						</dd>
+					</div>{/if}
+				{#if item.lifetime !== null}
+					{#if item.lifetime.lifespanSeconds !== null}<div>
+							<dt>Lifespan</dt>
+							<dd>{formatDuration(item.lifetime.lifespanSeconds)}</dd>
+						</div>{/if}
+					{#if item.lifetime.remaining !== null}<div>
+							<dt>Remaining at appraisal</dt>
+							<dd>
+								{item.lifetime.remaining.kind === "expired"
+									? "Expired"
+									: formatDuration(item.lifetime.remaining.seconds)}
+							</dd>
+						</div>{/if}
+				{/if}
+				{#if item.manaStone !== null}
+					{#if item.manaStone.efficiency !== null}<div>
+							<dt>Mana recovery efficiency</dt>
+							<dd>{formatInspectionPercent(item.manaStone.efficiency)}</dd>
+						</div>{/if}
+					{#if item.manaStone.destructionChance !== null}<div>
+							<dt>Stone destruction chance</dt>
+							<dd>
+								{formatInspectionPercent(item.manaStone.destructionChance)}
+							</dd>
+						</div>{/if}
+				{/if}
+			</dl>
+		</section>
+	{/if}
+	{#if item.gearRatings.length > 0}
+		<section data-inspection-gear-ratings>
+			<h3 class="ui-section-heading">Gear ratings</h3>
+			<dl class="inspection-facts">
+				{#each item.gearRatings as rating}<div>
+						<dt>{inspectionGearRatingLabel(rating.kind)}</dt>
+						<dd>{formatInspectionNumber(rating.value)}</dd>
+					</div>{/each}
+			</dl>
+		</section>
+	{/if}
+
 	{#if item.wieldRequirements.length > 0}
 		<section>
 			<h3 class="ui-section-heading">Wield requirements</h3>
 			<ul>
 				{#each item.wieldRequirements as requirement}<li>
 						{formatWieldRequirement(requirement)}
+					</li>{/each}
+			</ul>
+		</section>
+	{/if}
+	{#if item.useRequirements.length > 0}
+		<section data-inspection-use-requirements>
+			<h3 class="ui-section-heading">Use requirements</h3>
+			<ul>
+				{#each item.useRequirements as requirement}<li>
+						{formatUseRequirement(requirement)}
 					</li>{/each}
 			</ul>
 		</section>
@@ -633,5 +717,31 @@
 					— {item.inscription.scribe}
 				</p>{/if}
 		</section>
+	{/if}
+	{#if item.gems !== null || item.attribution !== null}
+		<details
+			class="ui-disclosure ui-disclosure-section"
+			data-inspection-details
+		>
+			<summary>Details</summary>
+			<div class="ui-disclosure-body">
+				<dl class="inspection-facts">
+					{#if item.gems !== null}<div>
+							<dt>Embedded gems</dt>
+							<dd>
+								{item.gems.count} × {humanizeInspectionName(item.gems.material)}
+							</dd>
+						</div>{/if}
+					{#if item.attribution !== null}
+						{#each [["Craftsman", item.attribution.craftsman], ["Tinker", item.attribution.tinker], ["Imbuer", item.attribution.imbuer], ["Plating", item.attribution.plating]] as [label, value]}
+							{#if value !== null}<div>
+									<dt>{label}</dt>
+									<dd>{value}</dd>
+								</div>{/if}
+						{/each}
+					{/if}
+				</dl>
+			</div>
+		</details>
 	{/if}
 </article>

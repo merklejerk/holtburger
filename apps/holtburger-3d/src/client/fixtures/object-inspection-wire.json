@@ -38,7 +38,8 @@
 							"isLocked": null,
 							"sellable": null,
 							"ivoryable": null,
-							"unenchantable": true
+							"unenchantable": true,
+							"dyeable": true
 						},
 						"stack": null,
 						"uses": null,
@@ -47,6 +48,25 @@
 						"protections": null,
 						"bonuses": [],
 						"wieldRequirements": [],
+						"useRequirements": [
+							{
+								"type": "skill",
+								"data": {
+									"skill": "Summoning",
+									"requirement": {
+										"kind": "minimum",
+										"minimum": 570
+									}
+								}
+							},
+							{
+								"type": "attribute",
+								"data": {
+									"attribute": "self",
+									"minimum": 295
+								}
+							}
+						],
 						"inscription": null,
 						"imbuedEffects": 0,
 						"effects": [],
@@ -56,7 +76,7 @@
 						"spells": [
 							{
 								"id": 43,
-								"role": "item"
+								"role": "triggered"
 							},
 							{
 								"id": 42,
@@ -85,6 +105,40 @@
 						"cooldown": {
 							"groupId": 213,
 							"durationSeconds": 45.0
+						},
+						"equipmentSet": {
+							"id": 13,
+							"name": "Soldier's"
+						},
+						"gearRatings": [
+							{
+								"kind": "critical-damage",
+								"value": 3
+							}
+						],
+						"portalLevels": {
+							"minimum": 80,
+							"maximum": {
+								"kind": "unlimited"
+							}
+						},
+						"lifetime": {
+							"lifespanSeconds": 10800,
+							"remaining": {
+								"kind": "remaining",
+								"seconds": 3600
+							}
+						},
+						"manaStone": null,
+						"gems": {
+							"count": 2,
+							"material": "Ruby"
+						},
+						"attribution": {
+							"craftsman": null,
+							"tinker": "Test Tinker",
+							"imbuer": null,
+							"plating": null
 						}
 					}
 				}

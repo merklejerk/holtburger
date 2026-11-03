@@ -151,6 +151,53 @@ export function truncateInspectionDescription(
 	return partialWord > 0 ? prefix.slice(0, partialWord).trimEnd() : prefix;
 }
 
+/** Format shared activation facts without recomputing their requirements. */
+export function formatUseRequirement(
+	requirement: ItemInspection["useRequirements"][number],
+): string {
+	const { type, data } = requirement;
+	switch (type) {
+		case "level":
+			return `Level: ${formatInspectionNumber(data.level)}`;
+		case "skill": {
+			const constraint = data.requirement;
+			const value =
+				constraint.kind === "minimum"
+					? formatInspectionNumber(constraint.minimum)
+					: constraint.minimum === null
+						? humanizeInspectionName(constraint.training)
+						: `${formatInspectionNumber(constraint.minimum)} (${humanizeInspectionName(constraint.training)})`;
+			return `${humanizeInspectionName(data.skill)}: ${value}`;
+		}
+		case "attribute":
+			return `${humanizeInspectionName(data.attribute)}: ${formatInspectionNumber(data.minimum)}`;
+		case "vital":
+			return `${humanizeInspectionName(data.vital)}: ${formatInspectionNumber(data.minimum)}`;
+		case "heritage":
+			return `Heritage: ${humanizeInspectionName(data.heritage)}`;
+		case "allegiance-rank":
+			return `Allegiance rank: ${formatInspectionNumber(data.rank)}`;
+		case "owner":
+			return formatInspectionOwner(data.name);
+	}
+}
+
+/** Ownership labels describe disclosed restrictions without predicting eligibility. */
+function formatInspectionOwner(name: string | null): string {
+	return name === null || name.length === 0
+		? "Original owner only"
+		: `Restricted to ${name}`;
+}
+
+/** Gear contributions retain rating/point units rather than percentage formatting. */
+export function inspectionGearRatingLabel(
+	kind: ItemInspection["gearRatings"][number]["kind"],
+): string {
+	return kind === "max-health"
+		? "Maximum health"
+		: `${humanizeInspectionName(kind)} rating`;
+}
+
 /** Wield clauses are already semantic; this layer owns only user-facing phrasing. */
 export function formatWieldRequirement(requirement: WieldRequirement): string {
 	const { type, data } = requirement;
@@ -179,6 +226,8 @@ export function formatWieldRequirement(requirement: WieldRequirement): string {
 			return `Creature Type: ${humanizeInspectionName(data.creatureType)}`;
 		case "heritage":
 			return `Heritage: ${humanizeInspectionName(data.heritage)}`;
+		case "owner":
+			return formatInspectionOwner(data.name);
 	}
 }
 
@@ -210,6 +259,7 @@ export function formatItemStatuses(
 		values.push(status.isLocked ? "Locked" : "Unlocked");
 	if (status.sellable === false) values.push("Not sellable");
 	if (status.ivoryable === true) values.push("Ivoryable");
+	if (status.dyeable === true) values.push("Dyeable");
 	if (status.unenchantable === true) values.push("Unenchantable");
 	return values;
 }

@@ -32,8 +32,11 @@ describe("item cantrip summary", () => {
 	it("excludes activation spells even when their definitions have a cantrip tier", () => {
 		expect(
 			summarizeItemCantrips(
-				[{ id: 1, role: "on-use" }],
-				[known(1, "legendary")],
+				[
+					{ id: 1, role: "on-use" },
+					{ id: 2, role: "triggered" },
+				],
+				[known(1, "legendary"), known(2, "legendary")],
 				false,
 			),
 		).toEqual({ kind: "hidden" });

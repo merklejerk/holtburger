@@ -2404,6 +2404,7 @@
 								isLocked: null,
 								sellable: false,
 								ivoryable: true,
+								dyeable: true,
 								unenchantable: true,
 							},
 							stack: { current: 3, max: 10 },
@@ -2469,6 +2470,45 @@
 									value: { effective: 0.12, unbuffed: null, enchantment: null },
 								},
 							],
+							equipmentSet: { id: 13, name: "Soldier's" },
+							gearRatings: [
+								{ kind: "critical-damage", value: 3 },
+								{ kind: "max-health", value: 25 },
+							],
+							portalLevels: {
+								minimum: 80,
+								maximum: { kind: "level", level: 150 },
+							},
+							lifetime: {
+								lifespanSeconds: 10800,
+								remaining: { kind: "remaining", seconds: 3600 },
+							},
+							manaStone: { efficiency: 0.8, destructionChance: 0 },
+							gems: { count: 2, material: "Ruby" },
+							attribution: {
+								craftsman: "Harness Crafter",
+								tinker: "Harness Tinker",
+								imbuer: null,
+								plating: null,
+							},
+							useRequirements: [
+								{
+									type: "skill",
+									data: {
+										skill: "Summoning",
+										requirement: {
+											kind: "training",
+											training: "specialized",
+											minimum: 570,
+										},
+									},
+								},
+								{ type: "level", data: { level: 180 } },
+								{
+									type: "attribute",
+									data: { attribute: "self", minimum: 295 },
+								},
+							],
 							wieldRequirements: [
 								{ type: "level", data: { level: 80 } },
 								{
@@ -2496,6 +2536,7 @@
 							useText: "Use this item to recall to a remembered sanctuary.",
 							spells: [
 								{ id: 2000, role: "active-enchantment" as const },
+								{ id: 2000, role: "triggered" as const },
 								{ id: 2001, role: "item" as const },
 								{ id: 2002, role: "item" as const },
 								{ id: 2003, role: "item" as const },

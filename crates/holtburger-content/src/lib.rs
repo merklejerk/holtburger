@@ -5,6 +5,7 @@ pub mod character_titles;
 pub mod collision_pose;
 pub mod contracts;
 pub mod decode_cache;
+pub mod equipment_sets;
 pub mod generated_scenery;
 pub mod interior;
 pub mod landblock;

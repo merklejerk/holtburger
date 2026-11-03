@@ -41,6 +41,7 @@ const itemStatusSchema = z
 		isLocked: z.boolean().nullable(),
 		sellable: z.boolean().nullable(),
 		ivoryable: z.boolean().nullable(),
+		dyeable: z.boolean().nullable(),
 		unenchantable: z.boolean().nullable(),
 	})
 	.strict();
@@ -76,6 +77,12 @@ const bonusSchema = z
 	})
 	.strict();
 
+const ownerRequirementSchema = z
+	.object({
+		type: z.literal("owner"),
+		data: z.object({ name: z.string().nullable() }).strict(),
+	})
+	.strict();
 const wieldRequirementSchema = z.discriminatedUnion("type", [
 	z
 		.object({
@@ -95,7 +102,7 @@ const wieldRequirementSchema = z.discriminatedUnion("type", [
 						"quickness",
 						"coordination",
 						"focus",
-						"self-attr",
+						"self",
 					]),
 					difficulty: i32,
 				})
@@ -183,6 +190,7 @@ const wieldRequirementSchema = z.discriminatedUnion("type", [
 				.strict(),
 		})
 		.strict(),
+	ownerRequirementSchema,
 ]);
 
 const unitEffectTypes = [
@@ -216,6 +224,84 @@ const effectSchema = z.discriminatedUnion("type", [
 		})
 		.strict(),
 ]);
+
+// Activation constraints keep threshold-only and training-only evidence explicit.
+const skillActivationRequirementSchema = z.discriminatedUnion("kind", [
+	z.object({ kind: z.literal("minimum"), minimum: i32 }).strict(),
+	z
+		.object({
+			kind: z.literal("training"),
+			training: z.enum(["trained", "specialized"]),
+			minimum: i32.nullable(),
+		})
+		.strict(),
+]);
+
+const useRequirementSchema = z.discriminatedUnion("type", [
+	z
+		.object({
+			type: z.literal("skill"),
+			data: z
+				.object({
+					skill: semanticEnumName,
+					requirement: skillActivationRequirementSchema,
+				})
+				.strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("level"),
+			data: z.object({ level: i32 }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("attribute"),
+			data: z.object({ attribute: semanticEnumName, minimum: i32 }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("vital"),
+			data: z.object({ vital: semanticEnumName, minimum: i32 }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("heritage"),
+			data: z.object({ heritage: semanticEnumName }).strict(),
+		})
+		.strict(),
+	z
+		.object({
+			type: z.literal("allegiance-rank"),
+			data: z.object({ rank: i32 }).strict(),
+		})
+		.strict(),
+	ownerRequirementSchema,
+]);
+const gearRatingSchema = z
+	.object({
+		kind: z.enum([
+			"damage",
+			"damage-resistance",
+			"critical",
+			"critical-resistance",
+			"critical-damage",
+			"critical-damage-resistance",
+			"healing-boost",
+			"nether-resistance",
+			"life-resistance",
+			"max-health",
+			"player-killer-damage",
+			"player-killer-damage-resistance",
+			"overpower",
+			"overpower-resistance",
+		]),
+		value: i32,
+	})
+	.strict();
 
 const itemXpSchema = z
 	.string()
@@ -299,6 +385,56 @@ const itemInspectionSchema = z
 		protections: protectionsSchema.nullable(),
 		bonuses: z.array(bonusSchema),
 		wieldRequirements: z.array(wieldRequirementSchema),
+		useRequirements: z.array(useRequirementSchema),
+		equipmentSet: z
+			.object({ id: i32, name: z.string().nullable() })
+			.strict()
+			.nullable(),
+		gearRatings: z.array(gearRatingSchema),
+		portalLevels: z
+			.object({
+				minimum: i32.nullable(),
+				maximum: z
+					.discriminatedUnion("kind", [
+						z.object({ kind: z.literal("unlimited") }).strict(),
+						z.object({ kind: z.literal("level"), level: i32 }).strict(),
+					])
+					.nullable(),
+			})
+			.strict()
+			.nullable(),
+		lifetime: z
+			.object({
+				lifespanSeconds: i32.nullable(),
+				remaining: z
+					.discriminatedUnion("kind", [
+						z.object({ kind: z.literal("expired") }).strict(),
+						z.object({ kind: z.literal("remaining"), seconds: u32 }).strict(),
+					])
+					.nullable(),
+			})
+			.strict()
+			.nullable(),
+		manaStone: z
+			.object({
+				efficiency: finiteNumber.nullable(),
+				destructionChance: finiteNumber.nullable(),
+			})
+			.strict()
+			.nullable(),
+		gems: z
+			.object({ count: i32, material: semanticEnumName })
+			.strict()
+			.nullable(),
+		attribution: z
+			.object({
+				craftsman: z.string().nullable(),
+				tinker: z.string().nullable(),
+				imbuer: z.string().nullable(),
+				plating: z.string().nullable(),
+			})
+			.strict()
+			.nullable(),
 		inscription: z
 			.object({ text: z.string(), scribe: z.string().nullable() })
 			.strict()
@@ -343,7 +479,7 @@ const itemInspectionSchema = z
 			z
 				.object({
 					id: u32,
-					role: z.enum(["item", "on-use", "active-enchantment"]),
+					role: z.enum(["item", "on-use", "active-enchantment", "triggered"]),
 				})
 				.strict(),
 		),

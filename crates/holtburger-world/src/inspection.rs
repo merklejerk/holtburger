@@ -1,3 +1,12 @@
+mod item;
+pub(crate) use item::GEAR_RATING_PROPERTIES;
+use item::get_use_requirements;
+pub use item::{
+    ActivationTraining, EquipmentSetInfo, GearRating, GearRatingKind, GemInfo, ItemAttribution,
+    ItemLifetime, ManaStoneInfo, PortalLevelLimits, PortalMaximumLevel, RemainingLifetime,
+    SkillActivationRequirement,
+};
+
 use crate::damage::compute_damage_range;
 use crate::entity::Entity;
 use crate::entity_facts::{EntityIconAppearance, LockToolFacts, lock_tool_facts};
@@ -7,8 +16,9 @@ use crate::vendor::CoreVendorItem;
 use holtburger_common::Guid;
 use holtburger_common::properties::{
     AttackType, AttunedStatus, DamageType, HasProperties, ImbuedEffectType, ItemType, MaterialType,
-    ObjectDescriptionFlag, PropertyBool, PropertyFloat, PropertyInt, PropertyString, WeaponType,
-    WorldObjectExt as _, WorldObjectProperties, WorldObjectPropertyAccessors,
+    ObjectDescriptionFlag, PropertyBool, PropertyDataId, PropertyFloat, PropertyInt,
+    PropertyString, WeaponType, WorldObjectExt as _, WorldObjectProperties,
+    WorldObjectPropertyAccessors,
 };
 use holtburger_common::stats::{CreatureType, SkillType, VitalType as CurrentVital};
 use holtburger_content::CharacterTitleCatalog;
@@ -197,6 +207,18 @@ pub enum ObjectInspectionError {
         /// Identity of the item whose disclosed multiplier is invalid.
         guid: Guid,
     },
+    /// A disclosed mana recovery efficiency is not a finite number.
+    #[error("item {guid} has a non-finite mana-stone efficiency")]
+    NonFiniteManaStoneEfficiency {
+        /// Identity of the item whose disclosed efficiency is invalid.
+        guid: Guid,
+    },
+    /// A disclosed stone destruction probability is not a finite number.
+    #[error("item {guid} has a non-finite mana-stone destruction chance")]
+    NonFiniteManaStoneDestructionChance {
+        /// Identity of the item whose disclosed probability is invalid.
+        guid: Guid,
+    },
     /// A disclosed boost targets neither a current vital nor the explicit undefined value.
     #[error("item {guid} has invalid booster vital {value}")]
     InvalidBoosterVital {
@@ -262,8 +284,24 @@ pub struct ItemInspection {
     pub protections: Option<Protections>,
     /// Typed item modifiers whose units are owned by their kind.
     pub bonuses: Vec<Bonus>,
-    /// Up to four wield requirements plus the arcane-lore requirement.
+    /// Disclosed wield requirements, including heritage and owner restrictions.
     pub wield_requirements: Vec<WieldRequirement>,
+    /// Disclosed activation skill/training and character-level requirements.
+    pub use_requirements: Vec<UseRequirement>,
+    /// Disclosed equipment-set membership.
+    pub equipment_set: Option<EquipmentSetInfo>,
+    /// Item gear ratings, separate from percentage bonuses.
+    pub gear_ratings: Vec<GearRating>,
+    /// Disclosed portal character-level bounds.
+    pub portal_levels: Option<PortalLevelLimits>,
+    /// Expiration durations at appraisal time.
+    pub lifetime: Option<ItemLifetime>,
+    /// Mana-stone efficiency and use risk.
+    pub mana_stone: Option<ManaStoneInfo>,
+    /// Disclosed embedded gems.
+    pub gems: Option<GemInfo>,
+    /// Disclosed crafting/modification attribution.
+    pub attribution: Option<ItemAttribution>,
     /// Optional player-authored inscription and disclosed scribe.
     pub inscription: Option<InscriptionInfo>,
     /// Direct imbue flags retained without converting them into display strings.
@@ -277,7 +315,7 @@ pub struct ItemInspection {
     pub portal_restrictions: Option<Vec<PortalRestriction>>,
     /// Server-authored use text.
     pub use_text: Option<String>,
-    /// Appraisal spells classified as ordinary item spells, on-use spells, or active enchantments.
+    /// Appraisal spells classified as ordinary, on-use, triggered, or active enchantments.
     pub spells: Vec<InspectionSpell>,
 }
 
@@ -733,6 +771,8 @@ pub struct ItemStatus {
     pub sellable: Option<bool>,
     /// Whether ivory can be applied.
     pub ivoryable: Option<bool>,
+    /// Whether the server discloses that this item can be dyed.
+    pub dyeable: Option<bool>,
     /// Whether magic cannot enchant the item, derived from appraised ResistMagic.
     pub unenchantable: Option<bool>,
 }
@@ -778,6 +818,58 @@ pub enum BonusKind {
     ElementalDamage,
     ManaConversion,
     CriticalFrequency,
+}
+
+/// Requirements for activating an item, independent of equipping it.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "type",
+    content = "data",
+    rename_all = "kebab-case",
+    rename_all_fields = "camelCase"
+)]
+pub enum UseRequirement {
+    /// Current skill threshold and/or training class required for activation.
+    Skill {
+        /// Skill checked by the server.
+        skill: SkillType,
+        /// Complete disclosed constraint, including threshold-only requirements.
+        requirement: SkillActivationRequirement,
+    },
+    /// Minimum current primary attribute.
+    Attribute {
+        /// Attribute checked on the activating character.
+        attribute: AttributeType,
+        /// Required current value.
+        minimum: i32,
+    },
+    /// Minimum maximum vital value.
+    Vital {
+        /// Secondary attribute checked by the server.
+        vital: VitalType,
+        /// Required maximum value, not the current depleted value.
+        minimum: i32,
+    },
+    /// Required activating character heritage.
+    Heritage {
+        /// Required heritage group.
+        heritage: HeritageGroup,
+    },
+    /// Disclosed allegiance rank; does not predict server enforcement.
+    AllegianceRank {
+        /// Required rank recorded by the item.
+        rank: i32,
+    },
+    /// Disclosed restriction to the original owner.
+    Owner {
+        /// Disclosed owner name; absent means the original owner is unnamed.
+        name: Option<String>,
+    },
+    /// Minimum character level for activation.
+    Level {
+        /// Required character level.
+        level: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -833,6 +925,11 @@ pub enum WieldRequirement {
     Heritage {
         heritage: HeritageGroup,
     },
+    /// Disclosed restriction to the original owner.
+    Owner {
+        /// Owner name when disclosed by appraisal.
+        name: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -872,6 +969,8 @@ pub enum AttributeType {
     Quickness = 3,
     Coordination = 4,
     Focus = 5,
+    #[serde(rename = "self")]
+    #[strum(serialize = "Self")]
     SelfAttr = 6,
 }
 
@@ -1081,6 +1180,8 @@ pub enum InspectionSpellRole {
     OnUse,
     /// ACE's high-bit marker identifies an enchantment currently applied to the item.
     ActiveEnchantment,
+    /// Disclosed proc spell activated by a combat trigger.
+    Triggered,
 }
 
 /// One appraised spell with its activation meaning and wire marker decoded.
@@ -1096,12 +1197,14 @@ pub struct InspectionSpell {
 impl InspectionSpell {
     const ACTIVE_ENCHANTMENT_MASK: u32 = 0x8000_0000;
 
-    fn from_wire_id(value: u32, on_use_spell: Option<u32>) -> Self {
+    fn from_wire_id(value: u32, on_use_spell: Option<u32>, proc_spell: Option<u32>) -> Self {
         let id = value & !Self::ACTIVE_ENCHANTMENT_MASK;
         Self {
             id,
             role: if value & Self::ACTIVE_ENCHANTMENT_MASK != 0 {
                 InspectionSpellRole::ActiveEnchantment
+            } else if proc_spell == Some(id) {
+                InspectionSpellRole::Triggered
             } else if on_use_spell == Some(id) {
                 InspectionSpellRole::OnUse
             } else {
@@ -1324,6 +1427,9 @@ impl ItemInspection {
             .contains(ObjectDescriptionFlag::FOOD)
             .then(|| object.spell().filter(|id| *id != Guid::NULL).map(|id| id.0))
             .flatten();
+        let proc_spell = object
+            .get_data_prop(PropertyDataId::ProcSpell)
+            .map(|id| id.0);
         Ok(Self {
             cooldown: crate::item_cooldowns::ItemCooldownDefinition::from_properties(object),
             use_effect: InspectionUseEffect::from_object(object)?,
@@ -1360,6 +1466,7 @@ impl ItemInspection {
                 is_locked: object.get_bool_prop_opt(PropertyBool::Locked),
                 sellable: object.get_bool_prop_opt(PropertyBool::IsSellable),
                 ivoryable: object.get_bool_prop_opt(PropertyBool::Ivoryable),
+                dyeable: object.get_bool_prop_opt(PropertyBool::Dyable),
                 unenchantable: object
                     .supplement
                     .and_then(|supplement| supplement.equipment_unenchantable),
@@ -1386,6 +1493,14 @@ impl ItemInspection {
             protections: Protections::from_object(object),
             bonuses: get_bonuses(object),
             wield_requirements: get_wield_requirements(object),
+            use_requirements: get_use_requirements(object),
+            equipment_set: EquipmentSetInfo::from_object(object),
+            gear_ratings: GearRating::from_object(object),
+            portal_levels: PortalLevelLimits::from_object(object),
+            lifetime: ItemLifetime::from_object(object),
+            mana_stone: ManaStoneInfo::from_object(object)?,
+            gems: GemInfo::from_object(object),
+            attribution: ItemAttribution::from_object(object),
             inscription: InscriptionInfo::from_object(object),
             imbued_effects: get_imbued_effects(object),
             effects: Effect::from_object(object),
@@ -1402,7 +1517,7 @@ impl ItemInspection {
                 .spell_book
                 .iter()
                 .copied()
-                .map(|value| InspectionSpell::from_wire_id(value, on_use_spell))
+                .map(|value| InspectionSpell::from_wire_id(value, on_use_spell, proc_spell))
                 .collect(),
         })
     }
@@ -1553,13 +1668,21 @@ fn get_wield_requirements(object: &InspectionSource<'_>) -> Vec<WieldRequirement
         }
     }
 
-    // Arcane Lore requirement from ItemDifficulty
-    if let Some(difficulty) = object.get_int_prop(PropertyInt::ItemDifficulty)
-        && difficulty > 0
+    if let Some(heritage) = object
+        .get_int_prop(PropertyInt::HeritageSpecificArmor)
+        .and_then(|value| HeritageGroup::from_repr(value as usize))
+        .filter(|heritage| *heritage != HeritageGroup::Invalid)
     {
-        reqs.push(WieldRequirement::Skill {
-            skill: SkillType::ArcaneLore,
-            difficulty,
+        let requirement = WieldRequirement::Heritage { heritage };
+        if !reqs.contains(&requirement) {
+            reqs.push(requirement);
+        }
+    }
+    if object.get_bool_prop_opt(PropertyBool::AppraisalHasAllowedWielder) == Some(true) {
+        reqs.push(WieldRequirement::Owner {
+            name: object
+                .get_string_prop(PropertyString::CraftsmanName)
+                .map(str::to_owned),
         });
     }
 
@@ -3055,6 +3178,84 @@ mod tests {
         let slashing = item.protections.expect("protections").slashing;
         assert_eq!(slashing.unbuffed, None);
         assert_eq!(slashing.enchantment, Some(EnchantmentPolarity::Harmful));
+    }
+
+    #[test]
+    fn use_requirements_preserve_training_thresholds_and_independent_skills() {
+        let mut entity = Entity::new(
+            Guid(0x60000009),
+            "Essence".to_string(),
+            WorldPosition::default(),
+        );
+        let requirements = |entity: &Entity| {
+            let inspection = inspect_entity(entity).unwrap();
+            let ObjectInspectionDetails::Item(item) = inspection.details else {
+                panic!("essence should use item inspection");
+            };
+            item.use_requirements
+        };
+        assert!(requirements(&entity).is_empty());
+        // A threshold alone cannot identify the skill it belongs to.
+        entity.set_int_prop(PropertyInt::UseRequiresSkillLevel, 570);
+        assert!(requirements(&entity).is_empty());
+        entity.set_int_prop(PropertyInt::UseRequiresSkill, SkillType::Summoning as i32);
+        entity.set_int_prop(PropertyInt::UseRequiresLevel, 180);
+        assert_eq!(
+            requirements(&entity),
+            vec![
+                UseRequirement::Skill {
+                    skill: SkillType::Summoning,
+                    requirement: SkillActivationRequirement::Training {
+                        training: ActivationTraining::Trained,
+                        minimum: Some(570)
+                    },
+                },
+                UseRequirement::Level { level: 180 },
+            ]
+        );
+        entity.set_int_prop(
+            PropertyInt::UseRequiresSkillSpec,
+            SkillType::Summoning as i32,
+        );
+        assert_eq!(
+            requirements(&entity),
+            vec![
+                UseRequirement::Skill {
+                    skill: SkillType::Summoning,
+                    requirement: SkillActivationRequirement::Training {
+                        training: ActivationTraining::Specialized,
+                        minimum: Some(570)
+                    },
+                },
+                UseRequirement::Level { level: 180 },
+            ]
+        );
+        entity
+            .properties
+            .ints
+            .0
+            .remove(&PropertyInt::UseRequiresSkillLevel);
+        entity.set_int_prop(PropertyInt::UseRequiresSkill, SkillType::LifeMagic as i32);
+        assert_eq!(
+            requirements(&entity),
+            vec![
+                UseRequirement::Skill {
+                    skill: SkillType::LifeMagic,
+                    requirement: SkillActivationRequirement::Training {
+                        training: ActivationTraining::Trained,
+                        minimum: None
+                    },
+                },
+                UseRequirement::Skill {
+                    skill: SkillType::Summoning,
+                    requirement: SkillActivationRequirement::Training {
+                        training: ActivationTraining::Specialized,
+                        minimum: None
+                    },
+                },
+                UseRequirement::Level { level: 180 },
+            ]
+        );
     }
 
     #[test]

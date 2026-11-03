@@ -1,3 +1,4 @@
+import { createDefaultClientUserSections } from "../../client/client-settings-defaults";
 import type { ClientChatLine } from "../../client/client-chat-policy";
 import { createInputDefaults } from "../../lib/input/input-defaults";
 import { formatInputBindings } from "../../lib/input/input-presentation";
@@ -352,6 +353,9 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 					onRecentEmotesChange: () => {},
 				}),
 				sentHistory: [],
+				channelFilters:
+					createDefaultClientUserSections("windows").chatChannelFilters,
+				onChannelFiltersChange: () => {},
 				enabledTags: ["chat", "combat"],
 				onEnabledTagsChange: () => {},
 				onSend: async () => {

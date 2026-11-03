@@ -1,4 +1,7 @@
-import type { ClientChatSuppressionSettings } from "./client-settings-contract";
+import type {
+	ClientChatChannelFilters,
+	ClientChatSuppressionSettings,
+} from "./client-settings-contract";
 
 import type {
 	ClientChatChannel,
@@ -53,6 +56,44 @@ export type ClientChatLine = ClientChatEntry & {
 /** Independently toggleable message family in the combined chat buffer. */
 export type ClientChatFilterTag = "chat" | "combat";
 
+/** Ordered choices for the channel-filter popup; each group owns one saved boolean. */
+export const CLIENT_CHAT_CHANNEL_FILTERS = [
+	{ key: "general", label: "General" },
+	{ key: "trade", label: "Trade" },
+	{ key: "lfg", label: "LFG" },
+	{ key: "roleplay", label: "Roleplay" },
+	{ key: "allegiance", label: "Allegiance" },
+	{ key: "society", label: "Society" },
+	{ key: "olthoi", label: "Olthoi" },
+] as const satisfies readonly {
+	readonly key: keyof ClientChatChannelFilters;
+	readonly label: string;
+}[];
+
+/** Relationship chat and unknown channels retain the coarse Chat visibility policy. */
+function channelFilterGroup(
+	channel: ClientChatChannel,
+): keyof ClientChatChannelFilters | null {
+	switch (channel) {
+		case "general":
+		case "trade":
+		case "lfg":
+		case "roleplay":
+		case "olthoi":
+			return channel;
+		case "allegiance":
+		case "allegiance-broadcast":
+			return "allegiance";
+		case "society":
+		case "society-celestial-hand":
+		case "society-eldrytch-web":
+		case "society-radiant-blood":
+			return "society";
+		default:
+			return null;
+	}
+}
+
 /** Semantic color role derived once from message and named-channel identity. */
 export type ClientChatTone =
 	| "speech"
@@ -72,39 +113,6 @@ export const CLIENT_CHAT_FILTER_TAGS: readonly ClientChatFilterTag[] = [
 	"chat",
 	"combat",
 ];
-
-/** Labels preserve specific server meaning; generic notices and local chat need no prefix. */
-const CHAT_CATEGORY_LABELS: Readonly<
-	Record<Extract<ClientChatCategory, string>, string | null>
-> = {
-	broadcast: null,
-	"all-channels": "All Channels",
-	speech: null,
-	tell: "Tell",
-	"outgoing-tell": "Tell",
-	system: null,
-	combat: "Combat",
-	magic: "Magic",
-	channel: "Channel",
-	"channel-send": "Channel →",
-	social: "Social",
-	"social-send": "Social →",
-	emote: "Emote",
-	advancement: "Advancement",
-	abuse: "Abuse",
-	help: "Help",
-	appraisal: "Appraisal",
-	spellcasting: "Spellcasting",
-	allegiance: "Allegiance Notice",
-	fellowship: "Party Notice",
-	"world-broadcast": "World Broadcast",
-	"combat-enemy": "Combat Enemy",
-	"combat-self": "Combat Self",
-	recall: "Recall",
-	craft: "Crafting",
-	salvaging: "Salvaging",
-	"admin-tell": "Admin Tell",
-};
 
 /** Coarse UI family follows category semantics rather than the enclosing packet shape. */
 function categoryFilter(
@@ -157,7 +165,7 @@ function categoryTone(category: ClientChatCategory): ClientChatTone {
 	}
 }
 
-/** Optional buffer label; emotes read as actions and local chat omits its category. */
+/** Buffer prefixes identify conversation routes and explicit errors; category feedback stays unprefixed. */
 export function clientChatMessageLabel(line: ClientChatLine): string | null {
 	if (line.kind === "channel") {
 		if (line.channel !== "unknown") return clientChatChannelLabel(line.channel);
@@ -167,26 +175,16 @@ export function clientChatMessageLabel(line: ClientChatLine): string | null {
 			: `Room 0x${origin.roomId.toString(16).toUpperCase()} (type 0x${origin.typeId.toString(16).toUpperCase()})`;
 	}
 	if ("category" in line) {
-		const label =
-			typeof line.category === "string"
-				? CHAT_CATEGORY_LABELS[line.category]
-				: `Unknown type 0x${line.category.raw.toString(16).toUpperCase()}`;
-		if ("speakerKind" in line && line.speakerKind === "non-player")
-			return label === null ? "NPC" : `NPC ${label}`;
-		return label;
+		switch (line.category) {
+			case "tell":
+			case "outgoing-tell":
+			case "admin-tell":
+				return "Tell";
+			default:
+				return null;
+		}
 	}
-	switch (line.kind) {
-		case "emote":
-		case "soul-emote":
-			return null;
-		case "combat":
-			return "Combat";
-		case "error":
-			return "Error";
-		case "system":
-		case "formatted-system":
-			return null;
-	}
+	return line.kind === "error" ? "Error" : null;
 }
 
 export function clientChatFilterLabel(tag: ClientChatFilterTag): string {
@@ -202,6 +200,7 @@ export function clientChatFilterLabel(tag: ClientChatFilterTag): string {
 export function clientChatFiltersAllow(
 	enabledTags: readonly ClientChatFilterTag[],
 	line: ClientChatLine,
+	channelFilters: ClientChatChannelFilters,
 ): boolean {
 	switch (line.kind) {
 		case "formatted-system":
@@ -219,10 +218,14 @@ export function clientChatFiltersAllow(
 		case "emote":
 		case "soul-emote":
 			return enabledTags.includes("chat");
-		case "channel":
+		case "channel": {
+			if (line.channel === "fellowship-broadcast") return true;
+			const group = channelFilterGroup(line.channel);
 			return (
-				line.channel === "fellowship-broadcast" || enabledTags.includes("chat")
+				enabledTags.includes("chat") &&
+				(group === null || channelFilters[group])
 			);
+		}
 	}
 }
 

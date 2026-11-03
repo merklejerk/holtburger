@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	CLIENT_CHAT_CHANNEL_FILTERS,
 	CLIENT_CHAT_FILTER_TAGS,
 	clientChatChannelLabel,
 	clientChatFiltersAllow,
@@ -11,11 +12,99 @@ import {
 	type ClientChatLine,
 } from "./client-chat-policy";
 
+import { createDefaultClientUserSections } from "./client-settings-defaults";
+
+const channelFilters =
+	createDefaultClientUserSections("windows").chatChannelFilters;
+
 function line(message: ClientChatEntry): ClientChatLine {
 	return { ...message, id: 1, receivedAt: new Date(0), generation: 0 };
 }
 
 describe("client chat presentation policy", () => {
+	it.each([
+		["general", "general"],
+		["trade", "trade"],
+		["lfg", "lfg"],
+		["roleplay", "roleplay"],
+		["allegiance", "allegiance"],
+		["allegiance-broadcast", "allegiance"],
+		["society", "society"],
+		["society-celestial-hand", "society"],
+		["society-eldrytch-web", "society"],
+		["society-radiant-blood", "society"],
+		["olthoi", "olthoi"],
+	] as const)(
+		"filters %s with the %s choice under the Chat master switch",
+		(channel, group) => {
+			const message = line({
+				kind: "channel",
+				channel,
+				origin: { kind: "turbine", roomId: 2, typeId: 2 },
+				sender: "Mira",
+				speakerKind: "player",
+				message: "hello",
+			});
+			expect(clientChatFiltersAllow(["chat"], message, channelFilters)).toBe(
+				true,
+			);
+			expect(clientChatFiltersAllow([], message, channelFilters)).toBe(false);
+			expect(
+				clientChatFiltersAllow(["chat"], message, {
+					...channelFilters,
+					[group]: false,
+				}),
+			).toBe(false);
+			for (const { key } of CLIENT_CHAT_CHANNEL_FILTERS) {
+				if (key !== group)
+					expect(
+						clientChatFiltersAllow(["chat"], message, {
+							...channelFilters,
+							[key]: false,
+						}),
+					).toBe(true);
+			}
+		},
+	);
+
+	it.each([
+		"fellowship",
+		"vassals",
+		"patron",
+		"monarch",
+		"co-vassals",
+		"unknown",
+		"fellowship-broadcast",
+	] as const)(
+		"retains coarse visibility for %s regardless of named-channel choices",
+		(channel) => {
+			const hiddenChannels = {
+				...channelFilters,
+				general: false,
+				trade: false,
+				lfg: false,
+				roleplay: false,
+				allegiance: false,
+				society: false,
+				olthoi: false,
+			};
+			const message = line({
+				kind: "channel",
+				channel,
+				origin: { kind: "legacy", channelId: 2 },
+				sender: "Mira",
+				speakerKind: "player",
+				message: "hello",
+			});
+			expect(clientChatFiltersAllow(["chat"], message, hiddenChannels)).toBe(
+				true,
+			);
+			expect(clientChatFiltersAllow([], message, hiddenChannels)).toBe(
+				channel === "fellowship-broadcast",
+			);
+		},
+	);
+
 	it.each(["emote", "soul-emote"] as const)(
 		"presents %s without a label while preserving speaker colors",
 		(kind) => {
@@ -36,30 +125,29 @@ describe("client chat presentation policy", () => {
 		},
 	);
 
-	it.each([
-		["player", null],
-		["unknown", null],
-		["non-player", "NPC"],
-	] as const)("labels local chat from %s speakers", (speakerKind, expected) => {
-		for (const message of [
-			{
-				kind: "speech",
-				category: "speech",
-				sender: "Mira",
-				speakerKind,
-				message: "Hello",
-			},
-			{
-				kind: "tell",
-				category: "speech",
-				target: null,
-				sender: "Mira",
-				speakerKind,
-				message: "Hello",
-			},
-		] as const)
-			expect(clientChatMessageLabel(line(message))).toBe(expected);
-	});
+	it.each(["player", "unknown", "non-player"] as const)(
+		"omits the local category prefix from %s speakers",
+		(speakerKind) => {
+			for (const message of [
+				{
+					kind: "speech",
+					category: "speech",
+					sender: "Mira",
+					speakerKind,
+					message: "Hello",
+				},
+				{
+					kind: "tell",
+					category: "speech",
+					target: null,
+					sender: "Mira",
+					speakerKind,
+					message: "Hello",
+				},
+			] as const)
+				expect(clientChatMessageLabel(line(message))).toBeNull();
+		},
+	);
 
 	it("omits the local category prefix from server text", () => {
 		expect(
@@ -77,7 +165,7 @@ describe("client chat presentation policy", () => {
 		});
 		expect(clientChatMessageLabel(outgoing)).toBe("Tell");
 		expect(clientChatTone(outgoing)).toBe("tell");
-		expect(clientChatFiltersAllow([], outgoing)).toBe(false);
+		expect(clientChatFiltersAllow([], outgoing, channelFilters)).toBe(false);
 		for (const category of ["combat", "combat-enemy", "combat-self"] as const) {
 			const feedback = line({
 				kind: "server",
@@ -85,29 +173,30 @@ describe("client chat presentation policy", () => {
 				message: "combat feedback",
 			});
 			expect(clientChatTone(feedback)).toBe("combat");
-			expect(clientChatFiltersAllow(["chat"], feedback)).toBe(false);
-			expect(clientChatFiltersAllow(["combat"], feedback)).toBe(true);
+			expect(clientChatFiltersAllow(["chat"], feedback, channelFilters)).toBe(
+				false,
+			);
+			expect(clientChatFiltersAllow(["combat"], feedback, channelFilters)).toBe(
+				true,
+			);
 		}
 		for (const category of ["fellowship", "advancement", "craft"] as const) {
 			const notice = line({ kind: "server", category, message: "notice" });
-			expect(clientChatFiltersAllow([], notice)).toBe(true);
-			expect(clientChatMessageLabel(notice)).not.toBe("System");
+			expect(clientChatFiltersAllow([], notice, channelFilters)).toBe(true);
+			expect(clientChatMessageLabel(notice)).toBeNull();
 		}
 		const unknown = line({
 			kind: "server",
 			category: { raw: 0xabcdef },
 			message: "unknown",
 		});
-		expect(clientChatMessageLabel(unknown)).toBe("Unknown type 0xABCDEF");
-		expect(clientChatFiltersAllow([], unknown)).toBe(true);
+		expect(clientChatMessageLabel(unknown)).toBeNull();
+		expect(clientChatFiltersAllow([], unknown, channelFilters)).toBe(true);
 	});
 
-	it.each([
-		["magic", "Magic"],
-		["spellcasting", "Spellcasting"],
-	] as const)(
-		"filters %s with Combat while preserving its label",
-		(category, label) => {
+	it.each(["magic", "spellcasting"] as const)(
+		"filters %s with Combat while preserving its message category",
+		(category) => {
 			for (const message of [
 				{ kind: "server", category, message: "Spell feedback" },
 				{
@@ -119,10 +208,16 @@ describe("client chat presentation policy", () => {
 				},
 			] as const) {
 				const feedback = line(message);
-				expect(clientChatFiltersAllow([], feedback)).toBe(false);
-				expect(clientChatFiltersAllow(["chat"], feedback)).toBe(false);
-				expect(clientChatFiltersAllow(["combat"], feedback)).toBe(true);
-				expect(clientChatMessageLabel(feedback)).toBe(label);
+				expect(clientChatFiltersAllow([], feedback, channelFilters)).toBe(
+					false,
+				);
+				expect(clientChatFiltersAllow(["chat"], feedback, channelFilters)).toBe(
+					false,
+				);
+				expect(
+					clientChatFiltersAllow(["combat"], feedback, channelFilters),
+				).toBe(true);
+				expect(clientChatMessageLabel(feedback)).toBeNull();
 			}
 		},
 	);
@@ -163,7 +258,7 @@ describe("client chat presentation policy", () => {
 			speakerKind: "non-player",
 			message: "Choose a level.",
 		});
-		expect(clientChatMessageLabel(npc)).toBe("NPC Tell");
+		expect(clientChatMessageLabel(npc)).toBe("Tell");
 	});
 	it("combines independently enabled tags while always retaining system context", () => {
 		const speech = line({
@@ -183,17 +278,27 @@ describe("client chat presentation policy", () => {
 		const error = line({ kind: "error", message: "Renderer failed" });
 
 		expect(CLIENT_CHAT_FILTER_TAGS).toEqual(["chat", "combat"]);
-		expect(clientChatFiltersAllow(CLIENT_CHAT_FILTER_TAGS, speech)).toBe(true);
-		expect(clientChatFiltersAllow(CLIENT_CHAT_FILTER_TAGS, combat)).toBe(true);
-		expect(clientChatFiltersAllow(["chat"], combat)).toBe(false);
-		expect(clientChatFiltersAllow(["combat"], speech)).toBe(false);
-		expect(clientChatFiltersAllow([], system)).toBe(true);
-		expect(clientChatFiltersAllow([], error)).toBe(true);
+		expect(
+			clientChatFiltersAllow(CLIENT_CHAT_FILTER_TAGS, speech, channelFilters),
+		).toBe(true);
+		expect(
+			clientChatFiltersAllow(CLIENT_CHAT_FILTER_TAGS, combat, channelFilters),
+		).toBe(true);
+		expect(clientChatFiltersAllow(["chat"], combat, channelFilters)).toBe(
+			false,
+		);
+		expect(clientChatFiltersAllow(["combat"], speech, channelFilters)).toBe(
+			false,
+		);
+		expect(clientChatFiltersAllow([], system, channelFilters)).toBe(true);
+		expect(clientChatFiltersAllow([], error, channelFilters)).toBe(true);
+		expect(clientChatMessageLabel(error)).toBe("Error");
+		expect(clientChatMessageLabel(combat)).toBeNull();
 		const formatted = line({
 			kind: "formatted-system",
 			rows: [{ indented: false, spans: [{ kind: "emphasis", text: "Help" }] }],
 		});
-		expect(clientChatFiltersAllow([], formatted)).toBe(true);
+		expect(clientChatFiltersAllow([], formatted, channelFilters)).toBe(true);
 		expect(clientChatTone(formatted)).toBe("system");
 	});
 

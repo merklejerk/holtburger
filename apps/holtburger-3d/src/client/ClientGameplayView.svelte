@@ -173,6 +173,7 @@
 		type ClientHudPlacement,
 		type ClientHudViewport,
 	} from "./client-hud-layout";
+	import type { ClientChatChannelFilters } from "./client-settings-contract";
 	import type { ClientChatFilterTag } from "./client-chat-policy";
 	import type { ClientGameplayPresentationDiagnostics } from "./client-gameplay-presentation";
 	import type { ClientObjectPreviewService } from "./client-object-preview-service";
@@ -238,6 +239,11 @@
 		readonly minimapViewDiameters: MinimapState["viewDiameters"];
 		readonly onMinimapViewDiametersChange: (
 			value: MinimapState["viewDiameters"],
+		) => void;
+		/** User-wide channel visibility and its settings edit operation. */
+		readonly chatChannelFilters: ClientChatChannelFilters;
+		readonly onChatChannelFiltersChange: (
+			value: ClientChatChannelFilters,
 		) => void;
 		readonly chatFilters: readonly ClientChatFilterTag[];
 		/** User-wide chat timestamp visibility and its settings edit operation. */
@@ -496,6 +502,8 @@
 		onSpellBarShapeChange,
 		minimapViewDiameters,
 		onMinimapViewDiametersChange,
+		chatChannelFilters,
+		onChatChannelFiltersChange,
 		chatFilters,
 		chatTimestamps,
 		onChatTimestampsChange,
@@ -1468,6 +1476,8 @@
 					onSendError={onSendChatError}
 					onSelectEntity={onSelectKnownEntity}
 					onNotice={onChatNotice}
+					channelFilters={chatChannelFilters}
+					onChannelFiltersChange={onChatChannelFiltersChange}
 					enabledTags={chatFilters}
 					showTimestamps={chatTimestamps}
 					onShowTimestampsChange={onChatTimestampsChange}

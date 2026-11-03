@@ -216,14 +216,28 @@ describe("ClientSettingsStore", () => {
 			const initial = await store.loadUser(userContext, "persisted");
 			expect({ ...defaultUser, ...initial.settings }.chatTimestamps).toBe(true);
 			for (const chatTimestamps of [false, true]) {
+				const chatChannelFilters = {
+					...defaultUser.chatChannelFilters,
+					general: chatTimestamps,
+					allegiance: false,
+					society: false,
+				};
 				await store.saveUserPatch({
-					sections: { chatTimestamps, chatFilters: ["combat"] },
+					sections: {
+						chatTimestamps,
+						chatFilters: ["combat"],
+						chatChannelFilters,
+					},
 				});
 				const reloaded = new ClientSettingsStore(path, initialWindow);
 				await reloaded.load();
 				expect(await reloaded.loadUser(userContext, "persisted")).toMatchObject(
 					{
-						settings: { chatTimestamps, chatFilters: ["combat"] },
+						settings: {
+							chatTimestamps,
+							chatFilters: ["combat"],
+							chatChannelFilters,
+						},
 						repaired: [],
 					},
 				);

@@ -8,6 +8,8 @@
 	import { useAppInputPolicy } from "../lib/input/app-input-policy-context";
 	import { useClientInput } from "./client-input-context";
 	import ClientHudIcon from "./ClientHudIcon.svelte";
+	import type { ClientChatChannelFilters } from "./client-settings-contract";
+	import ChannelFiltersIcon from "../assets/icons/chat-channel-filters.svg?component";
 	import ClockIcon from "../assets/icons/duration.svg?component";
 	import { onDestroy, tick } from "svelte";
 	import PopupMenu from "../app/PopupMenu.svelte";
@@ -25,6 +27,7 @@
 		type ChatInputRecall,
 	} from "./client-chat-input-history";
 	import {
+		CLIENT_CHAT_CHANNEL_FILTERS,
 		CLIENT_CHAT_FILTER_TAGS,
 		clientChatMessageLabel,
 		clientChatFilterLabel,
@@ -58,6 +61,9 @@
 		readonly composer: ClientChatComposer;
 		/** Append submission failures to the app-owned durable chat buffer. */
 		readonly onSendError: (message: string) => void;
+		/** Saved named-channel choices refine the coarse Chat toggle. */
+		readonly channelFilters: ClientChatChannelFilters;
+		readonly onChannelFiltersChange: (value: ClientChatChannelFilters) => void;
 		readonly enabledTags: readonly ClientChatFilterTag[];
 		readonly onEnabledTagsChange: (
 			value: readonly ClientChatFilterTag[],
@@ -76,6 +82,8 @@
 		onSend,
 		composer,
 		onSendError,
+		channelFilters,
+		onChannelFiltersChange,
 		enabledTags,
 		onEnabledTagsChange,
 	}: Props = $props();
@@ -148,7 +156,17 @@
 	/** The component-local prompt never replaces the completed destination until accepted. */
 	let recipientOpen = $state(false);
 	let menuAnchor = $state<HTMLButtonElement | null>(null);
-	let menuOpen = $state(false);
+	/** The destination picker and channel filters share one popup lifetime. */
+	let openMenu = $state<"destination" | "filters" | null>(null);
+	let filterAnchor = $state<HTMLButtonElement | null>(null);
+	const filterItems = $derived(
+		CLIENT_CHAT_CHANNEL_FILTERS.map(({ key, label }) => ({
+			action: key,
+			label,
+			disabled: false,
+			selection: { kind: "checkbox" as const, checked: channelFilters[key] },
+		})),
+	);
 	type DestinationAction =
 		"speech" | "tell" | "selected" | ClientChatDestination;
 	const destinationItems = $derived([
@@ -194,7 +212,9 @@
 		explicitHistory || editorFocused || recipientOpen || heldHistory !== null,
 	);
 	const visibleMessages = $derived(
-		messages.filter((line) => clientChatFiltersAllow(enabledTags, line)),
+		messages.filter((line) =>
+			clientChatFiltersAllow(enabledTags, line, channelFilters),
+		),
 	);
 	/** Imperative scroll intent; layout observations do not belong in the UI graph. */
 	let following = true;
@@ -425,7 +445,7 @@
 	/** Enter the existing selected-recipient command without discarding a composed body. */
 	export async function tellSelected(): Promise<void> {
 		if (sending || composing || composer.selection.kind !== "target") return;
-		menuOpen = false;
+		openMenu = null;
 		message = `/tellselected ${message.replace(/^\/(?:ts|tellselected)(?:\s+|$)/i, "")}`;
 		recall = null;
 		const generation = composer.generation;
@@ -438,7 +458,7 @@
 	}
 
 	async function chooseDestination(action: DestinationAction): Promise<void> {
-		menuOpen = false;
+		openMenu = null;
 		const generation = composer.generation;
 		if (action === "tell") {
 			// Retire the popup's keyboard owner before the dialog focuses its recipient field.
@@ -649,6 +669,18 @@
 				</button>
 			{/each}
 			<button
+				bind:this={filterAnchor}
+				type="button"
+				class="chat-channel-filters ui-filter-pill"
+				aria-label="Channel filters"
+				title="Channel filters"
+				aria-haspopup="menu"
+				aria-expanded={openMenu === "filters"}
+				onclick={() => {
+					openMenu = openMenu === "filters" ? null : "filters";
+				}}><ChannelFiltersIcon /></button
+			>
+			<button
 				type="button"
 				class="chat-timestamps ui-filter-pill"
 				aria-label="Show chat timestamps"
@@ -675,9 +707,9 @@
 				title="Choose chat destination"
 				aria-label="Chat destination"
 				aria-haspopup="menu"
-				aria-expanded={menuOpen}
+				aria-expanded={openMenu === "destination"}
 				onclick={() => {
-					menuOpen = !menuOpen;
+					openMenu = openMenu === "destination" ? null : "destination";
 				}}
 			>
 				<span class="chat-channel-icon"
@@ -768,7 +800,22 @@
 			{/if}
 		</form>
 	</div>
-	{#if menuOpen && menuAnchor !== null}
+	{#if openMenu === "filters" && filterAnchor !== null}
+		<PopupMenu
+			anchor={filterAnchor}
+			label="Channel filters"
+			items={filterItems}
+			onselect={(key) =>
+				onChannelFiltersChange({
+					...channelFilters,
+					[key]: !channelFilters[key],
+				})}
+			onclose={() => {
+				openMenu = null;
+			}}
+		/>
+	{/if}
+	{#if openMenu === "destination" && menuAnchor !== null}
 		<PopupMenu
 			anchor={menuAnchor}
 			label="Chat destination"
@@ -777,7 +824,7 @@
 				void chooseDestination(action);
 			}}
 			onclose={() => {
-				menuOpen = false;
+				openMenu = null;
 			}}
 		/>
 	{/if}
@@ -866,6 +913,7 @@
 			pointer-events: auto;
 			user-select: auto;
 		}
+		.chat-channel-filters,
 		.chat-timestamps {
 			display: grid;
 			place-items: center;

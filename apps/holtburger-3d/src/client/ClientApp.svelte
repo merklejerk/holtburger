@@ -2578,6 +2578,9 @@
 			minimapViewDiameters={userSettings.minimapViewDiameters}
 			onMinimapViewDiametersChange={(minimapViewDiameters) =>
 				changeUserSection("minimapViewDiameters", minimapViewDiameters)}
+			chatChannelFilters={userSettings.chatChannelFilters}
+			onChatChannelFiltersChange={(value) =>
+				changeUserSection("chatChannelFilters", value)}
 			chatFilters={userSettings.chatFilters}
 			chatTimestamps={userSettings.chatTimestamps}
 			onChatTimestampsChange={(value) =>

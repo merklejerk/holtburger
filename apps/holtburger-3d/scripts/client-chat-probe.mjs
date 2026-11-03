@@ -18,7 +18,7 @@ export async function probeClientChat(client, evaluateExpression) {
 	const read = () => evaluate(`JSON.parse(JSON.stringify(${api}.read()))`);
 	const click = async (selector, text) => {
 		const point = await evaluate(`(() => {
-			const element = [...document.querySelectorAll(${JSON.stringify(selector)})].find(e => ${text === undefined ? "true" : `e.textContent.trim().startsWith(${JSON.stringify(text)})`});
+			const element = [...document.querySelectorAll(${JSON.stringify(selector)})].find(e => ${text === undefined ? "true" : `e.textContent.replace('✓', '').trim().startsWith(${JSON.stringify(text)})`});
 			if (!element) throw new Error('Chat probe control missing: ' + ${JSON.stringify(text ?? selector)});
 			const r = element.getBoundingClientRect();
 			return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
@@ -115,6 +115,46 @@ export async function probeClientChat(client, evaluateExpression) {
 				speakerKind: "player",
 				message: "Prefix theme check",
 			});
+
+		await click('button[aria-label="Channel filters"]');
+		assert.deepEqual(
+			await evaluate(
+				`Array.from(document.querySelectorAll('[role="menu"][aria-label="Channel filters"] [role="menuitemcheckbox"]')).map(e => [e.textContent.replace('✓', '').trim(), e.getAttribute('aria-checked')])`,
+			),
+			[
+				"General",
+				"Trade",
+				"LFG",
+				"Roleplay",
+				"Allegiance",
+				"Society",
+				"Olthoi",
+			].map((label) => [label, "true"]),
+		);
+		const prefixRows = () =>
+			evaluate(
+				`Array.from(document.querySelectorAll('.chat-lines p')).filter(e => e.textContent.includes('Prefix palette probe')).length`,
+			);
+		await click('[role="menuitemcheckbox"]', "General");
+		assert.equal(await prefixRows(), 3);
+		assert.equal(
+			await evaluate(
+				`document.querySelector('[role="menu"][aria-label="Channel filters"]') !== null`,
+			),
+			true,
+		);
+		await click('[role="menuitemcheckbox"]', "Trade");
+		assert.equal(await prefixRows(), 2);
+		await click('[role="menuitemcheckbox"]', "General");
+		await click('[role="menuitemcheckbox"]', "Trade");
+		assert.equal(await prefixRows(), 4);
+		await press("Escape", "Escape", 27);
+		assert.equal(
+			await evaluate(
+				`document.querySelector('[role="menu"][aria-label="Channel filters"]') === null`,
+			),
+			true,
+		);
 		const prefixPalette = await evaluate(`(() => {
 			const prefix = channel => [...document.querySelectorAll('.chat-channel-prefix')]
 				.find(node => node.dataset.channel === channel && node.closest('p').textContent.includes('Prefix palette probe'));

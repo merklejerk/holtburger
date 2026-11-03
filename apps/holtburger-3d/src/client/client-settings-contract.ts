@@ -111,6 +111,30 @@ const chatFiltersSchema = z
 	)
 	.readonly();
 
+/** Independent visibility choices for named channels in the retained chat buffer. */
+const clientChatChannelFiltersSchema = z
+	.object({
+		/** Public world chat. */
+		general: z.boolean(),
+		/** Buying and selling chat. */
+		trade: z.boolean(),
+		/** Looking-for-group chat. */
+		lfg: z.boolean(),
+		/** Roleplaying chat. */
+		roleplay: z.boolean(),
+		/** Allegiance chat and allegiance broadcasts share one choice. */
+		allegiance: z.boolean(),
+		/** Generic society chat and all three society-specific channels. */
+		society: z.boolean(),
+		/** Olthoi chat. */
+		olthoi: z.boolean(),
+	})
+	.strict()
+	.readonly();
+export type ClientChatChannelFilters = z.infer<
+	typeof clientChatChannelFiltersSchema
+>;
+
 /** Local chat admission preferences; suppressed messages never enter retained history. */
 export const clientChatSuppressionSettingsSchema = z
 	.object({
@@ -262,6 +286,8 @@ export const clientUserSettingsSchema = z
 		/** Stable emote identities shared across characters and servers on this local profile. */
 		recentEmotes: z.array(z.string().min(1)).readonly(),
 		chatFilters: chatFiltersSchema,
+		/** User-wide named-channel visibility, independent of retained history. */
+		chatChannelFilters: clientChatChannelFiltersSchema,
 		/** Buffer timestamp visibility shared across characters on this local profile. */
 		chatTimestamps: z.boolean(),
 		chatSuppression: clientChatSuppressionSettingsSchema,

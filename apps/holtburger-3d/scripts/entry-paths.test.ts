@@ -274,6 +274,14 @@ describe("Electron launch arguments", () => {
 			partitionClientLaunchArguments(["--ignore-world-map-cache=true"]),
 		).toThrow("does not accept a value");
 	});
+	it("forwards the update opt-out to main without a renderer query or a flag value", () => {
+		expect(partitionClientLaunchArguments(["--no-updates", "--debug"])).toEqual(
+			{ launchArguments: ["--no-updates"], rendererArguments: ["--debug"] },
+		);
+		expect(() => partitionClientLaunchArguments(["--no-updates=true"])).toThrow(
+			"does not accept a value",
+		);
+	});
 	it("forwards no-launcher to main without a renderer query or a flag value", () => {
 		expect(
 			partitionClientLaunchArguments([

@@ -1,3 +1,4 @@
+import { APP_LIFECYCLE_TUNING } from "../src/app/app-tuning.js";
 import { decode, encode } from "@msgpack/msgpack";
 import { z } from "zod";
 import {
@@ -31,10 +32,6 @@ import type {
 export const MAX_FRAME_BYTES = 16 * 1024 * 1024;
 /** Version negotiated before any command is accepted. */
 export const PROTOCOL_VERSION = 3;
-/** Grace period before a sidecar that ignored shutdown is terminated. */
-const SHUTDOWN_GRACE_MS = 2_000;
-/** Startup bound for a child that spawned but never produced a handshake. */
-const HANDSHAKE_GRACE_MS = 15_000;
 
 interface WritableStreamLike {
 	write(chunk: Uint8Array): boolean;
@@ -315,7 +312,7 @@ export class SidecarHostClient {
 				),
 				true,
 			);
-		}, HANDSHAKE_GRACE_MS);
+		}, APP_LIFECYCLE_TUNING.sidecarHandshakeTimeoutMs);
 		process.stdout.on("data", (chunk) => this.#receive(chunk));
 		process.stdin.on("error", (error) => {
 			this.#fail(new SidecarProtocolError("host_stdin", error.message), true);
@@ -491,7 +488,7 @@ export class SidecarHostClient {
 									"Host process did not terminate",
 								),
 							),
-						SHUTDOWN_GRACE_MS,
+						APP_LIFECYCLE_TUNING.sidecarShutdownGraceMs,
 					);
 				}),
 			]).finally(() => {
@@ -517,7 +514,7 @@ export class SidecarHostClient {
 						"host did not acknowledge shutdown",
 					),
 				);
-			}, SHUTDOWN_GRACE_MS);
+			}, APP_LIFECYCLE_TUNING.sidecarShutdownGraceMs);
 			this.#pending.set(id, {
 				resolve: () => {
 					clearTimeout(timeout);

@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-	ClientRetirement,
-	CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
-} from "../../electron/client-retirement";
+import { ClientRetirement } from "../../electron/client-retirement";
+import { APP_LIFECYCLE_TUNING } from "../app/app-tuning.js";
 import { ClientSettingsPersistence } from "./client-settings-persistence";
 import { ClientAppLifecycle } from "./client-app-lifecycle";
 
@@ -19,7 +17,7 @@ function setup() {
 	const dependencies = {
 		prepareRenderer: vi.fn(),
 		shutdownNative: vi.fn(async () => {}),
-		deadlineMs: CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
+		deadlineMs: APP_LIFECYCLE_TUNING.rendererClosePreparationTimeoutMs,
 	};
 	return { ...dependencies, owner: new ClientRetirement(dependencies) };
 }

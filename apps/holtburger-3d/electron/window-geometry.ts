@@ -1,3 +1,4 @@
+import { APP_PERSISTENCE_TUNING } from "../src/app/app-tuning.js";
 import type { ClientWindowSettings } from "../src/app/window-settings-contract.js";
 
 /** Only native window events and bounds are required; tests can hold writes independently. */
@@ -8,7 +9,6 @@ interface GeometryWindow {
 	removeListener(event: string, listener: () => void): unknown;
 }
 const GEOMETRY_EVENTS = ["resize", "maximize", "unmaximize"];
-export const WINDOW_GEOMETRY_WRITE_DELAY_MS = 250;
 /** Native geometry listeners outlive documents, so surface replacement must explicitly detach them. */
 export function observeWindowGeometry(
 	window: GeometryWindow,
@@ -47,7 +47,7 @@ export function observeWindowGeometry(
 			void write().catch(() => {
 				/* The serialized tail already reported this background failure. */
 			});
-		}, WINDOW_GEOMETRY_WRITE_DELAY_MS);
+		}, APP_PERSISTENCE_TUNING.windowGeometryWriteDelayMs);
 	};
 	for (const event of GEOMETRY_EVENTS) window.on(event, schedule);
 	return async () => {

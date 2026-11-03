@@ -3,12 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppBuild } from "../src/app/app-build-contract.js";
-import {
-	AppUpdates,
-	loadUpdateBuild,
-	UPDATE_CHECK_INTERVAL_MS,
-	UPDATE_CHECK_TIMEOUT_MS,
-} from "./app-updates.js";
+import { APP_UPDATE_TUNING } from "../src/app/app-tuning.js";
+import { AppUpdates, loadUpdateBuild } from "./app-updates.js";
 
 const build: AppBuild = {
 	development: false,
@@ -58,7 +54,7 @@ describe("application update ownership", () => {
 		await vi.advanceTimersByTimeAsync(0);
 		expect(request).toHaveBeenCalledOnce();
 		expect(request.mock.calls[0][0]).toBe(
-			"https://merklejerk.github.io/holtburger/updates/alpha.json",
+			`${APP_UPDATE_TUNING.feedRootUrl}/alpha.json`,
 		);
 		expect(updates.snapshot.availability).toEqual({
 			kind: "available",
@@ -67,7 +63,7 @@ describe("application update ownership", () => {
 		});
 		await updates.openDownloads();
 		expect(openExternal).toHaveBeenCalledExactlyOnceWith(
-			`https://github.com/merklejerk/holtburger/releases/tag/${feed.tag}`,
+			`${APP_UPDATE_TUNING.downloadsRootUrl}/${feed.tag}`,
 		);
 		updates.stop();
 	});
@@ -78,13 +74,13 @@ describe("application update ownership", () => {
 		updates.setWindowVisible(true);
 		const first = updates.registerPregame(true);
 		const second = updates.registerPregame(true);
-		await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS - 1);
+		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs - 1);
 		expect(request).toHaveBeenCalledOnce();
 		updates.releasePregame(first);
 		await vi.advanceTimersByTimeAsync(1);
 		expect(request).toHaveBeenCalledTimes(2);
 		updates.releasePregame(second);
-		await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS * 2);
+		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs * 2);
 		expect(request).toHaveBeenCalledTimes(2);
 		updates.registerPregame(true);
 		await vi.advanceTimersByTimeAsync(0);
@@ -102,7 +98,7 @@ describe("application update ownership", () => {
 		const current = updates.registerPregame(true);
 		expect(updates.releasePregame(old)).toBe("retired");
 		expect(updates.setPregameVisible(old, true)).toBe("retired");
-		await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
 		expect(request).toHaveBeenCalledTimes(2);
 		expect(updates.snapshot.availability.kind).toBe("available");
 		updates.releasePregame(current);
@@ -116,7 +112,7 @@ describe("application update ownership", () => {
 		const token = updates.registerPregame(true);
 		await vi.advanceTimersByTimeAsync(0);
 		updates.setWindowVisible(false);
-		await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
 		expect(request).toHaveBeenCalledOnce();
 		updates.setPregameVisible(token, false);
 		updates.setWindowVisible(true);
@@ -125,7 +121,7 @@ describe("application update ownership", () => {
 		updates.setPregameVisible(token, true);
 		await vi.advanceTimersByTimeAsync(0);
 		expect(request).toHaveBeenCalledTimes(2);
-		vi.setSystemTime(Date.now() + UPDATE_CHECK_INTERVAL_MS);
+		vi.setSystemTime(Date.now() + APP_UPDATE_TUNING.checkIntervalMs);
 		updates.setWindowVisible(true);
 		await vi.advanceTimersByTimeAsync(0);
 		expect(request).toHaveBeenCalledTimes(3);
@@ -138,16 +134,16 @@ describe("application update ownership", () => {
 		updates.setWindowVisible(true);
 		updates.registerPregame(true);
 		await vi.advanceTimersByTimeAsync(0);
+		const confirmed = updates.snapshot;
 		request.mockRejectedValueOnce(new Error("offline"));
-		await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
 		expect(updates.snapshot.availability.kind).toBe("available");
-		expect(updates.snapshot.diagnostic).toContain("offline");
+		expect(updates.snapshot).toEqual(confirmed);
 		request.mockResolvedValueOnce(
 			Response.json({ ...feed, version: build.version }),
 		);
-		await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
 		expect(updates.snapshot.availability.kind).toBe("current");
-		expect(updates.snapshot.diagnostic).toBeNull();
 		await expect(updates.openDownloads()).rejects.toThrow(
 			"No confirmed update",
 		);
@@ -165,12 +161,16 @@ describe("application update ownership", () => {
 			updates.start();
 			updates.setWindowVisible(true);
 			updates.registerPregame(true);
-			await vi.advanceTimersByTimeAsync(UPDATE_CHECK_TIMEOUT_MS - 1);
+			await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.requestTimeoutMs - 1);
 			expect(updates.snapshot.availability.kind).toBe("unknown");
 			updates.setWindowVisible(true);
 			await vi.advanceTimersByTimeAsync(1);
 			expect(request).toHaveBeenCalledOnce();
-			expect(updates.snapshot.diagnostic).toContain("timed out");
+			expect(request.mock.calls[0][1]?.signal?.aborted).toBe(true);
+			await vi.advanceTimersByTimeAsync(
+				APP_UPDATE_TUNING.checkIntervalMs - APP_UPDATE_TUNING.requestTimeoutMs,
+			);
+			expect(request).toHaveBeenCalledTimes(2);
 			updates.stop();
 		}
 	});
@@ -187,7 +187,6 @@ describe("application update ownership", () => {
 			updates.start();
 			await vi.advanceTimersByTimeAsync(0);
 			expect(updates.snapshot.availability.kind).toBe("unknown");
-			expect(updates.snapshot.diagnostic).not.toBeNull();
 			await expect(updates.openDownloads()).rejects.toThrow();
 			expect(openExternal).not.toHaveBeenCalled();
 			updates.stop();
@@ -200,7 +199,7 @@ describe("application update ownership", () => {
 		updates.start();
 		await vi.advanceTimersByTimeAsync(0);
 		updates.stop();
-		await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
 		expect(publish).not.toHaveBeenCalled();
 		expect(vi.getTimerCount()).toBe(0);
 	});
@@ -210,7 +209,7 @@ describe("application update ownership", () => {
 		updates.start();
 		updates.setWindowVisible(true);
 		updates.registerPregame(true);
-		await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
 		expect(request).not.toHaveBeenCalled();
 		updates.stop();
 	});
@@ -226,7 +225,7 @@ describe("application update ownership", () => {
 			updates.start();
 			await vi.advanceTimersByTimeAsync(0);
 			expect(request.mock.calls[0][0]).toBe(
-				"https://merklejerk.github.io/holtburger/updates/beta.json",
+				`${APP_UPDATE_TUNING.feedRootUrl}/beta.json`,
 			);
 			expect(updates.snapshot.availability.kind).toBe("current");
 			updates.stop();
@@ -239,9 +238,9 @@ describe("application update ownership", () => {
 		updates.setWindowVisible(true);
 		updates.registerPregame(true);
 		await vi.advanceTimersByTimeAsync(0);
-		vi.setSystemTime(-UPDATE_CHECK_INTERVAL_MS * 1000);
+		vi.setSystemTime(-APP_UPDATE_TUNING.checkIntervalMs * 1000);
 		updates.setWindowVisible(true);
-		await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS);
+		await vi.advanceTimersByTimeAsync(APP_UPDATE_TUNING.checkIntervalMs);
 		expect(request).toHaveBeenCalledOnce();
 		expect(vi.getTimerCount()).toBe(1);
 		updates.stop();

@@ -41,7 +41,8 @@ export type ClientLaunchArgumentName =
 	| "ignore-config"
 	| "ignore-world-map-cache"
 	| "settings-file"
-	| "no-launcher";
+	| "no-launcher"
+	| "no-updates";
 export function parseClientLaunchArgument(argument: string): {
 	readonly name: ClientLaunchArgumentName;
 	readonly value: string | undefined;

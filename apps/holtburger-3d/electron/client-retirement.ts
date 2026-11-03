@@ -4,9 +4,6 @@ import {
 	type ClientClosePreparation,
 } from "../src/client/client-close-contract.js";
 
-/** Bounds renderer registration/preparation only; native disk flush retains its existing contract. */
-export const CLIENT_CLOSE_PREPARATION_TIMEOUT_MS = 5_000;
-
 /** Only a preparing close operation can accept a renderer acknowledgement. */
 type ClosePhase =
 	| { readonly kind: "open" | "finishing" | "closed" }

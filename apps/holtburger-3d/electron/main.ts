@@ -1,7 +1,9 @@
+import { ClientRetirement } from "./client-retirement.js";
 import {
-	ClientRetirement,
-	CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
-} from "./client-retirement.js";
+	APP_WINDOW_TUNING,
+	APP_PERSISTENCE_TUNING,
+	APP_LIFECYCLE_TUNING,
+} from "../src/app/app-tuning.js";
 import {
 	app,
 	BrowserWindow,
@@ -97,14 +99,6 @@ import { uiThemeIdSchema } from "../src/app/ui-theme-contract.js";
 import { playerVisualCaptureSchema } from "../src/client/client-object-preview-contract.js";
 
 registerUiThemeScheme();
-
-const WINDOW_BACKGROUND_COLOR = "#0b0a08";
-const INITIAL_WINDOW_CONTENT_SIZE = Object.freeze({ width: 1440, height: 900 });
-/** Launcher dimensions are independent of the game viewport's minimum and saved bounds. */
-const LAUNCHER_WINDOW_CONTENT_SIZE = Object.freeze({ width: 900, height: 650 });
-const LAUNCHER_MINIMUM_WINDOW_SIZE = Object.freeze({ width: 680, height: 520 });
-const GAME_MINIMUM_WINDOW_SIZE = Object.freeze({ width: 1100, height: 700 });
-const VISUAL_CACHE_WRITE_DELAY_MS = 500;
 
 if (!app.isPackaged) {
 	const developmentUserData = clientUserDataPath(
@@ -226,6 +220,8 @@ function entryArguments(): {
 	mode: HostMode;
 	clientStartup?: ClientLaunchConfiguration;
 	noLauncher: boolean;
+	/** Process-only update lookup opt-out consumed by the native update owner. */
+	noUpdates: boolean;
 	ignorePersistedConfig: boolean;
 	ignoreWorldMapCache: boolean;
 	settingsFile: string | null;
@@ -248,6 +244,7 @@ function entryArguments(): {
 	const mode: HostMode = selectedEntryName === "client" ? "client" : "explorer";
 	let clientStartup: ClientLaunchConfiguration | undefined;
 	let noLauncher = false;
+	let noUpdates = false;
 	let ignorePersistedConfig = false;
 	let ignoreWorldMapCache = false;
 	let settingsFile: string | null = null;
@@ -259,6 +256,7 @@ function entryArguments(): {
 				? undefined
 				: { ...parsed.startup, contentPath: extracted.contentPath };
 		noLauncher = parsed.noLauncher;
+		noUpdates = parsed.noUpdates;
 		ignorePersistedConfig = parsed.ignorePersistedConfig;
 		ignoreWorldMapCache = parsed.ignoreWorldMapCache;
 		settingsFile = parsed.settingsFile;
@@ -289,6 +287,7 @@ function entryArguments(): {
 		mode,
 		clientStartup,
 		noLauncher,
+		noUpdates,
 		ignorePersistedConfig,
 		ignoreWorldMapCache,
 		settingsFile,
@@ -627,14 +626,14 @@ function createWindow(entry: {
 	const window = new BrowserWindow({
 		title: entry.title,
 		icon: applicationIconPath,
-		width: INITIAL_WINDOW_CONTENT_SIZE.width,
-		height: INITIAL_WINDOW_CONTENT_SIZE.height,
+		width: APP_WINDOW_TUNING.game.initialContentSize.width,
+		height: APP_WINDOW_TUNING.game.initialContentSize.height,
 		useContentSize: true,
-		minWidth: GAME_MINIMUM_WINDOW_SIZE.width,
-		minHeight: GAME_MINIMUM_WINDOW_SIZE.height,
+		minWidth: APP_WINDOW_TUNING.game.minimumSize.width,
+		minHeight: APP_WINDOW_TUNING.game.minimumSize.height,
 		resizable: true,
 		show: false,
-		backgroundColor: WINDOW_BACKGROUND_COLOR,
+		backgroundColor: APP_WINDOW_TUNING.backgroundColor,
 		webPreferences: {
 			preload: join(currentDirectory, "preload.cjs"),
 			additionalArguments: [
@@ -669,8 +668,8 @@ function createWindow(entry: {
 	// Electron/Wayland can negotiate the constructor width down to minWidth. Reapply the
 	// content size while hidden so the first visible frame keeps the configured inner dimensions.
 	window.setContentSize(
-		INITIAL_WINDOW_CONTENT_SIZE.width,
-		INITIAL_WINDOW_CONTENT_SIZE.height,
+		APP_WINDOW_TUNING.game.initialContentSize.width,
+		APP_WINDOW_TUNING.game.initialContentSize.height,
 	);
 	// Restored dimensions can stall ready-to-show's first-paint notification on Wayland.
 	// Show after the initial document loads so a mounted launcher cannot remain hidden.
@@ -741,7 +740,9 @@ function restoreGeometry(
 	role: "picker" | "client",
 ): void {
 	const minimum =
-		role === "picker" ? LAUNCHER_MINIMUM_WINDOW_SIZE : GAME_MINIMUM_WINDOW_SIZE;
+		role === "picker"
+			? APP_WINDOW_TUNING.launcher.minimumSize
+			: APP_WINDOW_TUNING.game.minimumSize;
 	window.setMinimumSize(minimum.width, minimum.height);
 	if (window.isFullScreen()) window.setFullScreen(false);
 	if (window.isMaximized()) window.unmaximize();
@@ -874,7 +875,7 @@ void (async () => {
 	}
 
 	const updates = new AppUpdates(
-		app.isPackaged
+		app.isPackaged && !entry.noUpdates
 			? loadUpdateBuild(
 					join(app.getAppPath(), "dist/build-info.json"),
 					console.error,
@@ -950,8 +951,8 @@ void (async () => {
 	const launcher = new LauncherStore(
 		join(app.getPath("userData"), "launcher-settings.json"),
 		initialGeometry(
-			LAUNCHER_WINDOW_CONTENT_SIZE.width,
-			LAUNCHER_WINDOW_CONTENT_SIZE.height,
+			APP_WINDOW_TUNING.launcher.initialContentSize.width,
+			APP_WINDOW_TUNING.launcher.initialContentSize.height,
 		),
 	);
 	await launcher.load();
@@ -1031,8 +1032,8 @@ void (async () => {
 				const settings = new ClientSettingsStore(
 					entry.settingsFile ?? clientSettingsFilePath(app.getPath("userData")),
 					initialGeometry(
-						INITIAL_WINDOW_CONTENT_SIZE.width,
-						INITIAL_WINDOW_CONTENT_SIZE.height,
+						APP_WINDOW_TUNING.game.initialContentSize.width,
+						APP_WINDOW_TUNING.game.initialContentSize.height,
 					),
 				);
 				attempt.resources = { kind: "settings", settings };
@@ -1051,7 +1052,7 @@ void (async () => {
 				const cache = new ClientVisualCacheStore(
 					join(app.getPath("userData"), "character-visuals"),
 					attempt.startup,
-					VISUAL_CACHE_WRITE_DELAY_MS,
+					APP_PERSISTENCE_TUNING.visualCacheWriteDelayMs,
 					(message) => {
 						console.error(message);
 						if (owner.attempt === attempt && !window.isDestroyed())
@@ -1077,7 +1078,7 @@ void (async () => {
 				if (!attempt.cancellation.signal.aborted) throw error;
 			}
 			const retirement = new ClientRetirement({
-				deadlineMs: CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
+				deadlineMs: APP_LIFECYCLE_TUNING.rendererClosePreparationTimeoutMs,
 				prepareRenderer: () => {
 					if (
 						documents.role !== "client" ||

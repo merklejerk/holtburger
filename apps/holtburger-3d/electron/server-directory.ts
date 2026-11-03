@@ -1,3 +1,4 @@
+import { APP_SERVER_DIRECTORY_TUNING } from "../src/app/app-tuning.js";
 import { z } from "zod";
 import { clientServerScope } from "./client-profile-key.js";
 import { launcherServerSchema } from "../src/launcher/launcher-contract.js";
@@ -7,9 +8,6 @@ import type {
 	ServerDirectory,
 } from "../src/launcher/server-directory-contract.js";
 
-/** Fixed public directory; callers cannot turn this command into arbitrary URL fetching. */
-export const TREE_STATS_DIRECTORY_URL = "https://treestats.net/servers.json";
-const DIRECTORY_TIMEOUT_MS = 10_000;
 const rowSchema = z.object({
 	name: z.string().trim().min(1),
 	description: z.string(),
@@ -46,8 +44,8 @@ export class ServerDirectoryCatalog {
 		}
 	}
 	async #fetch(): Promise<void> {
-		const response = await this.request(TREE_STATS_DIRECTORY_URL, {
-			signal: AbortSignal.timeout(DIRECTORY_TIMEOUT_MS),
+		const response = await this.request(APP_SERVER_DIRECTORY_TUNING.url, {
+			signal: AbortSignal.timeout(APP_SERVER_DIRECTORY_TUNING.requestTimeoutMs),
 			headers: { Accept: "application/json" },
 			credentials: "omit",
 		});

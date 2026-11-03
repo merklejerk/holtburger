@@ -63,6 +63,8 @@ character selection, and gameplay all use that same window. Disconnect returns t
 The examples above bypass the launcher for a direct connection. `client` is also accepted explicitly.
 Add `--no-launcher` to exit when the session ends rather than returning to the launcher; it requires
 `--account` and also applies to cancellation and connection/startup failures.
+Add `--no-updates` to disable update lookups for this launch, including while using the launcher.
+It takes no value and does not change saved settings.
 Both clients use `-p` for port and `-P` for password. Omit `--content` to use a saved installation or
 the asset folder picker after Play. An explicit override is temporary.
 

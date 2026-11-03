@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { gt } from "semver";
+import { APP_UPDATE_TUNING } from "../src/app/app-tuning.js";
 import {
 	appBuildSchema,
 	type AppBuild,
@@ -12,11 +13,6 @@ import {
 	type UpdateSnapshot,
 } from "../src/app/app-update-contract.js";
 import { formatError } from "../src/lib/format-error.js";
-
-export const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
-export const UPDATE_CHECK_TIMEOUT_MS = 5 * 1000;
-const UPDATE_FEED_ROOT = "https://merklejerk.github.io/holtburger/updates";
-const DOWNLOADS_ROOT = "https://github.com/merklejerk/holtburger/releases/tag/";
 
 /** Optional update metadata failures must never prevent the installed app from starting. */
 export function loadUpdateBuild(
@@ -92,7 +88,6 @@ export class AppUpdates {
 	#snapshot: UpdateSnapshot = {
 		revision: 0,
 		availability: { kind: "unknown" },
-		diagnostic: null,
 	};
 	#request: UpdateRequest | null = null;
 	#timer: ReturnType<typeof setTimeout> | null = null;
@@ -156,7 +151,7 @@ export class AppUpdates {
 		if (availability.kind !== "available")
 			throw new Error("No confirmed update downloads are available");
 		await this.#dependencies.openExternal(
-			`${DOWNLOADS_ROOT}${availability.tag}`,
+			`${APP_UPDATE_TUNING.downloadsRootUrl}/${availability.tag}`,
 		);
 	}
 
@@ -192,7 +187,7 @@ export class AppUpdates {
 				? 0
 				: Math.max(
 						0,
-						UPDATE_CHECK_INTERVAL_MS -
+						APP_UPDATE_TUNING.checkIntervalMs -
 							Math.max(0, this.#dependencies.now() - this.#lastAttempt),
 					);
 		if (remaining === 0) this.#check();
@@ -206,14 +201,14 @@ export class AppUpdates {
 		const cancellation = new AbortController();
 		const deadline = setTimeout(
 			() => cancellation.abort(new Error("Update check timed out")),
-			UPDATE_CHECK_TIMEOUT_MS,
+			APP_UPDATE_TUNING.requestTimeoutMs,
 		);
 		// Defer work until the request resource is installed, including synchronous fetch failures.
 		void Promise.resolve().then(async () => {
 			try {
 				const feed = await readUpdateFeed(
 					this.#dependencies.request,
-					`${UPDATE_FEED_ROOT}/${build.channel}.json`,
+					`${APP_UPDATE_TUNING.feedRootUrl}/${build.channel}.json`,
 					cancellation.signal,
 				);
 				if (!this.#stopped)
@@ -222,18 +217,12 @@ export class AppUpdates {
 						availability: gt(feed.version, build.version)
 							? { kind: "available", version: feed.version, tag: feed.tag }
 							: { kind: "current" },
-						diagnostic: null,
 					});
 			} catch (error) {
-				if (!this.#stopped) {
-					const diagnostic = `Update check failed: ${formatError(error)}`;
-					this.#dependencies.report(diagnostic);
-					this.#publish({
-						...this.#snapshot,
-						revision: this.#snapshot.revision + 1,
-						diagnostic,
-					});
-				}
+				if (!this.#stopped)
+					this.#dependencies.report(
+						`Update check failed: ${formatError(error)}`,
+					);
 			} finally {
 				clearTimeout(deadline);
 				this.#request = null;

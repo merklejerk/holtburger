@@ -10,7 +10,6 @@ function fixture() {
 	const initial: UpdateSnapshot = {
 		revision: 0,
 		availability: { kind: "unknown" },
-		diagnostic: null,
 	};
 	const snapshot = vi.fn(async () => initial);
 	const bridge: AppUpdateBridge = {
@@ -42,7 +41,6 @@ it("an initial IPC response cannot overwrite a newer event", async () => {
 	const newer: UpdateSnapshot = {
 		revision: 1,
 		availability: { kind: "current" },
-		diagnostic: null,
 	};
 	for (const listener of listeners) listener(newer);
 	await Promise.resolve();
@@ -61,7 +59,6 @@ it("retired subscribers ignore late responses and malformed events fail decoding
 		listener({
 			revision: 5,
 			availability: { kind: "available", version: "invalid", tag: "invalid" },
-			diagnostic: null,
 		});
 	expect(failed).toHaveBeenCalledOnce();
 	stop();

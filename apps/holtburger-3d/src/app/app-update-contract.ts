@@ -49,8 +49,6 @@ export const updateSnapshotSchema = z
 		revision: z.number().int().nonnegative(),
 		/** The renderer presents this decision without repeating version comparison. */
 		availability: updateAvailabilitySchema,
-		/** Observed check failure; native logging consumes it without interrupting play. */
-		diagnostic: z.string().nullable(),
 	})
 	.strict();
 

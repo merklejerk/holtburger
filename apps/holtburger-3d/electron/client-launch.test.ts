@@ -34,6 +34,21 @@ describe("Electron application arguments", () => {
 });
 
 describe("parseClientLaunchArguments", () => {
+	it("consumes the update opt-out with or without a direct connection", () => {
+		expect(parseClientLaunchArguments([]).noUpdates).toBe(false);
+		for (const connection of [[], ["--account=ash"]]) {
+			expect(
+				parseClientLaunchArguments([...connection, "--no-updates", "--debug"]),
+			).toMatchObject({ noUpdates: true, rendererArguments: ["--debug"] });
+		}
+		expect(parseClientLaunchArguments(["--no-updates"]).startup).toBeNull();
+		expect(() => parseClientLaunchArguments(["--no-updates=false"])).toThrow(
+			"--no-updates does not accept a value",
+		);
+		expect(() =>
+			parseClientLaunchArguments(["--no-updates", "--no-updates"]),
+		).toThrow("more than once");
+	});
 	it("requires an account for launcher-free sessions and consumes the flag as native policy", () => {
 		expect(
 			parseClientLaunchArguments(["--no-launcher", "--account=ash"]),
@@ -114,6 +129,7 @@ describe("parseClientLaunchArguments", () => {
 				password: "secret",
 			},
 			noLauncher: false,
+			noUpdates: false,
 			ignorePersistedConfig: false,
 			ignoreWorldMapCache: false,
 			settingsFile: null,
@@ -140,6 +156,7 @@ describe("parseClientLaunchArguments", () => {
 				password: "",
 			},
 			noLauncher: false,
+			noUpdates: false,
 			ignorePersistedConfig: false,
 			ignoreWorldMapCache: false,
 			settingsFile: null,
@@ -231,6 +248,7 @@ describe("parseClientLaunchArguments", () => {
 			ignorePersistedConfig: true,
 			ignoreWorldMapCache: false,
 			noLauncher: false,
+			noUpdates: false,
 			settingsFile: null,
 			rendererArguments: [],
 		});

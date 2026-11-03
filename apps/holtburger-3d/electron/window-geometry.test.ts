@@ -1,9 +1,7 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
-import {
-	observeWindowGeometry,
-	WINDOW_GEOMETRY_WRITE_DELAY_MS,
-} from "./window-geometry";
+import { observeWindowGeometry } from "./window-geometry";
+import { APP_PERSISTENCE_TUNING } from "../src/app/app-tuning.js";
 
 describe("surface geometry lifetime", () => {
 	it("captures final source geometry, detaches listeners, and prevents delayed cross-writes", async () => {
@@ -25,7 +23,9 @@ describe("surface geometry lifetime", () => {
 			window.emit("resize");
 			const stopGame = observeWindowGeometry(window, saveGame, report);
 			window.emit("resize");
-			await vi.advanceTimersByTimeAsync(WINDOW_GEOMETRY_WRITE_DELAY_MS);
+			await vi.advanceTimersByTimeAsync(
+				APP_PERSISTENCE_TUNING.windowGeometryWriteDelayMs,
+			);
 			expect(savePicker).toHaveBeenCalledExactlyOnceWith({
 				normalBounds: { width: 900, height: 650 },
 				maximized: false,
@@ -56,7 +56,9 @@ describe("surface geometry lifetime", () => {
 			const stop = observeWindowGeometry(window, save, notifyUser);
 			for (let attempt = 0; attempt < 2; attempt++) {
 				window.emit("resize");
-				await vi.advanceTimersByTimeAsync(WINDOW_GEOMETRY_WRITE_DELAY_MS);
+				await vi.advanceTimersByTimeAsync(
+					APP_PERSISTENCE_TUNING.windowGeometryWriteDelayMs,
+				);
 			}
 			expect(notifyUser).toHaveBeenCalledOnce();
 			await expect(stop()).rejects.toThrow("Permission denied");

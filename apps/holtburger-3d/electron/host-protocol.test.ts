@@ -1,3 +1,4 @@
+import { APP_LIFECYCLE_TUNING } from "../src/app/app-tuning.js";
 import { decode } from "@msgpack/msgpack";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_CONCURRENT_CONTENT_REQUESTS } from "../src/lib/host/host-limits.js";
@@ -632,7 +633,9 @@ describe("SidecarHostClient", () => {
 			const rejected = expect(shutdown).rejects.toMatchObject({
 				code: "shutdown_timeout",
 			});
-			await vi.advanceTimersByTimeAsync(2_000);
+			await vi.advanceTimersByTimeAsync(
+				APP_LIFECYCLE_TUNING.sidecarShutdownGraceMs,
+			);
 			await rejected;
 			expect(process.killCount).toBe(1);
 		} finally {

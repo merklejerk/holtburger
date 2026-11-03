@@ -8,7 +8,6 @@ export function installAppUpdateFixture() {
 	let snapshot: UpdateSnapshot = {
 		revision: 0,
 		availability: { kind: "unknown" },
-		diagnostic: null,
 	};
 	let opened = 0;
 	window.holtburgerUpdates = {
@@ -46,7 +45,6 @@ export function installAppUpdateFixture() {
 			snapshot = {
 				revision: snapshot.revision + 1,
 				availability,
-				diagnostic: null,
 			};
 			for (const listener of listeners) listener(snapshot);
 		},

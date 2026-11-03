@@ -589,6 +589,9 @@ Add `--no-launcher` with `--account` for a direct session that exits on disconne
 or connection/startup failure. This flag takes no value. Without it, direct CLI sessions return to
 the launcher when they end. Both paths finish session cleanup and flush settings before exit/return.
 
+Add `--no-updates` to disable update lookups for this process, with or without a direct connection.
+It takes no value and does not change saved settings or prevent browsing the server directory.
+
 The main launcher places server selection and profile configuration in separate, aligned columns.
 The selected server has a pregame diamond marker and accent edge. Each server has Edit/Delete icon
 actions revealed on hover or keyboard focus (always available on touch devices). Editing or deleting

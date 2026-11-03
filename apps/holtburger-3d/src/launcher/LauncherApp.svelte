@@ -567,6 +567,7 @@
 	{#if editor}
 		<UiDialog
 			className="launcher-editor"
+			initialFocus={editor.kind === "new-profile" ? "input" : undefined}
 			title={editor.kind === "server"
 				? "Server"
 				: editor.kind === "new-profile"

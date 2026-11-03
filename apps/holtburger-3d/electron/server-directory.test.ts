@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-	ServerDirectoryCatalog,
-	TREE_STATS_DIRECTORY_URL,
-} from "./server-directory";
+import { ServerDirectoryCatalog } from "./server-directory";
+import { APP_SERVER_DIRECTORY_TUNING } from "../src/app/app-tuning.js";
 
 const row = {
 	name: "Community",
@@ -28,7 +26,7 @@ describe("TreeStats server directory", () => {
 		const { catalog, request } = setup([row]);
 		await catalog.load(false);
 		expect(request).toHaveBeenCalledWith(
-			TREE_STATS_DIRECTORY_URL,
+			APP_SERVER_DIRECTORY_TUNING.url,
 			expect.objectContaining({
 				credentials: "omit",
 				signal: expect.any(AbortSignal),

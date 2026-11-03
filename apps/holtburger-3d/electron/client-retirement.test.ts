@@ -1,14 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-	ClientRetirement,
-	CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
-} from "./client-retirement";
+import { ClientRetirement } from "./client-retirement";
+import { APP_LIFECYCLE_TUNING } from "../src/app/app-tuning.js";
 
 function setup() {
 	const dependencies = {
 		prepareRenderer: vi.fn(),
 		shutdownNative: vi.fn(async () => {}),
-		deadlineMs: CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
+		deadlineMs: APP_LIFECYCLE_TUNING.rendererClosePreparationTimeoutMs,
 	};
 	return { ...dependencies, owner: new ClientRetirement(dependencies) };
 }
@@ -45,7 +43,9 @@ describe("document retirement preparation and native barrier", () => {
 		try {
 			const app = setup();
 			const retiring = app.owner.request();
-			await vi.advanceTimersByTimeAsync(CLIENT_CLOSE_PREPARATION_TIMEOUT_MS);
+			await vi.advanceTimersByTimeAsync(
+				APP_LIFECYCLE_TUNING.rendererClosePreparationTimeoutMs,
+			);
 			await expect(retiring).resolves.toMatchObject({ kind: "failed" });
 			app.owner.acceptPreparation({ kind: "prepared" });
 			expect(app.shutdownNative).toHaveBeenCalledOnce();

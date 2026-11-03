@@ -17,6 +17,8 @@ export interface ParsedClientLaunchArguments {
 	readonly startup: ClientLaunchConfiguration | null;
 	/** Direct sessions exit on disconnect/cancellation instead of returning to the picker. */
 	readonly noLauncher: boolean;
+	/** Disable update lookups for this process without changing persisted settings. */
+	readonly noUpdates: boolean;
 	/** Treat persisted renderer-owned settings as absent without disabling later saves. */
 	readonly ignorePersistedConfig: boolean;
 	/** Regenerate the map on first request, then reuse it for this host lifetime. */
@@ -68,6 +70,7 @@ export function parseClientLaunchArguments(
 	let meleeMaxChaseDistance: number | undefined;
 	let ignorePersistedConfig = false;
 	let noLauncher = false;
+	let noUpdates = false;
 	let ignoreWorldMapCache = false;
 	let settingsFile: string | null = null;
 	const rendererArguments: string[] = [];
@@ -90,6 +93,12 @@ export function parseClientLaunchArguments(
 			if (parsed.value !== undefined)
 				throw new Error("--no-launcher does not accept a value");
 			noLauncher = true;
+			continue;
+		}
+		if (name === "no-updates") {
+			if (parsed.value !== undefined)
+				throw new Error("--no-updates does not accept a value");
+			noUpdates = true;
 			continue;
 		}
 		if (name === "ignore-config") {
@@ -179,6 +188,7 @@ export function parseClientLaunchArguments(
 					},
 		ignorePersistedConfig,
 		noLauncher,
+		noUpdates,
 		ignoreWorldMapCache,
 		settingsFile,
 		rendererArguments,

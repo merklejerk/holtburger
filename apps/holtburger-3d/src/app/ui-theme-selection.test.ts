@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { CLIENT_CLOSE_PREPARATION_TIMEOUT_MS } from "../../electron/client-retirement";
+import { APP_LIFECYCLE_TUNING } from "./app-tuning.js";
 import { UiThemeSelection } from "./ui-theme-selection";
 import {
 	UI_THEME_LOAD_TIMEOUT_MS,
@@ -141,6 +141,6 @@ it("retirement aborts active work and discards queued requests and preference co
 
 it("keeps the theme operation deadline within the native close preparation budget", () => {
 	expect(UI_THEME_LOAD_TIMEOUT_MS).toBeLessThan(
-		CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
+		APP_LIFECYCLE_TUNING.rendererClosePreparationTimeoutMs,
 	);
 });

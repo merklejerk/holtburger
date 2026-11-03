@@ -374,7 +374,8 @@ async function runProbe() {
 			`(async () => {
 			const require = process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json');
 			const { app, BrowserWindow } = require('electron');
-			const { AppUpdates, UPDATE_CHECK_INTERVAL_MS } = require(require('node:path').join(app.getAppPath(), 'dist-electron/electron/app-updates.js'));
+			const { AppUpdates } = require(require('node:path').join(app.getAppPath(), 'dist-electron/electron/app-updates.js'));
+			const { APP_UPDATE_TUNING } = require(require('node:path').join(app.getAppPath(), 'dist-electron/src/app/app-tuning.js'));
 			const probe = { requests: [], opened: [], clock: 0, feed: { schemaVersion: 1, version: '0.1.4', tag: 'candidate-20261103-abcdef123' } };
 			const owner = new AppUpdates({ development: false, modified: false, version: '0.1.4-alpha.1', channel: 'alpha', revision: 'abcdef12' }, {
 				request: async (url) => { probe.requests.push(url); return Response.json(probe.feed); },
@@ -397,7 +398,8 @@ async function runProbe() {
 				else if (typeof descriptor.value === 'function') { const method = descriptor.value; descriptor.value = function(...args) { retireOriginal(this); return method.apply(owner, args); }; }
 				Object.defineProperty(AppUpdates.prototype, name, descriptor);
 			}
-			probe.advance = () => { probe.clock += UPDATE_CHECK_INTERVAL_MS; owner.setWindowVisible(true); };
+			probe.downloadsRootUrl = APP_UPDATE_TUNING.downloadsRootUrl;
+			probe.advance = () => { probe.clock += APP_UPDATE_TUNING.checkIntervalMs; owner.setWindowVisible(true); };
 			globalThis.__updatesProbe = probe;
 			owner.start();
 		})()`,
@@ -418,15 +420,14 @@ async function runProbe() {
 		await evaluate(page, `${updateIcon}.click()`);
 		let native = await evaluate(
 			inspector,
-			`({ requests: __updatesProbe.requests, opened: __updatesProbe.opened })`,
+			`({ requests: __updatesProbe.requests, opened: __updatesProbe.opened, expectedDownloadsUrl: __updatesProbe.downloadsRootUrl + '/' + __updatesProbe.feed.tag })`,
 		);
 		requireCondition(
 			native.requests.length === 1,
 			"Launcher mounts must share one startup request",
 		);
 		requireCondition(
-			native.opened[0] ===
-				"https://github.com/merklejerk/holtburger/releases/tag/candidate-20261103-abcdef123",
+			native.opened[0] === native.expectedDownloadsUrl,
 			"Click must open the confirmed release page",
 		);
 		if (values["updates-direct"]) {
@@ -481,7 +482,7 @@ async function runProbe() {
 		);
 		native = await evaluate(
 			inspector,
-			`({ requests: __updatesProbe.requests, opened: __updatesProbe.opened })`,
+			`({ requests: __updatesProbe.requests, opened: __updatesProbe.opened, expectedDownloadsUrl: __updatesProbe.downloadsRootUrl + '/' + __updatesProbe.feed.tag })`,
 		);
 		requireCondition(
 			native.requests.length === 2,

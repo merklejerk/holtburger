@@ -22,6 +22,7 @@ const CLIENT_LAUNCH_ARGUMENT_NAMES = new Set([
 	"ignore-world-map-cache",
 	"settings-file",
 	"no-launcher",
+	"no-updates",
 ]);
 const CLIENT_SHORT_ARGUMENT_NAMES = new Map([
 	["s", "server"],
@@ -33,6 +34,7 @@ const CLIENT_SHORT_ARGUMENT_NAMES = new Map([
 ]);
 const CLIENT_BOOLEAN_ARGUMENT_NAMES = new Set([
 	"no-launcher",
+	"no-updates",
 	"ignore-config",
 	"ignore-world-map-cache",
 ]);

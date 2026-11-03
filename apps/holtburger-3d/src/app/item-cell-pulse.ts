@@ -1,3 +1,5 @@
+import { showVisualPopover } from "./visual-popover";
+
 /** Active copies remain imperative and live only for the CSS animation's lifetime. */
 const active = new WeakMap<HTMLElement, () => void>();
 
@@ -64,21 +66,8 @@ export function pulseItemCell(
 	}
 	copy.classList.remove("item-grid-cell", "action-cell");
 	copy.classList.add("ui-item-cell-pulse");
-	copy.popover = "manual";
-	copy.inert = true;
-	copy.setAttribute("aria-hidden", "true");
-	Object.assign(copy.style, {
-		position: "fixed",
-		inset: "auto",
-		margin: "0",
-		anchorName: "none",
-		left: `${bounds.left}px`,
-		top: `${bounds.top}px`,
-		width: `${bounds.width}px`,
-		height: `${bounds.height}px`,
-	});
 	cell.after(copy);
-	copy.showPopover();
+	showVisualPopover(copy, bounds);
 	cell.dataset.uiCellPulsing = "true";
 	let frame = 0;
 	let finished = false;

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { probeInlineTags } from "./client-inline-tag-probe.mjs";
 import { probeClientEmotes } from "./client-emote-probe.mjs";
 import { probeBarber } from "./client-barber-probe.mjs";
 import { probeCellTooltips } from "./cell-tooltip-probe.mjs";
@@ -4926,6 +4927,10 @@ async function runClientHudHarness({ viteUrl }) {
 			if (selected !== 7)
 				throw new Error("Native Enter did not select the chat entity");
 			clientNearby.checks.push("chat-entity-native-keyboard");
+			clientNearby.inlineTags = await probeInlineTags(
+				client,
+				evaluateExpression,
+			);
 			return {
 				clientNearby,
 				consoleMessages,

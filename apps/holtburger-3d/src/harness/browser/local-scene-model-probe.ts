@@ -124,12 +124,16 @@ export async function probeLocalSceneModel(
 			throw new Error(
 				"Compatible appearance edit replaced the local scene nodes.",
 			);
-		// Invalid explicit playback fails locally before publication, without inventing missing DATs.
+		// Empty idle clips resolve to setup pose. An invalid cyclic index in the existing
+		// nonempty idle sequence rejects staging without requesting invented DAT identities.
+		const idle = source.body.pose;
+		if (idle.kind !== "default-idle" || idle.clips.length === 0)
+			throw new Error("Failure probe requires an authored idle sequence.");
 		const failure = await handle.replace("probe-subject", {
 			...source,
 			body: {
 				...source.body,
-				pose: { kind: "default-idle", clips: [], firstCyclicClip: 0 },
+				pose: { ...idle, firstCyclicClip: -1 },
 			},
 		});
 		if (failure.kind !== "failed" || handle.status().kind !== "ready")

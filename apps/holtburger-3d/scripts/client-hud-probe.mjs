@@ -1930,7 +1930,23 @@ export async function probeCharacterSheet(
 		document.querySelector('nav[aria-label="Game shortcuts"] button[aria-label="Character"]').click();
 	})()`,
 	);
+
 	await delay(250);
+	await evaluateExpression(
+		client,
+		`(() => {
+
+  const icons = [...document.querySelectorAll('.character-sheet .stat-icon')];
+  if (icons.length === 0 || icons.some(cell => { const icon = cell.querySelector('img'); return !icon || !icon.complete || icon.naturalWidth === 0; })) throw new Error('Progression stat artwork did not prepare real images');
+  const attribute = document.querySelector('[data-stat-icon=' + CSS.escape(JSON.stringify({Attribute: 'StrengthAttr'})) + '] img');
+  const synergy = document.querySelector('[aria-label="Strength skill synergies"] .stat-icon img');
+  const skill = document.querySelector('summary [data-stat-icon=' + CSS.escape(JSON.stringify({Skill: 'HeavyWeapons'})) + '] img');
+  if (!attribute || !synergy || !skill || synergy.src !== skill.src) throw new Error('Stat rows and synergies did not share canonical artwork');
+const synergies = document.querySelector('[aria-label="Strength skill synergies"]');
+  if (!synergies || !synergies.textContent.includes('Heavy Weapons × 0.33')) throw new Error('Attribute disclosure did not show its trained skill formula coefficient');
+  if (document.querySelector('[aria-label="Quickness skill synergies"]')) throw new Error('Unrelated attribute gained a skill synergy');
+ })()`,
+	);
 	const titles = await evaluateExpression(
 		client,
 		`(() => {
@@ -2333,9 +2349,28 @@ export async function probeCharacterSheet(
 		quicknessRow.open = true;
 		const purchase = quicknessRow.querySelector('.actions button');
 		if (!purchase || purchase.disabled) throw new Error('Portal return retained stale loading evaluations.');
-		if (!globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.retireCharacterSheet(globalThis.__CHARACTER_SHEET_PROBE_BASE__)) throw new Error('Retired character details survived the exit boundary.');
 		return { ...${JSON.stringify(failed)}, zeroVitaeHidden: true, insufficientCredits: true, tabIsolation: true, fixedBalances: true, portalRecovery: true };
 	})()`,
+	);
+	const feedbackExpression = `(async () => {
+  const { probeProgressionFeedback } = await import('/src/harness/browser/client-progression-feedback-probe.ts');
+  return await probeProgressionFeedback(globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__, globalThis.__CHARACTER_SHEET_PROBE_BASE__);
+ })()`;
+	const feedback = await evaluateExpression(client, feedbackExpression);
+	let reducedFeedback;
+	await client.send("Emulation.setEmulatedMedia", {
+		features: [{ name: "prefers-reduced-motion", value: "reduce" }],
+	});
+	try {
+		reducedFeedback = await evaluateExpression(client, feedbackExpression);
+	} finally {
+		await client.send("Emulation.setEmulatedMedia", { features: [] });
+	}
+	await evaluateExpression(
+		client,
+		`(() => {
+  if (!globalThis.__HOLTBURGER_3D_CLIENT_HUD_HARNESS__.retireCharacterSheet(globalThis.__CHARACTER_SHEET_PROBE_BASE__)) throw new Error('Retired character details survived the exit boundary.');
+ })()`,
 	);
 	await delay(250);
 	return await evaluateExpression(
@@ -2344,7 +2379,7 @@ export async function probeCharacterSheet(
 		const panel = document.querySelector('[aria-label="Character"] .character-sheet');
 		if (panel && !panel.textContent.includes('Waiting for character details')) throw new Error('Retired character details remained visible in the panel.');
 		if (document.querySelector('.character-hud progress')?.value !== 0) throw new Error('Retired character experience remained visible in the HUD.');
-		return { ...${JSON.stringify(neutral)}, titles: { ...${JSON.stringify(titles)}, optimistic: true, reconciled: true }, retired: true };
+		return { ...${JSON.stringify(neutral)}, titles: { ...${JSON.stringify(titles)}, optimistic: true, reconciled: true }, feedback: ${JSON.stringify({ normal: feedback, reduced: reducedFeedback })}, retired: true };
 	})()`,
 	);
 }

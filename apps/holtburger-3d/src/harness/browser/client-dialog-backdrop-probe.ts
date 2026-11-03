@@ -171,6 +171,7 @@ export async function probeDialogBackdrops(context: Map<unknown, unknown>) {
 			context,
 			props: {
 				preferences: { shareXp: true, shareLoot: false, ignoreRequests: false },
+				initialName: "Browser Party",
 				onSubmit: () => {
 					throw new Error("Backdrop created a party");
 				},

@@ -422,6 +422,21 @@
 		}
 	}
 
+	/** Enter the existing selected-recipient command without discarding a composed body. */
+	export async function tellSelected(): Promise<void> {
+		if (sending || composing || composer.selection.kind !== "target") return;
+		menuOpen = false;
+		message = `/tellselected ${message.replace(/^\/(?:ts|tellselected)(?:\s+|$)/i, "")}`;
+		recall = null;
+		const generation = composer.generation;
+		await tick();
+		if (composer.generation === generation && inputElement !== null) {
+			keyboard.activate(inputElement);
+			inputElement.setSelectionRange(message.length, message.length);
+			updateCompletion(inputElement);
+		}
+	}
+
 	async function chooseDestination(action: DestinationAction): Promise<void> {
 		menuOpen = false;
 		const generation = composer.generation;

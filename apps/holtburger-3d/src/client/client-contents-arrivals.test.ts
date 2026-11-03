@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ContentsArrivals } from "./client-contents-arrivals";
-import type { ClientContentsSection } from "./client-container-contents";
+import type { ContentsArrivalContainer } from "./client-contents-arrivals";
 import { entityFacts } from "./client-entity-mirror.test-support";
 
 /** Accepted storage facts with explicit quantities, independent of sorting and cell positions. */
 function section(
 	container: number,
 	entries: readonly (readonly [number, number])[],
-): ClientContentsSection {
+): ContentsArrivalContainer {
 	return {
 		container: entityFacts(container, {
 			storage: {
@@ -17,8 +17,7 @@ function section(
 				packCapacity: 7,
 			},
 		}),
-		rootSection: true,
-		items: entries.map(([guid, count]) => {
+		children: entries.map(([guid, count]) => {
 			const item = entityFacts(guid);
 			if (item.description.kind !== "known")
 				throw new Error("Fixture must have a known description.");
@@ -27,8 +26,6 @@ function section(
 				description: { ...item.description, stackCount: count },
 			};
 		}),
-		packs: [],
-		unslotted: [],
 	};
 }
 
@@ -36,48 +33,56 @@ describe("contents arrival feedback", () => {
 	it("ignores initial load and sorting, detects new identities and stack growth only", () => {
 		const tracker = new ContentsArrivals();
 		expect([
-			...tracker.update(
-				[
-					section(1, [
-						[10, 2],
-						[11, 1],
-					]),
-				],
-				false,
-			),
+			...tracker
+				.update(
+					[
+						section(1, [
+							[10, 2],
+							[11, 1],
+						]),
+					],
+					false,
+				)
+				.keys(),
 		]).toEqual([]);
 		expect([
-			...tracker.update(
-				[
-					section(1, [
-						[11, 1],
-						[10, 2],
-					]),
-				],
-				false,
-			),
+			...tracker
+				.update(
+					[
+						section(1, [
+							[11, 1],
+							[10, 2],
+						]),
+					],
+					false,
+				)
+				.keys(),
 		]).toEqual([]);
 		expect([
-			...tracker.update(
-				[
-					section(1, [
-						[10, 3],
-						[12, 1],
-					]),
-				],
-				false,
-			),
+			...tracker
+				.update(
+					[
+						section(1, [
+							[10, 3],
+							[12, 1],
+						]),
+					],
+					false,
+				)
+				.keys(),
 		]).toEqual([10, 12]);
 		expect([
-			...tracker.update(
-				[
-					section(1, [
-						[10, 2],
-						[12, 1],
-					]),
-				],
-				false,
-			),
+			...tracker
+				.update(
+					[
+						section(1, [
+							[10, 2],
+							[12, 1],
+						]),
+					],
+					false,
+				)
+				.keys(),
 		]).toEqual([]);
 	});
 
@@ -89,14 +94,16 @@ describe("contents arrival feedback", () => {
 				[section(1, []), section(2, [[10, 1]]), section(3, [[11, 1]])],
 				false,
 			),
-		]).toEqual([10]);
+		]).toEqual([[10, 2]]);
 	});
 
 	it("baselines recovery and containers whose roster was awaiting", () => {
 		const tracker = new ContentsArrivals();
 		tracker.update([section(1, [])], false);
 		tracker.update([section(1, [])], true);
-		expect([...tracker.update([section(1, [[10, 1]])], false)]).toEqual([]);
+		expect([...tracker.update([section(1, [[10, 1]])], false).keys()]).toEqual(
+			[],
+		);
 		const awaiting = section(1, [[10, 1]]);
 		tracker.update(
 			[
@@ -115,15 +122,17 @@ describe("contents arrival feedback", () => {
 			false,
 		);
 		expect([
-			...tracker.update(
-				[
-					section(1, [
-						[10, 1],
-						[11, 1],
-					]),
-				],
-				false,
-			),
+			...tracker
+				.update(
+					[
+						section(1, [
+							[10, 1],
+							[11, 1],
+						]),
+					],
+					false,
+				)
+				.keys(),
 		]).toEqual([]);
 	});
 });

@@ -1,3 +1,4 @@
+import type { StatArtworkServices } from "./client-stat-artwork";
 import {
 	characterCreationAppearanceRequestSchema,
 	characterCreationStatsRequestSchema,
@@ -20,6 +21,8 @@ export type CreationAppearance = CharacterCreationDraft["appearance"];
 
 /** One capability set for production transport and synthetic creator acceptance. */
 export interface CharacterCreationServices {
+	/** Static stat artwork is available before world entry. */
+	readonly statArtwork: StatArtworkServices;
 	loadCatalog(): Promise<CharacterCreationCatalog>;
 	resolveStats(
 		request: CharacterCreationStatsRequest,

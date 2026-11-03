@@ -21,14 +21,38 @@
 	/** Space belongs to the pressed element; blur or replacing an inactive tag cancels it. */
 	let spacePressed: HTMLSpanElement | null = null;
 
-	function click(event: MouseEvent & { currentTarget: HTMLSpanElement }): void {
+	/** Snapshot endpoints before the browser changes selection for this pointer gesture. */
+	function selectionEndpoints() {
 		const selection = document.getSelection();
-		// A native text-selection drag can end in a pointer click.
+		if (selection === null) return null;
+		return {
+			anchorNode: selection.anchorNode,
+			anchorOffset: selection.anchorOffset,
+			focusNode: selection.focusNode,
+			focusOffset: selection.focusOffset,
+		};
+	}
+	/** Undefined means no pointer gesture; keyboard and programmatic activation stay independent. */
+	let pointerSelection: ReturnType<typeof selectionEndpoints> | undefined;
+
+	function click(event: MouseEvent & { currentTarget: HTMLSpanElement }): void {
+		const before = pointerSelection;
+		pointerSelection = undefined;
+		const selection = document.getSelection();
+		// Suppress a newly selected range, while allowing a fresh click on existing highlighted text.
 		if (
 			event.detail > 0 &&
+			before !== undefined &&
 			selection !== null &&
 			!selection.isCollapsed &&
-			selection.containsNode(event.currentTarget, true)
+			selection.containsNode(event.currentTarget, true) &&
+			(event.detail > 1 ||
+				event.shiftKey ||
+				before === null ||
+				selection.anchorNode !== before.anchorNode ||
+				selection.anchorOffset !== before.anchorOffset ||
+				selection.focusNode !== before.focusNode ||
+				selection.focusOffset !== before.focusOffset)
 		)
 			return;
 		onActivate();
@@ -62,6 +86,12 @@
 		tabindex="0"
 		title={label}
 		aria-label={label}
+		onpointerdown={(event) => {
+			pointerSelection = event.button === 0 ? selectionEndpoints() : undefined;
+		}}
+		onpointercancel={() => {
+			pointerSelection = undefined;
+		}}
 		onclick={click}
 		onkeydown={keydown}
 		onkeyup={keyup}

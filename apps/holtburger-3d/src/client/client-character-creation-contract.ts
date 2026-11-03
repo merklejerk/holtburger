@@ -127,7 +127,7 @@ const catalogSchema = z
 								z
 									.object({
 										label: z.string().min(1),
-										skills: z.array(z.string().min(1)).min(1),
+										skills: z.array(namedChoice.strict()).min(1),
 									})
 									.strict(),
 							),

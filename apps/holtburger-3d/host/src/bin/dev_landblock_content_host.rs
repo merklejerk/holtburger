@@ -336,6 +336,36 @@ async fn handle_connection(mut stream: TcpStream, state: &DevHostState) -> anyho
                 Err(error) => write_error(&mut stream, error).await,
             }
         }
+        ("POST", "/stat-icons") => {
+            match holtburger_3d_host::stat_icons::load_stat_icons(&state.repository) {
+                Ok(references) => {
+                    write_response(
+                        &mut stream,
+                        200,
+                        "application/json",
+                        &serde_json::to_vec(&references)?,
+                    )
+                    .await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
+        ("POST", "/ui-icons") => {
+            let icons = serde_json::from_slice::<
+                holtburger_3d_host::ui_icons::PrepareUiIconsRequest,
+            >(&request.body)?;
+            match holtburger_3d_host::ui_icons::prepare_ui_icon_bytes(
+                Arc::clone(&state.repository),
+                icons,
+            )
+            .await
+            {
+                Ok(bytes) => {
+                    write_response(&mut stream, 200, "application/octet-stream", &bytes).await
+                }
+                Err(error) => write_error(&mut stream, error).await,
+            }
+        }
         ("GET", "/character-creation-catalog") => {
             let result = state
                 .repository

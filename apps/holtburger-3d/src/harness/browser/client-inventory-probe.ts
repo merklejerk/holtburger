@@ -1,3 +1,8 @@
+import { contentsFeedback } from "../../client/client-contents-feedback";
+import type {
+	ContentsArrival,
+	ContentsArrivalSource,
+} from "../../client/client-contents-arrivals";
 import { tick } from "svelte";
 import gameplayPreferences from "./fixtures/gameplay-preferences.json";
 import { emptyHousing } from "../../client/client-housing-contract";
@@ -68,6 +73,74 @@ export function inventoryFixtureItem(
 	};
 }
 
+/** Replacing the publication source withdraws old listeners and pre-commit arrivals. */
+async function probeArrivalSourceRebinding(): Promise<void> {
+	const source = () => {
+		const listeners = new Set<(arrivals: ContentsArrival) => void>();
+		const owner: ContentsArrivalSource = {
+			subscribeArrivals(receive) {
+				listeners.add(receive);
+				return () => {
+					listeners.delete(receive);
+				};
+			},
+		};
+		return {
+			owner,
+			count: () => listeners.size,
+			emit() {
+				for (const receive of listeners) receive(new Map([[1, 2]]));
+			},
+		};
+	};
+	const first = source();
+	const second = source();
+	const node = document.createElement("div");
+	node.className = "ui-theme";
+	Object.assign(node.style, {
+		position: "fixed",
+		left: "24px",
+		top: "24px",
+		width: "40px",
+		height: "40px",
+	});
+	const cell = document.createElement("div");
+	cell.className = "ui-item-cell";
+	cell.dataset.itemGuid = "1";
+	Object.assign(cell.style, { width: "32px", height: "32px" });
+	node.append(cell);
+	document.body.append(node);
+	const feedback = contentsFeedback(node, {
+		sections: [],
+		pending: false,
+		source: first.owner,
+	});
+	try {
+		first.emit();
+		feedback.update({ sections: [], pending: false, source: second.owner });
+		await tick();
+		if (
+			first.count() !== 0 ||
+			second.count() !== 1 ||
+			cell.dataset.uiCellPulsing === "true"
+		)
+			throw new Error(
+				"Replaced contents source retained listeners or queued arrivals",
+			);
+		second.emit();
+		await tick();
+		if (cell.dataset.uiCellPulsing !== "true")
+			throw new Error("Replacement contents source did not pulse arrivals");
+	} finally {
+		feedback.destroy();
+		node.remove();
+	}
+	if (second.count() !== 0)
+		throw new Error(
+			"Contents feedback retained its subscription after destruction",
+		);
+}
+
 /** A repeatable real-session inventory scenario without a content server or runtime assets. */
 export async function probeClientInventory(options: {
 	/** Accepted keyboard settings allow tooltip remapping to use the production update path. */
@@ -79,6 +152,8 @@ export async function probeClientInventory(options: {
 	readonly selection: ClientEntitySelection;
 	/** Persistent inventory maintenance, independent of producer event count. */
 	readonly readSampleCount: () => number;
+	/** Supply the app-owned selected-chat preview from the fixture session. */
+	readonly prepareTellRecipient: (guid: number | null) => void;
 	/** Synthetic content controls; production model, repository and browser decoding remain real. */
 	readonly readPreparedIconCount: () => number;
 	readonly holdIconPreparation: () => () => void;
@@ -94,6 +169,7 @@ export async function probeClientInventory(options: {
 		readonly args: Record<string, unknown> | undefined;
 	}[];
 }) {
+	await probeArrivalSourceRebinding();
 	const { emit, selection, commands } = options;
 	const sample = async () => {
 		await tick();
@@ -253,6 +329,7 @@ export async function probeClientInventory(options: {
 			characterManagement: { kind: "idle" },
 			playerVisualCapture: null,
 			entityCollisionDisabled: false,
+			socialMotionReady: true,
 			canTeleportFromMap: false,
 			recallDestinations: [],
 			housing: emptyHousing(),
@@ -372,6 +449,120 @@ export async function probeClientInventory(options: {
 	if (button("Inventory").getAttribute("aria-pressed") !== "true")
 		button("Inventory").click();
 	await sample();
+
+	// Exercise the actual selected-HUD action and editor without sending a message.
+	const originalTellRecord = records.find((record) => record.guid === 7);
+	if (originalTellRecord === undefined)
+		throw new Error("Missing selected fixture recipient");
+	update({ ...originalTellRecord, targeting: "creature", canTrade: true });
+	options.prepareTellRecipient(7);
+	await sample();
+	const chat = document.querySelector<HTMLInputElement>(
+		'[aria-label="Chat message"]',
+	);
+	if (chat === null) throw new Error("Missing chat editor");
+	chat.value = "draft text";
+	chat.dispatchEvent(new Event("input", { bubbles: true }));
+	const commandsBeforeTell = commands.filter(
+		(entry) => entry.command === "send_client_chat",
+	).length;
+	const selectedMenu = document.querySelector<HTMLButtonElement>(
+		'[aria-label="Selected entity actions"]',
+	);
+	if (selectedMenu === null)
+		throw new Error("Selected recipient did not offer the shared action menu");
+	selectedMenu.click();
+	await tick();
+	const tell =
+		document.querySelector<HTMLButtonElement>('[aria-label="Tell"]') ??
+		[...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(
+			(item) => item.textContent?.trim() === "Tell",
+		);
+	if (tell === undefined)
+		throw new Error("Selected creature did not offer Tell");
+	tell.click();
+	await tick();
+	await tick();
+	if (
+		chat.value !== "/tellselected draft text" ||
+		document.activeElement !== chat ||
+		commands.filter((entry) => entry.command === "send_client_chat").length !==
+			commandsBeforeTell
+	)
+		throw new Error(
+			"Tell did not focus selected-recipient compose mode while preserving the unsent draft",
+		);
+	chat.value = "";
+	chat.dispatchEvent(new Event("input", { bubbles: true }));
+	chat.dispatchEvent(
+		new KeyboardEvent("keydown", {
+			key: "Escape",
+			code: "Escape",
+			bubbles: true,
+			cancelable: true,
+		}),
+	);
+
+	update(originalTellRecord);
+	options.prepareTellRecipient(null);
+	await sample();
+
+	// Observe real animation activation; clones deliberately carry no targeting identities.
+	const pulsed = new Set<number>();
+	let hudPulsed = false;
+	const observePulses = new MutationObserver((mutations) => {
+		for (const { target } of mutations) {
+			if (!(target instanceof HTMLElement)) continue;
+			if (target.dataset.uiCellPulsing === "true")
+				pulsed.add(Number(target.dataset.itemGuid));
+			if (
+				target === button("Inventory") &&
+				target.classList.contains("ui-hud-attention")
+			)
+				hudPulsed = true;
+		}
+	});
+	observePulses.observe(document.body, {
+		subtree: true,
+		attributes: true,
+		attributeFilter: ["data-ui-cell-pulsing", "class"],
+	});
+	const deliver = (
+		upserts: readonly ClientEntityFacts[],
+		removed: readonly number[] = [],
+	) =>
+		emit("client-entity-facts-changed", {
+			projectileSupply: null,
+			salvage: null,
+			worldContainer: null,
+			upserts,
+			removed,
+		});
+	try {
+		deliver([owned(900001, 1, 9)]);
+		await sample();
+		if (!hudPulsed || !pulsed.has(1))
+			throw new Error("Arrival did not pulse the inventory HUD and Main Pack");
+		pulsed.clear();
+		deliver([owned(900001, 30, 9)]);
+		await sample();
+		if (!pulsed.has(30))
+			throw new Error("Transfer did not pulse the destination pack");
+		button("Inventory").click();
+		await tick();
+		hudPulsed = false;
+		deliver([owned(900002, 1, 10)]);
+		await sample();
+		if (!hudPulsed)
+			throw new Error(
+				"Closed inventory did not pulse its HUD button on arrival",
+			);
+		button("Inventory").click();
+		await sample();
+	} finally {
+		observePulses.disconnect();
+		deliver([], [900001, 900002]);
+	}
 	const containerCell = () => {
 		const element = document.querySelector<HTMLButtonElement>(
 			'.item-grid-cell[data-item-guid="30"]',
@@ -1905,6 +2096,7 @@ export async function probeClientInventory(options: {
 	await sample();
 
 	return {
+		arrivalSourceRebinding: true,
 		burdenWarnings: true,
 		burdenWarningOpensInventory: true,
 		equipmentHover: true,

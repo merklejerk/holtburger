@@ -1,4 +1,6 @@
 <script lang="ts">
+	import ClientStatArtwork from "./ClientStatArtwork.svelte";
+	import ClientStatIcon from "./ClientStatIcon.svelte";
 	import MaleIcon from "../assets/icons/pregame-male.svg?component";
 	import FemaleIcon from "../assets/icons/pregame-female.svg?component";
 	import UpgradeTriangle from "../assets/icons/character-upgrade-triangle.svg?component";
@@ -425,7 +427,9 @@
 			>
 				{#each ["Health", "Stamina", "Mana"] as label, index}
 					<div>
-						<dt>{label}</dt>
+						<dt>
+							<ClientStatIcon target={{ kind: "vital", id: index }} />{label}
+						</dt>
 						<dd class="ui-mono" data-vital={label}>
 							{startingStats.vitals[index]}
 						</dd>
@@ -436,601 +440,632 @@
 	{/if}
 {/snippet}
 
-<ClientPregameScreen branding="corner" showPortalLogo={true} backdrop={true}>
-	{#snippet footer()}
-		<button
-			class="creation-back pregame-action pregame-quiet ui-button"
-			type="button"
-			disabled={busy}
-			onclick={onBack}
-			><span class="pregame-icon" aria-hidden="true"><BackIcon /></span
-			>Back</button
-		>
-	{/snippet}
-	<div class="creation-layout">
-		<h1>Create a character</h1>
-		<aside class="creation-navigation">
-			<UiTabs
-				label="Character creation"
-				{tabs}
-				selected={page}
-				orientation="vertical"
-				onSelect={(value) => (page = value)}
+<ClientStatArtwork
+	services={services.statArtwork}
+	repository={null}
+	visible={true}
+>
+	<ClientPregameScreen branding="corner" showPortalLogo={true} backdrop={true}>
+		{#snippet footer()}
+			<button
+				class="creation-back pregame-action pregame-quiet ui-button"
+				type="button"
+				disabled={busy}
+				onclick={onBack}
+				><span class="pregame-icon" aria-hidden="true"><BackIcon /></span
+				>Back</button
 			>
-				{#snippet tabLabel(value, label)}
-					{@const Icon = stepIcons[value]}
-					<span class="creation-step-icon pregame-icon" aria-hidden="true"
-						><Icon /></span
-					>
-					<span>{label}</span>
-				{/snippet}
-			</UiTabs>
-		</aside>
-		<div class="creation-preview">
-			<div class="creation-identity">
-				<label class="creation-name ui-hud-group"
-					><span id="creation-name-label" class="creation-name-label"
-						>Character name</span
-					><span class="creation-name-editor"
-						><input
-							class="ui-input"
-							type="text"
-							placeholder="Enter a name"
-							title={nameError === null ? undefined : nameError}
-							aria-labelledby="creation-name-label"
-							aria-invalid={nameError !== null}
-							aria-describedby={nameError === null
-								? undefined
-								: "creation-name-error"}
-							required
-							form="creation-review-form"
-							disabled={busy || editor === null}
-							value={editor === null ? "" : editor.draft.name}
-							oninput={(event) => {
-								nameEdited = true;
-								updateDraft({
-									...readEditor().draft,
-									name: event.currentTarget.value,
-								});
-							}}
-						/>
-						{#if nameError !== null}
-							<span
-								class="creation-name-error-icon pregame-icon"
-								title={nameError}
-								aria-hidden="true"><WarningIcon /></span
-							>
-							<span id="creation-name-error" class="sr-only" role="alert"
-								>{nameError}</span
-							>
-						{/if}
-					</span>
-				</label>
-				<!-- Olthoi gender records share the same body and appearance choices; retain the draft value. -->
-				{#if heritage === null || (heritage.id !== 12 && heritage.id !== 13)}
-					<div class="creation-gender" role="group" aria-label="Gender">
-						{#each [{ id: 1, name: "Male", icon: MaleIcon }, { id: 2, name: "Female", icon: FemaleIcon }] as choice}
-							{@const Icon = choice.icon}
-							<button
-								class="ui-button ui-icon-button pregame-action pregame-round-button"
-								type="button"
-								data-gender={choice.id}
-								aria-label={choice.name}
-								title={choice.name}
-								aria-pressed={editor !== null &&
-									editor.draft.gender === choice.id}
-								disabled={busy ||
-									heritage === null ||
-									!heritage.genders.some((body) => body.id === choice.id)}
-								onclick={() =>
-									changeBody(readEditor().draft.heritage, choice.id)}
-							>
-								<span class="pregame-icon" aria-hidden="true"><Icon /></span>
-							</button>
-						{/each}
-					</div>
-				{/if}
-			</div>
-			<div class="creation-viewport">
-				<ClientPregameCharacter
-					source={source === null
-						? null
-						: { subjectId: "creation", visual: source }}
-					{framing}
-					{scene}
-				/>
-			</div>
-			<div class="creation-focus">
-				<span class="creation-rotate ui-muted"
-					><span class="pregame-icon" aria-hidden="true"><RotateIcon /></span
-					>Drag to rotate</span
+		{/snippet}
+		<div class="creation-layout">
+			<h1>Create a character</h1>
+			<aside class="creation-navigation">
+				<UiTabs
+					label="Character creation"
+					{tabs}
+					selected={page}
+					orientation="vertical"
+					onSelect={(value) => (page = value)}
 				>
-				<button
-					class="pregame-action ui-button"
-					type="button"
-					disabled={editor === null}
-					aria-pressed={!face}
-					onclick={() => setFaceMode(false)}
-					><span class="pregame-icon" aria-hidden="true"><BodyIcon /></span
-					>Body</button
-				>
-				<button
-					class="pregame-action ui-button"
-					type="button"
-					disabled={editor === null}
-					aria-pressed={face}
-					onclick={() => setFaceMode(true)}
-					><span class="pregame-icon" aria-hidden="true"><FaceIcon /></span
-					>Face</button
-				>
-			</div>
-			{#if resolution.kind === "failed"}<p class="ui-error" role="alert">
-					{resolution.message}
-				</p>{/if}
-		</div>
-		<section class="creation-editor" aria-label="Character settings">
-			<header class="creation-editor-heading">
-				<span
-					>{String(step + 1).padStart(2, "0")} / {String(tabs.length).padStart(
-						2,
-						"0",
-					)}</span
-				>
-				<h2>{tabs[step].label}</h2>
-			</header>
-			<div class="creation-settings">
-				{#if loadError !== null}
-					<p class="ui-error" role="alert">{loadError}</p>
-				{:else if editor === null || heritage === null || gender === null || balance === null || buildControls === null}
-					<p role="status">Loading character choices…</p>
-				{:else}
-					{@const draft = editor.draft}
-					<UiTabPanel
-						id="creation-race"
-						labelledBy="creation-race-tab"
-						active={page === "race"}
-					>
-						<fieldset class="creation-fields" disabled={busy}>
-							<legend class="sr-only">Race</legend>
-							<label
-								><span class="creation-label"
-									><span class="pregame-icon" aria-hidden="true"
-										><HeritageIcon /></span
-									>Race</span
-								><select
-									class="ui-input"
-									value={editor.draft.heritage}
-									onchange={(event) => {
-										changeHeritage(Number(event.currentTarget.value));
-										event.currentTarget.value = String(
-											readEditor().draft.heritage,
-										);
-									}}
-									>{#each editor.catalog.heritages as choice}<option
-											value={choice.id}>{choice.name}</option
-										>{/each}</select
-								></label
-							>
-						</fieldset>
-						<section class="creation-lore" aria-label={`${heritage.name} lore`}>
-							{#each heritage.lore as paragraph}<p>{paragraph}</p>{/each}
-						</section>
-
-						<section aria-label="Racial benefits">
-							<h3 class="ui-section-heading">Racial benefits</h3>
-							<ul>
-								{#each heritage.benefits.descriptions as benefit}<li>
-										{benefit}
-									</li>{/each}
-							</ul>
-							{#each heritage.benefits.skillGroups as group}
-								<section
-									class="creation-starting-skills"
-									aria-label={group.label}
-								>
-									<h4 class="ui-section-heading">{group.label}</h4>
-									<ul>
-										{#each group.skills as name}<li>{name}</li>{/each}
-									</ul>
-								</section>
-							{/each}
-						</section>
-					</UiTabPanel>
-					<UiTabPanel
-						id="creation-appearance"
-						labelledBy="creation-appearance-tab"
-						active={page === "appearance"}
-					>
-						<fieldset class="creation-fields" disabled={busy}>
-							<legend class="sr-only">Body and appearance</legend>
-							{#each ordinalChoices as control}
-								{@const Icon = control.icon}
-								{#if gender[control.count] > 1}<div class="creation-field">
-										<span
-											class="creation-label"
-											id={`creation-appearance-${control.field}`}
-											><span class="pregame-icon" aria-hidden="true"
-												><Icon /></span
-											>{control.label}</span
-										><UiOrdinalRange
-											label={control.label}
-											labelledBy={`creation-appearance-${control.field}`}
-											value={editor.draft.appearance[control.field]}
-											count={gender[control.count]}
-											disabled={busy}
-											buttonClass="pregame-action pregame-round-button"
-											onchange={(value) =>
-												changeAppearance(control.field, value)}
-										/>
-									</div>{/if}
-							{/each}
-							<BodyAppearanceColors
-								value={editor.draft.appearance}
-								skinColors={gender.skinColors}
-								hairColors={gender.hairColors}
-								eyeColors={gender.eyeColors}
-								visible={page === "appearance"}
-								disabled={busy}
-								onchange={changeAppearance}
+					{#snippet tabLabel(value, label)}
+						{@const Icon = stepIcons[value]}
+						<span class="creation-step-icon pregame-icon" aria-hidden="true"
+							><Icon /></span
+						>
+						<span>{label}</span>
+					{/snippet}
+				</UiTabs>
+			</aside>
+			<div class="creation-preview">
+				<div class="creation-identity">
+					<label class="creation-name ui-hud-group"
+						><span id="creation-name-label" class="creation-name-label"
+							>Character name</span
+						><span class="creation-name-editor"
+							><input
+								class="ui-input"
+								type="text"
+								placeholder="Enter a name"
+								title={nameError === null ? undefined : nameError}
+								aria-labelledby="creation-name-label"
+								aria-invalid={nameError !== null}
+								aria-describedby={nameError === null
+									? undefined
+									: "creation-name-error"}
+								required
+								form="creation-review-form"
+								disabled={busy || editor === null}
+								value={editor === null ? "" : editor.draft.name}
+								oninput={(event) => {
+									nameEdited = true;
+									updateDraft({
+										...readEditor().draft,
+										name: event.currentTarget.value,
+									});
+								}}
 							/>
-							<button
-								class="pregame-action ui-button creation-randomize"
-								type="button"
-								onclick={randomizeAppearance}
-								><span class="pregame-icon" aria-hidden="true"
-									><RandomizeIcon /></span
-								>Randomize appearance</button
+							{#if nameError !== null}
+								<span
+									class="creation-name-error-icon pregame-icon"
+									title={nameError}
+									aria-hidden="true"><WarningIcon /></span
+								>
+								<span id="creation-name-error" class="sr-only" role="alert"
+									>{nameError}</span
+								>
+							{/if}
+						</span>
+					</label>
+					<!-- Olthoi gender records share the same body and appearance choices; retain the draft value. -->
+					{#if heritage === null || (heritage.id !== 12 && heritage.id !== 13)}
+						<div class="creation-gender" role="group" aria-label="Gender">
+							{#each [{ id: 1, name: "Male", icon: MaleIcon }, { id: 2, name: "Female", icon: FemaleIcon }] as choice}
+								{@const Icon = choice.icon}
+								<button
+									class="ui-button ui-icon-button pregame-action pregame-round-button"
+									type="button"
+									data-gender={choice.id}
+									aria-label={choice.name}
+									title={choice.name}
+									aria-pressed={editor !== null &&
+										editor.draft.gender === choice.id}
+									disabled={busy ||
+										heritage === null ||
+										!heritage.genders.some((body) => body.id === choice.id)}
+									onclick={() =>
+										changeBody(readEditor().draft.heritage, choice.id)}
+								>
+									<span class="pregame-icon" aria-hidden="true"><Icon /></span>
+								</button>
+							{/each}
+						</div>
+					{/if}
+				</div>
+				<div class="creation-viewport">
+					<ClientPregameCharacter
+						source={source === null
+							? null
+							: { subjectId: "creation", visual: source }}
+						{framing}
+						{scene}
+					/>
+				</div>
+				<div class="creation-focus">
+					<span class="creation-rotate ui-muted"
+						><span class="pregame-icon" aria-hidden="true"><RotateIcon /></span
+						>Drag to rotate</span
+					>
+					<button
+						class="pregame-action ui-button"
+						type="button"
+						disabled={editor === null}
+						aria-pressed={!face}
+						onclick={() => setFaceMode(false)}
+						><span class="pregame-icon" aria-hidden="true"><BodyIcon /></span
+						>Body</button
+					>
+					<button
+						class="pregame-action ui-button"
+						type="button"
+						disabled={editor === null}
+						aria-pressed={face}
+						onclick={() => setFaceMode(true)}
+						><span class="pregame-icon" aria-hidden="true"><FaceIcon /></span
+						>Face</button
+					>
+				</div>
+				{#if resolution.kind === "failed"}<p class="ui-error" role="alert">
+						{resolution.message}
+					</p>{/if}
+			</div>
+			<section class="creation-editor" aria-label="Character settings">
+				<header class="creation-editor-heading">
+					<span
+						>{String(step + 1).padStart(2, "0")} / {String(
+							tabs.length,
+						).padStart(2, "0")}</span
+					>
+					<h2>{tabs[step].label}</h2>
+				</header>
+				<div class="creation-settings">
+					{#if loadError !== null}
+						<p class="ui-error" role="alert">{loadError}</p>
+					{:else if editor === null || heritage === null || gender === null || balance === null || buildControls === null}
+						<p role="status">Loading character choices…</p>
+					{:else}
+						{@const draft = editor.draft}
+						<UiTabPanel
+							id="creation-race"
+							labelledBy="creation-race-tab"
+							active={page === "race"}
+						>
+							<fieldset class="creation-fields" disabled={busy}>
+								<legend class="sr-only">Race</legend>
+								<label
+									><span class="creation-label"
+										><span class="pregame-icon" aria-hidden="true"
+											><HeritageIcon /></span
+										>Race</span
+									><select
+										class="ui-input"
+										value={editor.draft.heritage}
+										onchange={(event) => {
+											changeHeritage(Number(event.currentTarget.value));
+											event.currentTarget.value = String(
+												readEditor().draft.heritage,
+											);
+										}}
+										>{#each editor.catalog.heritages as choice}<option
+												value={choice.id}>{choice.name}</option
+											>{/each}</select
+									></label
+								>
+							</fieldset>
+							<section
+								class="creation-lore"
+								aria-label={`${heritage.name} lore`}
 							>
+								{#each heritage.lore as paragraph}<p>{paragraph}</p>{/each}
+							</section>
 
-							{#if heritage.usesStarterClothing}
+							<section aria-label="Racial benefits">
+								<h3 class="ui-section-heading">Racial benefits</h3>
+								<ul>
+									{#each heritage.benefits.descriptions as benefit}<li>
+											{benefit}
+										</li>{/each}
+								</ul>
+								{#each heritage.benefits.skillGroups as group}
+									<section
+										class="creation-starting-skills"
+										aria-label={group.label}
+									>
+										<h4 class="ui-section-heading">{group.label}</h4>
+										<ul>
+											{#each group.skills as skill}<li>
+													<ClientStatIcon
+														target={{ kind: "skill", id: skill.id }}
+													/>{skill.name}
+												</li>{/each}
+										</ul>
+									</section>
+								{/each}
+							</section>
+						</UiTabPanel>
+						<UiTabPanel
+							id="creation-appearance"
+							labelledBy="creation-appearance-tab"
+							active={page === "appearance"}
+						>
+							<fieldset class="creation-fields" disabled={busy}>
+								<legend class="sr-only">Body and appearance</legend>
+								{#each ordinalChoices as control}
+									{@const Icon = control.icon}
+									{#if gender[control.count] > 1}<div class="creation-field">
+											<span
+												class="creation-label"
+												id={`creation-appearance-${control.field}`}
+												><span class="pregame-icon" aria-hidden="true"
+													><Icon /></span
+												>{control.label}</span
+											><UiOrdinalRange
+												label={control.label}
+												labelledBy={`creation-appearance-${control.field}`}
+												value={editor.draft.appearance[control.field]}
+												count={gender[control.count]}
+												disabled={busy}
+												buttonClass="pregame-action pregame-round-button"
+												onchange={(value) =>
+													changeAppearance(control.field, value)}
+											/>
+										</div>{/if}
+								{/each}
+								<BodyAppearanceColors
+									value={editor.draft.appearance}
+									skinColors={gender.skinColors}
+									hairColors={gender.hairColors}
+									eyeColors={gender.eyeColors}
+									visible={page === "appearance"}
+									disabled={busy}
+									onchange={changeAppearance}
+								/>
 								<button
 									class="pregame-action ui-button creation-randomize"
 									type="button"
-									onclick={randomizeClothes}
+									onclick={randomizeAppearance}
 									><span class="pregame-icon" aria-hidden="true"
-										><ClothesIcon /></span
-									>Randomize clothes<span
-										class="pregame-icon"
-										aria-hidden="true"><RandomizeIcon /></span
-									></button
+										><RandomizeIcon /></span
+									>Randomize appearance</button
 								>
-							{/if}
-						</fieldset>
-					</UiTabPanel>
-					<UiTabPanel
-						id="creation-skills-stats"
-						labelledBy="creation-skills-stats-tab"
-						active={page === "skills-stats"}
-					>
-						<fieldset class="creation-fields" disabled={busy}>
-							<legend class="sr-only">Attributes and skills</legend>
-							<section aria-labelledby="creation-attributes-heading">
-								<h3
-									id="creation-attributes-heading"
-									class="ui-section-heading creation-build-heading"
-								>
-									Attributes
-								</h3>
-								<div class="creation-fields">
-									{#each buildControls.attributes as control}
-										<div class="creation-attribute-row">
-											<details>
-												<summary>{control.label}</summary>
-												<div class="creation-description">
-													<p>
-														{editor.catalog.attributeDescriptions[
-															control.index
-														]}
-													</p>
-												</div>
-											</details>
-											<label
-												><span class="sr-only">{control.label}</span><span
-													class="creation-variant"
-													><input
-														type="range"
-														class="creation-attribute-range"
-														class:exhausted={buildControls.balance
-															.attributes === 0}
-														title={buildControls.balance.attributes === 0
-															? "No attribute points remaining. Lower an attribute to reclaim points."
-															: undefined}
-														min={control.minimum}
-														max={control.maximum}
-														step="1"
-														value={control.value}
-														oninput={(event) =>
-															changeAttribute(
-																control.index,
-																event.currentTarget.valueAsNumber,
-															)}
-													/><span class="ui-mono" aria-hidden="true"
-														>{control.value}</span
-													></span
-												></label
-											>
-										</div>
-									{/each}
-								</div>
-							</section>
-							{@render startingVitals()}
-							<section aria-labelledby="creation-skills-heading">
-								<h3
-									id="creation-skills-heading"
-									class="ui-section-heading creation-build-heading"
-								>
-									Skills
-								</h3>
-								<div class="creation-skill-groups">
-									{#each advancements.toReversed() as group}
-										{@const rows = buildControls.skills.filter(
-											(row) => row.training === group.value,
-										)}
-										<section
-											aria-labelledby={`creation-skill-group-${group.value}`}
-										>
-											<h4
-												id={`creation-skill-group-${group.value}`}
-												class="creation-skill-group-heading"
-											>
-												{group.label}
-											</h4>
-											<div class="creation-skill-group-content">
-												{#if rows.length === 0}<p class="ui-muted">None</p>{/if}
-												{#each rows as row (row.skill.id)}
-													{@const formula = creationSkillFormulaText(
-														row.skill.formula,
-													)}
-													<ClientPregameExpandableRow
-														className="creation-skill-row"
-													>
-														{#snippet summary()}<span
-																class="creation-skill-name"
-																>{row.skill.name}</span
-															>
-															{#if startingStats !== null}
-																{@const startingLevel = startingSkillLevel(
-																	row.skill.id,
-																)}
-																<span
-																	class="creation-skill-level ui-mono"
-																	data-starting-skill={row.skill.id}
-																	aria-label={`${row.skill.name} starting level: ${startingLevel}`}
-																	title={startingLevel}
-																	>{startingLevel === "Unavailable"
-																		? "—"
-																		: startingLevel}</span
-																>
-															{/if}
-														{/snippet}
-														{#snippet actions()}
-															{#each ["downgrade", "upgrade"] as direction}
-																{@const action =
-																	direction === "upgrade"
-																		? row.upgrade
-																		: row.downgrade}
-																{@const caption =
-																	action.kind === "blocked"
-																		? action.reason
-																		: `${Math.abs(action.credits)} credits ${direction === "upgrade" ? "cost" : "refunded"}`}
-																<button
-																	class="ui-stat-action"
-																	class:active={action.kind === "available"}
-																	type="button"
-																	data-direction={direction === "upgrade"
-																		? "up"
-																		: "down"}
-																	disabled={action.kind === "blocked"}
-																	aria-label={`${row.skill.name}: ${action.label}. ${caption}`}
-																	title={`${action.label}: ${caption}`}
-																	onclick={() =>
-																		changeSkill(
-																			row.skill.id,
-																			direction === "upgrade"
-																				? "upgrade"
-																				: "downgrade",
-																		)}
-																>
-																	<span
-																		class="ui-stat-action-shape"
-																		aria-hidden="true"><UpgradeTriangle /></span
-																	><span class="ui-stat-action-label"
-																		>{action.credits === null
-																			? "—"
-																			: Math.abs(action.credits)}</span
-																	>
-																</button>
-															{/each}
-														{/snippet}
 
-														{#if row.skill.description.length > 0}<p>
-																{row.skill.description}
-															</p>{/if}
-														{#if formula !== null}<p class="ui-mono">
-																Formula: {formula}
-															</p>{/if}
-													</ClientPregameExpandableRow>
-												{/each}
-											</div>
-										</section>
-									{/each}
-								</div>
-							</section>
-						</fieldset>
-					</UiTabPanel>
-					<UiTabPanel
-						id="creation-review"
-						labelledBy="creation-review-tab"
-						active={page === "review"}
-					>
-						<form
-							id="creation-review-form"
-							class="creation-fields"
-							onsubmit={submit}
+								{#if heritage.usesStarterClothing}
+									<button
+										class="pregame-action ui-button creation-randomize"
+										type="button"
+										onclick={randomizeClothes}
+										><span class="pregame-icon" aria-hidden="true"
+											><ClothesIcon /></span
+										>Randomize clothes<span
+											class="pregame-icon"
+											aria-hidden="true"><RandomizeIcon /></span
+										></button
+									>
+								{/if}
+							</fieldset>
+						</UiTabPanel>
+						<UiTabPanel
+							id="creation-skills-stats"
+							labelledBy="creation-skills-stats-tab"
+							active={page === "skills-stats"}
 						>
 							<fieldset class="creation-fields" disabled={busy}>
-								<legend class="sr-only">Review and create</legend>
-								<label
-									>Starting town<select
-										class="ui-input"
-										value={editor.draft.startArea}
-										onchange={(event) =>
-											updateDraft({
-												...readEditor().draft,
-												startArea: Number(event.currentTarget.value),
-											})}
-										>{#each heritage.startAreaIds as id}{@const area =
-												editor.catalog.startAreas.find(
-													(entry) => entry.id === id,
-												)}{#if area !== undefined}<option value={id}
-													>{area.name}</option
-												>{/if}{/each}</select
-									></label
-								>
-								<dl class="creation-summary creation-review-identity ui-well">
-									<div class="creation-review-name">
-										<dt>Name</dt>
-										<dd>{draft.name.trim() || "Not entered"}</dd>
-									</div>
-									<div>
-										<dt>Race</dt>
-										<dd>{heritage.name}</dd>
-									</div>
-									<div>
-										<dt>Gender</dt>
-										<dd>{gender.name}</dd>
-									</div>
-								</dl>
-								<dl class="creation-summary creation-credit-balances ui-well">
-									<div>
-										<dt>Attribute points remaining</dt>
-										<dd>{balance.attributes}</dd>
-									</div>
-									<div>
-										<dt>Skill credits remaining</dt>
-										<dd>{balance.skills}</dd>
-									</div>
-								</dl>
-								<section aria-labelledby="creation-review-attributes-heading">
+								<legend class="sr-only">Attributes and skills</legend>
+								<section aria-labelledby="creation-attributes-heading">
 									<h3
-										id="creation-review-attributes-heading"
-										class="ui-section-heading"
+										id="creation-attributes-heading"
+										class="ui-section-heading creation-build-heading"
 									>
-										Starting attributes
+										Attributes
 									</h3>
-									<dl class="creation-summary creation-review-attributes">
-										{#each attributes as label, index}<div>
-												<dt>{label}</dt>
-												<dd>{draft.attributes[index]}</dd>
-											</div>{/each}
-									</dl>
+									<div class="creation-fields">
+										{#each buildControls.attributes as control}
+											<div class="creation-attribute-row">
+												<details>
+													<summary
+														><ClientStatIcon
+															target={{ kind: "attribute", id: control.index }}
+														/>{control.label}</summary
+													>
+													<div class="creation-description">
+														<p>
+															{editor.catalog.attributeDescriptions[
+																control.index
+															]}
+														</p>
+													</div>
+												</details>
+												<label
+													><span class="sr-only">{control.label}</span><span
+														class="creation-variant"
+														><input
+															type="range"
+															class="creation-attribute-range"
+															class:exhausted={buildControls.balance
+																.attributes === 0}
+															title={buildControls.balance.attributes === 0
+																? "No attribute points remaining. Lower an attribute to reclaim points."
+																: undefined}
+															min={control.minimum}
+															max={control.maximum}
+															step="1"
+															value={control.value}
+															oninput={(event) =>
+																changeAttribute(
+																	control.index,
+																	event.currentTarget.valueAsNumber,
+																)}
+														/><span class="ui-mono" aria-hidden="true"
+															>{control.value}</span
+														></span
+													></label
+												>
+											</div>
+										{/each}
+									</div>
 								</section>
 								{@render startingVitals()}
-								<div class="creation-review-skills">
-									{#each advancements
-										.filter((entry) => entry.value >= 2)
-										.toReversed() as advancement}
-										{@const skills = heritage.skills
-											.filter(
-												(skill) => draft.skills[skill.id] === advancement.value,
-											)
-											.toSorted((a, b) => a.name.localeCompare(b.name))}
-										<section
-											aria-labelledby={`creation-review-skills-${advancement.value}`}
-										>
-											<h3
-												id={`creation-review-skills-${advancement.value}`}
-												class="ui-section-heading"
+								<section aria-labelledby="creation-skills-heading">
+									<h3
+										id="creation-skills-heading"
+										class="ui-section-heading creation-build-heading"
+									>
+										Skills
+									</h3>
+									<div class="creation-skill-groups">
+										{#each advancements.toReversed() as group}
+											{@const rows = buildControls.skills.filter(
+												(row) => row.training === group.value,
+											)}
+											<section
+												aria-labelledby={`creation-skill-group-${group.value}`}
 											>
-												{advancement.label} skills
-											</h3>
-											{#if skills.length === 0}<p class="ui-muted">
-													None
-												</p>{:else}<ul class="creation-skills">
-													{#each skills as skill}<li>
-															{skill.name}{#if startingStats !== null}<span
-																	class="ui-mono"
-																	data-starting-skill={skill.id}
-																	>{startingSkillLevel(skill.id)}</span
-																>{/if}
-														</li>{/each}
-												</ul>{/if}
-										</section>
-									{/each}
-								</div>
+												<h4
+													id={`creation-skill-group-${group.value}`}
+													class="creation-skill-group-heading"
+												>
+													{group.label}
+												</h4>
+												<div class="creation-skill-group-content">
+													{#if rows.length === 0}<p class="ui-muted">
+															None
+														</p>{/if}
+													{#each rows as row (row.skill.id)}
+														{@const formula = creationSkillFormulaText(
+															row.skill.formula,
+														)}
+														<ClientPregameExpandableRow
+															className="creation-skill-row"
+														>
+															{#snippet summary()}<span
+																	class="creation-skill-name"
+																	><ClientStatIcon
+																		target={{ kind: "skill", id: row.skill.id }}
+																	/>{row.skill.name}</span
+																>
+																{#if startingStats !== null}
+																	{@const startingLevel = startingSkillLevel(
+																		row.skill.id,
+																	)}
+																	<span
+																		class="creation-skill-level ui-mono"
+																		data-starting-skill={row.skill.id}
+																		aria-label={`${row.skill.name} starting level: ${startingLevel}`}
+																		title={startingLevel}
+																		>{startingLevel === "Unavailable"
+																			? "—"
+																			: startingLevel}</span
+																	>
+																{/if}
+															{/snippet}
+															{#snippet actions()}
+																{#each ["downgrade", "upgrade"] as direction}
+																	{@const action =
+																		direction === "upgrade"
+																			? row.upgrade
+																			: row.downgrade}
+																	{@const caption =
+																		action.kind === "blocked"
+																			? action.reason
+																			: `${Math.abs(action.credits)} credits ${direction === "upgrade" ? "cost" : "refunded"}`}
+																	<button
+																		class="ui-stat-action"
+																		class:active={action.kind === "available"}
+																		type="button"
+																		data-direction={direction === "upgrade"
+																			? "up"
+																			: "down"}
+																		disabled={action.kind === "blocked"}
+																		aria-label={`${row.skill.name}: ${action.label}. ${caption}`}
+																		title={`${action.label}: ${caption}`}
+																		onclick={() =>
+																			changeSkill(
+																				row.skill.id,
+																				direction === "upgrade"
+																					? "upgrade"
+																					: "downgrade",
+																			)}
+																	>
+																		<span
+																			class="ui-stat-action-shape"
+																			aria-hidden="true"
+																			><UpgradeTriangle /></span
+																		><span class="ui-stat-action-label"
+																			>{action.credits === null
+																				? "—"
+																				: Math.abs(action.credits)}</span
+																		>
+																	</button>
+																{/each}
+															{/snippet}
+
+															{#if row.skill.description.length > 0}<p>
+																	{row.skill.description}
+																</p>{/if}
+															{#if formula !== null}<p class="ui-mono">
+																	Formula: {formula}
+																</p>{/if}
+														</ClientPregameExpandableRow>
+													{/each}
+												</div>
+											</section>
+										{/each}
+									</div>
+								</section>
 							</fieldset>
-						</form>
-					</UiTabPanel>
-				{/if}
-				<div class="creation-feedback">
-					{#if page === "skills-stats" && balance !== null}
-						<dl
-							class="creation-summary creation-credit-balances creation-build-balances ui-well"
-							aria-label="Remaining creation points"
+						</UiTabPanel>
+						<UiTabPanel
+							id="creation-review"
+							labelledBy="creation-review-tab"
+							active={page === "review"}
 						>
-							<div>
-								<dt>Attribute points remaining</dt>
-								<dd id="creation-attribute-credits">{balance.attributes}</dd>
-							</div>
-							<div>
-								<dt>Skill credits remaining</dt>
-								<dd id="creation-skill-credits">{balance.skills}</dd>
-							</div>
-						</dl>
+							<form
+								id="creation-review-form"
+								class="creation-fields"
+								onsubmit={submit}
+							>
+								<fieldset class="creation-fields" disabled={busy}>
+									<legend class="sr-only">Review and create</legend>
+									<label
+										>Starting town<select
+											class="ui-input"
+											value={editor.draft.startArea}
+											onchange={(event) =>
+												updateDraft({
+													...readEditor().draft,
+													startArea: Number(event.currentTarget.value),
+												})}
+											>{#each heritage.startAreaIds as id}{@const area =
+													editor.catalog.startAreas.find(
+														(entry) => entry.id === id,
+													)}{#if area !== undefined}<option value={id}
+														>{area.name}</option
+													>{/if}{/each}</select
+										></label
+									>
+									<dl class="creation-summary creation-review-identity ui-well">
+										<div class="creation-review-name">
+											<dt>Name</dt>
+											<dd>{draft.name.trim() || "Not entered"}</dd>
+										</div>
+										<div>
+											<dt>Race</dt>
+											<dd>{heritage.name}</dd>
+										</div>
+										<div>
+											<dt>Gender</dt>
+											<dd>{gender.name}</dd>
+										</div>
+									</dl>
+									<dl class="creation-summary creation-credit-balances ui-well">
+										<div>
+											<dt>Attribute points remaining</dt>
+											<dd>{balance.attributes}</dd>
+										</div>
+										<div>
+											<dt>Skill credits remaining</dt>
+											<dd>{balance.skills}</dd>
+										</div>
+									</dl>
+									<section aria-labelledby="creation-review-attributes-heading">
+										<h3
+											id="creation-review-attributes-heading"
+											class="ui-section-heading"
+										>
+											Starting attributes
+										</h3>
+										<dl class="creation-summary creation-review-attributes">
+											{#each attributes as label, index}<div>
+													<dt>
+														<ClientStatIcon
+															target={{ kind: "attribute", id: index }}
+														/>{label}
+													</dt>
+													<dd>{draft.attributes[index]}</dd>
+												</div>{/each}
+										</dl>
+									</section>
+									{@render startingVitals()}
+									<div class="creation-review-skills">
+										{#each advancements
+											.filter((entry) => entry.value >= 2)
+											.toReversed() as advancement}
+											{@const skills = heritage.skills
+												.filter(
+													(skill) =>
+														draft.skills[skill.id] === advancement.value,
+												)
+												.toSorted((a, b) => a.name.localeCompare(b.name))}
+											<section
+												aria-labelledby={`creation-review-skills-${advancement.value}`}
+											>
+												<h3
+													id={`creation-review-skills-${advancement.value}`}
+													class="ui-section-heading"
+												>
+													{advancement.label} skills
+												</h3>
+												{#if skills.length === 0}<p class="ui-muted">
+														None
+													</p>{:else}<ul class="creation-skills">
+														{#each skills as skill}<li>
+																<ClientStatIcon
+																	target={{ kind: "skill", id: skill.id }}
+																/>{skill.name}{#if startingStats !== null}<span
+																		class="ui-mono"
+																		data-starting-skill={skill.id}
+																		>{startingSkillLevel(skill.id)}</span
+																	>{/if}
+															</li>{/each}
+													</ul>{/if}
+											</section>
+										{/each}
+									</div>
+								</fieldset>
+							</form>
+						</UiTabPanel>
 					{/if}
-					{#if statsResolution.kind === "failed"}<p
-							class="ui-error"
-							role="alert"
-						>
-							Starting stats: {statsResolution.message}
-						</p>{/if}
-					{#if commandError !== null}<p class="ui-error" role="alert">
-							{commandError}
-						</p>{/if}
-					{#if management.kind === "rejected" && management.operation === "create"}<p
-							class="ui-error"
-							role="alert"
-						>
-							{management.message}
-						</p>{/if}
-					{#if management.kind === "uncertain"}<p class="ui-error" role="alert">
-							{management.message}
-						</p>{/if}
+					<div class="creation-feedback">
+						{#if page === "skills-stats" && balance !== null}
+							<dl
+								class="creation-summary creation-credit-balances creation-build-balances ui-well"
+								aria-label="Remaining creation points"
+							>
+								<div>
+									<dt>Attribute points remaining</dt>
+									<dd id="creation-attribute-credits">{balance.attributes}</dd>
+								</div>
+								<div>
+									<dt>Skill credits remaining</dt>
+									<dd id="creation-skill-credits">{balance.skills}</dd>
+								</div>
+							</dl>
+						{/if}
+						{#if statsResolution.kind === "failed"}<p
+								class="ui-error"
+								role="alert"
+							>
+								Starting stats: {statsResolution.message}
+							</p>{/if}
+						{#if commandError !== null}<p class="ui-error" role="alert">
+								{commandError}
+							</p>{/if}
+						{#if management.kind === "rejected" && management.operation === "create"}<p
+								class="ui-error"
+								role="alert"
+							>
+								{management.message}
+							</p>{/if}
+						{#if management.kind === "uncertain"}<p
+								class="ui-error"
+								role="alert"
+							>
+								{management.message}
+							</p>{/if}
+					</div>
 				</div>
-			</div>
-			<div class="creation-actions">
-				{#if page !== "race"}<button
-						class="pregame-action pregame-quiet ui-button"
-						type="button"
-						disabled={busy}
-						onclick={() => (page = tabs[step - 1].value)}
-						><span class="pregame-icon" aria-hidden="true"><BackIcon /></span
-						>Previous</button
-					>{/if}
-				{#if page === "review"}
-					<button
-						class="pregame-primary pregame-action ui-button"
-						type="submit"
-						form="creation-review-form"
-						disabled={busy || !canSubmit}
-						>{busy ? "Creating…" : "Create character"}</button
-					>
-				{:else}
-					<button
-						class="pregame-primary pregame-action ui-button"
-						type="button"
-						disabled={busy || editor === null}
-						onclick={() => (page = tabs[step + 1].value)}
-						>{tabs[step + 1].label}<span
-							class="creation-next pregame-icon"
-							aria-hidden="true"><BackIcon /></span
-						></button
-					>
-				{/if}
-			</div>
-		</section>
-	</div>
-</ClientPregameScreen>
+				<div class="creation-actions">
+					{#if page !== "race"}<button
+							class="pregame-action pregame-quiet ui-button"
+							type="button"
+							disabled={busy}
+							onclick={() => (page = tabs[step - 1].value)}
+							><span class="pregame-icon" aria-hidden="true"><BackIcon /></span
+							>Previous</button
+						>{/if}
+					{#if page === "review"}
+						<button
+							class="pregame-primary pregame-action ui-button"
+							type="submit"
+							form="creation-review-form"
+							disabled={busy || !canSubmit}
+							>{busy ? "Creating…" : "Create character"}</button
+						>
+					{:else}
+						<button
+							class="pregame-primary pregame-action ui-button"
+							type="button"
+							disabled={busy || editor === null}
+							onclick={() => (page = tabs[step + 1].value)}
+							>{tabs[step + 1].label}<span
+								class="creation-next pregame-icon"
+								aria-hidden="true"><BackIcon /></span
+							></button
+						>
+					{/if}
+				</div>
+			</section>
+		</div>
+	</ClientPregameScreen>
+</ClientStatArtwork>
 
 <style>
 	@layer components {

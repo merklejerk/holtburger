@@ -341,8 +341,8 @@ struct HeritageBenefits {
 struct CreationSkillGroup {
     /// Group heading, such as "Free skills".
     label: &'static str,
-    /// Authored skill names, alphabetized for browsing.
-    skills: Vec<String>,
+    /// Stable skill slots and authored names, alphabetized for browsing.
+    skills: Vec<NamedChoice>,
 }
 
 /// One body option and its indexed appearance controls.
@@ -666,7 +666,10 @@ fn heritage_benefit_text(heritage: u32, skills: &[SkillChoice]) -> Result<Herita
         } else {
             &mut trained
         };
-        group.push(skill.identity.name.clone());
+        group.push(NamedChoice {
+            id: skill.identity.id,
+            name: skill.identity.name.clone(),
+        });
     }
     let skill_groups = [
         ("Free skills", free),
@@ -678,7 +681,7 @@ fn heritage_benefit_text(heritage: u32, skills: &[SkillChoice]) -> Result<Herita
         if skills.is_empty() {
             return None;
         }
-        skills.sort();
+        skills.sort_by(|a, b| a.name.cmp(&b.name));
         Some(CreationSkillGroup { label, skills })
     })
     .collect();
@@ -716,11 +719,32 @@ mod tests {
         let normal = heritage_benefit_text(1, &skills).unwrap();
         assert_eq!(normal.skill_groups.len(), 3);
         assert_eq!(normal.skill_groups[0].label, "Free skills");
-        assert_eq!(normal.skill_groups[0].skills, ["Alpha", "Beta"]);
+        assert_eq!(
+            normal.skill_groups[0]
+                .skills
+                .iter()
+                .map(|skill| skill.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Alpha", "Beta"]
+        );
         assert_eq!(normal.skill_groups[1].label, "Required training");
-        assert_eq!(normal.skill_groups[1].skills, ["Required"]);
+        assert_eq!(
+            normal.skill_groups[1]
+                .skills
+                .iter()
+                .map(|skill| skill.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Required"]
+        );
         assert_eq!(normal.skill_groups[2].label, "Required specialization");
-        assert_eq!(normal.skill_groups[2].skills, ["Specialized"]);
+        assert_eq!(
+            normal.skill_groups[2]
+                .skills
+                .iter()
+                .map(|skill| skill.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Specialized"]
+        );
         assert!(
             normal
                 .descriptions

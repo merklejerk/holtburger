@@ -282,6 +282,7 @@
 		--ui-overlay-padding: 12px;
 		--ui-overlay-gap: 8px;
 		--ui-overlay-icon-size: 16px;
+		--ui-stat-icon-size: 24px;
 		/* Square menu grids use larger artwork than text-menu rows. Palette triggers share it. */
 		--ui-menu-grid-icon-size: 24px;
 		--ui-menu-grid-cell-size: 3rem;

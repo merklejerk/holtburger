@@ -75,7 +75,7 @@ fn request(specs: Vec<UiIconSpec>) -> PrepareUiIconsRequest {
             .collect(),
     }
 }
-fn rgba(result: &UiIconResult) -> Vec<u8> {
+fn decoded_rgba(result: &UiIconResult) -> UiImage {
     let bytes = match result {
         UiIconResult::Ready { image } | UiIconResult::Degraded { image, .. } => image,
         UiIconResult::Failed { .. } => panic!("expected image"),
@@ -84,12 +84,72 @@ fn rgba(result: &UiIconResult) -> Vec<u8> {
     let mut reader = decoder.read_info().unwrap();
     let mut pixels = vec![0; reader.output_buffer_size().unwrap()];
     let info = reader.next_frame(&mut pixels).unwrap();
+    pixels.truncate(info.buffer_size());
+    UiImage {
+        width: info.width,
+        height: info.height,
+        pixels,
+    }
+}
+
+fn rgba(result: &UiIconResult) -> Vec<u8> {
+    let image = decoded_rgba(result);
     assert_eq!(
-        (info.width, info.height),
+        (image.width, image.height),
         (ICON_SIZE as u32, ICON_SIZE as u32)
     );
-    pixels.truncate(info.buffer_size());
-    pixels
+    image.pixels
+}
+
+#[test]
+fn standalone_art_preserves_native_extent_and_every_pixel() {
+    // Covers skill/attribute sizes and a larger rectangular standalone graphic.
+    for (width, height) in [(20, 20), (25, 25), (64, 48)] {
+        let mut assets = Assets::default();
+        let pixels: Vec<_> = (0..width * height)
+            .flat_map(|index| [index as u8, 34, 56, 255])
+            .collect();
+        assets.images.insert(
+            1,
+            Arc::new(UiImage {
+                width,
+                height,
+                pixels: pixels.clone(),
+            }),
+        );
+        let results = prepare_with_assets(
+            &mut assets,
+            &request(vec![UiIconSpec::Base {
+                base: NonZeroU32::new(1).unwrap(),
+            }]),
+        )
+        .unwrap();
+        let image = decoded_rgba(&results[0].result);
+        assert_eq!((image.width, image.height), (width, height));
+        assert_eq!(image.pixels, pixels);
+    }
+}
+
+#[test]
+fn png_encoding_rejects_invalid_extents_and_decoded_pixel_budgets() {
+    assert!(
+        encode_png(&[], 0, 1)
+            .unwrap_err()
+            .to_string()
+            .contains("empty icon source extent")
+    );
+    assert!(
+        encode_png(&[], (MAX_ICON_FRAME_BYTES / 4 + 1) as u32, 1)
+            .unwrap_err()
+            .to_string()
+            .contains("decoded pixel budget")
+    );
+    assert!(
+        encode_png(&[], 1, 1)
+            .unwrap_err()
+            .to_string()
+            .contains("invalid icon RGBA byte extent")
+    );
 }
 
 #[test]

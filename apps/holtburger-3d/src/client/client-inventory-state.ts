@@ -1,3 +1,7 @@
+import {
+	ContentsArrivals,
+	type ContentsArrival,
+} from "./client-contents-arrivals";
 import { retainContentsVisuals } from "./client-contents-visuals";
 import { clientInventoryMembership } from "./client-inventory-sections";
 import type { ItemCapacity } from "../app/item-capacity";
@@ -110,6 +114,9 @@ export class ClientInventoryState {
 	#sortMode: ContentsSortMode = "native";
 	#view: ClientInventoryView | null = null;
 	#disposed = false;
+	/** Arrival history follows the accepted inventory lifetime, independent of mounted panels. */
+	readonly #arrivals = new ContentsArrivals();
+	readonly #arrivalListeners = new Set<(arrivals: ContentsArrival) => void>();
 
 	constructor(
 		lifecycle: InventoryLifecycle,
@@ -123,6 +130,7 @@ export class ClientInventoryState {
 		this.#owner = icons.createOwner("persistent");
 		this.pyrealIconKey = icons.retain(this.#owner, PYREAL_ICON_SPEC);
 		this.#unsubscribe = lifecycle.subscribe((event) => {
+			if (event.type === "resyncing") this.#arrivals.update([], true);
 			const state =
 				event.type === "lifecycle"
 					? event.lifecycle
@@ -136,6 +144,14 @@ export class ClientInventoryState {
 			() => this.#refresh(),
 			CLIENT_TUNING.inventory.displayIntervalMs,
 		);
+	}
+
+	/** Notifications are live-only: opening a panel never replays unseen arrivals. */
+	subscribeArrivals(receive: (arrivals: ContentsArrival) => void): () => void {
+		this.#arrivalListeners.add(receive);
+		return () => {
+			this.#arrivalListeners.delete(receive);
+		};
 	}
 
 	/** Group and sort only when a mounted consumer asks; hidden maintenance does neither. */
@@ -202,6 +218,7 @@ export class ClientInventoryState {
 	destroy(): void {
 		if (this.#disposed) return;
 		this.#disposed = true;
+		this.#arrivalListeners.clear();
 		clearInterval(this.#timer);
 		this.#unsubscribe();
 		this.icons.releaseOwner(this.#owner);
@@ -210,6 +227,7 @@ export class ClientInventoryState {
 	}
 
 	#reset(): void {
+		this.#arrivals.update([], true);
 		// Entry/initial-entry may both arrive; resetting an empty baseline is idempotent.
 		if (this.#baseline !== null) {
 			for (const key of this.#baseline.retainedKeys)
@@ -232,7 +250,10 @@ export class ClientInventoryState {
 			this.#pending = pending;
 			this.#view = null;
 		}
-		if (pending || read.kind !== "current") return;
+		if (pending || read.kind !== "current") {
+			this.#arrivals.update([], true);
+			return;
+		}
 		const level = read.level;
 		if (this.#baseline?.worldRevision === level.revision) return;
 		if (
@@ -284,6 +305,17 @@ export class ClientInventoryState {
 		};
 		this.#pending = false;
 		this.#view = null;
+		const arrivals = this.#arrivals.update(
+			membership === null
+				? []
+				: [membership.root, ...membership.containers].map((container) => ({
+						container,
+						children: membership.children.get(container.guid) ?? [],
+					})),
+			false,
+		);
+		if (arrivals.size > 0)
+			for (const receive of this.#arrivalListeners) receive(arrivals);
 	}
 }
 

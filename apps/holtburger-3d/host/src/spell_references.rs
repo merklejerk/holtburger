@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 pub use cantrips::CantripTier;
 use cantrips::classify_cantrip;
 
-use crate::{shared_host_content::SharedHostContent, ui_icons::UiIconSpec};
+use crate::{
+    shared_host_content::SharedHostContent,
+    ui_icons::{UiIconArtwork, UiIconSpec},
+};
 
 /// Bound reference work independently of PNG preparation batches.
 pub const MAX_SPELL_REFERENCE_BATCH: usize = 128;
@@ -42,20 +45,6 @@ impl LoadSpellReferencesRequest {
         }
         Ok(())
     }
-}
-
-/// Preserve the name even if a required icon mapping cannot be resolved.
-#[derive(Debug, Serialize)]
-#[serde(tag = "kind", rename_all = "kebab-case")]
-pub enum SpellArtwork {
-    Ready {
-        /// Complete resolved recipe consumed by the shared icon repository.
-        spec: UiIconSpec,
-    },
-    Failed {
-        /// Bounded diagnostic preserved alongside the authored name.
-        detail: String,
-    },
 }
 
 /// Immutable authored inspection facts, independent of current character state.
@@ -94,7 +83,7 @@ pub enum SpellReferenceResult {
         /// Static examination facts, available even if artwork fails.
         details: SpellDetails,
         /// Resolved visual inputs or their explicit failure.
-        artwork: SpellArtwork,
+        artwork: UiIconArtwork,
     },
     Missing {
         /// Keep a known player spell visible even when static content lacks it.
@@ -125,8 +114,8 @@ fn project_references(
             };
             let artwork =
                 match spell_icon_spec(assets, spell.icon_id, spell.power_tier, spell.flags) {
-                    Ok(spec) => SpellArtwork::Ready { spec },
-                    Err(error) => SpellArtwork::Failed {
+                    Ok(spec) => UiIconArtwork::Ready { spec },
+                    Err(error) => UiIconArtwork::Failed {
                         detail: error.to_string().chars().take(1024).collect(),
                     },
                 };
@@ -198,7 +187,7 @@ pub struct SpellComponentReference {
     /// Authored display name.
     pub name: String,
     /// Explicit image availability; missing art does not hide the name.
-    pub artwork: SpellArtwork,
+    pub artwork: UiIconArtwork,
 }
 
 /// The measured component table has 163 entries; one lazy content lookup serves all inspectors.
@@ -209,10 +198,10 @@ pub fn load_spell_components(content: &SharedHostContent) -> Result<Vec<SpellCom
         .into_iter()
         .map(|(id, component)| {
             let artwork = match NonZeroU32::new(component.icon) {
-                Some(base) => SpellArtwork::Ready {
+                Some(base) => UiIconArtwork::Ready {
                     spec: UiIconSpec::SpellComponent { base },
                 },
-                None => SpellArtwork::Failed {
+                None => UiIconArtwork::Failed {
                     detail: "Component artwork identity is zero".into(),
                 },
             };
@@ -282,7 +271,7 @@ mod tests {
                 duration_seconds: Some(60.0),
                 cantrip_tier: None,
             },
-            artwork: SpellArtwork::Ready {
+            artwork: UiIconArtwork::Ready {
                 spec: spell_icon_spec(&mut Mappings, 1, 10, 0x2008).unwrap(),
             },
         };
@@ -405,7 +394,7 @@ mod tests {
             SpellReferenceResult::Known {
                 name,
                 details: SpellDetails { cantrip_tier: Some(CantripTier::Minor), .. },
-                artwork: SpellArtwork::Failed { detail },
+                artwork: UiIconArtwork::Failed { detail },
                 ..
             } if name == "Minor Strength" && detail.contains("no entry")
         ));

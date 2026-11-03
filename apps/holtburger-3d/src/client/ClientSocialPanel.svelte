@@ -331,6 +331,7 @@
 {#if visible && creationPlayer !== null && view.preferences !== null}
 	<ClientPartyCreateDialog
 		preferences={view.preferences}
+		initialName={view.suggestedName}
 		onCancel={() => (creationPlayer = null)}
 		onSubmit={(name, settings) => {
 			const current = owner.read();

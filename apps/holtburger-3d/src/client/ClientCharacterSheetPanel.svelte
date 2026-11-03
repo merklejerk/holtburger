@@ -1,4 +1,11 @@
 <script lang="ts">
+	import { progressionFeedback } from "./client-progression-feedback";
+	import "./client-progression-feedback.css";
+	import ClientStatArtwork from "./ClientStatArtwork.svelte";
+	import ClientStatIcon from "./ClientStatIcon.svelte";
+	import type { StatArtworkServices } from "./client-stat-artwork";
+	import type { UiIconRepository } from "../app/ui-icon-repository";
+	import { attributeSkillSynergies } from "./client-attribute-synergies";
 	import { untrack } from "svelte";
 	import ClientSpellsPanel from "./ClientSpellsPanel.svelte";
 	import UiQuantity from "../app/UiQuantity.svelte";
@@ -25,6 +32,9 @@
 
 	interface Props {
 		readonly owner: ClientCharacterSheetState;
+		/** Static artwork uses the session repository without entering character snapshots. */
+		readonly statArtwork: StatArtworkServices;
+		readonly icons: UiIconRepository;
 		/** Retained window visibility pauses hidden display polling. */
 		readonly visible: boolean;
 		/** Confirmed magic stance permits the spellbook's existing cast action. */
@@ -36,6 +46,8 @@
 	}
 	const {
 		owner,
+		statArtwork,
+		icons,
 		spells,
 		enchantments,
 		visible,
@@ -171,6 +183,12 @@
 				name(a.stat.skill_type).localeCompare(name(b.stat.skill_type)),
 			),
 	);
+	const attributeSynergies = $derived(
+		attributeSkillSynergies(skills.map((row) => row.stat)),
+	);
+	const synergyNumber = new Intl.NumberFormat(undefined, {
+		maximumFractionDigits: 2,
+	});
 	const specializedSkills = $derived(
 		skills.filter((row) => row.stat.training === "Specialized"),
 	);
@@ -483,7 +501,7 @@
 {/snippet}
 
 {#snippet statValue(base: number, effective: number)}
-	<strong
+	<strong class="progression-value"
 		>{base}{#if effective !== base}<span
 				class="stat-effect"
 				class:increased={effective > base}
@@ -507,6 +525,7 @@
 		{@const details = detailLines(stat)}
 		<details
 			class="stat-row"
+			data-progression-target={progressionTargetKey(target)}
 			name="character-stat"
 			ontoggle={(event) => {
 				if (event.currentTarget.open) void resolveSpells(stat);
@@ -514,7 +533,9 @@
 		>
 			<summary>
 				<span
-					>{name(stat.skill_type)}{@render progressionHint(
+					><ClientStatIcon {target} />{name(
+						stat.skill_type,
+					)}{@render progressionHint(
 						stat,
 						actions,
 					)}{#if stat.training === "Unusable"}
@@ -536,342 +557,376 @@
 	{/each}
 {/snippet}
 
-<section
-	class="character-sheet ui-body ui-tabbed-panel"
-	aria-label="Character sheet"
+<ClientStatArtwork
+	services={statArtwork}
+	repository={icons}
+	visible={visible && activeTab === "progression"}
 >
-	<UiTabs
-		label="Character sheet tabs"
-		{tabs}
-		selected={activeTab}
-		onSelect={(value) => {
-			activeTab = value;
-			if (value === "spells") spellbookOpened = true;
-		}}
-	/>
-	<UiTabPanel
-		id={`${panelId}-progression`}
-		labelledBy={`${panelId}-progression-tab`}
-		active={activeTab === "progression"}
-		scroll={false}
+	<section
+		class="character-sheet ui-body ui-tabbed-panel"
+		aria-label="Character sheet"
 	>
-		<div class="progression-page">
-			<div class="progression-scroll">
-				{#if sheet === null}
-					<p role="status">Waiting for character details…</p>
-				{:else}
-					<header class="progression-summary">
-						<div class="character-identity">
-							<div
-								class="level-emblem"
-								aria-label={`Level ${sheet.level.level}`}
-							>
-								<small>Level</small><strong>{sheet.level.level}</strong>
-							</div>
-							<div class="identity-text">
-								<strong class="character-name"
-									>{sheet.name ?? "Character"}</strong
-								>{#if titleSelection === null && sheet.title}<span
-										class="character-title">{sheet.title}</span
-									>{/if}
-								<label
-									>Title
-									<select
-										class="ui-input"
-										aria-label="Character title"
-										value={titleSelection?.selectedId ?? 0}
-										disabled={titleSelection === null ||
-											titleEntries.length === 0}
-										onchange={(event) =>
-											void owner.selectTitle(Number(event.currentTarget.value))}
-									>
-										{#if titleSelection === null}
-											<option value={0} disabled>Loading titles…</option>
-										{:else if !selectedTitleListed}
-											<option value={titleSelection.selectedId} disabled>
-												{titleEntries.length === 0
-													? "No earned titles"
-													: titleSelection.selectedId === 0
-														? "No title selected"
-														: `Current title (ID ${titleSelection.selectedId})`}
-											</option>
-										{/if}
-										{#each titleEntries as entry (entry.id)}
-											<option value={entry.id}>{titleLabel(entry)}</option>
-										{/each}
-									</select>
-								</label>
-							</div>
-						</div>
-						{#if BigInt(sheet.level.xpForNextLevel) > 0n}
-							<div class="progress-track">
-								<div class="track-label">
-									<span>Level {sheet.level.level + 1}</span><span
-										><UiQuantity value={BigInt(sheet.level.xpIntoLevel)} /> / <UiQuantity
-											value={BigInt(sheet.level.xpForNextLevel)}
-										/> XP</span
-									>
-								</div>
-								<progress
-									class="ui-progress"
-									aria-label="Level experience"
-									max="100"
-									value={progressPercent(
-										BigInt(sheet.level.xpIntoLevel),
-										BigInt(sheet.level.xpForNextLevel),
-									)}
-								></progress>
-							</div>
-						{/if}
-
-						<!-- Retail reveals luminance at level 200 with nonzero capacity. -->
-						{#if sheet.level.level >= 200 && sheet.maximumLuminance !== null && BigInt(sheet.maximumLuminance) > 0n}
-							<div class="progress-track luminance-track">
-								<div class="track-label">
-									<span>Luminance</span><span
-										><UiQuantity
-											value={BigInt(sheet.level.availableLuminance)}
-										/> / <UiQuantity
-											value={BigInt(sheet.maximumLuminance)}
-										/></span
-									>
-								</div>
-								<progress
-									class="ui-progress"
-									aria-label="Luminance capacity"
-									title="Available luminance versus storage capacity"
-									max="100"
-									value={progressPercent(
-										BigInt(sheet.level.availableLuminance),
-										BigInt(sheet.maximumLuminance),
-									)}
-								></progress>
-							</div>
-						{/if}
-					</header>
-					{#if spellLoadError !== null}<p role="status" class="feedback">
-							{spellLoadError}
-						</p>{/if}
-					<h2 class="ui-section-heading">Vitals</h2>
-					{#each sheet.vitals as stat (stat.vital_type)}
-						{@const target = { Vital: stat.vital_type } as const}
-						{@const actions = raiseActions(target)}
-						{@const details = detailLines(stat)}
-						<details
-							class="stat-row"
-							name="character-stat"
-							ontoggle={(event) => {
-								if (event.currentTarget.open) void resolveSpells(stat);
-							}}
-						>
-							<summary>
-								<span
-									>Max {name(stat.vital_type)}{@render progressionHint(
-										stat,
-										actions,
-									)}</span
-								>
-								{@render statValue(stat.base, stat.buffed_max)}
-							</summary>
-							{@render actionButtons(`Max ${name(stat.vital_type)}`, actions)}
-							{#if details.length > 0}
-								<ul>
-									{#each details as line}<li>{line}</li>{/each}
-								</ul>
-							{/if}
-						</details>
-					{/each}
-					<h2 class="ui-section-heading">Attributes</h2>
-					{#each sheet.attributes as stat (stat.attr_type)}
-						{@const target = { Attribute: stat.attr_type } as const}
-						{@const actions = raiseActions(target)}
-						{@const details = detailLines(stat)}
-						<details
-							class="stat-row"
-							name="character-stat"
-							ontoggle={(event) => {
-								if (event.currentTarget.open) void resolveSpells(stat);
-							}}
-						>
-							<summary>
-								<span
-									>{name(stat.attr_type)}{@render progressionHint(
-										stat,
-										actions,
-									)}</span
-								>
-								{@render statValue(stat.base, stat.current)}
-							</summary>
-							{@render actionButtons(name(stat.attr_type), actions)}
-							{#if details.length > 0}
-								<ul>
-									{#each details as line}<li>{line}</li>{/each}
-								</ul>
-							{/if}
-						</details>
-					{/each}
-					{#if specializedSkills.length > 0}
-						<h2 class="ui-section-heading">Specialized</h2>
-						{@render skillRows(specializedSkills)}
-					{/if}
-					{#if trainedSkills.length > 0}
-						<h2 class="ui-section-heading">Trained</h2>
-						{@render skillRows(trainedSkills)}
-					{/if}
-					{#if untrainedSkills.length > 0}
-						<details class="skill-group">
-							<summary
-								><h2 class="ui-section-heading">
-									Untrained <small>({untrainedSkills.length})</small>
-								</h2></summary
-							>
-							{@render skillRows(untrainedSkills)}
-						</details>
-					{/if}
-				{/if}
-			</div>
-			{#if sheet !== null}
-				<footer class="progression-balances">
-					<div>
-						<small>Available XP</small><strong
-							use:hudAttention={sheet.level.unspentXp}
-							><UiQuantity value={BigInt(sheet.level.unspentXp)} /></strong
-						>
-					</div>
-					<div>
-						<small>Skill credits</small><strong
-							use:hudAttention={sheet.level.unspentSkillPoints}
-							>{sheet.level.unspentSkillPoints}</strong
-						>
-					</div>
-				</footer>
-			{/if}
-		</div>
-	</UiTabPanel>
-	<UiTabPanel
-		id={`${panelId}-defenses`}
-		labelledBy={`${panelId}-defenses-tab`}
-		active={activeTab === "defenses"}
-	>
-		{#if sheet === null}
-			<p role="status">Waiting for character details…</p>
-		{:else}
-			{#if spellLoadError !== null}<p role="status" class="feedback">
-					{spellLoadError}
-				</p>{/if}
-			<h2 class="ui-section-heading">Defenses</h2>
-			<details
-				class="stat-row"
-				name="character-defense"
-				ontoggle={(event) => {
-					if (event.currentTarget.open)
-						void resolveEffectSpells({ kind: "armor" });
+		<UiTabs
+			label="Character sheet tabs"
+			{tabs}
+			selected={activeTab}
+			onSelect={(value) => {
+				activeTab = value;
+				if (value === "spells") spellbookOpened = true;
+			}}
+		/>
+		<UiTabPanel
+			id={`${panelId}-progression`}
+			labelledBy={`${panelId}-progression-tab`}
+			active={activeTab === "progression"}
+			scroll={false}
+		>
+			<div
+				class="progression-page"
+				use:progressionFeedback={{
+					owner,
+					visible: visible && activeTab === "progression",
+					revision: display.revision,
 				}}
 			>
-				<summary><span>Armor</span><strong>{sheet.armor}</strong></summary>
-				<ul>
-					{#each defenseEffectLines({ kind: "armor" }) as line}<li>
-							{line}
-						</li>{/each}
-				</ul>
-			</details>
-			{#each RESISTANCE_ROWS as resistance (resistance.key)}
-				{@const resistancePercent = Math.round(
-					(1 - sheet.resistances[resistance.field]) * 100,
-				)}
+				<div class="progression-scroll">
+					{#if sheet === null}
+						<p role="status">Waiting for character details…</p>
+					{:else}
+						<header class="progression-summary">
+							<div class="character-identity">
+								<div
+									class="level-emblem"
+									aria-label={`Level ${sheet.level.level}`}
+								>
+									<small>Level</small><strong>{sheet.level.level}</strong>
+								</div>
+								<div class="identity-text">
+									<strong class="character-name"
+										>{sheet.name ?? "Character"}</strong
+									>{#if titleSelection === null && sheet.title}<span
+											class="character-title">{sheet.title}</span
+										>{/if}
+									<label
+										>Title
+										<select
+											class="ui-input"
+											aria-label="Character title"
+											value={titleSelection?.selectedId ?? 0}
+											disabled={titleSelection === null ||
+												titleEntries.length === 0}
+											onchange={(event) =>
+												void owner.selectTitle(
+													Number(event.currentTarget.value),
+												)}
+										>
+											{#if titleSelection === null}
+												<option value={0} disabled>Loading titles…</option>
+											{:else if !selectedTitleListed}
+												<option value={titleSelection.selectedId} disabled>
+													{titleEntries.length === 0
+														? "No earned titles"
+														: titleSelection.selectedId === 0
+															? "No title selected"
+															: `Current title (ID ${titleSelection.selectedId})`}
+												</option>
+											{/if}
+											{#each titleEntries as entry (entry.id)}
+												<option value={entry.id}>{titleLabel(entry)}</option>
+											{/each}
+										</select>
+									</label>
+								</div>
+							</div>
+							{#if BigInt(sheet.level.xpForNextLevel) > 0n}
+								<div class="progress-track">
+									<div class="track-label">
+										<span>Level {sheet.level.level + 1}</span><span
+											><UiQuantity value={BigInt(sheet.level.xpIntoLevel)} /> / <UiQuantity
+												value={BigInt(sheet.level.xpForNextLevel)}
+											/> XP</span
+										>
+									</div>
+									<progress
+										class="ui-progress"
+										aria-label="Level experience"
+										max="100"
+										value={progressPercent(
+											BigInt(sheet.level.xpIntoLevel),
+											BigInt(sheet.level.xpForNextLevel),
+										)}
+									></progress>
+								</div>
+							{/if}
+
+							<!-- Retail reveals luminance at level 200 with nonzero capacity. -->
+							{#if sheet.level.level >= 200 && sheet.maximumLuminance !== null && BigInt(sheet.maximumLuminance) > 0n}
+								<div class="progress-track luminance-track">
+									<div class="track-label">
+										<span>Luminance</span><span
+											><UiQuantity
+												value={BigInt(sheet.level.availableLuminance)}
+											/> / <UiQuantity
+												value={BigInt(sheet.maximumLuminance)}
+											/></span
+										>
+									</div>
+									<progress
+										class="ui-progress"
+										aria-label="Luminance capacity"
+										title="Available luminance versus storage capacity"
+										max="100"
+										value={progressPercent(
+											BigInt(sheet.level.availableLuminance),
+											BigInt(sheet.maximumLuminance),
+										)}
+									></progress>
+								</div>
+							{/if}
+						</header>
+						{#if spellLoadError !== null}<p role="status" class="feedback">
+								{spellLoadError}
+							</p>{/if}
+						<h2 class="ui-section-heading">Vitals</h2>
+						{#each sheet.vitals as stat (stat.vital_type)}
+							{@const target = { Vital: stat.vital_type } as const}
+							{@const actions = raiseActions(target)}
+							{@const details = detailLines(stat)}
+							<details
+								class="stat-row"
+								data-progression-target={progressionTargetKey(target)}
+								name="character-stat"
+								ontoggle={(event) => {
+									if (event.currentTarget.open) void resolveSpells(stat);
+								}}
+							>
+								<summary>
+									<span
+										><ClientStatIcon {target} />Max {name(
+											stat.vital_type,
+										)}{@render progressionHint(stat, actions)}</span
+									>
+									{@render statValue(stat.base, stat.buffed_max)}
+								</summary>
+								{@render actionButtons(`Max ${name(stat.vital_type)}`, actions)}
+								{#if details.length > 0}
+									<ul>
+										{#each details as line}<li>{line}</li>{/each}
+									</ul>
+								{/if}
+							</details>
+						{/each}
+						<h2 class="ui-section-heading">Attributes</h2>
+						{#each sheet.attributes as stat (stat.attr_type)}
+							{@const target = { Attribute: stat.attr_type } as const}
+							{@const actions = raiseActions(target)}
+							{@const details = detailLines(stat)}
+							{@const synergies = attributeSynergies.get(stat.attr_type)}
+							<details
+								class="stat-row"
+								data-progression-target={progressionTargetKey(target)}
+								name="character-stat"
+								ontoggle={(event) => {
+									if (event.currentTarget.open) void resolveSpells(stat);
+								}}
+							>
+								<summary>
+									<span
+										><ClientStatIcon {target} />{name(
+											stat.attr_type,
+										)}{@render progressionHint(stat, actions)}</span
+									>
+									{@render statValue(stat.base, stat.current)}
+								</summary>
+								{@render actionButtons(name(stat.attr_type), actions)}
+								{#if synergies !== undefined}
+									<p class="ui-muted">
+										Skill contributions per attribute point (before rounding and
+										modifiers)
+									</p>
+									<ul aria-label={`${name(stat.attr_type)} skill synergies`}>
+										{#each synergies as synergy (synergy.skill)}
+											<li>
+												<ClientStatIcon
+													target={{ Skill: synergy.skill }}
+												/>{name(synergy.skill)} × {synergyNumber.format(
+													synergy.multiplier,
+												)}
+											</li>
+										{/each}
+									</ul>
+								{/if}
+								{#if details.length > 0}
+									<ul>
+										{#each details as line}<li>{line}</li>{/each}
+									</ul>
+								{/if}
+							</details>
+						{/each}
+						{#if specializedSkills.length > 0}
+							<h2 class="ui-section-heading">Specialized</h2>
+							{@render skillRows(specializedSkills)}
+						{/if}
+						{#if trainedSkills.length > 0}
+							<h2 class="ui-section-heading">Trained</h2>
+							{@render skillRows(trainedSkills)}
+						{/if}
+						{#if untrainedSkills.length > 0}
+							<details class="skill-group">
+								<summary
+									><h2 class="ui-section-heading">
+										Untrained <small>({untrainedSkills.length})</small>
+									</h2></summary
+								>
+								{@render skillRows(untrainedSkills)}
+							</details>
+						{/if}
+					{/if}
+				</div>
+				{#if sheet !== null}
+					<footer class="progression-balances">
+						<div>
+							<small>Available XP</small><strong
+								use:hudAttention={sheet.level.unspentXp}
+								><UiQuantity value={BigInt(sheet.level.unspentXp)} /></strong
+							>
+						</div>
+						<div>
+							<small>Skill credits</small><strong
+								use:hudAttention={sheet.level.unspentSkillPoints}
+								>{sheet.level.unspentSkillPoints}</strong
+							>
+						</div>
+					</footer>
+				{/if}
+			</div>
+		</UiTabPanel>
+		<UiTabPanel
+			id={`${panelId}-defenses`}
+			labelledBy={`${panelId}-defenses-tab`}
+			active={activeTab === "defenses"}
+		>
+			{#if sheet === null}
+				<p role="status">Waiting for character details…</p>
+			{:else}
+				{#if spellLoadError !== null}<p role="status" class="feedback">
+						{spellLoadError}
+					</p>{/if}
+				<h2 class="ui-section-heading">Defenses</h2>
 				<details
 					class="stat-row"
 					name="character-defense"
 					ontoggle={(event) => {
 						if (event.currentTarget.open)
-							void resolveEffectSpells({
-								kind: "floatProperty",
-								key: resistance.key,
-							});
+							void resolveEffectSpells({ kind: "armor" });
 					}}
 				>
-					<summary
-						><span>{resistance.label}</span><strong
-							title="Damage reduction from this resistance. Negative values indicate vulnerability. Excludes armor and other damage modifiers; some attacks can bypass resistance."
-							>{resistancePercent}%</strong
-						></summary
-					>
+					<summary><span>Armor</span><strong>{sheet.armor}</strong></summary>
 					<ul>
-						{#each defenseEffectLines( { kind: "floatProperty", key: resistance.key } ) as line}<li
-							>
+						{#each defenseEffectLines({ kind: "armor" }) as line}<li>
 								{line}
 							</li>{/each}
 					</ul>
 				</details>
-			{/each}
-			{@const vitaePenaltyPercent = Math.round((1 - sheet.vitae) * 100)}
-			{#if vitaePenaltyPercent !== 0}<details
-					class="stat-row"
-					name="character-defense"
-					ontoggle={(event) => {
-						if (event.currentTarget.open)
-							void resolveEffectSpells({ kind: "vitae" });
-					}}
-				>
-					<summary
-						><span>Vitae penalty</span><strong>{vitaePenaltyPercent}%</strong
-						></summary
+				{#each RESISTANCE_ROWS as resistance (resistance.key)}
+					{@const resistancePercent = Math.round(
+						(1 - sheet.resistances[resistance.field]) * 100,
+					)}
+					<details
+						class="stat-row"
+						name="character-defense"
+						ontoggle={(event) => {
+							if (event.currentTarget.open)
+								void resolveEffectSpells({
+									kind: "floatProperty",
+									key: resistance.key,
+								});
+						}}
 					>
-					<ul>
-						{#each defenseEffectLines({ kind: "vitae" }) as line}<li>
-								{line}
-							</li>{/each}
-					</ul>
-				</details>{/if}
-		{/if}
-	</UiTabPanel>
-	<UiTabPanel
-		id={`${panelId}-spells`}
-		labelledBy={`${panelId}-spells-tab`}
-		active={activeTab === "spells"}
-		scroll={false}
-	>
-		{#if spellbookOpened}
-			{#if spells !== null}
-				{#key spells}
-					<ClientSpellsPanel
-						{spells}
-						visible={visible && activeTab === "spells"}
-						{castEnabled}
-						{onCastSpell}
-					/>
-				{/key}
-			{:else}
-				<p role="status">Waiting for spellbook…</p>
+						<summary
+							><span>{resistance.label}</span><strong
+								title="Damage reduction from this resistance. Negative values indicate vulnerability. Excludes armor and other damage modifiers; some attacks can bypass resistance."
+								>{resistancePercent}%</strong
+							></summary
+						>
+						<ul>
+							{#each defenseEffectLines( { kind: "floatProperty", key: resistance.key } ) as line}<li
+								>
+									{line}
+								</li>{/each}
+						</ul>
+					</details>
+				{/each}
+				{@const vitaePenaltyPercent = Math.round((1 - sheet.vitae) * 100)}
+				{#if vitaePenaltyPercent !== 0}<details
+						class="stat-row"
+						name="character-defense"
+						ontoggle={(event) => {
+							if (event.currentTarget.open)
+								void resolveEffectSpells({ kind: "vitae" });
+						}}
+					>
+						<summary
+							><span>Vitae penalty</span><strong>{vitaePenaltyPercent}%</strong
+							></summary
+						>
+						<ul>
+							{#each defenseEffectLines({ kind: "vitae" }) as line}<li>
+									{line}
+								</li>{/each}
+						</ul>
+					</details>{/if}
 			{/if}
-		{/if}
-	</UiTabPanel>
-</section>
+		</UiTabPanel>
+		<UiTabPanel
+			id={`${panelId}-spells`}
+			labelledBy={`${panelId}-spells-tab`}
+			active={activeTab === "spells"}
+			scroll={false}
+		>
+			{#if spellbookOpened}
+				{#if spells !== null}
+					{#key spells}
+						<ClientSpellsPanel
+							{spells}
+							visible={visible && activeTab === "spells"}
+							{castEnabled}
+							{onCastSpell}
+						/>
+					{/key}
+				{:else}
+					<p role="status">Waiting for spellbook…</p>
+				{/if}
+			{/if}
+		</UiTabPanel>
+	</section>
 
-{#if visible && activeTab === "progression" && trainingReview !== null && "Train" in trainingReview.quote.intent}
-	<UiDialog
-		className="client-skill-training-dialog"
-		title="Train skill"
-		initialFocus="[data-cancel-training]"
-		onCancel={() => (trainingReview = null)}
-	>
-		<p>
-			Train <strong>{name(trainingReview.quote.intent.Train.skill)}</strong> for
-			<UiQuantity value={trainingReview.quote.credits_spent} /> skill credits?
-		</p>
-		<div class="ui-dialog-actions">
-			<button
-				class="ui-button"
-				type="button"
-				data-cancel-training
-				onclick={() => (trainingReview = null)}>Cancel</button
-			>
-			<button class="ui-button" type="button" onclick={confirmTraining}
-				>Train</button
-			>
-		</div>
-	</UiDialog>
-{/if}
+	{#if visible && activeTab === "progression" && trainingReview !== null && "Train" in trainingReview.quote.intent}
+		<UiDialog
+			className="client-skill-training-dialog"
+			title="Train skill"
+			initialFocus="[data-cancel-training]"
+			onCancel={() => (trainingReview = null)}
+		>
+			<p>
+				Train <strong>{name(trainingReview.quote.intent.Train.skill)}</strong>
+				for
+				<UiQuantity value={trainingReview.quote.credits_spent} /> skill credits?
+			</p>
+			<div class="ui-dialog-actions">
+				<button
+					class="ui-button"
+					type="button"
+					data-cancel-training
+					onclick={() => (trainingReview = null)}>Cancel</button
+				>
+				<button class="ui-button" type="button" onclick={confirmTraining}
+					>Train</button
+				>
+			</div>
+		</UiDialog>
+	{/if}
+</ClientStatArtwork>
 
 <style>
 	@layer components {

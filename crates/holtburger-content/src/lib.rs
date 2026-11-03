@@ -25,6 +25,7 @@ pub mod setup_dimensions;
 pub mod soul_emote;
 mod source_reader;
 pub mod spells;
+pub mod stat_icons;
 pub mod terrain_collision;
 pub mod terrain_topology;
 #[cfg(test)]

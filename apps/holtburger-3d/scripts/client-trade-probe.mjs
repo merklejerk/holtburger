@@ -34,6 +34,10 @@ export async function probeTrade(client, evaluateExpression) {
 	);
 	await read(`${fixture}.register()`);
 	await wait("document.querySelector('[data-trade-panel]') !== null");
+	await wait(
+		`document.querySelector('.client-inventory [data-item-guid="6003"]')?.dataset.dimmed === 'true' && document.querySelector('.client-inventory [data-item-guid="6001"]')?.dataset.dimmed === 'false'`,
+	);
+
 	await read(`(async () => {
 		const panel = document.querySelector('[data-trade-panel]');
 		const reset = panel.querySelector('.trade-reset');
@@ -98,6 +102,10 @@ export async function probeTrade(client, evaluateExpression) {
 	if (add.kind !== "add" || add.item !== 6001)
 		throw new Error("Inventory drop did not submit a trade addition");
 	await read(`${fixture}.pending()`);
+	await wait(
+		`document.querySelector('.client-inventory [data-item-guid="6001"]')?.dataset.dimmed === 'true'`,
+	);
+
 	await wait(`${button("Confirm trade")}?.disabled === true`);
 	if (await read("document.querySelector('[data-trade-item]') !== null"))
 		throw new Error("Pending addition became a confirmed offer");
@@ -300,6 +308,10 @@ export async function probeTrade(client, evaluateExpression) {
 	)
 		throw new Error("Trade close did not wait for the server");
 	await read(`${fixture}.close()`);
+	await wait(
+		`document.querySelector('.client-inventory [data-item-guid="6003"]')?.dataset.dimmed === 'false'`,
+	);
+
 	await wait("document.querySelector('[data-trade-panel]') === null");
 	await read(`${fixture}.register()`);
 	await wait("document.querySelector('[data-trade-panel]') !== null");

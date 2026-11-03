@@ -35,7 +35,53 @@ const issue = {
 	detail: "Missing declared overlay",
 };
 
+/** Header-only fixture: browser image decoding, rather than this boundary, validates PNG payloads. */
+function pngHeader(width: number, height: number): Uint8Array {
+	const bytes = png.slice();
+	const header = new DataView(bytes.buffer);
+	header.setUint32(16, width);
+	header.setUint32(20, height);
+	return bytes;
+}
+
 describe("UI icon host source", () => {
+	it.each([20, 25, 64])(
+		"accepts native standalone PNG header extent %i",
+		(size) => {
+			const base: UiIconRequest = {
+				...request,
+				spec: { kind: "base", base: 1 },
+			};
+			const result = { ...ready, image: pngHeader(size, size) };
+			expect(decodeUiIcons(encode([result]), [base])).toEqual([result]);
+		},
+	);
+	it.each([
+		[0, 25],
+		[25, 0],
+		[MAX_ICON_FRAME_BYTES / 4 + 1, 1],
+	])(
+		"rejects invalid standalone PNG header extents %i x %i",
+		(width, height) => {
+			const base: UiIconRequest = {
+				...request,
+				spec: { kind: "base", base: 1 },
+			};
+			expect(() =>
+				decodeUiIcons(encode([{ ...ready, image: pngHeader(width, height) }]), [
+					base,
+				]),
+			).toThrow("decoded pixel budget");
+		},
+	);
+	it("retains the fixed canvas contract for composed inventory artwork", () => {
+		expect(() =>
+			decodeUiIcons(encode([{ ...ready, image: pngHeader(25, 25) }]), [
+				request,
+			]),
+		).toThrow("native inventory canvas extent");
+	});
+
 	it("round-trips ready, degraded and failed entries while preserving diagnostics", async () => {
 		const results = [
 			ready,

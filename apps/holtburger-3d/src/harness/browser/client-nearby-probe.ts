@@ -143,8 +143,8 @@ export async function probeClientNearby(dependencies: {
 			launcherBox.height, "launcher and icon fit the compact HUD control height");
 	await click('[aria-label="Nearby entities and alerts"]');
 	await settle();
-	require(document.querySelectorAll("[data-entity-guid]").length ===
-		3, "three independent roots displayed");
+	require(document.querySelectorAll("#nearby-entities-panel [data-entity-guid]")
+		.length === 3, "three independent roots displayed");
 	const entityName = document.querySelector<HTMLElement>(".entity-name");
 	require(entityName !== null &&
 		getComputedStyle(entityName).borderStyle === "none" &&
@@ -152,8 +152,8 @@ export async function probeClientNearby(dependencies: {
 			"rgba(0, 0, 0, 0)", "entity names use quiet catalog controls");
 	input('[aria-label="Search entity names"]', "dmnd");
 	await tick();
-	require(document.querySelectorAll("[data-entity-guid]").length ===
-		1, "fuzzy search filters names");
+	require(document.querySelectorAll("#nearby-entities-panel [data-entity-guid]")
+		.length === 1, "fuzzy search filters names");
 	await click('[data-entity-guid="7"] .entity-name');
 	require(dependencies.selected() ===
 		7, "row uses production selected identity");
@@ -184,13 +184,14 @@ export async function probeClientNearby(dependencies: {
 	require(document.querySelector(propsFilter)?.textContent?.trim() ===
 		"Props (0)", "props exclude pickup-eligible items");
 	await click(propsFilter);
-	require(document.querySelectorAll("[data-entity-guid]").length ===
-		0, "props filter excludes pickups");
+	require(document.querySelectorAll("#nearby-entities-panel [data-entity-guid]")
+		.length === 0, "props filter excludes pickups");
 	await click(propsFilter);
 	require(document.querySelector(pickupFilter)?.textContent?.trim() ===
 		"Pickups (1)", "pickup count uses world eligibility");
 	await click(pickupFilter);
-	require(document.querySelectorAll("[data-entity-guid]").length === 1 &&
+	require(document.querySelectorAll("#nearby-entities-panel [data-entity-guid]")
+		.length === 1 &&
 		document.querySelector('[data-entity-guid="7"]') !==
 			null, "pickup filter shows eligible entities without examination");
 	require(document
@@ -199,7 +200,8 @@ export async function probeClientNearby(dependencies: {
 		"Pickups", "pickup row label agrees with its filter");
 	publishPickup(false);
 	await settle();
-	require(document.querySelectorAll("[data-entity-guid]").length === 0 &&
+	require(document.querySelectorAll("#nearby-entities-panel [data-entity-guid]")
+		.length === 0 &&
 		document.querySelector(pickupFilter)?.textContent?.trim() ===
 			"Pickups (0)", "pickup rows and count follow eligibility changes");
 	require(document.querySelector(propsFilter)?.textContent?.trim() ===
@@ -208,7 +210,8 @@ export async function probeClientNearby(dependencies: {
 		0, "pickup filtering never examines entities");
 	await click(pickupFilter);
 	await click(propsFilter);
-	require(document.querySelectorAll("[data-entity-guid]").length === 1 &&
+	require(document.querySelectorAll("#nearby-entities-panel [data-entity-guid]")
+		.length === 1 &&
 		document.querySelector('[data-entity-guid="7"]') !==
 			null, "props filter shows the item after pickup eligibility is withdrawn");
 	require(document
@@ -236,7 +239,8 @@ export async function probeClientNearby(dependencies: {
 	require(document.querySelector(useableFilter)?.textContent?.trim() ===
 		"Useable (1)", "useable category has a live count");
 	await click(useableFilter);
-	require(document.querySelectorAll("[data-entity-guid]").length === 1 &&
+	require(document.querySelectorAll("#nearby-entities-panel [data-entity-guid]")
+		.length === 1 &&
 		document.querySelector('[data-entity-guid="7"] .category-icon svg') !==
 			null, "useable filter and category icon accept public-only lever facts");
 	require(examineRequests().length ===
@@ -323,6 +327,16 @@ export async function probeClientNearby(dependencies: {
 	require(owner.rules()[0]?.match.mode ===
 		"exact", "row action preserves literal names");
 	require(owner.trackedGuids().has(7), "exact rule tracks existing entity");
+	await click("#nearby-tracked-tab");
+	require(document.querySelectorAll("#nearby-tracked-panel [data-entity-guid]")
+		.length === 1 &&
+		document.querySelector('#nearby-tracked-panel [data-entity-guid="7"]') !==
+			null, "Tracked tab contains only enabled alert matches");
+	require(document.querySelector<HTMLInputElement>(
+		'#nearby-tracked-panel input[type="search"]',
+	)?.value === "", "Tracked search is independent of Entities search");
+	await click("#nearby-entities-tab");
+
 	require(launcher.classList.contains("nearby-alert-active") &&
 		getComputedStyle(launcher).animationIterationCount ===
 			"infinite", "matching alert starts the launcher's repeating pulse");
@@ -338,6 +352,9 @@ export async function probeClientNearby(dependencies: {
 		owner.rules().length === 1 &&
 		owner.rules()[0]?.enabled ===
 			false, "toggle disables its existing exact rule");
+	require(document.querySelectorAll("#nearby-tracked-panel [data-entity-guid]")
+		.length === 0, "Disabled alerts immediately leave the Tracked catalog");
+
 	await click(exactToggle);
 	require(exactPressed() &&
 		owner.rules().length === 1 &&
@@ -674,6 +691,9 @@ export async function probeClientNearby(dependencies: {
 	};
 	const gold = entityTag("Gold Golem");
 	dependencies.select(7);
+	gold.dispatchEvent(
+		new PointerEvent("pointerdown", { bubbles: true, button: 0 }),
+	);
 	const range = document.createRange();
 	range.selectNodeContents(gold);
 	const textSelection = document.getSelection();
@@ -683,6 +703,14 @@ export async function probeClientNearby(dependencies: {
 	gold.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
 	require(dependencies.selected() ===
 		7, "text selection does not acquire the entity");
+	// A fresh pointer click must activate even while the same text remains highlighted.
+	gold.dispatchEvent(
+		new PointerEvent("pointerdown", { bubbles: true, button: 0 }),
+	);
+	gold.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+	require(dependencies.selected() ===
+		10, "a fresh click activates highlighted entity text");
+	dependencies.select(7);
 	textSelection.removeAllRanges();
 	await click('[aria-label="Select entity: Gold Golem"]');
 	require(dependencies.selected() ===

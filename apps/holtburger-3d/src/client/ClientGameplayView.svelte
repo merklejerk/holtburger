@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { StatArtworkServices } from "./client-stat-artwork";
 	import { type InputPlatform } from "../lib/input/input-platform";
 
 	import ClientLockFeedback from "./ClientLockFeedback.svelte";
@@ -350,6 +351,8 @@
 		readonly spells: ClientSpellServices | null;
 		/** Session-owned character facts and quotes, independent of this panel mount. */
 		readonly characterSheet: ClientCharacterSheetState | null;
+		/** Mode-neutral stat artwork comes from the active static-content source. */
+		readonly statArtwork: StatArtworkServices;
 		/** World-resolved active effects with a browser-local countdown anchor. */
 		readonly enchantments:
 			import("./client-lifecycle-session").ClientTimedEnchantments | null;
@@ -559,6 +562,7 @@
 		readSelectedEntityDisplay,
 		spells,
 		characterSheet,
+		statArtwork,
 		enchantments,
 		inventory,
 		itemSession,
@@ -800,6 +804,7 @@
 			displayPlatform,
 		),
 	);
+	let chatEditor = $state<ClientChat>();
 	let activePanel = $state<ClientSystemPanel | null>(null);
 	/** Salvage entry opens inventory through the same single-open-panel owner as the dock. */
 	export function showInventory(): void {
@@ -1442,6 +1447,7 @@
 		>
 			{#key chatComposer.generation}
 				<ClientChat
+					bind:this={chatEditor}
 					composer={chatComposer}
 					{onSetWaypoint}
 					messages={chatMessages}
@@ -1488,6 +1494,14 @@
 					changeHudPlacement("selectedEntity", placement)}
 			>
 				<ClientSelectedEntityHud
+					tell={{
+						available: () =>
+							chatEditor !== undefined &&
+							chatComposer.selection.kind === "target",
+						activate: () => {
+							void chatEditor?.tellSelected();
+						},
+					}}
 					{input}
 					{displayPlatform}
 					selectedGuid={selectedEntityGuid}
@@ -1567,6 +1581,7 @@
 		{/if}
 
 		<ClientShortcutDock
+			{inventory}
 			placement={hudLayout.shortcuts}
 			editable={hudMode === "layout"}
 			{viewport}
@@ -1716,7 +1731,7 @@
 			{/key}
 		{/if}
 
-		{#if characterSheet !== null}
+		{#if characterSheet !== null && inventory !== null}
 			{#key characterSheet}
 				<ClientHudWindow
 					icon="training"
@@ -1731,6 +1746,8 @@
 						changeHudPlacement("characterSheet", placement)}
 				>
 					<ClientCharacterSheetPanel
+						{statArtwork}
+						icons={inventory.icons}
 						owner={characterSheet}
 						visible={activePanel === "characterSheet"}
 						{spells}
@@ -1878,6 +1895,8 @@
 									interactions={itemInteractions}
 									{inventory}
 									{vendor}
+									{trade}
+									{salvage}
 									selectedGuid={selectedEntityGuid}
 									onSelectItem={(guid) => onSelectContentsItem(guid, "toggle")}
 									requestedSplit={requestedInventorySplit}

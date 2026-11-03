@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { STAT_ICON_FIXTURE } from "./stat-icon-fixture";
 	import { clientChatRequestSchema } from "../../client/client-host-contract";
 	import { applyUiScale } from "../../app/ui-scale";
 	import UiTooltipHost from "../../app/UiTooltipHost.svelte";
@@ -214,6 +215,7 @@
 		CLIENT_TUNING,
 	} from "../../client/client-tuning";
 	import { recordSentChat } from "../../client/client-chat-input-history";
+	import { selectedChatRecipient } from "../../client/client-chat-compose";
 	import { ClientChatComposer } from "../../client/client-chat-composer.svelte";
 	import { uiThemes } from "../../app/mount";
 	import { steelUrl, opaqueUrl } from "./ui-showcase-themes";
@@ -1179,6 +1181,18 @@
 			emit: emitInteractionEvent,
 			selection,
 			commands: interactionCommands,
+
+			prepareTellRecipient: (guid) => {
+				const read = interactionLifecycle.entities.read();
+				chatComposer.setSelection(
+					selectedChatRecipient(
+						guid,
+						guid !== null && read.kind === "current"
+							? read.level.entities.get(guid)
+							: undefined,
+					),
+				);
+			},
 			readSampleCount: () => inventorySampleCount,
 			readPreparedIconCount: () => preparedIconCount,
 			holdIconPreparation,
@@ -6225,6 +6239,14 @@
 			></canvas>
 			{#if gameplayCanvas !== null && interactionRoot !== null}
 				<ClientGameplayView
+					statArtwork={{
+						load: async () => STAT_ICON_FIXTURE,
+						prepare: async () => {
+							throw new Error(
+								"HUD stat icons must use their session repository",
+							);
+						},
+					}}
 					platform="windows"
 					{barber}
 					lockInteractions={userSettings.lockInteractions}

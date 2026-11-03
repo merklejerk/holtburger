@@ -69,7 +69,7 @@ pub fn compose(layers: IconLayers<'_>) -> Result<Vec<u8>> {
     Ok(output)
 }
 
-/// Preserve authored RGBA while clipping/padding a standalone graphic to native icon size.
+/// Clip or pad one composition layer to the fixed inventory/spell canvas.
 pub(super) fn canvas(image: &UiImage) -> Result<Vec<u8>> {
     let width = usize::try_from(image.width)?;
     let height = usize::try_from(image.height)?;

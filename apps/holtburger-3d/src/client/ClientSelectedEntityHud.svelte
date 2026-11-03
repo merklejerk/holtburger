@@ -49,6 +49,11 @@
 		readonly onCorpsePermission: (granted: boolean) => void;
 		/** Sample allegiance-owned swear admission with the selected display. */
 		readonly readCanSwear: () => boolean;
+		/** Chat owner supplies admission and activates the existing selected-tell editor. */
+		readonly tell?: {
+			readonly available: () => boolean;
+			readonly activate: () => void;
+		};
 		/** Server confirmation owns the selected-player swear request. */
 		readonly onSwear: () => void;
 		/** Invite the current eligible selection through its party owner. */
@@ -79,6 +84,7 @@
 		readCanCorpsePermission,
 		onCorpsePermission,
 		readCanSwear,
+		tell,
 		onSwear,
 		onInvite,
 		onInteract,
@@ -96,6 +102,7 @@
 	let canIgnoreAccount = $state(false);
 	let canCorpsePermission = $state(false);
 	let canSwear = $state(false);
+	let canTell = $state(false);
 	/** Eligible selected-entity command; the source remains mounted for follow-up dialogs. */
 	type SelectedAction = {
 		/** Command name used by the accessible direct button and unbound menu rows. */
@@ -112,6 +119,7 @@
 			| { readonly action: "interact" | "split"; readonly description: string }
 			| {
 					readonly action:
+						| "tell"
 						| "salvage"
 						| "swear"
 						| "invite"
@@ -132,6 +140,14 @@
 				icon: display.interactionLabel === "Trade" ? "trade" : "interact",
 				disabled: false,
 				activate: onInteract,
+			});
+		if (canTell && tell !== undefined)
+			available.push({
+				action: "tell",
+				label: "Tell",
+				icon: "tell",
+				disabled: false,
+				activate: tell.activate,
 			});
 		if (canSwear)
 			available.push({
@@ -241,6 +257,7 @@
 			canIgnoreAccount = guid !== null && readCanIgnoreAccount();
 			canCorpsePermission = guid !== null && readCanCorpsePermission();
 			canSwear = guid !== null && readCanSwear();
+			canTell = guid !== null && tell?.available() === true;
 		});
 	});
 
@@ -257,6 +274,7 @@
 			canIgnoreAccount = selectedGuid !== null && readCanIgnoreAccount();
 			canCorpsePermission = selectedGuid !== null && readCanCorpsePermission();
 			canSwear = selectedGuid !== null && readCanSwear();
+			canTell = selectedGuid !== null && tell?.available() === true;
 		};
 		const interval = window.setInterval(
 			sample,

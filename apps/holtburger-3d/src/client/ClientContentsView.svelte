@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { ContentsArrivalSource } from "./client-contents-arrivals";
 	import { contentsFeedback } from "./client-contents-feedback";
 	import type { Snippet } from "svelte";
 	import ItemGridCell from "../app/ItemGridCell.svelte";
@@ -11,6 +12,8 @@
 	interface Props {
 		/** Prepared sections retain the panel owner's resource lifetime. */
 		readonly sections: readonly ClientContentsSection[];
+		/** An inventory session supplies live arrivals; external contents baseline locally. */
+		readonly arrivals?: ContentsArrivalSource;
 		/** Native navigation order; null entries represent known empty carried pack slots. */
 		readonly packs: readonly (ClientEntityFacts | null)[];
 		/** Retained recovery pictures are visible with actions disabled. */
@@ -40,6 +43,7 @@
 	}
 	const {
 		sections,
+		arrivals,
 		packs,
 		pending,
 		orientation,
@@ -73,7 +77,7 @@
 
 <div
 	class="contents-view"
-	use:contentsFeedback={{ sections, pending }}
+	use:contentsFeedback={{ sections, pending, source: arrivals }}
 	data-orientation={orientation}
 	data-contents-root={sections[0]?.container.guid}
 >

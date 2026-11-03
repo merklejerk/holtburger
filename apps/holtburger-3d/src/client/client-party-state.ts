@@ -23,7 +23,7 @@ type PartySession = Pick<
 > & {
 	state(): Pick<
 		ReturnType<ClientLifecycleSession["state"]>,
-		"playerGuid" | "lifecycle"
+		"playerGuid" | "playerName" | "lifecycle"
 	>;
 };
 /** Local pending intent carries its original character and invocation identity. */
@@ -147,6 +147,9 @@ export class ClientPartyState implements LocalDialogSource {
 						},
 			preferences,
 			player: state.playerGuid,
+			/** Identity-derived suggestion belongs to the creation UI, not the server roster. */
+			suggestedName:
+				state.playerName === null ? "New Party" : `${state.playerName}'s Party`,
 			enabled:
 				!this.#disposed &&
 				state.playerGuid !== null &&

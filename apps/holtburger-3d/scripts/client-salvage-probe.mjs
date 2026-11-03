@@ -138,6 +138,10 @@ export async function probeSalvage(client, evaluateExpression) {
 	await wait(`${count("preview_client_salvage")} > ${initialPreview + 1}`);
 	await read(`${fixture}.reply()`);
 	await wait(`document.querySelector('[data-salvage-queue]') !== null`);
+	await wait(
+		`document.querySelector(${JSON.stringify(owned(9200))})?.dataset.dimmed === 'true' && document.querySelector(${JSON.stringify(owned(9201))})?.dataset.dimmed === 'false'`,
+	);
+
 	await assert(
 		`${count("submit_client_item_use")} === ${initialUse}`,
 		"Ust activation sent generic item Use",

@@ -6,6 +6,7 @@ import {
 	type ProgressionIntent,
 	type ProgressionQuote,
 } from "./client-character-sheet-contract";
+import { confirmedProgressionGain } from "./client-progression-gain";
 import { ClientCharacterSheetState } from "./client-character-sheet-state";
 
 const intent = {
@@ -399,5 +400,210 @@ describe("optimistic title selection", () => {
 		expect(owner.read().sheet?.titleSelection?.selectedId).toBe(42);
 		await owner.selectTitle(1);
 		expect(send).toHaveBeenCalledTimes(2);
+	});
+});
+
+describe("confirmed progression rewards", () => {
+	function owner() {
+		return new ClientCharacterSheetState(
+			async () => {},
+			async () => {},
+			async () => {},
+			() => {},
+		);
+	}
+	it("preserves independent confirmations between display reads and never replays them", async () => {
+		const state = owner();
+		const listener = vi.fn();
+		state.reset(sheet(), "in-world");
+		const stop = state.subscribeGains(listener);
+		await state.purchase(quote());
+		expect(listener).not.toHaveBeenCalled();
+		state.replace(sheet(7, 2));
+		const next = quote();
+		next.quote.target_state.ranks = 2;
+		next.quote.target_state.spent_xp = 200;
+		next.quote.resulting_ranks = 3;
+		await state.purchase(next);
+		state.replace(sheet(7, 3));
+		expect(listener.mock.calls.map(([gain]) => gain.reward)).toEqual([
+			{ kind: "ranks", amount: 1 },
+			{ kind: "ranks", amount: 1 },
+		]);
+		expect(listener.mock.calls[1][0].revision).toBeLessThanOrEqual(
+			state.read().revision,
+		);
+		stop();
+		const reopened = vi.fn();
+		state.subscribeGains(reopened);
+		expect(reopened).not.toHaveBeenCalled();
+	});
+	it("keeps buffs and rejected purchases quiet and retires feedback on reset", async () => {
+		const state = owner();
+		const listener = vi.fn();
+		state.reset(sheet(), "in-world");
+		state.subscribeGains(listener);
+		await state.purchase(quote());
+		const buffed = sheet();
+		buffed.attributes[0].current += 50;
+		state.replace(buffed);
+		expect(listener).not.toHaveBeenCalled();
+		state.acceptFeedback({ Rejected: { intent, reason: "StaleQuote" } });
+		state.replace(sheet(7, 2));
+		expect(listener).not.toHaveBeenCalled();
+		state.reset(sheet(7, 3), "in-world");
+		expect(listener.mock.calls).toEqual([[null]]);
+	});
+	it("uses the actual bulk rank gain and ignores character replacement", () => {
+		expect(
+			confirmedProgressionGain(sheet(), sheet(7, 11), quote(), 8)?.reward,
+		).toEqual({ kind: "ranks", amount: 10 });
+		expect(
+			confirmedProgressionGain(sheet(), sheet(8, 11), quote(), 8),
+		).toBeNull();
+	});
+	function withSkill(
+		input: number,
+		result: number,
+		training: "Trained" | "Untrained" = "Trained",
+	): CharacterSheet {
+		const value = sheet();
+		const finalization = {
+			before_rounding: result,
+			rounded: result,
+			minimum: 0,
+			result,
+		};
+		const modifiers = { contributions: [], multiplier: 1, additive: 0 };
+		value.skills = [
+			{
+				availableInEor: true,
+				description: null,
+				stat: {
+					skill_type: "HeavyWeapons",
+					ranks: 0,
+					init: 0,
+					spent_xp: 0,
+					next_rank_xp: 100,
+					base: result,
+					current: result,
+					training,
+					trained_cost: 2,
+					specialized_cost: 4,
+					breakdown: {
+						formula: {
+							Applied: {
+								first: {
+									attribute: "StrengthAttr",
+									base: input,
+									effective: input,
+									modifiers: [],
+								},
+								second: null,
+								divisor: 3,
+								base_before_rounding: input / 3,
+								effective_before_rounding: input / 3,
+								base_result: result,
+								effective_result: result,
+							},
+						},
+						base_bonuses: [],
+						current_bonuses: [],
+						vitae: 1,
+						modifiers,
+						wide_modifiers: [],
+						wide_additive_rounded: 0,
+						finalization,
+					},
+				},
+			},
+		];
+		return value;
+	}
+	it("glints only rounded increases in trained base formula contributions", () => {
+		const before = withSkill(11, 3);
+		const after = withSkill(12, 4);
+		after.attributes[0].ranks++;
+		expect(
+			confirmedProgressionGain(before, after, quote(), 8)?.synergies,
+		).toEqual([{ Skill: "HeavyWeapons" }]);
+		after.skills[0].stat.breakdown.formula = "NoFormula";
+		expect(
+			confirmedProgressionGain(before, after, quote(), 8)?.synergies,
+		).toEqual([]);
+		expect(
+			confirmedProgressionGain(before, withSkill(11, 3), quote(), 8),
+		).toBeNull();
+		const rounded = withSkill(11, 3);
+		rounded.attributes[0].ranks++;
+		expect(
+			confirmedProgressionGain(before, rounded, quote(), 8)?.synergies,
+		).toEqual([]);
+	});
+	it("ignores vital regeneration but rewards a purchased maximum", () => {
+		const before = sheet();
+		const modifiers = { contributions: [], multiplier: 1, additive: 0 };
+		before.vitals = [
+			{
+				vital_type: "Health",
+				ranks: 1,
+				start: 10,
+				spent_xp: 100,
+				next_rank_xp: 200,
+				base: 11,
+				buffed_max: 11,
+				current: 5,
+				breakdown: {
+					formula: null,
+					modifiers,
+					finalization: {
+						before_rounding: 11,
+						rounded: 11,
+						minimum: 0,
+						result: 11,
+					},
+				},
+			},
+		];
+		const purchase = quote();
+		purchase.quote.intent = {
+			Raise: { target: { Vital: "Health" }, ranks: 1 },
+		};
+		const regenerated = {
+			...before,
+			vitals: before.vitals.map((stat) => ({ ...stat, current: 10 })),
+		};
+		expect(
+			confirmedProgressionGain(before, regenerated, purchase, 8),
+		).toBeNull();
+		const upgraded = {
+			...regenerated,
+			vitals: regenerated.vitals.map((stat) => ({
+				...stat,
+				ranks: 2,
+				base: 12,
+				buffed_max: 12,
+			})),
+		};
+		expect(
+			confirmedProgressionGain(before, upgraded, purchase, 8)?.reward,
+		).toEqual({ kind: "ranks", amount: 1 });
+	});
+	it("confirms training without requiring purchased ranks", () => {
+		const training = quote();
+		training.quote.intent = { Train: { skill: "HeavyWeapons" } };
+		training.quote.target_state = {
+			training: "Untrained",
+			ranks: 0,
+			spent_xp: 0,
+		};
+		expect(
+			confirmedProgressionGain(
+				withSkill(11, 3, "Untrained"),
+				withSkill(11, 3),
+				training,
+				8,
+			)?.reward,
+		).toEqual({ kind: "trained" });
 	});
 });

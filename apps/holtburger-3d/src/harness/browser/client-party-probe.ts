@@ -1,3 +1,4 @@
+import gameplayPreferences from "./fixtures/gameplay-preferences.json";
 import { createInputDefaults } from "../../lib/input/input-defaults";
 import { mount, tick, unmount } from "svelte";
 import { probeDialogBackdrops } from "./client-dialog-backdrop-probe";
@@ -159,6 +160,7 @@ export async function probeParty(options: {
 		emit("client-party-updated", { party });
 		emit("client-character-preferences-updated", {
 			appearance: { showHelmet: true, showCloak: true },
+			gameplay: gameplayPreferences,
 			party: { shareXp: true, shareLoot: false, ignoreRequests: false },
 			friends: { appearOffline: false },
 			allegiance: { showLogons: false },
@@ -443,7 +445,7 @@ export async function probeParty(options: {
 			":modal",
 		), "Creation did not acquire native modality");
 		require(dialog.querySelector<HTMLButtonElement>('button[type="submit"]')
-			?.disabled === true, "Blank creation name accepted");
+			?.disabled === false, "Suggested creation name cannot be submitted");
 		const beforeCancel = commands.length;
 		dialog.dispatchEvent(new Event("cancel", { cancelable: true }));
 		await tick();
@@ -460,6 +462,11 @@ export async function probeParty(options: {
 			'input:not([type="checkbox"])',
 		);
 		if (name === null) throw new Error("Missing party name input");
+		require(name.value ===
+			`${session.state().playerName}'s Party`, "Creation did not suggest the character's party name");
+		require(name.selectionStart === 0 &&
+			name.selectionEnd ===
+				name.value.length, "Suggested name was not selected for replacement");
 		require(document.activeElement ===
 			name, "Creation did not focus the name input");
 		name.value = "New Browser Raid";

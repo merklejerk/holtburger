@@ -66,6 +66,8 @@
 </script>
 
 <script lang="ts">
+	import { hudAttention } from "../app/hud-attention";
+	import type { ContentsArrivalSource } from "./client-contents-arrivals";
 	import { presentClientBinding } from "./client-binding-catalog";
 	import type { ClientCombatMode } from "./client-host-contract";
 	import type { ClientKeyboardConfiguration } from "../lib/input/input-contract";
@@ -99,6 +101,8 @@
 		/** The same visible list used to determine the initial dock width. */
 		readonly shortcuts: readonly ClientShortcut[];
 		readonly activePanel: ClientSystemPanel | null;
+		/** Session arrival notifications remain live while inventory is closed. */
+		readonly inventory?: ContentsArrivalSource | null;
 		readonly onToggle: (panel: ClientSystemPanel) => void;
 	}
 
@@ -111,11 +115,36 @@
 		displayPlatform,
 		shortcuts,
 		activePanel,
+		inventory,
 		onToggle,
 		combatMode,
 		combatEnabled,
 		onToggleCombat,
 	}: Props = $props();
+	/** Rebinding withdraws the old session subscription without pulsing the new baseline. */
+	function inventoryAttention(
+		node: HTMLElement,
+		source: ContentsArrivalSource | null | undefined,
+	) {
+		let sequence = 0;
+		const attention = hudAttention(node, null);
+		let unsubscribe = source?.subscribeArrivals(() =>
+			attention.update(++sequence),
+		);
+		return {
+			update(next: ContentsArrivalSource | null | undefined) {
+				if (next === source) return;
+				unsubscribe?.();
+				source = next;
+				unsubscribe = source?.subscribeArrivals(() =>
+					attention.update(++sequence),
+				);
+			},
+			destroy() {
+				unsubscribe?.();
+			},
+		};
+	}
 	const trayPlacement = $derived.by(() => {
 		const defaults = createClientHudPanelPlacement(
 			CLIENT_UI_DEFAULTS.shortcuts,
@@ -176,6 +205,7 @@
 			<button
 				type="button"
 				class="ui-hud-button ui-icon-button"
+				use:inventoryAttention={panel === "inventory" ? inventory : null}
 				title={combat
 					? `Combat stance: ${combatMode}. Toggle peace/combat (${combatShortcut.description})`
 					: panel === null

@@ -6,7 +6,7 @@ const statId = z.string().min(1);
 const enchantmentKey = z.object({ spellId: u32, layer: u32 }).strict();
 
 /** Shared target identity; only a core-provided quote can authorize a spend. */
-const statTargetSchema = z.union([
+export const statTargetSchema = z.union([
 	z.object({ Attribute: statId }).strict(),
 	z.object({ Vital: statId }).strict(),
 	z.object({ Skill: statId }).strict(),

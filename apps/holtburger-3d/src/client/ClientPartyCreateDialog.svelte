@@ -5,6 +5,8 @@
 	interface Props {
 		/** Retained character preferences seed this draft once, without live checkbox replacement. */
 		readonly preferences: PartyPreferences;
+		/** Suggested name is captured once for this editable draft. */
+		readonly initialName: string;
 		/** Submit the name and settings together to the session owner. */
 		readonly onSubmit: (
 			name: string,
@@ -13,12 +15,15 @@
 		/** Cancel the local draft without changing character preferences. */
 		readonly onCancel: () => void;
 	}
-	const { preferences, onSubmit, onCancel }: Props = $props();
-	let name = $state("");
+	const { preferences, initialName, onSubmit, onCancel }: Props = $props();
+	let name = $state(untrack(() => initialName));
 	let shareXp = $state(untrack(() => preferences.shareXp));
 	let shareLoot = $state(untrack(() => preferences.shareLoot));
 	let nameInput: HTMLInputElement;
-	onMount(() => nameInput.focus());
+	onMount(() => {
+		nameInput.focus();
+		nameInput.select();
+	});
 </script>
 
 <UiDialog

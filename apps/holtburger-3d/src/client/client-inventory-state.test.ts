@@ -122,6 +122,28 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("persistent inventory state", () => {
+	it("publishes arrivals and their destinations without a mounted view, then quietly baselines reentry", async () => {
+		const f = fixture();
+		const arrivals: (readonly (readonly [number, number])[])[] = [];
+		const unsubscribe = f.model.subscribeArrivals((next) =>
+			arrivals.push([...next]),
+		);
+		expect(arrivals).toEqual([]);
+		f.baseline([item(2, 10), item(3, 11)]);
+		await sample();
+		expect(arrivals).toEqual([[[3, 1]]]);
+		f.changeLifecycle({ kind: "entering-world", characterGuid: 1 });
+		f.baseline([item(2, 10), item(3, 11), item(4, 12)]);
+		f.changeLifecycle({ kind: "in-world" });
+		await sample();
+		expect(arrivals).toHaveLength(1);
+		unsubscribe();
+		f.baseline([item(5, 13)]);
+		await sample();
+		expect(arrivals).toHaveLength(1);
+		f.destroy();
+	});
+
 	it("withholds burden during recovery and replaces it with the new player baseline", () => {
 		const f = fixture();
 		const acceptPlayer = (guid: number, burden: number | null) => {

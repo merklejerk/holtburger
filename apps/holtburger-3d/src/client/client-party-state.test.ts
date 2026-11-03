@@ -32,8 +32,12 @@ function fixture() {
 		shareLoot: false,
 		ignoreRequests: false,
 	};
-	let state: Pick<ClientLifecycleSessionState, "playerGuid" | "lifecycle"> = {
+	let state: Pick<
+		ClientLifecycleSessionState,
+		"playerGuid" | "playerName" | "lifecycle"
+	> = {
 		playerGuid: 1,
+		playerName: "Test Character",
 		lifecycle: { kind: "in-world" },
 	};
 	const listeners = new Set<(event: ClientLifecycleSessionEvent) => void>();

@@ -1,4 +1,8 @@
 <script lang="ts">
+	import {
+		statArtworkServices,
+		type StatArtworkServices,
+	} from "./client-stat-artwork";
 	import { type InputPlatform } from "../lib/input/input-platform";
 
 	import { applyUiScale } from "../app/ui-scale";
@@ -626,7 +630,20 @@
 		},
 	});
 
+	const statArtwork: StatArtworkServices = {
+		load: () => {
+			if (hostTransport === null)
+				throw new Error("Stat artwork content is unavailable");
+			return statArtworkServices(hostTransport).load();
+		},
+		prepare: (requests) => {
+			if (hostTransport === null)
+				throw new Error("Stat artwork content is unavailable");
+			return prepareUiIcons(hostTransport, requests);
+		},
+	};
 	const creationServices: CharacterCreationServices = {
+		statArtwork,
 		loadCatalog: async () => {
 			const transport = hostTransport;
 			if (transport === null)
@@ -2528,6 +2545,7 @@
 
 	{#if page.kind === "gameplay" && canvasElement !== null && interactionRoot !== null}
 		<ClientGameplayView
+			{statArtwork}
 			platform={startupPlatform}
 			{theme}
 			onReturnToMainMenu={() => void returnToMainMenu()}

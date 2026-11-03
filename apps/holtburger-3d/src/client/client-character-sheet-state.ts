@@ -9,6 +9,10 @@ import {
 	type ProgressionQuote,
 	type StatTarget,
 } from "./client-character-sheet-contract";
+import {
+	confirmedProgressionGain,
+	type ProgressionGain,
+} from "./client-progression-gain";
 import type { ClientLifecycle } from "./client-host-contract";
 import { progressionRejectionReason } from "./client-character-sheet-feedback";
 
@@ -21,6 +25,16 @@ export class ClientCharacterSheetState {
 	#pending = new Map<string, ProgressionQuote>();
 	#requestId = 0;
 	#revision = 0;
+	/** Live-only feedback; null retires effects across a snapshot reset. */
+	#gainListeners = new Set<(gain: ProgressionGain | null) => void>();
+
+	/** No history replay: retained views subscribe only while progression is visible. */
+	subscribeGains(listener: (gain: ProgressionGain | null) => void): () => void {
+		this.#gainListeners.add(listener);
+		return () => {
+			this.#gainListeners.delete(listener);
+		};
+	}
 
 	constructor(
 		private readonly evaluate: (
@@ -88,6 +102,7 @@ export class ClientCharacterSheetState {
 		phase: ClientLifecycle["kind"] | null,
 	): void {
 		this.#pending.clear();
+		for (const listener of this.#gainListeners) listener(null);
 		this.#sheet = sheet;
 		this.#phase = phase;
 		this.#requestQuotes();
@@ -106,7 +121,17 @@ export class ClientCharacterSheetState {
 			this.reset(sheet, this.#phase);
 			return;
 		}
-		const before = this.#quoteInputs(this.#sheet);
+		const previous = this.#sheet;
+		const before = this.#quoteInputs(previous);
+		const gains = [...this.#pending.values()].flatMap((quote) => {
+			const gain = confirmedProgressionGain(
+				previous,
+				sheet,
+				quote,
+				this.#revision + 1,
+			);
+			return gain === null ? [] : [gain];
+		});
 		this.#sheet = sheet;
 		for (const [key, quote] of this.#pending) {
 			if (
@@ -121,6 +146,8 @@ export class ClientCharacterSheetState {
 		}
 		this.#revision++;
 		if (before !== this.#quoteInputs(sheet)) this.#requestQuotes();
+		for (const gain of gains)
+			for (const listener of this.#gainListeners) listener(gain);
 	}
 
 	acceptEvaluations(

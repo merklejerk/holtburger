@@ -212,6 +212,8 @@ pub enum SharedContentCommand {
     LoadSkySource,
     /// Small static component dictionary, loaded lazily by inspectors.
     LoadSpellComponents,
+    /// Static artwork shared by creation and progression.
+    LoadStatIcons,
     LoadSpellReferences {
         request: crate::spell_references::LoadSpellReferencesRequest,
     },
@@ -251,6 +253,7 @@ pub const SHARED_CONTENT_COMMAND_NAMES: &[&str] = &[
     "prepare_ui_icons",
     "load_spell_references",
     "load_spell_components",
+    "load_stat_icons",
     "load_motion_table_closure",
 ];
 
@@ -384,6 +387,16 @@ pub async fn dispatch_shared_content(
             let content = runtime.content().clone();
             let references = tokio::task::spawn_blocking(move || {
                 Ok::<_, anyhow::Error>(content.soul_emotes()?.references())
+            })
+            .await
+            .map_err(application_error)?
+            .map_err(application_error)?;
+            encode_json(references)
+        }
+        LoadStatIcons => {
+            let content = runtime.content().clone();
+            let references = tokio::task::spawn_blocking(move || {
+                crate::stat_icons::load_stat_icons(&content.repository)
             })
             .await
             .map_err(application_error)?

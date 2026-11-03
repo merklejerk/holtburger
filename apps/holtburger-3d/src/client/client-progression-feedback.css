@@ -1,0 +1,57 @@
+@layer components {
+	.progression-page [data-progression-target] > summary {
+		position: relative;
+	}
+	.progression-reward-ring,
+	.progression-reward-label,
+	.progression-training-wash {
+		position: absolute;
+		pointer-events: none;
+		color: var(--ui-color-accent);
+	}
+	.progression-reward-floating {
+		padding: 0;
+		border: 0;
+		overflow: visible;
+		background: transparent;
+		pointer-events: none;
+		color: var(--ui-color-accent);
+	}
+	.progression-reward-floating.stat-icon {
+		overflow: hidden;
+	}
+	.progression-reward-ring {
+		border: 2px solid currentColor;
+		box-shadow:
+			0 0 8px currentColor,
+			inset 0 0 5px currentColor;
+		border-radius: 50%;
+		box-sizing: border-box;
+	}
+	/* A second concentric edge makes the halo legible around small stat artwork. */
+	.progression-reward-ring::after {
+		content: "";
+		position: absolute;
+		inset: -5px;
+		border: 1px solid currentColor;
+		border-radius: inherit;
+		opacity: 0.6;
+	}
+	.progression-reward-label {
+		text-align: right;
+		box-sizing: border-box;
+		font-weight: bold;
+		text-shadow: 0 1px 3px var(--ui-color-background, #111);
+		z-index: 1;
+	}
+	.progression-training-wash {
+		inset: 0;
+		background: linear-gradient(
+			90deg,
+			transparent,
+			var(--ui-color-accent),
+			transparent
+		);
+		border-radius: inherit;
+	}
+}

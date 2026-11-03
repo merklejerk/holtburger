@@ -72,6 +72,7 @@ pub mod sky_source;
 pub mod sound_table_source;
 pub mod source_projection;
 pub mod spell_references;
+pub mod stat_icons;
 mod terrain_color;
 pub mod ui_icons;
 pub mod weenie_appearance;

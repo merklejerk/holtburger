@@ -80,7 +80,7 @@ const issues = z.tuple([issueSchema]).rest(issueSchema).readonly();
 const key = z.string().min(1).max(MAX_ICON_KEY_BYTES);
 const image = z
 	.instanceof(Uint8Array)
-	.refine(isNativeIconPng, "Expected a native-size PNG icon.");
+	.refine(isUiIconPng, "Expected a PNG icon within the decoded pixel budget.");
 const resultSchema = z.discriminatedUnion("kind", [
 	z
 		.object({ kind: z.literal("ready"), key, image })
@@ -122,19 +122,35 @@ export function decodeUiIcons(
 		maxBinLength: MAX_ICON_FRAME_BYTES,
 	});
 	const results = z.array(resultSchema).min(1).max(MAX_ICON_BATCH).parse(value);
-	const expected = new Set(requested.map(({ key }) => key));
+	const expected = new Map(requested.map(({ key, spec }) => [key, spec]));
 	for (const result of results) {
-		if (!expected.delete(result.key))
+		const spec = expected.get(result.key);
+		if (spec === undefined)
 			throw new Error(
 				`Unexpected or duplicate icon response key: ${result.key}`,
 			);
+		expected.delete(result.key);
+		if (result.kind !== "failed" && spec.kind !== "base") {
+			const header = new DataView(
+				result.image.buffer,
+				result.image.byteOffset,
+				result.image.byteLength,
+			);
+			if (
+				header.getUint32(16) !== UI_ICON_SIZE ||
+				header.getUint32(20) !== UI_ICON_SIZE
+			)
+				throw new Error(
+					"Composed icons require the native inventory canvas extent.",
+				);
+		}
 	}
 	if (expected.size > 0)
 		throw new Error("Icon response omitted requested keys.");
 	return results;
 }
 
-function isNativeIconPng(bytes: Uint8Array): boolean {
+function isUiIconPng(bytes: Uint8Array): boolean {
 	// Header validation precedes URL creation. Browser decoding still owns full PNG validation.
 	const signature = [137, 80, 78, 71, 13, 10, 26, 10];
 	if (
@@ -146,7 +162,8 @@ function isNativeIconPng(bytes: Uint8Array): boolean {
 	return (
 		view.getUint32(8) === 13 &&
 		view.getUint32(12) === 0x49484452 &&
-		view.getUint32(16) === UI_ICON_SIZE &&
-		view.getUint32(20) === UI_ICON_SIZE
+		view.getUint32(16) > 0 &&
+		view.getUint32(20) > 0 &&
+		view.getUint32(16) * view.getUint32(20) <= MAX_ICON_FRAME_BYTES / 4
 	);
 }

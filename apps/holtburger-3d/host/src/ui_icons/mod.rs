@@ -78,6 +78,20 @@ pub enum UiIconSpec {
     },
 }
 
+/// Static artwork preserves explicit mapping failures alongside owner-provided labels.
+#[derive(Debug, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum UiIconArtwork {
+    Ready {
+        /// Complete resolved recipe consumed by the shared icon repository.
+        spec: UiIconSpec,
+    },
+    Failed {
+        /// Bounded diagnostic preserved alongside the authored name.
+        detail: String,
+    },
+}
+
 /// One opaque frontend correlation key and its complete inputs.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -270,31 +284,7 @@ fn prepare_with_assets(
             if let Some(image) = images.get(&resolved.recipe) {
                 return Ok(image.clone());
             }
-            let pixels = match &resolved.artwork {
-                ResolvedArtwork::Spell {
-                    base,
-                    background,
-                    effects,
-                    overlay,
-                } => compositor::compose_spell(base, background, effects, overlay.as_deref()),
-                ResolvedArtwork::Base(base) => compositor::canvas(base),
-                ResolvedArtwork::SpellComponent(base) => compositor::compose_spell_component(base),
-                ResolvedArtwork::Composed {
-                    base,
-                    background,
-                    effects,
-                    overlay,
-                    underlay,
-                } => compose(IconLayers {
-                    base,
-                    background,
-                    effects,
-                    overlay: overlay.as_deref(),
-                    underlay: underlay.as_deref(),
-                }),
-            }
-            .map_err(|e| issue(IconLayer::Composition, IconIssueCode::Composition, None, e))?;
-            let image = encode_png(&pixels)
+            let image = encode_artwork(&resolved.artwork)
                 .map_err(|e| issue(IconLayer::Composition, IconIssueCode::Composition, None, e))?;
             images.insert(resolved.recipe, image.clone());
             Ok(image)
@@ -495,10 +485,48 @@ fn issue(
     }
 }
 
-fn encode_png(pixels: &[u8]) -> Result<Vec<u8>> {
+/// Composed item/spell icons use a fixed canvas; standalone graphics keep their authored extent.
+fn encode_artwork(artwork: &ResolvedArtwork) -> Result<Vec<u8>> {
+    let pixels = match artwork {
+        ResolvedArtwork::Spell {
+            base,
+            background,
+            effects,
+            overlay,
+        } => compositor::compose_spell(base, background, effects, overlay.as_deref()),
+        ResolvedArtwork::Base(base) => return encode_png(&base.pixels, base.width, base.height),
+        ResolvedArtwork::SpellComponent(base) => compositor::compose_spell_component(base),
+        ResolvedArtwork::Composed {
+            base,
+            background,
+            effects,
+            overlay,
+            underlay,
+        } => compose(IconLayers {
+            base,
+            background,
+            effects,
+            overlay: overlay.as_deref(),
+            underlay: underlay.as_deref(),
+        }),
+    }?;
+    encode_png(&pixels, ICON_SIZE as u32, ICON_SIZE as u32)
+}
+
+fn encode_png(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    ensure!(width > 0 && height > 0, "empty icon source extent");
+    let pixel_count = u64::from(width) * u64::from(height);
+    ensure!(
+        pixel_count <= (MAX_ICON_FRAME_BYTES / 4) as u64,
+        "icon exceeds decoded pixel budget"
+    );
+    ensure!(
+        pixel_count * 4 == pixels.len() as u64,
+        "invalid icon RGBA byte extent"
+    );
     let mut bytes = Vec::new();
     {
-        let mut encoder = png::Encoder::new(&mut bytes, ICON_SIZE as u32, ICON_SIZE as u32);
+        let mut encoder = png::Encoder::new(&mut bytes, width, height);
         encoder.set_color(png::ColorType::Rgba);
         encoder.set_depth(png::BitDepth::Eight);
         encoder.set_compression(png::Compression::Fast);

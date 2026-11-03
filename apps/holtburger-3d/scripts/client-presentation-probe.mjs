@@ -523,6 +523,22 @@ export async function probeClientPresentation(
 			"document.querySelector('.creation-settings select') !== null && document.querySelector('.creation-viewport .creature-preview-status') === null",
 		);
 		const creator = await read(`${api}.read()`);
+		await wait(`(() => {
+   const cells = [...document.querySelectorAll('.creation-layout .stat-icon')];
+   return cells.length > 0 && cells.every(cell => { const image = cell.querySelector('img'); return image?.complete && image.naturalWidth > 0; });
+  })()`);
+		await read(`(() => {
+   for (const cell of document.querySelectorAll('.creation-layout .stat-icon')) {
+    if (!cell.checkVisibility()) continue;
+    const image = cell.querySelector('img');
+    const style = getComputedStyle(cell);
+    const bounds = cell.getBoundingClientRect();
+    const imageBounds = image.getBoundingClientRect();
+    if (style.overflow !== 'hidden' || [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomLeftRadius, style.borderBottomRightRadius].some(radius => radius !== '50%')) throw new Error('Stat artwork is not clipped at all four corners');
+    if (Math.abs(bounds.width - bounds.height) > 0.5 || Math.abs(bounds.width - imageBounds.width) > 0.5 || Math.abs(bounds.height - imageBounds.height) > 0.5) throw new Error('Stat artwork does not fill its circular container');
+   }
+  })()`);
+
 		assert.equal(
 			await read(
 				"document.getElementById('creation-race-tab').getAttribute('aria-selected')",

@@ -47,6 +47,15 @@ export function createTradeFixture(options: {
 				upserts: [
 					player,
 					source,
+					entityFacts(item + 2, {
+						ownedByPlayer: true,
+						canOfferTrade: false,
+						location: {
+							kind: "contained",
+							parentGuid: 1,
+							slot: { kind: "item", index: 1 },
+						},
+					}),
 					entityFacts(item + 1, { scenePlacement: "unavailable" }),
 				],
 				removed: [],

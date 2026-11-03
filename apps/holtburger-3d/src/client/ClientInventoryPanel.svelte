@@ -14,6 +14,8 @@
 	} from "./client-inventory-split";
 
 	import ClientContentsView from "./ClientContentsView.svelte";
+	import type { ClientTradeState } from "./client-trade-state";
+	import type { ClientSalvageState } from "./client-salvage-state";
 	import type { ClientVendorState } from "./client-vendor-state";
 
 	import UiIcon from "../app/UiIcon.svelte";
@@ -46,6 +48,9 @@
 		readonly inventory: ClientInventoryState;
 		/** Visible vendor identity gates the world's sale verdict without owning acceptance rules. */
 		readonly vendor: ClientVendorState | null;
+		/** Open workflow admission reuses the same owners as drag/drop. */
+		readonly trade: ClientTradeState | null;
+		readonly salvage: ClientSalvageState | null;
 		/** Shared source activation and target acquisition. */
 		readonly interactions: ClientItemInteractions;
 		readonly selectedGuid: number | null;
@@ -66,6 +71,8 @@
 		displayPlatform,
 		inventory,
 		vendor,
+		trade,
+		salvage,
 		interactions,
 		selectedGuid,
 		onSelectItem,
@@ -82,6 +89,8 @@
 	let view = $state<ClientInventoryView | null>(null);
 	/** Sampled alongside inventory; closing the vendor restores ordinary cell presentation. */
 	let visibleVendor = $state<number | null>(null);
+	/** One sampled set keeps markup free of live workflow reads. */
+	let workflowDimmed = $state<ReadonlySet<number>>(new Set());
 	/** Row hover is local UI state; compatible locations come from sampled world facts. */
 	let hoveredEquipmentSlot = $state<number | null>(null);
 	/** Submission state prevents repeated writes while one option request is in flight. */
@@ -175,7 +184,18 @@
 			intervalMs: CLIENT_TUNING.inventory.displayIntervalMs,
 			read: () => {
 				visibleVendor = vendor?.visibleVendor() ?? null;
-				return inventory.read();
+				const items = inventory.readItems().items;
+				const next = inventory.read();
+				workflowDimmed = new Set(
+					[...items.values()]
+						.filter(
+							(item) =>
+								trade?.inventoryItemUnavailable(item.guid) === true ||
+								(salvage?.visible === true && !salvage.canQueue(item.guid)),
+						)
+						.map((item) => item.guid),
+				);
+				return next;
 			},
 			keys: (next) => [
 				...next.iconKeys.values(),
@@ -187,8 +207,12 @@
 				displays = images;
 			},
 		});
+		const unsubscribeArrivals = inventory.subscribeArrivals(() =>
+			display.refresh(),
+		);
 		sampleNow = display.refresh;
 		return () => {
+			unsubscribeArrivals();
 			split.destroy();
 			splitOwner = null;
 			sampleNow = null;
@@ -291,6 +315,7 @@
 			</div>
 		</aside>
 		<ClientContentsView
+			arrivals={inventory}
 			{sections}
 			packs={packSlots}
 			{pending}
@@ -307,9 +332,10 @@
 				!pending && isSplittableInventoryItem(item) ? splitActionHint : null}
 			dimItem={(item) =>
 				!pending &&
-				((item.vendorSale !== null &&
-					item.vendorSale.vendor === visibleVendor &&
-					!item.vendorSale.accepted) ||
+				(workflowDimmed.has(item.guid) ||
+					(item.vendorSale !== null &&
+						item.vendorSale.vendor === visibleVendor &&
+						!item.vendorSale.accepted) ||
 					(hoveredEquipmentSlot !== null &&
 						!(
 							item.description.kind === "known" &&
@@ -406,7 +432,7 @@
 		.inventory-currency-icon :global(.ui-icon) {
 			--ui-icon-rendering: var(--ui-inventory-pyreal-icon-upsample-filter);
 		}
-		/* PreparedUiIcon PNGs have a fixed 32px native extent; this compares CSS display sizes. */
+		/* Currency artwork has a 32px native extent; this compares CSS display sizes. */
 		@container inventory-pyreal-icon (width < 32px) {
 			.inventory-currency-icon :global(.ui-icon) {
 				--ui-icon-rendering: var(--ui-inventory-pyreal-icon-downsample-filter);

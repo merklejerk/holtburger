@@ -76,8 +76,27 @@ export interface ClientTuning {
 	};
 	/** Mounted spell-list artwork sampling; membership itself is event-driven. */
 	readonly spells: { readonly iconDisplayIntervalMs: number };
+	/** Bounded display sampling for creation and progression artwork. */
+	readonly statIcons: { readonly displayIntervalMs: number };
 	/** Mounted Character panel sampling; world stat publication remains host-owned. */
-	readonly characterSheet: { readonly displayIntervalMs: number };
+	readonly characterSheet: {
+		readonly displayIntervalMs: number;
+		/** Progression reward motion and independent floating-label lifetime. */
+		readonly feedback: {
+			readonly pressMs: number;
+			readonly popMs: number;
+			/** Expansion of the gold icon halo, independent of floating labels. */
+			readonly ringMs: number;
+			readonly ringScale: number;
+			readonly floatMs: number;
+			readonly trainingMs: number;
+			readonly synergyMs: number;
+			readonly iconScale: number;
+			readonly trainingIconScale: number;
+			readonly floatDistancePx: number;
+			readonly labelOffsetPx: number;
+		};
+	};
 	/** Shared audio policy selected by the client composition. */
 	readonly audio: FrontendAudioTuning;
 	/** Client diagnostic publication and display policy. */

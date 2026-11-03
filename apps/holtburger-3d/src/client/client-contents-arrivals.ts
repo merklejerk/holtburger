@@ -1,5 +1,21 @@
-import type { ClientContentsSection } from "./client-container-contents";
+import type { ClientEntityFacts } from "./client-entity-mirror";
 
+/** Unsorted accepted membership, independent of navigation strips or grid presentation. */
+export interface ContentsArrivalContainer {
+	/** Container roster establishes when its initial membership is complete enough to baseline. */
+	readonly container: ClientEntityFacts;
+	/** Immediate contained children, including packs and entries still awaiting slot order. */
+	readonly children: readonly ClientEntityFacts[];
+}
+
+/** A confirmed arrival names its immediate destination; consumers never infer it from current layout. */
+export type ContentsArrival = ReadonlyMap<number, number>;
+/** Session-owned inventory can notify mounted consumers without retaining old notifications. */
+export interface ContentsArrivalSource {
+	readonly subscribeArrivals: (
+		receive: (arrivals: ContentsArrival) => void,
+	) => () => void;
+}
 /** Compare contents by container and physical identity; cell order and artwork are irrelevant. */
 export class ContentsArrivals {
 	/** Null quantities distinguish unknown descriptions from established single items. */
@@ -7,23 +23,19 @@ export class ContentsArrivals {
 
 	/** Initial, newly opened, and recovering containers establish a quiet baseline. */
 	update(
-		sections: readonly ClientContentsSection[],
+		containers: readonly ContentsArrivalContainer[],
 		pending: boolean,
-	): ReadonlySet<number> {
-		const arrivals = new Set<number>();
+	): ContentsArrival {
+		const arrivals = new Map<number, number>();
 		const next = new Map<number, ReadonlyMap<number, number | null>>();
 		if (!pending) {
-			for (const section of sections) {
-				const storage = section.container.storage;
+			for (const { container, children } of containers) {
+				const storage = container.storage;
 				if (storage.kind !== "container" || storage.roster === "awaiting")
 					continue;
-				const previous = this.#containers.get(section.container.guid);
+				const previous = this.#containers.get(container.guid);
 				const items = new Map<number, number | null>();
-				for (const item of [
-					...section.items,
-					...section.packs,
-					...section.unslotted,
-				]) {
+				for (const item of children) {
 					const count =
 						item.description.kind === "known"
 							? (item.description.stackCount ?? 1)
@@ -35,9 +47,9 @@ export class ContentsArrivals {
 						before === undefined ||
 						(before !== null && count !== null && count > before)
 					)
-						arrivals.add(item.guid);
+						arrivals.set(item.guid, container.guid);
 				}
-				next.set(section.container.guid, items);
+				next.set(container.guid, items);
 			}
 		}
 		this.#containers = next;

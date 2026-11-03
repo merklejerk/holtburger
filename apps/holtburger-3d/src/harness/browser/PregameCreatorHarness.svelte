@@ -23,6 +23,7 @@
 </script>
 
 <script lang="ts">
+	import { statArtworkServices } from "../../client/client-stat-artwork";
 	import startingStatsFixture from "../../../../../crates/holtburger-core/tests/fixtures/character_creation_starting_stats.json";
 	import { onMount, tick, untrack } from "svelte";
 	import ClientCharacterSelect from "../../client/ClientCharacterSelect.svelte";
@@ -178,6 +179,10 @@
 		return catalog;
 	}
 	const services: CharacterCreationServices = {
+		statArtwork: {
+			load: () => statArtworkServices(transport).load(),
+			prepare: (requests) => statArtworkServices(transport).prepare(requests),
+		},
 		resolveStats: async (request) => {
 			statsQueries++;
 			if (holdNextStats) {
@@ -499,6 +504,17 @@
 	}
 	async function run(): Promise<CreatorWorkflowProof> {
 		await click("Create character");
+		await until(() => {
+			const cells = [...root.querySelectorAll(".stat-icon")];
+			return (
+				cells.length > 0 &&
+				cells.every((cell) => {
+					const image = cell.querySelector("img");
+					return image?.complete === true && image.naturalWidth > 0;
+				})
+			);
+		}, "retail stat artwork in the creator");
+
 		await until(() => appearanceRequests === 1, "initial appearance query");
 		await click("Appearance");
 		await changeSkinColor();
@@ -781,7 +797,10 @@
 			const listed = [...(section?.querySelectorAll("li") ?? [])].map(
 				(item) => item.textContent,
 			);
-			if (JSON.stringify(listed) !== JSON.stringify(group.skills))
+			if (
+				JSON.stringify(listed) !==
+				JSON.stringify(group.skills.map((skill) => skill.name))
+			)
 				throw new Error("Starting skills are not itemized by training group");
 		}
 		const lore = root.querySelector(`[aria-label="${alternate.name} lore"]`);

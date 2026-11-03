@@ -6,6 +6,8 @@
 		"src/explorer/main.ts",
 		"src/harness/browser/main.ts",
 		"src/harness/browser/client-precise-jump-probe.ts",
+		"src/harness/browser/client-progression-feedback-probe.ts",
+		"src/harness/browser/client-inline-tag-fixture.ts",
 		"src/harness/browser/client-jump-hud-probe.ts",
 		"src/harness/browser/content-failure-probe.ts",
 		"src/harness/browser/dynamic-material-table-probe.ts",

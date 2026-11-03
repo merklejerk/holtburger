@@ -128,6 +128,15 @@ export class ClientTradeState {
 		this.#submit({ kind: "open", partner });
 	}
 
+	/** Inventory highlighting uses the same current offer admission as a drop, without preparing artwork. */
+	inventoryItemUnavailable(item: number): boolean {
+		const trade = this.#snapshot.trade;
+		return (
+			trade !== null &&
+			!this.acceptsDrop(trade.partner_guid, trade.revision, item)
+		);
+	}
+
 	/** A drop captures the exact offer revision so a reset cannot retarget an old gesture. */
 	acceptsDrop(partner: number, revision: number, item: number): boolean {
 		const read = this.session.entities.read();

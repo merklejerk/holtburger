@@ -16,6 +16,8 @@ export function pregameContentTransport(url: string): HostTransport {
 		load_landblock_source_batch: "/landblock-source-batch",
 		load_setup_visual: "/setup-visual",
 		load_character_creation_catalog: "/character-creation-catalog",
+		load_stat_icons: "/stat-icons",
+		prepare_ui_icons: "/ui-icons",
 		resolve_character_creation_appearance: "/character-creation-appearance",
 		resolve_character_creation_stats: "/character-creation-stats",
 		load_animation: "/animation",
@@ -43,6 +45,7 @@ export function pregameContentTransport(url: string): HostTransport {
 			);
 			await checkHostHttpResponse(response);
 			return catalog ||
+				command === "load_stat_icons" ||
 				command === "load_landblock_profile" ||
 				command === "load_motion_table_closure" ||
 				command === "resolve_character_creation_appearance" ||

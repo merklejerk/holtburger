@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { statArtworkServices } from "../../client/client-stat-artwork";
 	import { mountPregameWorldHarness } from "./pregame-world-harness";
 	import { probePreviewFrameCadence } from "./preview-frame-cadence-probe";
 	import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
@@ -156,6 +157,7 @@
 					services: {
 						resolveStats: (request) =>
 							resolveCharacterCreationStats(transport, request),
+						statArtwork: statArtworkServices(transport),
 						loadCatalog: async () => loadCharacterCreationCatalog(transport),
 						resolveAppearance: async (request) =>
 							resolveCharacterCreationAppearance(transport, request),
@@ -259,6 +261,7 @@
 					creation: {
 						resolveStats: (request) =>
 							resolveCharacterCreationStats(transport, request),
+						statArtwork: statArtworkServices(transport),
 						loadCatalog: async () => catalog,
 						resolveAppearance: (request) =>
 							resolveCharacterCreationAppearance(transport, request),

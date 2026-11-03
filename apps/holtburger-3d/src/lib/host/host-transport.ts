@@ -119,6 +119,7 @@ const SHARED_HOST_COMMAND_NAMES = [
 	"prepare_ui_icons",
 	"load_spell_references",
 	"load_spell_components",
+	"load_stat_icons",
 	"load_animation",
 	"load_setup_visual",
 	"load_physics_script",

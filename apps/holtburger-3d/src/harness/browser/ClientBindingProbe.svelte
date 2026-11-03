@@ -97,6 +97,8 @@
 			readCanSalvage={() => false}
 			onSalvage={() => {}}
 			readCanSplit={() => menu}
+			readCanAutoMerge={() => false}
+			onAutoMerge={() => {}}
 			readCanInvite={() => false}
 			readCanCorpsePermission={() => false}
 			onCorpsePermission={() => {}}

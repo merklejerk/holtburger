@@ -83,7 +83,9 @@ impl ClientRuntime {
         self.cancel_rest_posture();
         self.reset_combat_engagement();
         self.clear_busy_operation();
-        self.stop_pack_exchange("Character lifecycle changed; the last request may still complete");
+        self.stop_inventory_operation(
+            "Character lifecycle changed; the last request may still complete",
+        );
         self.stop_equipment_change(
             "Character lifecycle changed; the last request may still complete",
         );

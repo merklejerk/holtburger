@@ -58,6 +58,20 @@ pub struct StorageDestination {
     pub placement: u32,
 }
 
+/// Direct ordinary contents in accepted native order. Pending placements remain the
+/// caller's responsibility; this helper does not establish roster completeness.
+pub(super) fn native_container_items(world: &WorldState, container: Guid) -> Vec<(u32, Guid)> {
+    let mut items: Vec<_> = world
+        .container_contents(container)
+        .filter_map(|(guid, slot)| match slot {
+            StorageSlot::Item { index } => Some((index, guid)),
+            _ => None,
+        })
+        .collect();
+    items.sort_unstable();
+    items
+}
+
 /// Reserve slots in preferred container, main pack, then native pack order.
 /// Each boolean identifies the pack-slot domain (true) or ordinary item domain (false).
 pub fn allocate_storage(

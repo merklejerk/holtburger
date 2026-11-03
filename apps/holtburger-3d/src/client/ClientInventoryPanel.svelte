@@ -4,6 +4,7 @@
 	import { bindContentsActivation } from "./client-contents-activation";
 	import type { ClientItemInteractions } from "./client-item-interactions";
 	import { onMount } from "svelte";
+	import PopupMenu from "../app/PopupMenu.svelte";
 	import { startUiIconDisplay } from "../app/ui-icon-display";
 	import ClientQuantityDialog from "./ClientQuantityDialog.svelte";
 	import {
@@ -145,6 +146,32 @@
 	);
 	const burdenPresentation = $derived(presentClientBurden(burden));
 	const burdenText = $derived(burdenPresentation.percent);
+	/** Cold transient intent; core execution survives panel closure. */
+	let containerMenu = $state<{
+		container: number;
+		anchor: { x: number; y: number };
+	} | null>(null);
+	$effect(() => {
+		if (
+			containerMenu !== null &&
+			(view === null ||
+				view.pending ||
+				!inventory.canAutoMergeContainer(containerMenu.container))
+		)
+			containerMenu = null;
+	});
+	function openContainerMenu(event: MouseEvent, container: number): void {
+		event.preventDefault();
+		event.stopPropagation();
+		containerMenu = inventory.canAutoMergeContainer(container)
+			? { container, anchor: { x: event.clientX, y: event.clientY } }
+			: null;
+	}
+	/** PopupMenu dismisses before dispatch; capture identity while the menu is still present. */
+	function autoMergeSelection(container: number): () => void {
+		return () => inventory.requestAutoMergeContainer(container);
+	}
+
 	let panel: HTMLDivElement;
 
 	let sampleNow: (() => void) | null = null;
@@ -317,6 +344,7 @@
 		<ClientContentsView
 			arrivals={inventory}
 			{sections}
+			onContainerContextMenu={openContainerMenu}
 			packs={packSlots}
 			{pending}
 			orientation="vertical"
@@ -386,6 +414,18 @@
 		/>
 	{/if}
 </div>
+
+{#if containerMenu !== null}
+	<PopupMenu
+		anchor={containerMenu.anchor}
+		label="Bag actions"
+		items={[{ action: "auto-merge", label: "Auto-merge", disabled: false }]}
+		onselect={autoMergeSelection(containerMenu.container)}
+		onclose={() => {
+			containerMenu = null;
+		}}
+	/>
+{/if}
 
 <style>
 	@layer components {

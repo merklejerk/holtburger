@@ -201,8 +201,15 @@ export interface ClientTuning {
 		/** Accepted player-to-crystal range retained while preparing payment. */
 		readonly maximumDistanceMeters: number;
 	};
-	/** Mounted inventory display sampling policy. */
+	/** Inventory gestures, display sampling, and execution budgets. */
 	readonly inventory: {
+		/** Core execution budgets snapshotted for each container invocation. */
+		readonly autoMerge: {
+			/** Maximum authoritative confirmation wait for one request. */
+			readonly stepTimeoutMs: number;
+			/** Absolute budget for the entire invocation. */
+			readonly operationTimeoutMs: number;
+		};
 		/** Pointer travel required before an inventory selection becomes a drag. */
 		readonly dragThresholdCssPixels: number;
 		/** Time after a drag during which synthetic double-click activation is suppressed. */

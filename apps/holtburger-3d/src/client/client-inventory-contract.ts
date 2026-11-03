@@ -64,3 +64,23 @@ export function nextInventoryPreviewSequence(): number {
 		throw new Error("Inventory preview sequence exhausted");
 	return ++previewSequence;
 }
+
+/** Application-chosen finite deadlines; mirrored by core's validated policy. */
+export const autoMergePolicySchema = z
+	.object({
+		stepTimeoutMs: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+		operationTimeoutMs: z
+			.number()
+			.int()
+			.positive()
+			.max(Number.MAX_SAFE_INTEGER),
+	})
+	.strict();
+
+/** One container invocation; the browser does not plan individual stack transfers. */
+export const autoMergeRequestSchema = z
+	.object({
+		container: unsigned,
+		policy: autoMergePolicySchema,
+	})
+	.strict();

@@ -379,10 +379,7 @@ impl ClientRuntime {
         &mut self,
         bindings: Vec<EquipmentBinding>,
     ) -> RuntimeResult<()> {
-        if self.equipment_change_pending()
-            || self.pack_exchange.is_some()
-            || self.active_busy_operation.is_some()
-        {
+        if self.inventory_change_pending() || self.active_busy_operation.is_some() {
             self.equipment_set_failure(
                 bindings,
                 "Another inventory operation is still pending".into(),

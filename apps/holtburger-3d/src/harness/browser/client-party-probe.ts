@@ -118,6 +118,8 @@ export async function probeParty(options: {
 			readCanSalvage: () => false,
 			onSalvage: () => {},
 			readCanSplit: () => false,
+			readCanAutoMerge: () => false,
+			onAutoMerge: () => {},
 			readCanCorpsePermission: () => false,
 			onCorpsePermission: () => {},
 			readCanSwear: () => false,

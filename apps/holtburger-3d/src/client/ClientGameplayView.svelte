@@ -947,6 +947,17 @@
 				onSocialNotice,
 			);
 	}
+	function canAutoMergeSelectedContainer(): boolean {
+		return (
+			selectedEntityGuid !== null &&
+			inventory?.canAutoMergeContainer(selectedEntityGuid) === true
+		);
+	}
+	function autoMergeSelectedContainer(): void {
+		if (selectedEntityGuid !== null)
+			inventory?.requestAutoMergeContainer(selectedEntityGuid);
+	}
+
 	function canSplitSelectedEntity(): boolean {
 		return (
 			selectedEntityGuid !== null &&
@@ -1519,6 +1530,8 @@
 						if (selectedEntityGuid !== null) salvage?.add(selectedEntityGuid);
 					}}
 					readCanSplit={canSplitSelectedEntity}
+					readCanAutoMerge={canAutoMergeSelectedContainer}
+					onAutoMerge={autoMergeSelectedContainer}
 					readCanAddFriend={() => friendTarget() !== null}
 					readCanIgnoreAccount={() => ignoreTarget() !== null}
 					onAddFriend={addSelectedFriend}

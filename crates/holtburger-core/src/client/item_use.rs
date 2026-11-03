@@ -163,7 +163,7 @@ impl ClientRuntime {
                 "The originating character is no longer in the world.",
             ));
         }
-        if self.equipment_change_pending() || self.pack_exchange.is_some() {
+        if self.inventory_change_pending() {
             return Ok(reject("An inventory change is still pending."));
         }
         let source = match request.intent {

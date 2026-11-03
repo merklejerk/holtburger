@@ -1032,6 +1032,8 @@ pub struct ClientDynamicScriptCue {
 
 #[derive(Debug, Clone)]
 pub enum ClientViewEvent {
+    /// Confirmed container-consolidation progress and terminal outcome.
+    AutoMergeFinished(super::container_auto_merge::AutoMergeResult),
     /// Target-local server lock evidence, independent of request completion and scene admission.
     LockFeedback(super::lock_feedback::LockFeedback),
     /// Complete cold barber interaction and committed local particle state.
@@ -1420,6 +1422,13 @@ pub enum ClientCommand {
     PreviewInventory(super::inventory_plan::InventoryPreviewRequest),
     /// Re-evaluate and execute an identity-based inventory gesture.
     SubmitInventory(super::inventory_plan::InventoryIntent),
+    /// Consolidate direct partial stacks using an explicit frontend timeout policy.
+    AutoMergeContainer {
+        /// Player root or a directly carried real bag.
+        container: Guid,
+        /// Finite application-chosen execution budgets.
+        policy: super::container_auto_merge::AutoMergePolicy,
+    },
     /// Changes only the local player's response to peer entities.
     SetEntityCollisionDisabled(bool),
     Login(String),

@@ -250,10 +250,7 @@ impl ClientRuntime {
         slot: Option<TargetSlot>,
         split: Option<u32>,
     ) -> Result<()> {
-        if self.equipment_change_pending()
-            || self.pack_exchange.is_some()
-            || self.active_busy_operation.is_some()
-        {
+        if self.inventory_change_pending() || self.active_busy_operation.is_some() {
             self.emit_action_result(
                 ActionResultSource::Client,
                 ActionResultReason::General("Another inventory operation is still pending".into()),

@@ -34,6 +34,10 @@
 		readonly onSalvage: () => void;
 		/** Bounded inventory-owned eligibility read sampled with the selected display. */
 		readonly readCanSplit: () => boolean;
+		/** Sample the same carried-container eligibility used by inventory context actions. */
+		readonly readCanAutoMerge: () => boolean;
+		/** Submit the selected container through the inventory-owned command and feedback path. */
+		readonly onAutoMerge: () => void;
 		/** Sample app-owned party eligibility alongside the selected display. */
 		readonly readCanInvite: () => boolean;
 		/** Read friend shortcut eligibility without introducing HUD request state. */
@@ -76,6 +80,8 @@
 		readCanSalvage,
 		onSalvage,
 		readCanSplit,
+		readCanAutoMerge,
+		onAutoMerge,
 		readCanInvite,
 		readCanAddFriend,
 		readCanIgnoreAccount,
@@ -97,6 +103,8 @@
 	);
 	let canSalvage = $state(false);
 	let canSplit = $state(false);
+	/** Cold action availability sampled at the selected HUD display cadence. */
+	let canAutoMerge = $state(false);
 	let canInvite = $state(false);
 	let canAddFriend = $state(false);
 	let canIgnoreAccount = $state(false);
@@ -121,6 +129,7 @@
 					readonly action:
 						| "tell"
 						| "salvage"
+						| "auto-merge"
 						| "swear"
 						| "invite"
 						| "friend"
@@ -197,6 +206,15 @@
 				activate: () => onCorpsePermission(false),
 			});
 		}
+		if (canAutoMerge)
+			available.push({
+				action: "auto-merge",
+				label: "Auto-merge",
+				icon: "inventory",
+				disabled: false,
+				activate: onAutoMerge,
+			});
+
 		if (canSalvage)
 			available.push({
 				action: "salvage",
@@ -252,6 +270,7 @@
 				guid === null ? EMPTY_CLIENT_SELECTED_DISPLAY : readSelectedDisplay();
 			canSalvage = guid !== null && readCanSalvage();
 			canSplit = guid !== null && readCanSplit();
+			canAutoMerge = guid !== null && readCanAutoMerge();
 			canInvite = guid !== null && readCanInvite();
 			canAddFriend = guid !== null && readCanAddFriend();
 			canIgnoreAccount = guid !== null && readCanIgnoreAccount();
@@ -269,6 +288,7 @@
 					: readSelectedDisplay();
 			canSalvage = selectedGuid !== null && readCanSalvage();
 			canSplit = selectedGuid !== null && readCanSplit();
+			canAutoMerge = selectedGuid !== null && readCanAutoMerge();
 			canInvite = selectedGuid !== null && readCanInvite();
 			canAddFriend = selectedGuid !== null && readCanAddFriend();
 			canIgnoreAccount = selectedGuid !== null && readCanIgnoreAccount();

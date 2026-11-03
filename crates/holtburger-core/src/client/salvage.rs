@@ -84,7 +84,7 @@ impl ClientRuntime {
         if self.state != ClientState::InWorld || self.world.player.guid != player {
             return Err("The originating character is no longer in the world.");
         }
-        if self.equipment_change_pending() || self.pack_exchange.is_some() {
+        if self.inventory_change_pending() {
             return Err("An inventory change is still pending.");
         }
         if self.active_busy_operation.is_some() {

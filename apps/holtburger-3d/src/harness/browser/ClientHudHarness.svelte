@@ -1410,6 +1410,14 @@
 		readonly aetheriaDropProbe: typeof aetheriaDropProbe;
 		/** Inspect real session requests while CDP drives production inventory pointers. */
 		readonly inventoryDragCommands: () => typeof interactionCommands;
+		/** Controlled incoming facts exercise production pack context menus and toast decoding. */
+		readonly autoMergeProbe: {
+			readonly begin: () => void;
+			readonly resync: () => void;
+			readonly feedback: (feedback: ClientActionFeedback) => void;
+			readonly toast: () => ReturnType<ClientToastCenter["snapshot"]>;
+			readonly timing: typeof CLIENT_TUNING.inventory.autoMerge;
+		};
 		/** Observe immutable captures and exercise failure feedback without a live server. */
 		readonly loadoutProbe: typeof loadoutProbe;
 		/** Replace selected inventory identity while a panel interaction is active. */
@@ -4898,6 +4906,8 @@
 					interactionLifecycle.previewInventory(request),
 				submitInventory: (intent) =>
 					interactionLifecycle.submitInventory(intent),
+				autoMergeContainer: (container) =>
+					interactionLifecycle.autoMergeContainer(container),
 				state: () => interactionLifecycle.state(),
 				subscribe: (listener) => interactionLifecycle.subscribe(listener),
 			},
@@ -5823,6 +5833,53 @@
 				},
 			},
 			inventoryDragCommands: () => interactionCommands,
+			autoMergeProbe: {
+				begin: () => {
+					emitInteractionBaseline();
+					const pack = (
+						guid: number,
+						entryKind: "container" | "foci",
+						index: number,
+					) =>
+						entityFacts(guid, {
+							ownedByPlayer: true,
+							location: {
+								kind: "contained",
+								parentGuid: 1,
+								slot: { kind: "pack", entryKind, index },
+							},
+							// Even contradictory storage facts must not offer the action for a focus.
+							storage: {
+								kind: "container",
+								roster: "announced",
+								itemCapacity: 24,
+								packCapacity: 0,
+							},
+						});
+					emitInteractionEvent("client-entity-facts-changed", {
+						projectileSupply: null,
+						salvage: null,
+						worldContainer: null,
+						removed: [],
+						upserts: [pack(1001, "container", 0), pack(1002, "foci", 1)],
+					});
+					gameplayView?.showInventory();
+				},
+				resync: () => emitInteractionEvent("client-state-resyncing", null),
+				feedback: (feedback) => {
+					const release = interactionLifecycle.subscribe((event) => {
+						if (event.type === "action-feedback")
+							inventoryToasts.publish(event.feedback);
+					});
+					try {
+						emitInteractionEvent("client-action-feedback", feedback);
+					} finally {
+						release();
+					}
+				},
+				toast: () => inventoryToasts.snapshot(),
+				timing: CLIENT_TUNING.inventory.autoMerge,
+			},
 			aetheriaDropProbe,
 			loadoutProbe,
 			selectInventoryItem: (guid) =>

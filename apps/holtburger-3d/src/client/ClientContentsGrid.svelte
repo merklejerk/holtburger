@@ -20,6 +20,8 @@
 		readonly dimItem?: (item: ClientEntityFacts) => boolean;
 		/** Optional item hover identity for inventory-owned equipment affordances. */
 		readonly onHoverItem?: (guid: number | null) => void;
+		/** Inventory supplies the same context action for headers and pack-strip cells. */
+		readonly onContainerContextMenu?: (event: MouseEvent, guid: number) => void;
 		/** Explicit pack pickup appears only for external contents. */
 		readonly onTakePack?: (guid: number) => void;
 	}
@@ -34,6 +36,7 @@
 		rootLabel,
 		dimItem,
 		onHoverItem,
+		onContainerContextMenu,
 		onTakePack,
 	}: Props = $props();
 	function itemName(item: ClientEntityFacts): string {
@@ -87,6 +90,9 @@
 				data-item-guid={section.container.guid}
 				aria-pressed={selectedGuid === section.container.guid}
 				disabled={pending || section.container.description.kind === "pending"}
+				oncontextmenu={onContainerContextMenu === undefined
+					? undefined
+					: (event) => onContainerContextMenu(event, section.container.guid)}
 				onclick={() => onSelectItem(section.container.guid)}
 			>
 				{section.rootSection && rootLabel !== null

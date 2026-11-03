@@ -1,3 +1,4 @@
+import { formatError } from "../lib/format-error";
 import {
 	ContentsArrivals,
 	type ContentsArrival,
@@ -40,10 +41,10 @@ export interface InventoryCurrencyRow extends Omit<
 	readonly iconKey: string;
 }
 
-/** Session commands and results used by the inventory split dialog. */
+/** Session commands and results shared by inventory gestures and container actions. */
 export type InventoryInteractionSession = Pick<
 	ClientLifecycleSession,
-	"previewInventory" | "submitInventory" | "subscribe"
+	"previewInventory" | "submitInventory" | "autoMergeContainer" | "subscribe"
 >;
 
 /** Existing lifecycle facts and semantic mirror; the model does not subscribe to raw properties. */
@@ -208,6 +209,46 @@ export class ClientInventoryState {
 		if (this.#pending) return null;
 		const description = this.#baseline?.membership?.root.description;
 		return description?.kind === "known" ? description.burden : null;
+	}
+
+	/** Only actual carried storage and Main Pack expose the app-local context command. */
+	canAutoMergeContainer(guid: number): boolean {
+		this.#refresh();
+		if (this.#pending || this.#baseline === null) return false;
+		const { playerGuid, membership } = this.#baseline;
+		const item =
+			guid === playerGuid ? membership?.root : this.#baseline.items.get(guid);
+		if (
+			item === undefined ||
+			item.description.kind !== "known" ||
+			item.storage.kind !== "container" ||
+			item.storage.roster !== "announced" ||
+			item.storage.itemCapacity === null ||
+			item.storage.itemCapacity <= 0
+		)
+			return false;
+		return (
+			guid === playerGuid ||
+			(item.ownedByPlayer &&
+				item.location.kind === "contained" &&
+				item.location.parentGuid === playerGuid &&
+				item.location.slot.kind === "pack" &&
+				item.location.slot.entryKind === "container")
+		);
+	}
+
+	/** Recheck a menu identity against current membership before crossing the host boundary. */
+	async autoMergeContainer(guid: number): Promise<void> {
+		if (!this.canAutoMergeContainer(guid))
+			throw new Error("That bag is no longer available for auto-merge.");
+		await this.interactions.autoMergeContainer(guid);
+	}
+
+	/** UI entry points share transport/admission failure feedback as well as execution. */
+	requestAutoMergeContainer(guid: number): void {
+		void this.autoMergeContainer(guid).catch((error: unknown) => {
+			this.reportFailure(formatError(error));
+		});
 	}
 
 	cycleSort(): void {

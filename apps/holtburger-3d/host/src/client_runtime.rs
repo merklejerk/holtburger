@@ -334,6 +334,26 @@ impl ClientAttackProfileRequest {
     }
 }
 
+/// JSON uses JavaScript's exact integer range; the shared controller only owns durations.
+fn deserialize_auto_merge_policy<'de, D>(
+    deserializer: D,
+) -> std::result::Result<holtburger_core::client::container_auto_merge::AutoMergePolicy, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let policy =
+        holtburger_core::client::container_auto_merge::AutoMergePolicy::deserialize(deserializer)?;
+    const SAFE_MILLISECONDS: std::ops::RangeInclusive<u64> = 1..=((1_u64 << 53) - 1);
+    if !SAFE_MILLISECONDS.contains(&policy.step_timeout_ms)
+        || !SAFE_MILLISECONDS.contains(&policy.operation_timeout_ms)
+    {
+        return Err(serde::de::Error::custom(
+            "Auto-merge timeouts must be positive safe integer milliseconds",
+        ));
+    }
+    Ok(policy)
+}
+
 /// Commands accepted only by the client authority.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "command", rename_all = "snake_case")]
@@ -403,6 +423,14 @@ pub enum ClientHostCommand {
         guid: holtburger_common::Guid,
         /// Prefer the off hand when supported, or the right side for paired jewelry.
         alternate: bool,
+    },
+    /// Consolidate direct carried contents using the application's explicit timeout policy.
+    AutoMergeClientContainer {
+        /// Player root or real carried pack identity.
+        container: holtburger_common::Guid,
+        /// Finite budgets snapshotted by the browser at invocation.
+        #[serde(deserialize_with = "deserialize_auto_merge_policy")]
+        policy: holtburger_core::client::container_auto_merge::AutoMergePolicy,
     },
     /// Execute a semantic inventory gesture against the latest authoritative world.
     SubmitClientInventory {
@@ -638,6 +666,7 @@ pub const CLIENT_COMMAND_NAMES: &[&str] = &[
     "submit_client_trade",
     "request_client_barber",
     "submit_client_inventory",
+    "auto_merge_client_container",
     "equip_client_item",
     "apply_client_equipment_set",
     "preview_client_salvage",
@@ -1317,6 +1346,11 @@ pub async fn dispatch_client(
             .map_err(application_error),
         CloseClientContainer { guid } => runtime
             .send_command(ClientCommand::CloseContainer(guid))
+            .await
+            .map(|()| HostResponse::Unit)
+            .map_err(application_error),
+        AutoMergeClientContainer { container, policy } => runtime
+            .send_command(ClientCommand::AutoMergeContainer { container, policy })
             .await
             .map(|()| HostResponse::Unit)
             .map_err(application_error),
@@ -2005,5 +2039,36 @@ mod map_position_tests {
             .destination()
             .is_ok()
         );
+    }
+}
+
+#[cfg(test)]
+mod auto_merge_tests {
+    use super::*;
+
+    #[test]
+    fn explicit_auto_merge_policy_decodes_without_an_implicit_default() {
+        let payload = serde_json::json!({
+            "command": "auto_merge_client_container", "container": 7,
+            "policy": { "stepTimeoutMs": 250, "operationTimeoutMs": 800 }
+        });
+        let command: ClientHostCommand = serde_json::from_value(payload.clone()).unwrap();
+        assert!(
+            matches!(command, ClientHostCommand::AutoMergeClientContainer { container: holtburger_common::Guid(7), policy } if policy.step_timeout_ms == 250 && policy.operation_timeout_ms == 800)
+        );
+        assert!(CLIENT_COMMAND_NAMES.contains(&"auto_merge_client_container"));
+        for invalid in [
+            serde_json::json!({}),
+            serde_json::json!({"stepTimeoutMs": -1, "operationTimeoutMs": 800}),
+            serde_json::json!({"stepTimeoutMs": 1.5, "operationTimeoutMs": 800}),
+            serde_json::json!({"stepTimeoutMs": 0, "operationTimeoutMs": 800}),
+            serde_json::json!({"stepTimeoutMs": 250, "operationTimeoutMs": 0}),
+            serde_json::json!({"stepTimeoutMs": (1_u64 << 53), "operationTimeoutMs": 800}),
+            serde_json::json!({"stepTimeoutMs": 250, "operationTimeoutMs": (1_u64 << 53)}),
+        ] {
+            let mut payload = payload.clone();
+            payload["policy"] = invalid;
+            assert!(serde_json::from_value::<ClientHostCommand>(payload).is_err());
+        }
     }
 }

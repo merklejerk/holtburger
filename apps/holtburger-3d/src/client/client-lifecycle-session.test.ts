@@ -1,3 +1,5 @@
+import { CLIENT_TUNING } from "./client-tuning";
+import { autoMergePolicySchema } from "./client-inventory-contract";
 import barberFixture from "./fixtures/barber-wire.json";
 import { ClientBarberState } from "./client-barber-state";
 import {
@@ -1224,6 +1226,38 @@ describe("ClientLifecycleSession", () => {
 			]);
 		},
 	);
+
+	it("snapshots auto-merge policy from client tuning and submits one container command", async () => {
+		const transport = new FakeClientTransport();
+		const session = new ClientLifecycleSession(transport);
+		await session.autoMergeContainer(7);
+		expect(transport.invocations).toEqual([
+			{
+				command: "auto_merge_client_container",
+				args: {
+					container: 7,
+					policy: { ...CLIENT_TUNING.inventory.autoMerge },
+				},
+			},
+		]);
+		const policy = { stepTimeoutMs: 200, operationTimeoutMs: 100 };
+		expect(autoMergePolicySchema.parse(policy)).toEqual(policy);
+		for (const invalid of [
+			0,
+			-1,
+			1.5,
+			Infinity,
+			NaN,
+			Number.MAX_SAFE_INTEGER + 1,
+		]) {
+			expect(() =>
+				autoMergePolicySchema.parse({ ...policy, stepTimeoutMs: invalid }),
+			).toThrow();
+			expect(() =>
+				autoMergePolicySchema.parse({ ...policy, operationTimeoutMs: invalid }),
+			).toThrow();
+		}
+	});
 
 	it("routes correlated inventory previews and submits semantic identities", async () => {
 		const transport = new FakeClientTransport();

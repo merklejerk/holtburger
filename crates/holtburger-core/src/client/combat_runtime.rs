@@ -158,8 +158,7 @@ impl ClientRuntime {
                 .is_available()
             && movement_ready
             && self.active_busy_operation.is_none()
-            && !self.equipment_change_pending()
-            && self.pack_exchange.is_none()
+            && !self.inventory_change_pending()
     }
 
     /// Physical prediction can gate jumping locally. Navigation has no local support solver,

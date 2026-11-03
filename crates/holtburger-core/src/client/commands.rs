@@ -22,6 +22,36 @@ fn render_soul_emote_text(text: &str) -> String {
     text.replace("%p", "their")
 }
 
+/// Raw mutations admitted by the runtime's inventory gate. Controllers reuse this
+/// classification; guarded workflows retain their own typed receipt/admission handlers.
+pub(super) fn inventory_command_requires_guard(command: &ClientCommand) -> bool {
+    // Missile attacks consume ammunition; casting consumes components. Both also compete
+    // with equipment stance transitions, so they share ordinary inventory admission.
+    matches!(
+        command,
+        ClientCommand::Drop(_)
+            | ClientCommand::Get(_)
+            | ClientCommand::Stack { .. }
+            | ClientCommand::Split { .. }
+            | ClientCommand::MoveItem { .. }
+            | ClientCommand::Use { .. }
+            | ClientCommand::UseWithTarget { .. }
+            | ClientCommand::SalvageItemsWith { .. }
+            | ClientCommand::GiveObjectRequest { .. }
+            | ClientCommand::VendorTrade(_)
+            | ClientCommand::Buy { .. }
+            | ClientCommand::Sell { .. }
+            | ClientCommand::Trade(
+                crate::client::trade::TradeRequest::Open { .. }
+                    | crate::client::trade::TradeRequest::Accept { .. }
+                    | crate::client::trade::TradeRequest::Add { .. }
+            )
+            | ClientCommand::CastSpell { .. }
+            | ClientCommand::TargetedMeleeAttack { .. }
+            | ClientCommand::TargetedMissileAttack { .. }
+    )
+}
+
 impl ClientRuntime {
     fn resolve_legacy_channel(
         kind: crate::client::types::ChatChannelDestination,
@@ -97,6 +127,10 @@ impl ClientRuntime {
         if let Some(capture) = &mut self.runtime_fixture {
             capture.record_command(&cmd)?;
         }
+        self.poll_auto_merge(std::time::Instant::now());
+        if self.interrupt_auto_merge(&cmd) {
+            return self.reject_auto_merge_conflict(cmd).await;
+        }
         self.cancel_rest_for_command(&cmd);
         match &cmd {
             ClientCommand::GetAndWield { item, .. }
@@ -118,31 +152,7 @@ impl ClientRuntime {
             }
             _ => {}
         }
-        if (self.equipment_change_pending() || self.pack_exchange.is_some())
-            && matches!(
-                cmd,
-                ClientCommand::Drop(_)
-                    | ClientCommand::Get(_)
-                    | ClientCommand::Stack { .. }
-                    | ClientCommand::Split { .. }
-                    | ClientCommand::MoveItem { .. }
-                    | ClientCommand::Use { .. }
-                    | ClientCommand::UseWithTarget { .. }
-                    | ClientCommand::SalvageItemsWith { .. }
-                    | ClientCommand::GiveObjectRequest { .. }
-                    | ClientCommand::VendorTrade(_)
-                    | ClientCommand::Buy { .. }
-                    | ClientCommand::Sell { .. }
-                    | ClientCommand::Trade(crate::client::trade::TradeRequest::Open { .. }
-                        | crate::client::trade::TradeRequest::Accept { .. }
-                        | crate::client::trade::TradeRequest::Add { .. })
-                    // ACE missile attacks consume ammo; spellcasting consumes components.
-                    // Combat actions also compete with equipment peace/wield transitions.
-                    | ClientCommand::CastSpell { .. }
-                    | ClientCommand::TargetedMeleeAttack { .. }
-                    | ClientCommand::TargetedMissileAttack { .. }
-            )
-        {
+        if self.inventory_change_pending() && inventory_command_requires_guard(&cmd) {
             if let ClientCommand::Trade(_) = &cmd {
                 self.report_trade_failure("An inventory change is still pending".into());
                 return Ok(());
@@ -198,6 +208,9 @@ impl ClientRuntime {
                 Ok(())
             }
             ClientCommand::SubmitInventory(intent) => self.submit_inventory_intent(intent).await,
+            ClientCommand::AutoMergeContainer { container, policy } => {
+                self.start_auto_merge(container, policy).await
+            }
             ClientCommand::PreviewInventory(request) => {
                 self.preview_inventory_intent(request);
                 Ok(())
@@ -375,6 +388,45 @@ impl ClientRuntime {
             | ClientCommand::Disconnect
             | ClientCommand::Quit => self.handle_system_command(cmd).await,
         }
+    }
+
+    /// Preserve each workflow's correlated rejection while the merge still owns admission.
+    async fn reject_auto_merge_conflict(&mut self, cmd: ClientCommand) -> Result<()> {
+        const REASON: &str =
+            "Auto-merge stopped; inventory change still pending. Try again shortly.";
+        match cmd {
+            // These handlers reject at their inventory admission gate and publish the exact
+            // receipt their frontend is awaiting. A generic toast would strand that workflow.
+            ClientCommand::SubmitItemUse(request) => return self.submit_item_use(request).await,
+            ClientCommand::SubmitSalvage(request) => return self.submit_salvage(request).await,
+            ClientCommand::ApplyEquipmentSet(bindings) => {
+                return self.apply_equipment_set(bindings).await;
+            }
+            ClientCommand::VendorTrade(request) => {
+                self.reject_vendor_request(&request, REASON.into());
+                return Ok(());
+            }
+            ClientCommand::Trade(_) => {
+                self.report_trade_failure(REASON.into());
+                return Ok(());
+            }
+            // A refused begin still acknowledges its sequence, without retaining an attack.
+            ClientCommand::BeginCombatEngagement {
+                intent_sequence, ..
+            } if self.combat_engagement.admit_intent(intent_sequence) => {
+                let _ = self
+                    .client_view_event_tx
+                    .send(ClientViewEvent::CombatStatusUpdated(
+                        self.combat_engagement.status(),
+                    ));
+            }
+            _ => {}
+        }
+        self.emit_action_result(
+            ActionResultSource::Client,
+            ActionResultReason::General(REASON.into()),
+        );
+        Ok(())
     }
 
     pub(super) async fn disconnect(&mut self) -> Result<()> {

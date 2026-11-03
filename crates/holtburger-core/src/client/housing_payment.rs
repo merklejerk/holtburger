@@ -113,7 +113,7 @@ impl ClientRuntime {
         if self.state != ClientState::InWorld {
             return Err("Housing payment is only available in the world".into());
         }
-        if self.pack_exchange.is_some() {
+        if self.inventory_operation_pending() {
             return Err("Finish the pending operation before preparing payment".into());
         }
         let crystal = self

@@ -53,6 +53,7 @@ impl ClientRuntime {
             | ClientCommand::Recall(_)
             | ClientCommand::Use { .. }
             | ClientCommand::UseWithTarget { .. }
+            | ClientCommand::AutoMergeContainer { .. }
             | ClientCommand::SubmitInventory(_)
             | ClientCommand::GetAndWield { .. }
             | ClientCommand::SplitToWield { .. }
@@ -86,10 +87,7 @@ impl ClientRuntime {
             );
             return Ok(());
         }
-        if self.equipment_change_pending()
-            || self.pack_exchange.is_some()
-            || self.active_busy_operation.is_some()
-        {
+        if self.inventory_change_pending() || self.active_busy_operation.is_some() {
             self.emit_action_result(
                 ActionResultSource::Client,
                 ActionResultReason::General(

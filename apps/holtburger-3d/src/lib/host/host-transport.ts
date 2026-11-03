@@ -215,6 +215,7 @@ const CLIENT_HOST_COMMAND_NAMES = [
 	"submit_client_trade",
 	"request_client_barber",
 	"submit_client_inventory",
+	"auto_merge_client_container",
 	"close_client_container",
 	"equip_client_item",
 	"apply_client_equipment_set",

@@ -2,7 +2,10 @@
 
 use super::{
     equipment_plan::{EquipmentPlan, EquipmentPlanError, plan_equipment_change},
-    inventory_storage::{InventoryPlacementPolicy, StorageAllocationError, allocate_storage},
+    inventory_merge::{MergeStep, plan_stack_merge},
+    inventory_storage::{
+        InventoryPlacementPolicy, StorageAllocationError, allocate_storage, native_container_items,
+    },
     types::TargetSlot,
 };
 use holtburger_common::{
@@ -79,11 +82,7 @@ pub enum InventoryPlan {
     /// Self-drop or a whole-stack split has no protocol consequence.
     Noop,
     /// One server merge request transfers this exact positive quantity.
-    Merge {
-        source: Guid,
-        destination: Guid,
-        amount: u32,
-    },
+    Merge(MergeStep),
     /// One server container request also handles explicit unequip.
     Move(InventoryMove),
     /// One server-owned drop, including dequipping when necessary.
@@ -226,12 +225,8 @@ pub fn plan_inventory_intent(
                     .filter(|amount| *amount > 0)
                     .ok_or(InventoryPlanError::Pending(intent.item))?
                     as u32;
-                if let Some(destination) = pickup_merge_target(world, intent.item, amount) {
-                    return Ok(InventoryPlan::Merge {
-                        source: intent.item,
-                        destination,
-                        amount,
-                    });
+                if let Some(step) = pickup_merge_step(world, intent.item, amount)? {
+                    return Ok(InventoryPlan::Merge(step));
                 }
             }
             let destinations =
@@ -340,7 +335,7 @@ pub fn plan_inventory_intent(
                             return Ok(InventoryPlan::Noop);
                         }
                         if let Some(plan) = plan_stack_merge(world, intent.item, guid)? {
-                            return Ok(plan);
+                            return Ok(InventoryPlan::Merge(plan));
                         }
                         break;
                     }
@@ -365,7 +360,7 @@ pub fn plan_inventory_intent(
             }
             require_accessible_item(world, guid)?;
             match plan_stack_merge(world, intent.item, guid) {
-                Ok(Some(plan)) => return Ok(plan),
+                Ok(Some(plan)) => return Ok(InventoryPlan::Merge(plan)),
                 // Positional item drops retain their move fallback when the stack is full.
                 Err(InventoryPlanError::StackFull)
                     if matches!(intent.target, InventoryTarget::Item { .. }) => {}
@@ -381,52 +376,14 @@ pub fn plan_inventory_intent(
     }
 }
 
-/// Incompatible items permit replacement; compatible stacks must merge or reject.
-fn plan_stack_merge(
-    world: &WorldState,
-    source: Guid,
-    destination: Guid,
-) -> Result<Option<InventoryPlan>, InventoryPlanError> {
-    let from = world
-        .get_visible_entity(source)
-        .ok_or(InventoryPlanError::Pending(source))?;
-    let to = world
-        .get_visible_entity(destination)
-        .ok_or(InventoryPlanError::Pending(destination))?;
-    let source_template = from.wcid.ok_or(InventoryPlanError::Pending(source))?;
-    let target_template = to.wcid.ok_or(InventoryPlanError::Pending(destination))?;
-    if source_template != target_template {
-        return Ok(None);
-    }
-    if !from.is_stackable() && !to.is_stackable() {
-        return Ok(None);
-    }
-    for (guid, entity) in [(source, from), (destination, to)] {
-        entity
-            .get_int_prop(PropertyInt::MaxStackSize)
-            .ok_or(InventoryPlanError::Pending(guid))?;
-    }
-    if !from.is_stackable() || !to.is_stackable() {
-        return Ok(None);
-    }
-    let amount = world
-        .resolve_merge_stack_amount(source, destination, None)
-        .ok_or(InventoryPlanError::Pending(destination))?;
-    if amount == 0 {
-        return Err(InventoryPlanError::StackFull);
-    }
-    i32::try_from(amount).map_err(|_| InventoryPlanError::ProtocolRange)?;
-    Ok(Some(InventoryPlan::Merge {
-        source,
-        destination,
-        amount,
-    }))
-}
-
 /// Retail searches main-pack items, then each carried pack's items in native order. Container
 /// preference only affects free-slot fallback. Unknown stack facts cannot authorize a merge;
 /// ordinary storage remains available.
-fn pickup_merge_target(world: &WorldState, source: Guid, amount: u32) -> Option<Guid> {
+fn pickup_merge_step(
+    world: &WorldState,
+    source: Guid,
+    amount: u32,
+) -> Result<Option<MergeStep>, InventoryPlanError> {
     let mut packs: Vec<_> = world
         .container_contents(world.player.guid)
         .filter_map(|(guid, slot)| match slot {
@@ -441,22 +398,16 @@ fn pickup_merge_target(world: &WorldState, source: Guid, amount: u32) -> Option<
     for container in
         std::iter::once(world.player.guid).chain(packs.into_iter().map(|(_, guid)| guid))
     {
-        let mut items: Vec<_> = world
-            .container_contents(container)
-            .filter_map(|(guid, slot)| match slot {
-                StorageSlot::Item { index } => Some((index, guid)),
-                _ => None,
-            })
-            .collect();
-        items.sort_unstable();
-        if let Some((_, destination)) = items
-            .into_iter()
-            .find(|(_, guid)| world.resolve_merge_stack_amount(source, *guid, None) == Some(amount))
-        {
-            return Some(destination);
+        let items = native_container_items(world, container);
+        for (_, destination) in items {
+            match plan_stack_merge(world, source, destination) {
+                Ok(Some(step)) if step.amount == amount => return Ok(Some(step)),
+                Ok(_) | Err(InventoryPlanError::Pending(_) | InventoryPlanError::StackFull) => {}
+                Err(error) => return Err(error),
+            }
         }
     }
-    None
+    Ok(None)
 }
 
 /// Access is distinct from ownership; the root is a destination, not a movable contents item.
@@ -653,7 +604,9 @@ impl From<&InventoryPlan> for InventoryPreview {
                 max_amount: *max_amount,
             },
             InventoryPlan::Noop => Self::Noop,
-            InventoryPlan::Merge { amount, .. } => Self::Merge { amount: *amount },
+            InventoryPlan::Merge(step) => Self::Merge {
+                amount: step.amount,
+            },
             InventoryPlan::Move(_) => Self::Move,
             InventoryPlan::Drop { .. } => Self::Drop,
             InventoryPlan::Give { .. } => Self::Give,
@@ -674,10 +627,7 @@ impl super::ClientRuntime {
         if !matches!(self.state, super::ClientState::InWorld) || self.activation.is_some() {
             return Err("Inventory changes require an active world".into());
         }
-        if self.equipment_change_pending()
-            || self.pack_exchange.is_some()
-            || self.active_busy_operation.is_some()
-        {
+        if self.inventory_change_pending() || self.active_busy_operation.is_some() {
             return Err("Another inventory operation is still pending".into());
         }
         plan_inventory_intent(&self.world, intent, self.inventory_placement)
@@ -711,6 +661,31 @@ pub(super) mod tests {
     use holtburger_world::WorldBootstrap;
     use holtburger_world::entity::Entity;
     use std::sync::Arc;
+
+    fn expected_merge(
+        world: &WorldState,
+        source: Guid,
+        destination: Guid,
+        amount: u32,
+    ) -> InventoryPlan {
+        let source_before = world.entities.get(source).unwrap().stack_size();
+        let destination_before = world.entities.get(destination).unwrap().stack_size();
+        InventoryPlan::Merge(MergeStep {
+            source,
+            destination,
+            amount,
+            source_before,
+            destination_before,
+            source_after: if source_before == amount {
+                super::super::inventory_merge::MergeSourceAfter::Removed
+            } else {
+                super::super::inventory_merge::MergeSourceAfter::Remaining {
+                    count: source_before - amount,
+                }
+            },
+            destination_after: destination_before + amount,
+        })
+    }
 
     const PLAYER: Guid = Guid(1);
     const PACK: Guid = Guid(2);
@@ -1020,14 +995,7 @@ pub(super) mod tests {
                 .ints
                 .insert(PropertyInt::StackSize, count);
             let plan = plan_inventory_intent(&world, intent, Default::default()).unwrap();
-            assert_eq!(
-                plan,
-                InventoryPlan::Merge {
-                    source: SOURCE,
-                    destination: TARGET,
-                    amount: expected
-                }
-            );
+            assert_eq!(plan, expected_merge(&world, SOURCE, TARGET, expected));
             assert_eq!(
                 InventoryPreview::from(&plan),
                 InventoryPreview::Merge { amount: expected }
@@ -1343,11 +1311,7 @@ pub(super) mod tests {
                     },
                     Default::default()
                 ),
-                Ok(InventoryPlan::Merge {
-                    source,
-                    destination,
-                    amount
-                })
+                Ok(expected_merge(&world, source, destination, amount))
             );
         }
         world
@@ -1493,21 +1457,13 @@ pub(super) mod tests {
         };
         assert_eq!(
             plan_inventory_intent(&world, intent, Default::default()),
-            Ok(InventoryPlan::Merge {
-                source: ground,
-                destination: TARGET,
-                amount: QUANTITY as u32,
-            })
+            Ok(expected_merge(&world, ground, TARGET, QUANTITY as u32))
         );
         // Native position, rather than GUID, chooses the first whole-stack fit.
         place(&mut world, LAST, PACK, 0, InventoryEntryKind::Item);
         assert_eq!(
             plan_inventory_intent(&world, intent, Default::default()),
-            Ok(InventoryPlan::Merge {
-                source: ground,
-                destination: LAST,
-                amount: QUANTITY as u32,
-            })
+            Ok(expected_merge(&world, ground, LAST, QUANTITY as u32))
         );
         // Main-pack stacks precede preferred side-pack stacks.
         place(&mut world, TARGET, PLAYER, 0, InventoryEntryKind::Item);
@@ -1522,11 +1478,7 @@ pub(super) mod tests {
                 },
                 Default::default()
             ),
-            Ok(InventoryPlan::Merge {
-                source: ground,
-                destination: TARGET,
-                amount: QUANTITY as u32,
-            })
+            Ok(expected_merge(&world, ground, TARGET, QUANTITY as u32))
         );
         for guid in [TARGET, LAST] {
             world
@@ -2033,11 +1985,7 @@ pub(super) mod tests {
         };
         assert_eq!(
             plan_inventory_intent(&world, intent, Default::default()),
-            Ok(InventoryPlan::Merge {
-                source: SOURCE,
-                destination: TARGET,
-                amount: 10
-            })
+            Ok(expected_merge(&world, SOURCE, TARGET, 10))
         );
         world
             .entities

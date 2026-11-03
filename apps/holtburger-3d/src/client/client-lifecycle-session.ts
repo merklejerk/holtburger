@@ -162,7 +162,9 @@ import {
 	type ClientItemUseFinished,
 	type ClientLockedTarget,
 } from "./client-item-use-contract";
+import { CLIENT_TUNING } from "./client-tuning";
 import {
+	autoMergeRequestSchema,
 	inventoryIntentSchema,
 	type ClientInventoryIntent,
 	inventoryPreviewRequestSchema,
@@ -335,6 +337,7 @@ type ClientCommandName = Extract<
 	| "submit_client_trade"
 	| "request_client_barber"
 	| "submit_client_inventory"
+	| "auto_merge_client_container"
 	| "close_client_container"
 	| "equip_client_item"
 	| "apply_client_equipment_set"
@@ -1189,6 +1192,15 @@ export class ClientLifecycleSession {
 		await this.#transport.invoke("submit_client_inventory", {
 			intent: inventoryIntentSchema.parse(intent),
 		});
+	}
+
+	/** Snapshot application policy once; core owns confirmation and expiry. */
+	async autoMergeContainer(container: number): Promise<void> {
+		const request = autoMergeRequestSchema.parse({
+			container,
+			policy: { ...CLIENT_TUNING.inventory.autoMerge },
+		});
+		await this.#transport.invoke("auto_merge_client_container", request);
 	}
 
 	/** Identity-specific close; late window disposal cannot close a replacement root. */

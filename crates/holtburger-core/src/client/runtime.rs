@@ -108,6 +108,7 @@ impl ClientRuntime {
     }
 
     pub(super) fn poll_busy_timeout(&mut self, now: Instant) {
+        self.poll_auto_merge(now);
         self.poll_container_close_timeout(now);
         self.poll_housing_query_timeout(now);
         self.poll_allegiance_query_timeout(now);
@@ -338,7 +339,7 @@ impl ClientRuntime {
         self.advance_equipment_change(now).await?;
         self.poll_barber();
         self.advance_equipment_set(now).await?;
-        self.advance_pack_exchange(now).await?;
+        self.advance_inventory_operation(now).await?;
         let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);
         if active_world {
             self.advance_dynamic_scripts(self.dynamic_script_time())?;
@@ -418,7 +419,7 @@ impl ClientRuntime {
 
         self.advance_equipment_change(now).await?;
         self.advance_equipment_set(now).await?;
-        self.advance_pack_exchange(now).await?;
+        self.advance_inventory_operation(now).await?;
         let active_world = self.activation.is_none() && matches!(self.state, ClientState::InWorld);
         profile.checkpoint("activation_and_equipment");
         let before_dynamic = active_world.then(|| self.capture_dynamic_entity_tick_baseline());

@@ -194,8 +194,7 @@ impl ClientRuntime {
             return Err("The originating character is no longer ready in the world".into());
         }
         if self.active_busy_operation.is_some()
-            || self.pack_exchange.is_some()
-            || self.equipment_change_pending()
+            || self.inventory_change_pending()
             || self.world.trade.is_some()
         {
             return Err("Finish the pending interaction or inventory change before paying".into());

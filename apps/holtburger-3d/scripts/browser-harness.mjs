@@ -27,6 +27,7 @@ import {
 	probeSelectPicker,
 } from "./keyboard-policy-probe.mjs";
 import { probeTrade } from "./client-trade-probe.mjs";
+import { probeInventoryAutoMerge } from "./client-inventory-auto-merge-probe.mjs";
 import { probeInventoryDrag } from "./client-inventory-drag-probe.mjs";
 import {
 	probeActionBars,
@@ -4970,6 +4971,7 @@ async function runClientHudHarness({ viteUrl }) {
 						options.screenshotPath,
 					),
 					itemUse: await probeItemUse(client, evaluateExpression),
+					autoMerge: await probeInventoryAutoMerge(client, evaluateExpression),
 				},
 				consoleMessages,
 				state: { error: null, ready: true },

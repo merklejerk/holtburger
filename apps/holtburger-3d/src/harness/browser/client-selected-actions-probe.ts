@@ -23,6 +23,7 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 	document.body.append(target);
 	let interact = false;
 	let split = false;
+	let autoMerge = false;
 	let invite = false;
 	let swear = false;
 	let friend = false;
@@ -70,6 +71,10 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 			readCanSalvage: () => false,
 			onSalvage: () => {},
 			readCanSplit: () => split,
+			readCanAutoMerge: () => autoMerge,
+			onAutoMerge: () => {
+				calls.push("auto-merge");
+			},
 			readCanInvite: () => invite,
 			readCanSwear: () => swear,
 			readCanCorpsePermission: () => friend,
@@ -255,6 +260,33 @@ export async function probeSelectedActions(context: Map<unknown, unknown>) {
 		require(menu() === null &&
 			button("Trade")
 				.isConnected, "Eligibility change must restore the single action and dismiss the menu");
+		interact = false;
+		autoMerge = true;
+		await sample();
+		button("Auto-merge").click();
+		require(calls.at(-1) === "auto-merge" &&
+			menu() === null, "A lone auto-merge action must dispatch directly");
+		interact = true;
+		await sample();
+		await open();
+		const mergeRow = Array.from(
+			target.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+		).find((row) => row.textContent?.trim() === "Auto-merge");
+		if (mergeRow === undefined)
+			throw new Error("Missing selected auto-merge menu action");
+		require(mergeRow.querySelector("svg") !==
+			null, "Auto-merge must appear with artwork beside other eligible actions");
+		mergeRow.click();
+		await settle();
+		require(calls.at(-1) === "auto-merge" &&
+			menu() === null, "Auto-merge menu selection must dispatch and dismiss");
+		await open();
+		autoMerge = false;
+		await sample();
+		require(menu() === null &&
+			target.querySelector('button[aria-label="Auto-merge"]') ===
+				null, "Lost container eligibility must remove auto-merge and dismiss its menu");
+
 		// Feed typed death-query output through production chat and its explicit waypoint link.
 		const query = deathLocationResultSchema.parse({
 			character: 7,

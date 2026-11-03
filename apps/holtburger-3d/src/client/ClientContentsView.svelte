@@ -36,6 +36,8 @@
 		readonly dimItem?: (item: ClientEntityFacts) => boolean;
 		/** Optional item hover identity for inventory-owned equipment affordances. */
 		readonly onHoverItem?: (guid: number | null) => void;
+		/** Composing panel owns container context actions; external contents omit this callback. */
+		readonly onContainerContextMenu?: (event: MouseEvent, guid: number) => void;
 		/** External shells provide explicit whole-pack pickup alongside drag/drop. */
 		readonly onTakePack?: (guid: number) => void;
 		/** Panel-specific summary and the shared compact sort control. */
@@ -55,6 +57,7 @@
 		quantityActionHint,
 		dimItem,
 		onHoverItem,
+		onContainerContextMenu,
 		onTakePack,
 		footer,
 	}: Props = $props();
@@ -113,6 +116,9 @@
 					disabled={pending ||
 						item === null ||
 						item.description.kind === "pending"}
+					oncontextmenu={onContainerContextMenu === undefined || item === null
+						? undefined
+						: (event) => onContainerContextMenu(event, item.guid)}
 					onselect={() => {
 						if (item !== null) navigate(item.guid);
 					}}
@@ -133,6 +139,7 @@
 			{dimItem}
 			{onHoverItem}
 			{onTakePack}
+			{onContainerContextMenu}
 		/>
 	</div>
 	<div class="contents-footer">{@render footer()}</div>

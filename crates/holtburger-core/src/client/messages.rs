@@ -463,6 +463,9 @@ impl ClientRuntime {
             self.entity_cue_inbox.remove(data.guid);
         }
 
+        if let GameMessage::InventoryRemoveObject(data) = &message {
+            self.observe_auto_merge_removal(data.object_guid);
+        }
         if let GameMessage::GameEvent(event) = &message
             && let GameEvent::PlayerDescription(description) = &event.event
             && description.guid != self.world.player.guid
@@ -823,8 +826,11 @@ impl ClientRuntime {
                 GameEvent::InventoryServerSaveFailed(data) => {
                     self.observe_vendor_failure(data.item_guid, data.error);
                     self.reject_equipment_item(data.item_guid);
-                    self.reject_pack_exchange_item(data.item_guid);
-                    if !self.reject_equipment_set_item(data.item_guid, data.error) {
+                    let inventory_owned =
+                        self.reject_inventory_operation_item(data.item_guid, data.error);
+                    if !inventory_owned
+                        && !self.reject_equipment_set_item(data.item_guid, data.error)
+                    {
                         self.emit_action_result(
                             ActionResultSource::Wire,
                             ActionResultReason::InventoryServerSaveFailed {

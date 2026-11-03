@@ -87,6 +87,7 @@ function fixture(
 			entities: mirror,
 			previewInventory: vi.fn(async () => {}),
 			submitInventory: vi.fn(async () => {}),
+			autoMergeContainer: vi.fn(async () => {}),
 			state: () => ({ lifecycle }),
 			subscribe: (listener) => {
 				listeners.add(listener);
@@ -122,6 +123,68 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe("persistent inventory state", () => {
+	it("offers auto-merge only for Main Pack and actual carried containers, rechecking stale menus", async () => {
+		const f = fixture();
+		const bag = entityFacts(8, {
+			ownedByPlayer: true,
+			location: {
+				kind: "contained",
+				parentGuid: 1,
+				slot: { kind: "pack", index: 0, entryKind: "container" },
+			},
+			storage: {
+				kind: "container",
+				roster: "announced",
+				itemCapacity: 24,
+				packCapacity: 0,
+			},
+		});
+		const focus = entityFacts(9, {
+			ownedByPlayer: true,
+			location: {
+				kind: "contained",
+				parentGuid: 1,
+				slot: { kind: "pack", index: 1, entryKind: "foci" },
+			},
+		});
+		f.baseline([bag, focus]);
+		expect(f.model.canAutoMergeContainer(1)).toBe(true);
+		expect(f.model.canAutoMergeContainer(8)).toBe(true);
+		expect(f.model.canAutoMergeContainer(9)).toBe(false);
+		expect(f.model.canAutoMergeContainer(99)).toBe(false);
+		await f.model.autoMergeContainer(8);
+		expect(f.model.interactions.autoMergeContainer).toHaveBeenCalledWith(8);
+		f.mirror.awaitSnapshot();
+		expect(f.model.canAutoMergeContainer(8)).toBe(false);
+		await expect(f.model.autoMergeContainer(8)).rejects.toThrow(
+			"no longer available",
+		);
+		expect(f.model.interactions.autoMergeContainer).toHaveBeenCalledTimes(1);
+		f.destroy();
+	});
+
+	it("reports request failures through the inventory toast callback shared by UI entry points", async () => {
+		const f = fixture();
+		vi.mocked(f.model.interactions.autoMergeContainer).mockRejectedValueOnce(
+			new Error("Injected enqueue failure"),
+		);
+		f.model.requestAutoMergeContainer(1);
+		await vi.waitFor(() =>
+			expect(f.model.reportFailure).toHaveBeenCalledWith(
+				"Injected enqueue failure",
+			),
+		);
+		f.mirror.awaitSnapshot();
+		f.model.requestAutoMergeContainer(1);
+		await vi.waitFor(() =>
+			expect(f.model.reportFailure).toHaveBeenCalledWith(
+				"That bag is no longer available for auto-merge.",
+			),
+		);
+		expect(f.model.interactions.autoMergeContainer).toHaveBeenCalledTimes(1);
+		f.destroy();
+	});
+
 	it("publishes arrivals and their destinations without a mounted view, then quietly baselines reentry", async () => {
 		const f = fixture();
 		const arrivals: (readonly (readonly [number, number])[])[] = [];

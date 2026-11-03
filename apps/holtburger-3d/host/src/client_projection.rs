@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use holtburger_common::{CharacterOption, Guid, stats::VitalType};
+use holtburger_core::client::container_auto_merge::AutoMergeOutcome;
 use holtburger_core::client::types::{
     ChatChannelKind, ChatChannelSource, ChatSpeakerKind, ChatTellTarget, CombatFeedback,
     CombatOutcomeContext, ServerTextCombatOutcomeKind,
@@ -1714,6 +1715,33 @@ impl From<&ClientApplicationSnapshot> for ClientCurrentState {
 /// Projects one broad core event into the renderer-safe client event surface.
 pub fn project_client_event(event: ClientViewEvent) -> Option<ClientHostEvent> {
     match event {
+        ClientViewEvent::AutoMergeFinished(result) => {
+            let (message, tone) = match result.outcome {
+                AutoMergeOutcome::Completed { changed: false } => {
+                    ("Nothing to merge".into(), ClientActionFeedbackTone::Status)
+                }
+                AutoMergeOutcome::Completed { changed: true } => (
+                    format!("Auto-merge complete: {} slots freed", result.slots_freed),
+                    ClientActionFeedbackTone::Status,
+                ),
+                AutoMergeOutcome::Rejected(reason) => (
+                    format!("Could not auto-merge: {reason}"),
+                    ClientActionFeedbackTone::Warning,
+                ),
+                AutoMergeOutcome::Stopped(reason) => (
+                    format!(
+                        "Auto-merge stopped: {reason}. {} slots freed",
+                        result.slots_freed
+                    ),
+                    ClientActionFeedbackTone::Warning,
+                ),
+            };
+            Some(ClientHostEvent::ActionFeedback(ClientActionFeedback {
+                message,
+                tone,
+                equipment: None,
+            }))
+        }
         ClientViewEvent::BarberUpdated(snapshot) => Some(ClientHostEvent::BarberUpdated(snapshot)),
         ClientViewEvent::BarberPreview(result) => Some(ClientHostEvent::BarberPreview(result)),
         ClientViewEvent::HousingUpdated(housing) => Some(ClientHostEvent::HousingUpdated(housing)),
@@ -3687,5 +3715,62 @@ mod barber_contract_tests {
             event,
             Some(super::ClientHostEvent::BarberPreview(_))
         ));
+    }
+}
+
+#[cfg(test)]
+mod auto_merge_tests {
+    use super::*;
+    use holtburger_core::client::container_auto_merge::{AutoMergeOutcome, AutoMergeResult};
+
+    #[test]
+    fn terminal_results_use_existing_action_feedback_with_honest_progress() {
+        for (outcome, slots_freed, message, warning) in [
+            (
+                AutoMergeOutcome::Completed { changed: false },
+                0,
+                "Nothing to merge",
+                false,
+            ),
+            (
+                AutoMergeOutcome::Completed { changed: true },
+                0,
+                "Auto-merge complete: 0 slots freed",
+                false,
+            ),
+            (
+                AutoMergeOutcome::Completed { changed: true },
+                2,
+                "Auto-merge complete: 2 slots freed",
+                false,
+            ),
+            (
+                AutoMergeOutcome::Rejected("Finish trading".into()),
+                0,
+                "Could not auto-merge: Finish trading",
+                true,
+            ),
+            (
+                AutoMergeOutcome::Stopped("Timed out".into()),
+                1,
+                "Auto-merge stopped: Timed out. 1 slots freed",
+                true,
+            ),
+        ] {
+            let event = project_client_event(ClientViewEvent::AutoMergeFinished(AutoMergeResult {
+                slots_freed,
+                outcome,
+            }))
+            .unwrap();
+            let ClientHostEvent::ActionFeedback(feedback) = event else {
+                panic!("result must use the existing feedback path")
+            };
+            assert_eq!(feedback.message, message);
+            assert_eq!(
+                matches!(feedback.tone, ClientActionFeedbackTone::Warning),
+                warning
+            );
+            assert!(feedback.equipment.is_none());
+        }
     }
 }

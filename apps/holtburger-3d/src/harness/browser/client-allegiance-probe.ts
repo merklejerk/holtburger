@@ -386,6 +386,8 @@ export async function probeAllegiance(options: {
 				readCanSalvage: () => false,
 				onSalvage: () => {},
 				readCanSplit: () => false,
+				readCanAutoMerge: () => false,
+				onAutoMerge: () => {},
 				readCanInvite: () => false,
 				readCanAddFriend: () => false,
 				readCanIgnoreAccount: () => false,

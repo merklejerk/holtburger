@@ -249,6 +249,12 @@ export const CLIENT_TUNING = {
 		maximumDistanceMeters: 9,
 	},
 	inventory: {
+		autoMerge: {
+			/** Maximum wait for one merge request's authoritative consequences. */
+			stepTimeoutMs: 10_000,
+			/** Maximum duration of the complete invocation. */
+			operationTimeoutMs: 30_000,
+		},
 		/** Pointer travel that distinguishes inventory selection from dragging. */
 		dragThresholdCssPixels: 6,
 		/** Ignore double-click completion from a finished drag gesture. */

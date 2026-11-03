@@ -36,6 +36,7 @@ pub use connection_failure::{
     CharacterErrorCode, ClientExitOutcome, ConnectionFailure, ConnectionFailureCause,
     ConnectionOperation,
 };
+pub mod container_auto_merge;
 mod contracts;
 pub mod corpse;
 mod dynamic_entity_view;
@@ -53,6 +54,7 @@ pub mod housing_execution;
 pub mod housing_management;
 pub mod housing_payment;
 pub mod housing_queries;
+pub mod inventory_merge;
 pub mod inventory_plan;
 mod inventory_runtime;
 pub mod inventory_storage;
@@ -262,8 +264,8 @@ pub struct ClientRuntime {
     pending_combat_mode: Option<holtburger_protocol::messages::combat::CombatMode>,
     /// Outstanding P2P item acknowledgments shared by all frontends.
     trade_additions: HashMap<Guid, Instant>,
-    /// Dependent pack exchange waiting to send its second insertion.
-    pack_exchange: Option<inventory_runtime::PackExchange>,
+    /// Single owner of dependent inventory requests and their local admission.
+    inventory_operation: Option<inventory_runtime::InventoryOperation>,
     state: ClientState,
     /// Distinguishes the initial connected socket from a login request in flight.
     authenticating: bool,
@@ -626,7 +628,9 @@ impl ClientRuntime {
     ) {
         self.housing_opening = None;
         self.reset_combat_engagement();
-        self.stop_pack_exchange("World lifecycle changed; the last request may still complete");
+        self.stop_inventory_operation(
+            "World lifecycle changed; the last request may still complete",
+        );
         self.stop_equipment_change("World lifecycle changed; the last request may still complete");
         self.equipment_set = Default::default();
         self.pending_combat_mode = None;

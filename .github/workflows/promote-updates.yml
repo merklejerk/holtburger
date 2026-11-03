@@ -1,0 +1,14 @@
+name: Promote Update Feeds
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  select-release-ref:
+    runs-on: ubuntu-22.04
+    steps:
+      - run: |
+          echo 'Select 3d-next in Run workflow, or pass --ref 3d-next with gh workflow run.'
+          exit 1

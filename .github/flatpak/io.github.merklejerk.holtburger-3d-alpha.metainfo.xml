@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.merklejerk.holtburger-alpha</id>
+  <id>io.github.merklejerk.holtburger-3d-alpha</id>
   <metadata_license>MIT</metadata_license>
   <project_license>AGPL-3.0-only</project_license>
   <name>Holtburger 3D Alpha</name>
@@ -9,6 +9,6 @@
     <p>Includes the 3D client and Explorer. Requires user-supplied retail data.</p>
     <p>Client launch requires account and connection arguments. The 3D client requires user-supplied retail data.</p>
   </description>
-  <launchable type="desktop-id">io.github.merklejerk.holtburger-alpha.desktop</launchable>
+  <launchable type="desktop-id">io.github.merklejerk.holtburger-3d-alpha.desktop</launchable>
   <url type="homepage">https://github.com/merklejerk/holtburger</url>
 </component>

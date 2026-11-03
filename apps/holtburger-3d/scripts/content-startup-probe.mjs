@@ -51,7 +51,7 @@ const launchTarget =
 					await readFile(
 						join(
 							workspace,
-							".github/flatpak/io.github.merklejerk.holtburger-alpha.json",
+							".github/flatpak/io.github.merklejerk.holtburger-3d-alpha.json",
 						),
 						"utf8",
 					),

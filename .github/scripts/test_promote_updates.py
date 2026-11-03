@@ -32,7 +32,7 @@ def release_fixture(version: str, channel: str, commit: str, identifier: int) ->
         record = {**identity, "product": product, "target": "x86_64-unknown-linux-gnu",
                   "archive": f"holtburger-{product}-{version}-x86_64.flatpak", "sha256": checksum,
                   "runtime": "org.freedesktop.Platform/x86_64/26.08",
-                  "appId": f"io.github.merklejerk.holtburger-{'cli-alpha' if product == 'cli' else 'alpha'}"}
+                  "appId": f"io.github.merklejerk.holtburger-{'cli-alpha' if product == 'cli' else '3d-alpha'}"}
         if product == "cli":
             record.update(content)
         flatpaks.append(record)

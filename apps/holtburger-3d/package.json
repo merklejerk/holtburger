@@ -3,7 +3,7 @@
 	"private": true,
 	"version": "0.1.5-alpha",
 	"license": "AGPL-3.0-only",
-	"desktopName": "io.github.merklejerk.holtburger-alpha.desktop",
+	"desktopName": "io.github.merklejerk.holtburger-3d-alpha.desktop",
 	"type": "module",
 	"main": "dist-electron/electron/main.js",
 	"engines": {

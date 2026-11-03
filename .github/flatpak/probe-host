@@ -14,4 +14,4 @@ done
 fixture_root=$(dirname "$content")
 exec flatpak run --user --filesystem="$fixture_root":ro \
   --command=/app/lib/holtburger/h3d/resources/holtburger-3d-host \
-  io.github.merklejerk.holtburger-alpha "$@"
+  io.github.merklejerk.holtburger-3d-alpha "$@"

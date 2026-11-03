@@ -169,7 +169,7 @@ jobs:
           sudo apt-get install --yes --no-install-recommends \
             flatpak flatpak-builder appstream-compose desktop-file-utils elfutils ostree librsvg2-common dbus-x11
           sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-          RUNTIME_VERSION=$(python -c 'import json; print(json.load(open(".github/flatpak/io.github.merklejerk.holtburger-alpha.json"))["runtime-version"])')
+          RUNTIME_VERSION=$(python -c 'import json; print(json.load(open(".github/flatpak/io.github.merklejerk.holtburger-3d-alpha.json"))["runtime-version"])')
           sudo flatpak install --noninteractive --assumeyes flathub "org.freedesktop.Platform/x86_64/$RUNTIME_VERSION" "org.freedesktop.Sdk/x86_64/$RUNTIME_VERSION"
       - name: Install 3D probe display and portal helpers
         if: needs.plan.outputs.product != 'cli'
@@ -236,7 +236,7 @@ jobs:
           mkdir -p .holtburger-local/candidate-artifacts/3d
           BUNDLE='.holtburger-local/candidate-artifacts/3d/holtburger-3d-${{ needs.plan.outputs.version }}-x86_64.flatpak'
           cp holtburger-3d.flatpak "$BUNDLE"
-          LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-alpha)
+          LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-3d-alpha)
           python .github/scripts/candidate_release.py record-flatpak --files "$LOCATION/files" \
             --native "$HOLTBURGER_3D_NATIVE" --bundle "$BUNDLE" \
             --output .holtburger-local/candidate-artifacts/3d/metadata-3d-flatpak.json

@@ -59,7 +59,7 @@ INSTALLER_TARGETS = (
 SCRIPTS = ("fighter.js", "mage.js", "mage.data.json", "mage.data.bin")
 TOOLS = ("holtburger-cli", "dat2hba", "dat-tool")
 APP = ROOT / "apps/holtburger-3d"
-THREED_FLATPAK_RECIPE = ROOT / ".github/flatpak/io.github.merklejerk.holtburger-alpha.json"
+THREED_FLATPAK_RECIPE = ROOT / ".github/flatpak/io.github.merklejerk.holtburger-3d-alpha.json"
 CLI_FLATPAK_RECIPE = ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli-alpha.yaml"
 CLI_NIGHTLY_FLATPAK_RECIPE = ROOT / "apps/holtburger-cli/dist/io.github.merklejerk.holtburger-cli.yaml"
 CLI_CONTENT_DESCRIPTOR = ROOT / ".github/cli-content.json"
@@ -414,7 +414,7 @@ def validate_manifest(document: dict) -> ReleaseInventory:
     if re.fullmatch(r"org\.freedesktop\.Platform/x86_64/[0-9.]+", runtime) is None:
         raise ValueError("Flatpak runtime is outside the supported runtime family")
     app_ids = {"cli": "io.github.merklejerk.holtburger-cli-alpha",
-               "3d": "io.github.merklejerk.holtburger-alpha"}
+               "3d": "io.github.merklejerk.holtburger-3d-alpha"}
     for record in flatpaks:
         product = record["product"]
         expected = {**identity, "target": "x86_64-unknown-linux-gnu",

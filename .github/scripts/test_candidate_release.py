@@ -304,7 +304,7 @@ class ReleaseManifestTests(unittest.TestCase):
                 bundle.write_bytes(product.encode())
                 record = {**identity, "product": product,
                           "target": next(target.triple for target in TARGETS if target.platform == "linux"),
-                          "appId": f"io.github.merklejerk.holtburger-{'cli-alpha' if product == 'cli' else 'alpha'}",
+                          "appId": f"io.github.merklejerk.holtburger-{'cli-alpha' if product == 'cli' else '3d-alpha'}",
                           "archive": bundle.name, "sha256": digest(bundle),
                           "runtime": flatpak_runtime_ref(json.loads(THREED_FLATPAK_RECIPE.read_text()))}
                 if product == "cli":
@@ -468,7 +468,7 @@ class ProductFlatpakTests(unittest.TestCase):
                     record_flatpak(files, native, bundle, output)
                 executable.chmod(0o755)
                 metadata = files.parent / "metadata"
-                for field, value, message in (("name", "io.github.merklejerk.holtburger-alpha", "application ID"),
+                for field, value, message in (("name", "io.github.merklejerk.holtburger-3d-alpha", "application ID"),
                                                ("runtime", "org.example.Wrong/x86_64/test", "runtime differs")):
                     values = {"name": recipe["id"], "runtime": runtime, field: value}
                     metadata.write_text(f"[Application]\nname={values['name']}\nruntime={values['runtime']}\n")

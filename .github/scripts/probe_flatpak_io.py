@@ -47,7 +47,7 @@ def probe_cli_tools(inputs: Path, outputs: Path) -> None:
 
 def probe_3d_portal(inputs: Path) -> None:
     """Check document-portal access in the 3D app's own sandbox without CLI utilities."""
-    recipe = json.loads((ROOT / ".github/flatpak/io.github.merklejerk.holtburger-alpha.json").read_text())
+    recipe = json.loads((ROOT / ".github/flatpak/io.github.merklejerk.holtburger-3d-alpha.json").read_text())
     app_id = recipe["id"]
     version = json.loads(subprocess.check_output([
         "busctl", "--user", "--json=short", "get-property", "org.freedesktop.portal.Desktop",

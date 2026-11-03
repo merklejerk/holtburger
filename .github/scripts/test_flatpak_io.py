@@ -39,8 +39,8 @@ class FlatpakIoTests(unittest.TestCase):
                 json.dumps({"data": MIN_FILE_CHOOSER_PORTAL_VERSION}), portal,
             ]) as query, patch("probe_flatpak_io.subprocess.run") as run:
                 probe_3d_portal(inputs)
-            self.assertIn("--app=io.github.merklejerk.holtburger-alpha", query.call_args_list[1].args[0])
-            self.assertIn("io.github.merklejerk.holtburger-alpha", run.call_args_list[0].args[0])
+            self.assertIn("--app=io.github.merklejerk.holtburger-3d-alpha", query.call_args_list[1].args[0])
+            self.assertIn("io.github.merklejerk.holtburger-3d-alpha", run.call_args_list[0].args[0])
             self.assertIn("--command=sh", run.call_args_list[0].args[0])
             self.assertEqual(run.call_args_list[-1].args[0], ["flatpak", "document-unexport", "--doc-id", "probe-document"])
 

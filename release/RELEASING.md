@@ -188,12 +188,15 @@ validator is used later by promotion; local staging additionally checks every pa
 The Flatpaks reuse their already-built Linux native archives. One job shares tooling/runtime
 setup, with separate cached builder state per product. The CLI has networking but no graphical
 sockets or Electron. The 3D recipe retains graphics/audio/network and the pinned Zypak helper;
-it keeps `io.github.merklejerk.holtburger-alpha` and existing settings, while the download is
+it uses `io.github.merklejerk.holtburger-3d-alpha`, matching the Windows installer and macOS
+bundle ID, while the download is
 named `holtburger-3d-VERSION-x86_64.flatpak`. CLI uses `io.github.merklejerk.holtburger-cli-alpha`.
 The alpha CLI appears as **Holtburger CLI Alpha** and has separate settings from main/nightly
 `io.github.merklejerk.holtburger-cli`. Nightly preparation explicitly selects `--nightly-cli`.
 Both alpha products use Freedesktop 26.08. The generated alpha recipe selects that runtime
 from the 3D recipe; the checked-in CLI recipe remains independently usable for staging.
+The 3D ID replaces the earlier alpha Flatpak ID. It creates a separate installation and
+settings directory; earlier settings and portal grants are not migrated automatically.
 
 Portable native Linux builds use Ubuntu 22.04; Flatpak builds use headless Ubuntu 24.04 and
 its newer builder. No desktop distribution or persistent runner fleet is required. A virtual
@@ -275,7 +278,7 @@ checksums, known limitations, and which automatic/manual checks actually ran:
 3. 3D: supply full retail data, launch the default client and explicit Explorer, and check
    gameplay, graphics/audio/input, window scaling, and OS launch behavior.
 4. On Linux, install the two separate Flatpaks. Check CLI utility permissions and 3D portal
-   selection across restarts. The 3D app ID preserves prior alpha settings.
+   selection across restarts. The renamed 3D app starts with a separate settings directory.
 
 Record unavailable native targets explicitly. Old alpha.3 acceptance does not establish the
 new split candidate's behavior. A fix requires a new identified candidate and affected checks;
@@ -349,4 +352,4 @@ At the authorized beta merge, change `candidate_allocation.RELEASE_BRANCH` and p
 trusted checkout ref to `main`, update dispatch examples, push/PR branch filters and Pages
 environment allowlists together, and verify a complete candidate and promotion repair from
 `main`. The beta audience alone never changes the source ref. Retain existing desktop and
-Flatpak IDs/settings locations: their historical alpha spelling preserves installations.
+Flatpak IDs/settings locations: their alpha spelling preserves installations across versions.

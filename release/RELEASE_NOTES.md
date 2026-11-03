@@ -6,8 +6,10 @@ private runtime; it requires user-supplied retail DATs or a full HBA. Full retai
 are not distributed.
 
 Both products have native Linux x86-64, Windows x86-64, and macOS Apple Silicon archives,
-and separate Linux x86-64 Flatpaks using Freedesktop 26.08. The 3D Flatpak retains the alpha
-app ID and saved settings: `io.github.merklejerk.holtburger-alpha`. Its download is named
+and separate Linux x86-64 Flatpaks using Freedesktop 26.08. The 3D Flatpak uses
+`io.github.merklejerk.holtburger-3d-alpha`, matching the Windows installer and macOS bundle ID.
+This replaces the earlier 3D Flatpak ID and creates a separate installation and settings
+directory; earlier settings and portal grants are not migrated automatically. Its download is named
 `holtburger-3d`; CLI uses `io.github.merklejerk.holtburger-cli-alpha`. Archive utilities belong to
 CLI, including its Flatpak's `--command=dat-tool` and `--command=dat2hba` entries.
 

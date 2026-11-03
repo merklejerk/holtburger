@@ -109,14 +109,14 @@ See the release notes for which native targets were actually verified.
 
 ## Flatpak
 
-Install `holtburger-3d-VERSION-x86_64.flatpak`. The 3D product retains the existing alpha
-application ID and its saved settings:
+Install `holtburger-3d-VERSION-x86_64.flatpak`. The 3D application ID is
+`io.github.merklejerk.holtburger-3d-alpha`:
 
 ```sh
 flatpak install --user ./holtburger-3d-VERSION-x86_64.flatpak
-flatpak run --filesystem=/path/to/retail:ro io.github.merklejerk.holtburger-alpha \
+flatpak run --filesystem=/path/to/retail:ro io.github.merklejerk.holtburger-3d-alpha \
   --host SERVER --port 9000 --account ACCOUNT --password PASSWORD --content /path/to/retail
-flatpak run --filesystem=/path/to/retail:ro io.github.merklejerk.holtburger-alpha \
+flatpak run --filesystem=/path/to/retail:ro io.github.merklejerk.holtburger-3d-alpha \
   explorer --content /path/to/retail
 ```
 
@@ -124,5 +124,9 @@ Use absolute paths and quote paths containing spaces. The asset picker can obtai
 through the desktop's document portal, which requires a working portal backend. Saved
 portal selections retain their grants. An explicit override requires its filesystem grant
 on each invocation. Settings/cache live under
-`~/.var/app/io.github.merklejerk.holtburger-alpha/`. Graphics and audio use the desktop's
+`~/.var/app/io.github.merklejerk.holtburger-3d-alpha/`. Graphics and audio use the desktop's
 Wayland/X11, GPU, and audio services.
+
+This application ID replaces the earlier 3D alpha ID. Flatpak treats it as a separate
+installation with a new settings directory; earlier settings and portal grants are not
+migrated automatically.

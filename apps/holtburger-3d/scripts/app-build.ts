@@ -2,7 +2,11 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
-import type { AppBuild } from "../src/app/app-build.ts";
+import {
+	appBuildSchema,
+	releaseChannelSchema,
+	type AppBuild,
+} from "../src/app/app-build-contract.js";
 
 /** Capture source identity during configuration; missing package/Git metadata fails the build. */
 export function readAppBuild(appRoot: string, development: boolean): AppBuild {
@@ -33,10 +37,16 @@ export function readAppBuild(appRoot: string, development: boolean): AppBuild {
 					{ cwd: appRoot, encoding: "utf8" },
 				)
 			: null;
-	return {
+	const channel = releaseChannelSchema.parse(
+		JSON.parse(
+			readFileSync(resolve(appRoot, "../../release/channel.json"), "utf8"),
+		),
+	);
+	return appBuildSchema.parse({
 		development,
 		version,
+		channel,
 		revision,
 		modified: status === null ? modified === "1" : status.length > 0,
-	};
+	});
 }

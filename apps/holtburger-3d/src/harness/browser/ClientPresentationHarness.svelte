@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { createFixtureThemeSettings } from "./ui-showcase-themes";
+	import { installAppUpdateFixture } from "./app-update-fixture";
 	import { onMount, type ComponentProps } from "svelte";
 	import { encode } from "@msgpack/msgpack";
 	import { z } from "zod";
@@ -75,6 +76,11 @@
 	const { keyboard } = provideAppInputPolicy();
 
 	onMount(() => {
+		const restoreUpdates = new URLSearchParams(location.search).has(
+			"presentation-updates",
+		)
+			? installAppUpdateFixture()
+			: null;
 		const retireKeyboard = keyboard.mount(document);
 		const url = new URLSearchParams(location.search).get("contentHost");
 		if (url === null)
@@ -512,6 +518,7 @@
 			}
 		});
 		return () => {
+			restoreUpdates?.();
 			retireKeyboard();
 			retireClose?.();
 			closed = true;

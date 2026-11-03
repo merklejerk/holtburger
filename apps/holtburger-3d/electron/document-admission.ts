@@ -15,6 +15,11 @@ export class DocumentAdmission {
 	get role(): DocumentRole | null {
 		return this.#document?.role ?? null;
 	}
+
+	/** Optional lifecycle withdrawals can acknowledge retirement without reopening stale IPC admission. */
+	isAdmitted(id: unknown): boolean {
+		return this.#open && this.#document !== null && this.#document.id === id;
+	}
 	navigate(role: DocumentRole, path: string): void {
 		this.#document = { id: randomUUID(), role, path: path.split("?", 1)[0] };
 		this.#open = true;

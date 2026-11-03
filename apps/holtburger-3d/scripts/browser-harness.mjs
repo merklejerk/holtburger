@@ -8,6 +8,7 @@ import { probeCombatBar } from "./client-combat-bar-probe.mjs";
 import { probeSalvage } from "./client-salvage-probe.mjs";
 import { probeUserThemeLifecycle } from "./user-theme-lifecycle-probe.mjs";
 import { probeClientPresentation } from "./client-presentation-probe.mjs";
+import { probeClientUpdates } from "./client-updates-probe.mjs";
 import { probeClientCombatEscape } from "./client-combat-escape-probe.mjs";
 import { probeClientMouseMovement } from "./client-mouse-movement-probe.mjs";
 import { probeSpellBar } from "./client-spell-bar-probe.mjs";
@@ -693,6 +694,7 @@ function parseArgs(args) {
 		pregamePreview: false,
 		pregameLocation: 0,
 		clientPresentation: false,
+		clientUpdates: false,
 		clientCombatEscape: false,
 		userThemeLifecycle: false,
 		worldMap: false,
@@ -881,6 +883,10 @@ function parseArgs(args) {
 			case "--user-theme-lifecycle":
 				parsed.userThemeLifecycle = true;
 				parsed.clientPresentation = true;
+				break;
+			case "--client-updates":
+				parsed.clientPresentation = true;
+				parsed.clientUpdates = true;
 				break;
 			case "--client-presentation":
 				parsed.clientPresentation = true;
@@ -2060,6 +2066,7 @@ Options:
   --nameplate-report-only
                         Print only renderer identity, errors, profiling, and nameplate evidence.
   --client-presentation Verify actual client selection/creator/gameplay/return on one world context.
+  --client-updates Verify the update footer and pregame visibility registrations on actual client pages.
   --client-combat-escape Verify combat retry and cancellation ordering through the actual client.
   --pregame-location <index> Choose a configured pregame scene for diagnostics (default: 0).
   --pregame-preview    Exercise static asset ownership and direct preview draw before world startup.
@@ -5523,7 +5530,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 	const terrainGlTrace = options.traceTerrainGl ? "&traceTerrainGl=true" : "";
 	const worldMarker =
 		options.worldMarker === null ? "" : `&worldMarker=${options.worldMarker}`;
-	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&pregame-location=${options.pregameLocation}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}${options.worldMap ? "&world-map=1" : ""}${options.pregamePreview ? "&pregame-preview=1" : ""}${options.clientPresentation ? "&client-presentation=1&presentation-gates=1" : ""}${process.env.HOLTBURGER_PROBE_CLIENT_CONTENT === "1" ? "&presentation-content-failure=1" : ""}`;
+	const pageUrl = `${viteUrl}/harness/browser/?contentHost=${encodeURIComponent(contentHostUrl)}&pregame-location=${options.pregameLocation}&cameraHeight=${encodeURIComponent(options.cameraHeight)}&viewportWidth=${encodeURIComponent(options.viewportWidth)}&viewportHeight=${encodeURIComponent(options.viewportHeight)}${dynamicIsolation}${dynamicExclusion}${attachmentExclusion}${fixture}${portalTransitionCompositorDiagnostic}${portalTransitionLifecycleFixture}${timeOfDay}${dayGroup}${particleSeed}${frameIntervalMs}${captureFrame}${audioTrace}${terrainGlTrace}${worldMarker}${options.uiTheme ? "&ui-theme=1" : ""}${options.worldMap ? "&world-map=1" : ""}${options.pregamePreview ? "&pregame-preview=1" : ""}${options.clientPresentation ? "&client-presentation=1&presentation-gates=1" : ""}${options.clientUpdates ? "&presentation-updates=1" : ""}${process.env.HOLTBURGER_PROBE_CLIENT_CONTENT === "1" ? "&presentation-content-failure=1" : ""}`;
 	const chrome = startChild(options.chromePath, [
 		"--remote-debugging-port=0",
 		`--user-data-dir=${userDataDirectory}`,
@@ -5579,11 +5586,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 		await client.send("Runtime.enable");
 		if (options.clientPresentation) {
 			const clientPresentation = await (
-				options.userThemeLifecycle
-					? probeUserThemeLifecycle
-					: options.clientCombatEscape
-						? probeClientCombatEscape
-						: probeClientPresentation
+				options.clientUpdates
+					? probeClientUpdates
+					: options.userThemeLifecycle
+						? probeUserThemeLifecycle
+						: options.clientCombatEscape
+							? probeClientCombatEscape
+							: probeClientPresentation
 			)(client, evaluateExpression, consoleMessages);
 			return {
 				clientPresentation,

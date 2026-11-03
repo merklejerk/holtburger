@@ -3,12 +3,15 @@ import {
 	type ContentStartupSnapshot,
 } from "./content-startup-contract";
 
-interface ContentBridge {
-	snapshot(): Promise<unknown>;
+import {
+	subscribeNativeSnapshot,
+	type NativeSnapshotSource,
+} from "./native-snapshot";
+
+interface ContentBridge extends NativeSnapshotSource {
 	choose(): Promise<void>;
 	retry(): Promise<void>;
 	quit(): Promise<void>;
-	listen(handler: (snapshot: unknown) => void): () => void;
 }
 
 declare global {
@@ -31,27 +34,12 @@ export function createContentStartupTransport() {
 			handler: (snapshot: ContentStartupSnapshot) => void,
 			failed: (error: unknown) => void,
 		): () => void {
-			let revision = -1;
-			let active = true;
-			const receive = (value: unknown) => {
-				if (!active) return;
-				try {
-					const snapshot = contentStartupSnapshotSchema.parse(value);
-					if (snapshot.revision <= revision) return;
-					revision = snapshot.revision;
-					handler(snapshot);
-				} catch (error) {
-					failed(error);
-				}
-			};
-			const unsubscribe = bridge.listen(receive);
-			void bridge.snapshot().then(receive, (error: unknown) => {
-				if (active) failed(error);
-			});
-			return () => {
-				active = false;
-				unsubscribe();
-			};
+			return subscribeNativeSnapshot(
+				bridge,
+				(value) => contentStartupSnapshotSchema.parse(value),
+				handler,
+				failed,
+			);
 		},
 	};
 }

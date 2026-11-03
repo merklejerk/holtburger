@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from alpha_changes import main
+from candidate_changes import main
 
 
 class CandidateChangeTests(unittest.TestCase):
@@ -25,7 +25,7 @@ class CandidateChangeTests(unittest.TestCase):
                         "GITHUB_EVENT_PATH": str(event),
                         "GITHUB_OUTPUT": str(output),
                     }, clear=True),
-                    patch("alpha_changes.subprocess.check_output") as changes,
+                    patch("candidate_changes.subprocess.check_output") as changes,
                 ):
                     main()
                 changes.assert_not_called()

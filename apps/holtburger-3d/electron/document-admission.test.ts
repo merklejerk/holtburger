@@ -7,8 +7,10 @@ describe("document IPC admission", () => {
 		gate.navigate("picker", "launcher/index.html");
 		const picker = gate.boot("file:///app/dist/launcher/index.html");
 		gate.require(picker, "picker");
+		expect(gate.isAdmitted(picker)).toBe(true);
 		expect(() => gate.require(picker, "client")).toThrow("unavailable");
 		gate.close();
+		expect(gate.isAdmitted(picker)).toBe(false);
 		expect(() => gate.require(picker)).toThrow("closed");
 		gate.navigate("client", "client/index.html?debug=1");
 		expect(() => gate.boot("file:///app/dist/launcher/index.html")).toThrow(
@@ -16,6 +18,8 @@ describe("document IPC admission", () => {
 		);
 		const first = gate.boot("file:///app/dist/client/index.html?debug=1");
 		gate.require(first, "client");
+		expect(gate.isAdmitted(first)).toBe(true);
+		expect(gate.isAdmitted(picker)).toBe(false);
 		expect(() => gate.require(picker)).toThrow("closed");
 		gate.navigate("client", "client/index.html");
 		expect(() => gate.require(first)).toThrow("closed");

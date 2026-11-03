@@ -30,6 +30,8 @@ const { values } = parseArgs({
 		"profile-content-only": { type: "boolean" },
 		"app-settings-only": { type: "boolean" },
 		"dev-restart-only": { type: "boolean" },
+		"updates-only": { type: "boolean" },
+		"updates-direct": { type: "boolean" },
 	},
 });
 const directory = await mkdtemp(join(tmpdir(), "h3d-launcher-probe-"));
@@ -299,6 +301,16 @@ async function runProbe() {
 		"--no-sandbox",
 	];
 	const gameArgs = [
+		...(values["updates-direct"]
+			? [
+					"--server",
+					"127.0.0.1:1",
+					"--account",
+					"update-probe",
+					"--password",
+					"probe-secret",
+				]
+			: []),
 		...(values["profile-content-only"]
 			? ["--no-content-search"]
 			: ["--clear-content"]),
@@ -354,7 +366,158 @@ async function runProbe() {
 	);
 	browser = await createCdpClient(browserEndpoint);
 	inspector = await createCdpClient(inspectorEndpoint);
-	await attach("launcher");
+	const initialUpdateRole = values["updates-direct"] ? "client" : "launcher";
+	await attach(initialUpdateRole);
+	if (values["updates-only"] || values["updates-direct"]) {
+		await evaluate(
+			inspector,
+			`(async () => {
+			const require = process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json');
+			const { app, BrowserWindow } = require('electron');
+			const { AppUpdates, UPDATE_CHECK_INTERVAL_MS } = require(require('node:path').join(app.getAppPath(), 'dist-electron/electron/app-updates.js'));
+			const probe = { requests: [], opened: [], clock: 0, feed: { schemaVersion: 1, version: '0.1.4', tag: 'candidate-20261103-abcdef123' } };
+			const owner = new AppUpdates({ development: false, modified: false, version: '0.1.4-alpha.1', channel: 'alpha', revision: 'abcdef12' }, {
+				request: async (url) => { probe.requests.push(url); return Response.json(probe.feed); },
+				now: () => probe.clock,
+				publish: (snapshot) => BrowserWindow.getAllWindows()[0].webContents.send('updates:state', snapshot),
+				report: console.error,
+				openExternal: async (url) => { probe.opened.push(url); }
+			});
+			// Inject capabilities through the inspector, keeping production free of test URLs or flags.
+			const stopOriginal = Object.getOwnPropertyDescriptor(AppUpdates.prototype, 'stop').value;
+			const replaced = new WeakSet();
+			const retireOriginal = (instance) => {
+				if (instance === owner || replaced.has(instance)) return;
+				replaced.add(instance);
+				stopOriginal.call(instance);
+			};
+			for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(AppUpdates.prototype))) {
+				if (name === 'constructor') continue;
+				if (descriptor.get) { const get = descriptor.get; descriptor.get = function() { retireOriginal(this); return get.call(owner); }; }
+				else if (typeof descriptor.value === 'function') { const method = descriptor.value; descriptor.value = function(...args) { retireOriginal(this); return method.apply(owner, args); }; }
+				Object.defineProperty(AppUpdates.prototype, name, descriptor);
+			}
+			probe.advance = () => { probe.clock += UPDATE_CHECK_INTERVAL_MS; owner.setWindowVisible(true); };
+			globalThis.__updatesProbe = probe;
+			owner.start();
+		})()`,
+		);
+		await page.send("Page.enable");
+		const loaded = new Promise((resolve) =>
+			page.on("Page.loadEventFired", resolve),
+		);
+		await page.send("Page.reload");
+		await loaded;
+		await attach(initialUpdateRole);
+		const updateIcon =
+			"document.querySelector('.pregame-build button[aria-label^=\"Update available\"]')";
+		await waitFor(
+			() => evaluate(page, `${updateIcon}?.checkVisibility()`),
+			"launcher update icon",
+		);
+		await evaluate(page, `${updateIcon}.click()`);
+		let native = await evaluate(
+			inspector,
+			`({ requests: __updatesProbe.requests, opened: __updatesProbe.opened })`,
+		);
+		requireCondition(
+			native.requests.length === 1,
+			"Launcher mounts must share one startup request",
+		);
+		requireCondition(
+			native.opened[0] ===
+				"https://github.com/merklejerk/holtburger/releases/tag/candidate-20261103-abcdef123",
+			"Click must open the confirmed release page",
+		);
+		if (values["updates-direct"]) {
+			await evaluate(page, "window.holtburgerLauncher.back(null)");
+			await attach("launcher");
+			await waitFor(
+				() => evaluate(page, `${updateIcon}?.checkVisibility()`),
+				"direct startup update retained on launcher return",
+			);
+			report.scenarios.push(
+				"Direct client startup receives update availability before the launcher is opened",
+			);
+		}
+		const staleToken = await evaluate(
+			page,
+			"window.holtburgerUpdates.registerPregame(true)",
+		);
+		const serverId = randomUUID();
+		await evaluate(
+			page,
+			`window.holtburgerLauncher.saveServer(${JSON.stringify({ id: serverId, name: "Update probe", endpoint: { host: "127.0.0.1", port: 1 } })})`,
+		);
+		await evaluate(
+			page,
+			`window.holtburgerLauncher.play(${JSON.stringify({ serverId, profileId: null, contentPath: assets, credentials: { account: "update-probe", password: "probe-secret" } })})`,
+		);
+		await attach("client");
+		await waitFor(
+			() => evaluate(page, `${updateIcon}?.checkVisibility()`),
+			"pregame update icon",
+		);
+		await evaluate(page, "window.holtburgerLauncher.back(null)");
+		await attach("launcher");
+		await waitFor(
+			() => evaluate(page, `${updateIcon}?.checkVisibility()`),
+			"retained update on launcher return",
+		);
+		requireCondition(
+			await evaluate(
+				page,
+				`window.holtburgerUpdates.setPregameVisible(${JSON.stringify(staleToken)}, false).then((status) => status === "retired")`,
+			),
+			"New documents must reject old visibility tokens",
+		);
+		await evaluate(
+			inspector,
+			`__updatesProbe.feed.version = '0.1.4-alpha.1'; __updatesProbe.advance()`,
+		);
+		await waitFor(
+			() => evaluate(page, `${updateIcon} === null`),
+			"successful feed reconciliation removes update icon",
+		);
+		native = await evaluate(
+			inspector,
+			`({ requests: __updatesProbe.requests, opened: __updatesProbe.opened })`,
+		);
+		requireCondition(
+			native.requests.length === 2,
+			"Returning between documents must not bypass the hourly interval",
+		);
+		report.scenarios.push(
+			"Native update startup, real footer click, picker/client replacement, stale-token rejection and hourly reconciliation",
+		);
+		report.updates = native;
+		await evaluate(
+			inspector,
+			`setTimeout(() => process.getBuiltinModule('module').createRequire(process.cwd() + '/package.json')('electron').app.quit(), 0); true`,
+		);
+		inspector.close();
+		inspector = null;
+		await new Promise((resolve, reject) => {
+			if (status !== null) {
+				resolve();
+				return;
+			}
+			const deadline = setTimeout(
+				() => reject(new Error("Update probe shutdown timed out")),
+				10_000,
+			);
+			child.once("close", () => {
+				clearTimeout(deadline);
+				resolve();
+			});
+		});
+		requireCondition(
+			status.code === 0,
+			`Update probe shutdown failed: ${JSON.stringify(status)}`,
+		);
+		console.log(JSON.stringify(report, null, 2));
+		return;
+	}
 	if (values["app-settings-only"]) {
 		const startup = await evaluate(
 			inspector,

@@ -1,8 +1,8 @@
-name: Alpha Release Candidate
+name: Release Candidate
 
 on:
   push:
-    tags: ['alpha-[0-9]*']
+    tags: ['candidate-[0-9]*']
   workflow_dispatch:
     inputs:
       purpose:
@@ -20,12 +20,16 @@ on:
         type: choice
         options: [all, x86_64-unknown-linux-gnu, x86_64-pc-windows-msvc, aarch64-apple-darwin]
         default: all
+      version:
+        description: Explicit greater suite SemVer (candidate only; retries reuse it)
+        type: string
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: alpha-${{ github.ref }}
+  group: candidate-allocation
   cancel-in-progress: false
 
 env:
@@ -50,21 +54,32 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          persist-credentials: false
+          # Allocation atomically pushes its version commit and tag; checkout removes credentials on cleanup.
+          persist-credentials: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install release tooling dependencies
+        run: python -m pip install -r .github/scripts/requirements.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.1
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: 1.95.0
           components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Prepare the locked dependency cache for offline version allocation
+        if: github.event_name == 'workflow_dispatch' && inputs.purpose == 'candidate'
+        run: cargo fetch --locked
       - name: Resolve source identity and selected native matrix
         id: identity
         env:
           REQUEST_PURPOSE: ${{ inputs.purpose || 'candidate' }}
           REQUEST_PRODUCT: ${{ inputs.product || 'both' }}
           REQUEST_TARGET: ${{ inputs.target || 'all' }}
-        run: python .github/scripts/alpha_release.py plan --purpose "$REQUEST_PURPOSE" --product "$REQUEST_PRODUCT" --target "$REQUEST_TARGET"
+          REQUEST_VERSION: ${{ inputs.version }}
+        run: python .github/scripts/candidate_release.py plan --purpose "$REQUEST_PURPOSE" --product "$REQUEST_PRODUCT" --target "$REQUEST_TARGET" --version "$REQUEST_VERSION"
       - name: Check release tooling
         run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
       - name: Check Rust formatting
@@ -76,26 +91,20 @@ jobs:
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: alpha-notices
+          name: candidate-notices
           path: .github/licenses/THIRD_PARTY_NOTICES.html
           if-no-files-found: error
-      - name: Create the manually requested candidate tag
-        if: github.event_name == 'workflow_dispatch' && steps.identity.outputs.tag != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ALPHA_TAG: ${{ steps.identity.outputs.tag }}
-        run: python .github/scripts/alpha_release.py create-tag "$ALPHA_TAG"
-
   validation:
     needs: plan
-    uses: ./.github/workflows/alpha-checks.yml
+    uses: ./.github/workflows/candidate-checks.yml
     with:
       product: ${{ needs.plan.outputs.product }}
+      commit: ${{ needs.plan.outputs.commit }}
 
   linux:
     needs: plan
     if: needs.plan.outputs.linux_enabled == 'true'
-    uses: ./.github/workflows/alpha-native.yml
+    uses: ./.github/workflows/candidate-native.yml
     with:
       commit: ${{ needs.plan.outputs.commit }}
       matrix: ${{ needs.plan.outputs.linux_matrix }}
@@ -104,7 +113,7 @@ jobs:
   desktop:
     needs: plan
     if: needs.plan.outputs.desktop_enabled == 'true'
-    uses: ./.github/workflows/alpha-native.yml
+    uses: ./.github/workflows/candidate-native.yml
     with:
       commit: ${{ needs.plan.outputs.commit }}
       matrix: ${{ needs.plan.outputs.desktop_matrix }}
@@ -126,6 +135,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install release tooling dependencies
+        run: python -m pip install -r .github/scripts/requirements.txt
       - uses: actions/setup-node@v4
         if: needs.plan.outputs.product != 'cli'
         with:
@@ -143,14 +154,14 @@ jobs:
         run: npm ci --ignore-scripts
       - uses: actions/download-artifact@v4
         with:
-          pattern: alpha-*-x86_64-unknown-linux-gnu
-          path: .holtburger-local/alpha-native-linux
+          pattern: candidate-*-x86_64-unknown-linux-gnu
+          path: .holtburger-local/candidate-native-linux
           merge-multiple: true
       - uses: actions/download-artifact@v4
         if: needs.plan.outputs.product != '3d'
         with:
           name: verification-linux-bootstrap
-          path: .holtburger-local/alpha-linux-probes
+          path: .holtburger-local/candidate-linux-probes
       - name: Install Flatpak tooling and shared runtime
         run: |
           sudo sed -i '/azure\.archive\.ubuntu\.com/d' /etc/apt/apt-mirrors.txt
@@ -166,8 +177,8 @@ jobs:
       - name: Materialize CLI recipe from its native archive
         if: needs.plan.outputs.product != '3d'
         run: |
-          NATIVE=$(python .github/scripts/alpha_release.py prepare-flatpak --product cli \
-            --artifacts .holtburger-local/alpha-native-linux --output .holtburger-local/alpha-cli-flatpak.json)
+          NATIVE=$(python .github/scripts/candidate_release.py prepare-flatpak --product cli \
+            --artifacts .holtburger-local/candidate-native-linux --output .holtburger-local/candidate-cli-flatpak.json)
           echo "HOLTBURGER_CLI_NATIVE=$NATIVE" >> "$GITHUB_ENV"
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         if: needs.plan.outputs.product != '3d'
@@ -176,35 +187,35 @@ jobs:
           build-dir: .holtburger-local/flatpak-cli-build
           repo-dir: .holtburger-local/flatpak-cli-repo
           state-dir: .holtburger-local/flatpak-cli-state
-          cache-key: alpha-cli-${{ runner.arch }}-${{ hashFiles('apps/holtburger-cli/dist/**') }}
+          cache-key: candidate-cli-${{ runner.arch }}-${{ hashFiles('apps/holtburger-cli/dist/**') }}
           upload-artifact: false
-          manifest-path: .holtburger-local/alpha-cli-flatpak.json
+          manifest-path: .holtburger-local/candidate-cli-flatpak.json
           cache: true
       - name: Probe and record CLI Flatpak
         if: needs.plan.outputs.product != '3d'
         run: |
           flatpak install --user --noninteractive --assumeyes holtburger-cli.flatpak
-          chmod +x .holtburger-local/alpha-linux-probes/content_bootstrap
-          dbus-run-session -- .github/flatpak/verify-cli-installed "$GITHUB_WORKSPACE/.holtburger-local/alpha-linux-probes/content_bootstrap"
-          mkdir -p .holtburger-local/alpha-artifacts/cli
-          BUNDLE='.holtburger-local/alpha-artifacts/cli/holtburger-cli-${{ needs.plan.outputs.version }}-x86_64.flatpak'
+          chmod +x .holtburger-local/candidate-linux-probes/content_bootstrap
+          dbus-run-session -- .github/flatpak/verify-cli-installed "$GITHUB_WORKSPACE/.holtburger-local/candidate-linux-probes/content_bootstrap"
+          mkdir -p .holtburger-local/candidate-artifacts/cli
+          BUNDLE='.holtburger-local/candidate-artifacts/cli/holtburger-cli-${{ needs.plan.outputs.version }}-x86_64.flatpak'
           cp holtburger-cli.flatpak "$BUNDLE"
           LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-cli-alpha)
-          python .github/scripts/alpha_release.py record-flatpak --files "$LOCATION/files" \
+          python .github/scripts/candidate_release.py record-flatpak --files "$LOCATION/files" \
             --native "$HOLTBURGER_CLI_NATIVE" --bundle "$BUNDLE" \
-            --output .holtburger-local/alpha-artifacts/cli/metadata-cli-flatpak.json
+            --output .holtburger-local/candidate-artifacts/cli/metadata-cli-flatpak.json
       - uses: actions/upload-artifact@v4
         if: needs.plan.outputs.product != '3d'
         with:
-          name: alpha-cli-flatpak
-          path: .holtburger-local/alpha-artifacts/cli/*
+          name: candidate-cli-flatpak
+          path: .holtburger-local/candidate-artifacts/cli/*
           if-no-files-found: error
           compression-level: 0
       - name: Materialize 3D recipe from its native archive
         if: needs.plan.outputs.product != 'cli'
         run: |
-          NATIVE=$(python .github/scripts/alpha_release.py prepare-flatpak --product 3d \
-            --artifacts .holtburger-local/alpha-native-linux --output .holtburger-local/alpha-3d-flatpak.json)
+          NATIVE=$(python .github/scripts/candidate_release.py prepare-flatpak --product 3d \
+            --artifacts .holtburger-local/candidate-native-linux --output .holtburger-local/candidate-3d-flatpak.json)
           echo "HOLTBURGER_3D_NATIVE=$NATIVE" >> "$GITHUB_ENV"
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         if: needs.plan.outputs.product != 'cli'
@@ -213,27 +224,27 @@ jobs:
           build-dir: .holtburger-local/flatpak-3d-build
           repo-dir: .holtburger-local/flatpak-3d-repo
           state-dir: .holtburger-local/flatpak-3d-state
-          cache-key: alpha-3d-${{ runner.arch }}-${{ hashFiles('.github/flatpak/**') }}
+          cache-key: candidate-3d-${{ runner.arch }}-${{ hashFiles('.github/flatpak/**') }}
           upload-artifact: false
-          manifest-path: .holtburger-local/alpha-3d-flatpak.json
+          manifest-path: .holtburger-local/candidate-3d-flatpak.json
           cache: true
       - name: Probe and record 3D Flatpak
         if: needs.plan.outputs.product != 'cli'
         run: |
           flatpak install --user --noninteractive --assumeyes holtburger-3d.flatpak
           xvfb-run --auto-servernum dbus-run-session -- .github/flatpak/verify-installed
-          mkdir -p .holtburger-local/alpha-artifacts/3d
-          BUNDLE='.holtburger-local/alpha-artifacts/3d/holtburger-3d-${{ needs.plan.outputs.version }}-x86_64.flatpak'
+          mkdir -p .holtburger-local/candidate-artifacts/3d
+          BUNDLE='.holtburger-local/candidate-artifacts/3d/holtburger-3d-${{ needs.plan.outputs.version }}-x86_64.flatpak'
           cp holtburger-3d.flatpak "$BUNDLE"
           LOCATION=$(flatpak --user info --show-location io.github.merklejerk.holtburger-alpha)
-          python .github/scripts/alpha_release.py record-flatpak --files "$LOCATION/files" \
+          python .github/scripts/candidate_release.py record-flatpak --files "$LOCATION/files" \
             --native "$HOLTBURGER_3D_NATIVE" --bundle "$BUNDLE" \
-            --output .holtburger-local/alpha-artifacts/3d/metadata-3d-flatpak.json
+            --output .holtburger-local/candidate-artifacts/3d/metadata-3d-flatpak.json
       - uses: actions/upload-artifact@v4
         if: needs.plan.outputs.product != 'cli'
         with:
-          name: alpha-3d-flatpak
-          path: .holtburger-local/alpha-artifacts/3d/*
+          name: candidate-3d-flatpak
+          path: .holtburger-local/candidate-artifacts/3d/*
           if-no-files-found: error
           compression-level: 0
 
@@ -255,13 +266,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install release tooling dependencies
+        run: python -m pip install -r .github/scripts/requirements.txt
       - uses: actions/download-artifact@v4
         with:
-          pattern: alpha-*
-          path: .holtburger-local/alpha-artifacts
+          pattern: candidate-*
+          path: .holtburger-local/candidate-artifacts
           merge-multiple: true
       - name: Stage the complete draft for final user native verification
         env:
           GH_TOKEN: ${{ github.token }}
-          ALPHA_TAG: ${{ needs.plan.outputs.tag }}
-        run: python .github/scripts/alpha_release.py stage .holtburger-local/alpha-artifacts "$ALPHA_TAG"
+          CANDIDATE_TAG: ${{ needs.plan.outputs.tag }}
+        run: python .github/scripts/candidate_release.py stage .holtburger-local/candidate-artifacts "$CANDIDATE_TAG"

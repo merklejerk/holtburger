@@ -1,0 +1,56 @@
+name: Promote Update Feeds
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Each run discovers the complete current inventory. Coalesced pending events are harmless.
+concurrency:
+  group: update-feed-promotion
+  cancel-in-progress: false
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  generate:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      # Publication identifies data, not executable tooling. Checkout resolves this trusted ref to one SHA.
+      # Change together with candidate_allocation.RELEASE_BRANCH at the authorized beta merge.
+      - uses: actions/checkout@v4
+        with:
+          ref: 3d-next
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install release tooling dependencies
+        run: python -m pip install -r .github/scripts/requirements.txt
+      - name: Reconcile accepted published releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/promote_updates.py .holtburger-local/update-site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: .holtburger-local/update-site
+
+  deploy:
+    needs: generate
+    runs-on: ubuntu-22.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy complete update site
+        id: deployment
+        uses: actions/deploy-pages@v4

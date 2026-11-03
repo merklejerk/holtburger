@@ -11,7 +11,7 @@ import subprocess
 import sys
 import tempfile
 
-from alpha_release import (
+from candidate_release import (
     APP, INSTALLER_TARGETS, digest, extract_bundle, target_named, verify_bundle,
     verify_payload, write_json,
 )
@@ -25,7 +25,7 @@ WINDOWS_APP_NAME = "Holtburger 3D Alpha"
 def numeric_version(version: str) -> str:
     """Windows binary resources have four unsigned 16-bit components, not SemVer labels."""
     validate_version(version)
-    parts = version.split("+", 1)[0].split("-", 1)[0].split(".")
+    parts = version.split("-", 1)[0].split(".")
     if any(int(part) > 65535 for part in parts):
         raise ValueError("Suite version exceeds Windows installer resource limits")
     return ".".join([*parts, "0"])

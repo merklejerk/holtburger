@@ -1,4 +1,4 @@
-name: Alpha native package
+name: Candidate native package
 
 on:
   workflow_call:
@@ -40,6 +40,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install release tooling dependencies
+        run: python -m pip install -r .github/scripts/requirements.txt
       - uses: actions/setup-node@v4
         if: inputs.product != 'cli'
         with:
@@ -53,8 +55,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - uses: actions/download-artifact@v4
         with:
-          name: alpha-notices
-          path: .holtburger-local/alpha-notices
+          name: candidate-notices
+          path: .holtburger-local/candidate-notices
       - name: Fetch pinned CLI content
         if: inputs.product != '3d'
         env:
@@ -80,15 +82,15 @@ jobs:
           SUFFIX=''
           if [[ "$RUNNER_OS" == 'Windows' ]]; then SUFFIX='.exe'; fi
           "target/${{ matrix.triple }}/release/content_bootstrap$SUFFIX" .holtburger-local/cli-content
-          python .github/scripts/alpha_release.py assemble --product cli \
+          python .github/scripts/candidate_release.py assemble --product cli \
             --target '${{ matrix.triple }}' --content .holtburger-local/cli-content \
-            --notices .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html \
-            --output .holtburger-local/alpha-artifacts/cli
+            --notices .holtburger-local/candidate-notices/THIRD_PARTY_NOTICES.html \
+            --output .holtburger-local/candidate-artifacts/cli
       - uses: actions/upload-artifact@v4
         if: inputs.product != '3d'
         with:
-          name: alpha-cli-${{ matrix.triple }}
-          path: .holtburger-local/alpha-artifacts/cli/*
+          name: candidate-cli-${{ matrix.triple }}
+          path: .holtburger-local/candidate-artifacts/cli/*
           if-no-files-found: error
           compression-level: 0
       - uses: actions/upload-artifact@v4
@@ -127,7 +129,7 @@ jobs:
             sudo apt-get update
             sudo apt-get install --yes --no-install-recommends xvfb xauth
           fi
-      - name: Check packaged renderer assets and content recovery
+      - name: Check packaged renderer, content recovery and update lifecycle
         if: inputs.product != 'cli'
         working-directory: apps/holtburger-3d
         run: |
@@ -140,22 +142,26 @@ jobs:
           esac
           if [[ "$RUNNER_OS" == 'Linux' ]]; then
             xvfb-run --auto-servernum node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
+            xvfb-run --auto-servernum npm run probe:launcher -- --updates-only --package "$EXECUTABLE"
+            xvfb-run --auto-servernum npm run probe:launcher -- --updates-direct --package "$EXECUTABLE"
           else
             node scripts/content-startup-probe.mjs --package "$EXECUTABLE"
+            npm run probe:launcher -- --updates-only --package "$EXECUTABLE"
+            npm run probe:launcher -- --updates-direct --package "$EXECUTABLE"
           fi
       - name: Assemble the 3D native archive
         if: inputs.product != 'cli'
         run: |
-          python .github/scripts/alpha_release.py assemble --product 3d \
+          python .github/scripts/candidate_release.py assemble --product 3d \
             --target '${{ matrix.triple }}' \
             --package 'apps/holtburger-3d/out/holtburger-3d-${{ matrix.platform }}-${{ matrix.architecture }}' \
-            --notices .holtburger-local/alpha-notices/THIRD_PARTY_NOTICES.html \
-            --output .holtburger-local/alpha-artifacts/3d
+            --notices .holtburger-local/candidate-notices/THIRD_PARTY_NOTICES.html \
+            --output .holtburger-local/candidate-artifacts/3d
       - uses: actions/upload-artifact@v4
         if: inputs.product != 'cli'
         with:
-          name: alpha-3d-${{ matrix.triple }}
-          path: .holtburger-local/alpha-artifacts/3d/*
+          name: candidate-3d-${{ matrix.triple }}
+          path: .holtburger-local/candidate-artifacts/3d/*
           if-no-files-found: error
           compression-level: 0
       - uses: actions/upload-artifact@v4
@@ -183,13 +189,13 @@ jobs:
           COMPILER=()
           if [[ "$RUNNER_OS" == 'Windows' ]]; then COMPILER=(--iscc "$INNO_COMPILER"); fi
           python .github/scripts/desktop_installers.py \
-            --artifacts .holtburger-local/alpha-artifacts/3d \
+            --artifacts .holtburger-local/candidate-artifacts/3d \
             --target '${{ matrix.triple }}' \
-            --output .holtburger-local/alpha-installers "${COMPILER[@]}"
+            --output .holtburger-local/candidate-installers "${COMPILER[@]}"
       - uses: actions/upload-artifact@v4
         if: runner.os != 'Linux' && inputs.product != 'cli'
         with:
-          name: alpha-3d-installer-${{ matrix.triple }}
-          path: .holtburger-local/alpha-installers/*
+          name: candidate-3d-installer-${{ matrix.triple }}
+          path: .holtburger-local/candidate-installers/*
           if-no-files-found: error
           compression-level: 0

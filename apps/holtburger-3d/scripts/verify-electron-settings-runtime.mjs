@@ -41,6 +41,9 @@ await import(
 
 // Launcher persistence and terminal events must remain consumable by Electron's Node runtime.
 await import(
+	new URL("../dist-electron/electron/app-updates.js", import.meta.url).href
+);
+await import(
 	new URL("../dist-electron/electron/app-settings.js", import.meta.url).href
 );
 await import(

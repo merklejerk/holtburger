@@ -8,28 +8,40 @@ import re
 import shutil
 import subprocess
 import tomllib
+from typing import Literal
+
+from semver import Version
 
 
 ROOT = Path(__file__).resolve().parents[2]
-APP = ROOT / "apps/holtburger-3d"
 
 
 def validate_version(version: str) -> None:
-    """Require SemVer, including numeric prerelease identifiers without leading zeros."""
-    match = re.fullmatch(
-        r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
-        r"(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?"
-        r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
-        version,
-    )
-    if match is None:
-        raise ValueError(f"Invalid suite SemVer: {version}")
-    prerelease = match.group(4)
-    if prerelease and any(
-        part.isdigit() and len(part) > 1 and part.startswith("0")
-        for part in prerelease.split(".")
-    ):
-        raise ValueError(f"Numeric prerelease identifiers cannot have leading zeros: {version}")
+    """Require SemVer without unordered build metadata for release allocation."""
+    try:
+        parsed = Version.parse(version)
+    except ValueError as error:
+        raise ValueError(f"Invalid suite SemVer: {version}") from error
+    if parsed.build is not None:
+        raise ValueError("Suite release versions cannot contain build metadata")
+
+
+def release_channel(root: Path = ROOT) -> Literal["alpha", "beta"]:
+    """Read the source-owned audience without inferring it from version suffixes."""
+    channel = json.loads((root / "release/channel.json").read_text())
+    if channel not in ("alpha", "beta"):
+        raise ValueError("Release channel must be alpha or beta")
+    return channel
+
+
+def validate_channel_version(channel: str, version: str) -> None:
+    """The initial beta series uses ordinary unsuffixed 0.x.y suite versions."""
+    validate_version(version)
+    if channel not in ("alpha", "beta"):
+        raise ValueError("Release channel must be alpha or beta")
+    parsed = Version.parse(version)
+    if channel == "beta" and (parsed.major != 0 or parsed.prerelease is not None):
+        raise ValueError("Beta releases require an unsuffixed 0.x.y version")
 
 
 def check_versions(root: Path = ROOT) -> str:
@@ -62,13 +74,13 @@ def check_versions(root: Path = ROOT) -> str:
     return version
 
 
-def bump(version: str) -> None:
+def bump(version: str, root: Path) -> None:
     """Update the one Cargo version owner, then let npm and Cargo maintain lockfiles."""
     validate_version(version)
     npm = shutil.which("npm")
     if npm is None:
         raise RuntimeError("npm is required to update the Electron version and lockfile")
-    path = ROOT / "Cargo.toml"
+    path = root / "Cargo.toml"
     original = path.read_text()
     updated, count = re.subn(
         r'(\[workspace\.package\]\n(?:(?!\[).)*?^version\s*=\s*)"[^"]+"',
@@ -80,12 +92,12 @@ def bump(version: str) -> None:
         raise ValueError("Expected exactly one workspace package version")
     path.write_text(updated)
     subprocess.run(
-        [npm, "--prefix", str(APP), "version", version,
+        [npm, "--prefix", str(root / "apps/holtburger-3d"), "version", version,
          "--no-git-tag-version", "--ignore-scripts", "--allow-same-version"],
-        cwd=ROOT, check=True,
+        cwd=root, check=True,
     )
-    subprocess.run(["cargo", "update", "--workspace", "--offline"], cwd=ROOT, check=True)
-    print(check_versions())
+    subprocess.run(["cargo", "update", "--workspace", "--offline"], cwd=root, check=True)
+    print(check_versions(root))
 
 
 def main() -> None:
@@ -96,7 +108,7 @@ def main() -> None:
     update.add_argument("version")
     arguments = parser.parse_args()
     if arguments.command == "bump":
-        bump(arguments.version)
+        bump(arguments.version, ROOT)
     else:
         print(check_versions())
 

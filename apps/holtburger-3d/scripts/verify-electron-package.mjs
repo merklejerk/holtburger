@@ -109,6 +109,11 @@ export async function verifyElectronPackage(packageRoot) {
 	const buildMetadata = JSON.parse(
 		readArchiveFile("dist/build-info.json").toString(),
 	);
+	const sourceChannel = JSON.parse(
+		await readFile(resolve(appRoot, "../../release/channel.json"), "utf8"),
+	);
+	if (buildMetadata.channel !== sourceChannel)
+		throw new Error("Packaged release channel differs from the source channel");
 	if (
 		buildMetadata.version !== packageMetadata.version ||
 		buildMetadata.development !== false
@@ -169,6 +174,7 @@ export async function verifyElectronPackage(packageRoot) {
 		platform: process.platform,
 		architecture: process.arch,
 		version: buildMetadata.version,
+		channel: buildMetadata.channel,
 		revision: buildMetadata.revision,
 		modified: buildMetadata.modified,
 		packageRoot: normalizedPackageRoot,

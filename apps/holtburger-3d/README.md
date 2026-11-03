@@ -582,7 +582,7 @@ sidecar and asset setup, then connects; highlighting a profile does not start th
 returns to the launcher in the same window. Character logout keeps the connection and returns to
 character selection. Complete CLI account/connection arguments bypass the launcher initially;
 `--account` remains required for a direct connection. Use an explicit `explorer` argument for offline
-exploration. Both clients use `-p` for port and `-P` for password. See the [alpha quickstart](../../release/ALPHA_QUICKSTART.md) for native
+exploration. Both clients use `-p` for port and `-P` for password. See the [alpha quickstart](../../release/QUICKSTART.md) for native
 paths, retail-content selection, and bundle layout.
 
 Add `--no-launcher` with `--account` for a direct session that exits on disconnect, cancellation,
@@ -969,9 +969,9 @@ packaged application has been exercised on that operating system.
 
 The branch-scoped `holtburger-3d-portability.yml` workflow is diagnostic only: it has read-only
 permissions, retains artifacts briefly, and cannot publish a GitHub release. The cargo-dist
-release workflow remains CLI-only. The separate `alpha-release.yml` workflow builds suites
+release workflow remains CLI-only. The separate `candidate-release.yml` workflow builds suites
 from `3d-next` and stages draft GitHub prereleases for final user verification. See
-[alpha release preparation](../../release/ALPHA_RELEASING.md); automated packaging checks do
+[release preparation](../../release/RELEASING.md); automated packaging checks do
 not replace the final native-bundle acceptance step.
 
 ## Security and dependency maintenance
@@ -984,12 +984,12 @@ applies a Content Security Policy. Rust validates the closed command protocol in
 Review Electron and Electron Forge updates at least monthly and before sharing a build. Apply normal
 compatible updates through npm, inspect `npm audit` rather than using a forced downgrade or override,
 then run the full checks and package inspection above. Electron upgrades additionally require the
-branch portability probe and a fresh manual smoke check on available hardware. There is no automatic
-updater in the alpha suite.
+branch portability probe and a fresh manual smoke check on available hardware. Update alerts open the published release downloads page; downloading and installing updates
+remain manual.
 
 The packaged resources contain Holtburger's AGPLv3 license alongside the Electron and Chromium
 notices supplied by Electron. The alpha suite adds download checksums, build identity, and
-documented build/publication instructions in `release/ALPHA_RELEASING.md`.
+documented build/publication instructions in `release/RELEASING.md`.
 
 The WebGL2 backend has one flat-frame schedule: opaque scene color and depth are
 rendered into a renderer-owned target, optionally receive near-field ambient

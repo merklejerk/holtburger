@@ -148,7 +148,7 @@ Custom scripts can be stored in `EXTRACT_DIR/scripts/` (must be writeable).
 Download the flatpak from releases then run `flatpak install ./holtburger-cli.flatpak`.
 The alpha CLI uses a separate app ID, `io.github.merklejerk.holtburger-cli-alpha`,
 and appears as **Holtburger CLI Alpha**. It can coexist with the main/nightly CLI;
-see the [alpha quickstart](release/ALPHA_CLI_QUICKSTART.md) for its commands.
+see the [alpha quickstart](release/CLI_QUICKSTART.md) for its commands.
 
 ```bash
 # see help
@@ -266,9 +266,9 @@ executable-adjacent `content/`. A directory uses `bootstrap.hba` when present, o
 
 CLI native/Flatpak bundles include the generated reference and navigation data. Source builds
 need generated data compatible with the current navigation format; see the
-[CLI quickstart](release/ALPHA_CLI_QUICKSTART.md).
+[CLI quickstart](release/CLI_QUICKSTART.md).
 A full HBA alone does not replace navigation data. h3d separately supports full retail DATs or
-HBAs through its own content selection; see the [3D quickstart](release/ALPHA_3D_QUICKSTART.md).
+HBAs through its own content selection; see the [3D quickstart](release/3D_QUICKSTART.md).
 
 ## License
 

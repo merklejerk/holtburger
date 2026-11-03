@@ -2,7 +2,17 @@ import {
 	ClientRetirement,
 	CLIENT_CLOSE_PREPARATION_TIMEOUT_MS,
 } from "./client-retirement.js";
-import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from "electron";
+import {
+	app,
+	BrowserWindow,
+	dialog,
+	ipcMain,
+	Menu,
+	powerMonitor,
+	shell,
+} from "electron";
+import { AppUpdates, loadUpdateBuild } from "./app-updates.js";
+import type { PregameRegistrationStatus } from "../src/app/app-update-contract.js";
 import {
 	ClientApplication,
 	type ApplicationAttempt,
@@ -122,6 +132,8 @@ let restartRequested = false;
 let desktop: ClientApplication<NativeAttempt> | undefined;
 let stopGeometry: (() => Promise<void>) | null = null;
 let pickerFailure: string | null = null;
+/** Update availability survives native document replacement and never owns the game lifecycle. */
+let appUpdates: AppUpdates | undefined;
 
 /** Native resources are bound to exactly one admitted endpoint. */
 interface NativeAttempt extends ApplicationAttempt {
@@ -842,6 +854,7 @@ void (async () => {
 	installIpcBridge(window, entry.mode);
 	installContentIpc();
 	const navigate = async (role: DocumentRole, path: string) => {
+		appUpdates?.clearPregame();
 		documents.navigate(role, path);
 		await loadEntry(window, path, entry.mode);
 	};
@@ -859,6 +872,80 @@ void (async () => {
 		await explorerContent.start();
 		return;
 	}
+
+	const updates = new AppUpdates(
+		app.isPackaged
+			? loadUpdateBuild(
+					join(app.getAppPath(), "dist/build-info.json"),
+					console.error,
+				)
+			: null,
+		{
+			request: fetch,
+			now: Date.now,
+			publish: (snapshot) => {
+				if (documents.role !== null && !window.webContents.isDestroyed())
+					window.webContents.send("updates:state", snapshot);
+			},
+			report: console.error,
+			openExternal: (url) => shell.openExternal(url),
+		},
+	);
+	appUpdates = updates;
+	const reconsiderUpdates = () => {
+		if (!window.isDestroyed())
+			updates.setWindowVisible(window.isVisible() && !window.isMinimized());
+	};
+	window.on("show", reconsiderUpdates);
+	window.on("hide", reconsiderUpdates);
+	window.on("minimize", reconsiderUpdates);
+	window.on("restore", reconsiderUpdates);
+	window.on("focus", reconsiderUpdates);
+	powerMonitor.on("resume", reconsiderUpdates);
+	window.once("closed", () => {
+		updates.stop();
+		powerMonitor.removeListener("resume", reconsiderUpdates);
+	});
+	handle("updates:snapshot", undefined, () => updates.snapshot);
+	handle("updates:register-pregame", undefined, (_event, visible: unknown) =>
+		updates.registerPregame(z.boolean().parse(visible)),
+	);
+	// Optional lifecycle withdrawals can arrive after native navigation seals their document.
+	// Acknowledge retirement without admitting stale registration, snapshot or download actions.
+	const updateRegistration = (
+		event: Electron.IpcMainInvokeEvent,
+		identity: unknown,
+		operation: () => PregameRegistrationStatus,
+	) => {
+		requireApplicationFrame(event, BrowserWindow.fromWebContents(event.sender));
+		if (
+			!documents.isAdmitted(identity) ||
+			(documentRetirement !== undefined &&
+				!documentRetirement.acceptsRendererRequests)
+		)
+			return "retired";
+		return operation();
+	};
+	ipcMain.handle(
+		"updates:pregame-visible",
+		(event, identity: unknown, token: unknown, visible: unknown) =>
+			updateRegistration(event, identity, () =>
+				updates.setPregameVisible(
+					z.uuid().parse(token),
+					z.boolean().parse(visible),
+				),
+			),
+	);
+	ipcMain.handle(
+		"updates:release-pregame",
+		(event, identity: unknown, token: unknown) =>
+			updateRegistration(event, identity, () =>
+				updates.releasePregame(z.uuid().parse(token)),
+			),
+	);
+	handle("updates:open-downloads", undefined, () => updates.openDownloads());
+	updates.start();
+	reconsiderUpdates();
 
 	const launcher = new LauncherStore(
 		join(app.getPath("userData"), "launcher-settings.json"),
@@ -891,6 +978,7 @@ void (async () => {
 		await navigate("picker", "launcher/index.html");
 	};
 	const cleanup = async (attempt: NativeAttempt) => {
+		updates.clearPregame();
 		documents.close();
 		for (const detach of attempt.detach.splice(0)) detach();
 		const results = await Promise.allSettled([
@@ -981,6 +1069,7 @@ void (async () => {
 			await attempt.content.start();
 		},
 		retire: async (attempt) => {
+			updates.clearPregame();
 			// Opening contains settings/navigation only; host readiness must be cancelled by native close.
 			try {
 				await attempt.opening;
@@ -1163,6 +1252,7 @@ void (async () => {
 	});
 	window.on("close", (event) => {
 		event.preventDefault();
+		updates.stop();
 		quitting = true;
 		void owner.quit();
 	});
@@ -1189,6 +1279,7 @@ void (async () => {
 
 app.on("window-all-closed", () => app.quit());
 app.on("before-quit", (event) => {
+	appUpdates?.stop();
 	if (desktop !== undefined || quitting || !explorerContent) return;
 	event.preventDefault();
 	quitting = true;

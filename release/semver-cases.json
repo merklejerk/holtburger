@@ -1,0 +1,13 @@
+{
+  "comparisons": [
+    { "left": "0.1.4-alpha.9", "right": "0.1.4-alpha.10", "expected": -1 },
+    { "left": "0.1.4-alpha.10", "right": "0.1.4", "expected": -1 },
+    { "left": "0.1.9", "right": "0.1.10", "expected": -1 },
+    { "left": "0.1.10", "right": "0.2.0", "expected": -1 },
+    { "left": "0.2.0", "right": "0.1.10", "expected": 1 },
+    { "left": "0.2.0", "right": "0.2.0", "expected": 0 }
+  ],
+  "invalidReleaseVersions": [
+    "v0.1.4", "0.1", "0.01.4", "0.1.4-alpha.01", "0.1.4+build.1", " 0.1.4"
+  ]
+}

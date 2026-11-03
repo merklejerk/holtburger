@@ -1,4 +1,4 @@
-name: Alpha checks
+name: Candidate checks
 
 on:
   push:
@@ -10,12 +10,16 @@ on:
       product:
         type: string
         default: both
+      commit:
+        description: Allocated immutable candidate source; ordinary PR/push runs use their event source
+        type: string
+        required: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: alpha-checks-${{ github.workflow }}-${{ github.ref }}
+  group: candidate-checks-${{ github.workflow }}-${{ inputs.commit || github.sha }}
   cancel-in-progress: ${{ github.ref_type != 'tag' && github.event_name != 'workflow_dispatch' }}
 
 env:
@@ -30,14 +34,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.commit || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install release tooling dependencies
+        run: python -m pip install -r .github/scripts/requirements.txt
       - id: changes
         name: Select build inputs without skipping the final status
-        run: python .github/scripts/alpha_changes.py
+        run: python .github/scripts/candidate_changes.py
       - name: Check release tooling
         run: python -m unittest discover -s .github/scripts -p 'test_*.py' -v
       - name: Check suite versions
@@ -59,10 +66,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.commit || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install release tooling dependencies
+        run: python -m pip install -r .github/scripts/requirements.txt
       - uses: actions/setup-node@v4
         if: inputs.product != 'cli'
         with:
@@ -128,7 +138,7 @@ jobs:
           xvfb-run --auto-servernum npm run probe:user-themes:built
 
   result:
-    name: Alpha validation
+    name: Candidate validation
     if: always()
     needs: [changes, quality]
     runs-on: ubuntu-22.04

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assemble, inspect, and stage an alpha bundle without publishing it."""
+"""Allocate, assemble, inspect and stage a release candidate without publishing it."""
 
 import argparse
 import configparser
@@ -18,7 +18,8 @@ import tarfile
 import tempfile
 import zipfile
 
-from release_version import ROOT, check_versions
+from release_version import ROOT, bump, check_versions, release_channel, validate_channel_version
+from candidate_allocation import RELEASE_BRANCH, allocate_candidate, validate_tagged_candidate
 from cli_content_input import CONTENT_FILES, verify_staged_content
 
 
@@ -97,14 +98,16 @@ def source_identity() -> tuple[str, bool]:
 
 
 def validate_tag(tag: str, commit: str) -> None:
-    match = re.fullmatch(r"alpha-[0-9]{8}-([0-9a-f]{7,40})", tag)
+    """New candidates use source identity tags outside the generic SemVer publisher."""
+    match = re.fullmatch(r"candidate-[0-9]{8}-([0-9a-f]{7,40})", tag)
     if match is None:
-        raise ValueError("Alpha tag must be alpha-YYYYMMDD-<source-commit-prefix>")
+        raise ValueError("Candidate tag must be candidate-YYYYMMDD-<source-commit-prefix>")
     if not commit.startswith(match.group(1)):
-        raise ValueError("Alpha tag commit prefix does not match the source checkout")
+        raise ValueError("Candidate tag commit prefix does not match the source checkout")
 
 
-def plan(product: str, target: str, purpose: str) -> None:
+def plan(product: str, target: str, purpose: str, requested_version: str | None) -> None:
+    """Resolve exactly one immutable source before selecting any validation/build matrix."""
     version = check_versions()
     commit, modified = source_identity()
     if modified:
@@ -112,22 +115,23 @@ def plan(product: str, target: str, purpose: str) -> None:
     tagged = os.environ.get("GITHUB_REF_TYPE") == "tag"
     candidate = tagged or purpose == "candidate"
     if candidate and (product != "both" or target != "all"):
-        raise ValueError("Alpha candidates require both products and every supported native target")
+        raise ValueError("Candidates require both products and every supported native target")
     tag = ""
-    if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" and candidate:
-        if os.environ["GITHUB_REF"] != "refs/heads/3d-next":
-            raise ValueError("Run the alpha candidate workflow on the 3d-next branch")
-        # Preserve upstream's source-owned date so later-day retries reuse the same candidate.
-        commit_date = run("git", "show", "-s", "--format=%cs", commit).replace("-", "")
-        tag = f"alpha-{commit_date}-{commit[:9]}"
-    elif tagged:
+    if tagged:
         tag = os.environ["GITHUB_REF_NAME"]
-    if tag:
         validate_tag(tag, commit)
-        subprocess.run(
-            ["git", "merge-base", "--is-ancestor", commit, "origin/3d-next"],
-            cwd=ROOT, check=True,
-        )
+        validate_tagged_candidate(ROOT, tag, commit)
+        subprocess.run(["git", "merge-base", "--is-ancestor", commit,
+                        f"origin/{RELEASE_BRANCH}"], cwd=ROOT, check=True)
+    elif candidate:
+        if os.environ.get("GITHUB_REF") != f"refs/heads/{RELEASE_BRANCH}":
+            raise ValueError(f"Run the candidate workflow on the {RELEASE_BRANCH} branch")
+        if not requested_version:
+            raise ValueError("Candidate dispatch requires an explicit suite version")
+        allocated = allocate_candidate(ROOT, requested_version, lambda value: bump(value, ROOT))
+        version, commit, tag = allocated.version, allocated.commit, allocated.tag
+    elif requested_version:
+        raise ValueError("Diagnostic builds cannot allocate a release version")
     selected = [entry for entry in TARGETS if target == "all" or entry.triple == target]
     result = {
         "version": version, "commit": commit, "product": product, "tag": tag,
@@ -142,26 +146,6 @@ def plan(product: str, target: str, purpose: str) -> None:
                 encoded = json.dumps(value) if isinstance(value, dict) else value
                 output.write(f"{key}={encoded}\n")
     print(json.dumps(result))
-
-
-def create_tag(tag: str) -> None:
-    """Create an immutable lightweight candidate tag; reruns may reuse the same source."""
-    commit, modified = source_identity()
-    if modified:
-        raise ValueError("Candidate tagging requires a clean source checkout")
-    validate_tag(tag, commit)
-    repository = os.environ["GITHUB_REPOSITORY"]
-    ref = f"refs/tags/{tag}"
-    matches = json.loads(run("gh", "api", f"repos/{repository}/git/matching-refs/tags/{tag}"))
-    existing = [entry for entry in matches if entry["ref"] == ref]
-    if existing:
-        target = existing[0]["object"]
-        if target["type"] != "commit" or target["sha"] != commit:
-            raise ValueError("Existing candidate tag does not identify the source commit")
-    else:
-        run("gh", "api", f"repos/{repository}/git/refs", "--method", "POST",
-            "--raw-field", f"ref={ref}", "--raw-field", f"sha={commit}")
-    print(f"Candidate tag ready: {tag}")
 
 
 def executable_architecture(path: Path) -> str:
@@ -208,6 +192,7 @@ def verify_bundle(bundle: Path) -> dict:
     if sys.platform != target.platform:
         raise ValueError("Bundle inspection must run on its native platform")
     product = info["product"]
+    validate_channel_version(info["channel"], info["version"])
     if product not in PRODUCTS:
         raise ValueError(f"Unsupported native product: {product}")
     expected = {"QUICKSTART.md", "LICENSE.md", "build-info.json", "THIRD_PARTY_NOTICES.html"}
@@ -246,8 +231,8 @@ def verify_bundle(bundle: Path) -> dict:
             raise ValueError(f"Bundle symlink escapes the installation: {path}")
     if product == "3d":
         renderer = json.loads(run("node", "scripts/verify-electron-package.mjs", str((bundle / "h3d").resolve()), cwd=APP))
-        if (renderer["version"], renderer["revision"], renderer["modified"]) != (
-            info["version"], info["commit"][:8], info["modified"]
+        if (renderer["version"], renderer["revision"], renderer["modified"], renderer["channel"]) != (
+            info["version"], info["commit"][:8], info["modified"], info["channel"]
         ):
             raise ValueError("3D build identity differs from the packaged renderer")
     return info
@@ -326,6 +311,8 @@ def assemble(arguments) -> None:
     version = check_versions()
     commit, modified = source_identity()
     product = arguments.product
+    channel = release_channel(ROOT)
+    validate_channel_version(channel, version)
     if product == "cli" and arguments.content is None:
         raise ValueError("CLI assembly requires --content staging")
     if product == "3d" and arguments.package is None:
@@ -339,7 +326,7 @@ def assemble(arguments) -> None:
         binaries = ROOT / "target" / target.triple / "release"
         suffix = ".exe" if target.platform == "win32" else ""
         info = {
-            "version": version, "commit": commit, "modified": modified,
+            "version": version, "commit": commit, "modified": modified, "channel": channel,
             "product": product, "target": target.triple,
             "noticesSha256": digest(arguments.notices),
         }
@@ -360,7 +347,7 @@ def assemble(arguments) -> None:
         else:
             shutil.copytree(arguments.package, bundle / "h3d", symlinks=True)
             verify_host_origin(bundle, binaries / f"holtburger-3d-host{suffix}", target)
-        shutil.copy2(ROOT / f"release/ALPHA_{product.upper()}_QUICKSTART.md", bundle / "QUICKSTART.md")
+        shutil.copy2(ROOT / f"release/{product.upper()}_QUICKSTART.md", bundle / "QUICKSTART.md")
         shutil.copy2(ROOT / "LICENSE.md", bundle / "LICENSE.md")
         shutil.copy2(arguments.notices, bundle / "THIRD_PARTY_NOTICES.html")
         write_json(bundle / "build-info.json", info)
@@ -378,79 +365,128 @@ def assemble(arguments) -> None:
         print(destination)
 
 
+@dataclass(frozen=True)
+class ReleaseInventory:
+    """Validated public release identity and expected downloadable file digests."""
+
+    version: str  # SemVer compared by the feed generator.
+    channel: str  # Explicit audience used by channel selection.
+    commit: str  # Full source commit checked against the public candidate tag.
+    assets: dict[str, str]  # Exact downloadable payload names and expected SHA-256 values.
+
+
+def validate_manifest(document: dict) -> ReleaseInventory:
+    """Validate complete inventory without needing native packages or the current checkout."""
+    if document["schemaVersion"] != 1:
+        raise ValueError("Unsupported managed release manifest schema")
+    version, channel, commit = document["version"], document["channel"], document["commit"]
+    validate_channel_version(channel, version)
+    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise ValueError("Release manifest requires a full source commit")
+    notices_digest = document["noticesSha256"]
+    identity = {"version": version, "channel": channel, "commit": commit,
+                "modified": False, "noticesSha256": notices_digest}
+    expected_assets = {"THIRD_PARTY_NOTICES.html": notices_digest}
+    native = document["native"]
+    pairs = [(item["product"], item["target"]) for item in native]
+    expected_pairs = {(product, target.triple) for product in PRODUCTS for target in TARGETS}
+    if len(pairs) != len(expected_pairs) or set(pairs) != expected_pairs:
+        raise ValueError("Release manifest requires both products on every native target")
+    for record in native:
+        if any(record[key] != value for key, value in identity.items()):
+            raise ValueError("Release identity mismatch for native archive")
+        target = target_named(record["target"])
+        extension = ".tar.gz" if target.platform == "linux" else ".zip"
+        filename = f"holtburger-{record['product']}-{version}-{target.triple}{extension}"
+        if record["archive"] != filename:
+            raise ValueError("Release archive filename mismatch")
+        expected_assets[filename] = record["sha256"]
+    cli = [item for item in native if item["product"] == "cli"]
+    content = {"contentSha256": cli[0]["contentSha256"], "contentFiles": cli[0]["contentFiles"]}
+    if set(content["contentFiles"]) != set(CONTENT_FILES):
+        raise ValueError("CLI content inventory differs from its required companions")
+    if any(any(record[key] != value for key, value in content.items()) for record in cli):
+        raise ValueError("CLI native targets contain different content companions")
+    flatpaks = document["flatpaks"]
+    if len(flatpaks) != len(PRODUCTS) or {item["product"] for item in flatpaks} != set(PRODUCTS):
+        raise ValueError("Release manifest requires both product Flatpaks")
+    runtime = flatpaks[0]["runtime"]
+    if re.fullmatch(r"org\.freedesktop\.Platform/x86_64/[0-9.]+", runtime) is None:
+        raise ValueError("Flatpak runtime is outside the supported runtime family")
+    app_ids = {"cli": "io.github.merklejerk.holtburger-cli-alpha",
+               "3d": "io.github.merklejerk.holtburger-alpha"}
+    for record in flatpaks:
+        product = record["product"]
+        expected = {**identity, "target": "x86_64-unknown-linux-gnu",
+                    "appId": app_ids[product], "runtime": runtime}
+        if product == "cli":
+            expected.update(content)
+        if any(record[key] != value for key, value in expected.items()):
+            raise ValueError("Flatpak release identity mismatch")
+        filename = f"holtburger-{product}-{version}-x86_64.flatpak"
+        if record["archive"] != filename:
+            raise ValueError("Flatpak release filename mismatch")
+        expected_assets[filename] = record["sha256"]
+    installers = document["installers"]
+    if len(installers) != len(INSTALLER_TARGETS) or {item["target"] for item in installers} != {item.triple for item in INSTALLER_TARGETS}:
+        raise ValueError("Release manifest requires every desktop installer")
+    for record in installers:
+        installer = next(item for item in INSTALLER_TARGETS if item.triple == record["target"])
+        archive = next(item for item in native if item["product"] == "3d" and item["target"] == installer.triple)
+        expected = {**identity, "product": "3d", "format": installer.format,
+                    "nativeArchiveSha256": archive["sha256"]}
+        if any(record[key] != value for key, value in expected.items()):
+            raise ValueError("Installer release identity mismatch")
+        filename = installer.filename(version)
+        if record["installer"] != filename:
+            raise ValueError("Installer release filename mismatch")
+        expected_assets[filename] = record["sha256"]
+    assets = document["assets"]
+    if len(assets) != len(expected_assets) or {item["name"]: item["sha256"] for item in assets} != expected_assets:
+        raise ValueError("Release manifest asset inventory or digests differ from its payload records")
+    for checksum in [*expected_assets.values(), content["contentSha256"], *content["contentFiles"].values()]:
+        if re.fullmatch(r"[0-9a-f]{64}", checksum) is None:
+            raise ValueError("Release manifest contains an invalid SHA-256 digest")
+    return ReleaseInventory(version, channel, commit, expected_assets)
+
+
 def manifest(artifacts: Path) -> list[Path]:
-    """Require both products on every release target before recording public assets."""
+    """Validate the public inventory, then verify each file before freezing the draft."""
     version = check_versions()
+    channel = release_channel(ROOT)
     commit, modified = source_identity()
     if modified:
         raise ValueError("Refusing release metadata for a modified source checkout")
     notices = artifacts / "THIRD_PARTY_NOTICES.html"
     if not notices.stat().st_size:
         raise ValueError("Empty dependency notices")
-    notices_digest = digest(notices)
-    identity = {"commit": commit, "version": version, "modified": False,
-                "noticesSha256": notices_digest}
+    native = [json.loads((artifacts / f"metadata-{product}-{target.triple}.json").read_text())
+              for product in PRODUCTS for target in TARGETS]
+    flatpaks = [json.loads((artifacts / f"metadata-{product}-flatpak.json").read_text()) for product in PRODUCTS]
+    installers = [json.loads((artifacts / f"metadata-3d-installer-{item.triple}.json").read_text()) for item in INSTALLER_TARGETS]
+    assets = [{"name": notices.name, "sha256": digest(notices)}]
+    assets.extend({"name": record["archive"], "sha256": record["sha256"]} for record in [*native, *flatpaks])
+    assets.extend({"name": record["installer"], "sha256": record["sha256"]} for record in installers)
+    document = {"schemaVersion": 1, "channel": channel, "version": version, "commit": commit,
+                "noticesSha256": digest(notices), "native": native, "flatpaks": flatpaks,
+                "installers": installers, "assets": assets}
+    inventory = validate_manifest(document)
     content_digest = json.loads(CLI_CONTENT_DESCRIPTOR.read_text())["sha256"]
-    records, flatpaks, files = [], [], [notices]
-    for product in PRODUCTS:
-        for target in TARGETS:
-            record = json.loads((artifacts / f"metadata-{product}-{target.triple}.json").read_text())
-            expected = {**identity, "product": product, "target": target.triple}
-            if any(record[key] != value for key, value in expected.items()):
-                raise ValueError(f"Release identity mismatch for {product}/{target.triple}")
-            if product == "cli":
-                if record["contentSha256"] != content_digest or set(record["contentFiles"]) != set(CONTENT_FILES):
-                    raise ValueError(f"CLI content identity mismatch for {target.triple}")
-            path = artifacts / record["archive"]
-            extension = ".tar.gz" if target.platform == "linux" else ".zip"
-            expected_name = f"holtburger-{product}-{version}-{target.triple}{extension}"
-            if record["archive"] != expected_name or digest(path) != record["sha256"]:
-                raise ValueError(f"Release archive digest/path mismatch: {product}/{target.triple}")
-            files.append(path)
-            records.append(record)
-    cli_records = [record for record in records if record["product"] == "cli"]
-    if any(record["contentFiles"] != cli_records[0]["contentFiles"] for record in cli_records):
-        raise ValueError("CLI native targets contain different content companions")
+    if any(item["contentSha256"] != content_digest for item in native if item["product"] == "cli"):
+        raise ValueError("CLI release content differs from the pinned source input")
     runtime = flatpak_runtime_ref(json.loads(THREED_FLATPAK_RECIPE.read_text()))
-    app_ids = {"cli": "io.github.merklejerk.holtburger-cli-alpha",
-               "3d": "io.github.merklejerk.holtburger-alpha"}
-    for product in PRODUCTS:
-        native = next(record for record in records if record["product"] == product and record["target"] == "x86_64-unknown-linux-gnu")
-        record = json.loads((artifacts / f"metadata-{product}-flatpak.json").read_text())
-        expected = {**identity, "product": product, "target": native["target"],
-                    "appId": app_ids[product], "runtime": runtime}
-        if product == "cli":
-            expected.update({"contentSha256": content_digest, "contentFiles": native["contentFiles"]})
-        if any(record[key] != value for key, value in expected.items()):
-            raise ValueError(f"Flatpak release identity mismatch: {product}")
-        expected_name = f"holtburger-{product}-{version}-x86_64.flatpak"
-        path = artifacts / expected_name
-        if record["archive"] != expected_name or not path.stat().st_size or digest(path) != record["sha256"]:
-            raise ValueError(f"Flatpak release archive mismatch: {product}")
+    if any(item["runtime"] != runtime for item in flatpaks):
+        raise ValueError("Flatpak release identity mismatch with the source runtime")
+    files = []
+    for name, checksum in inventory.assets.items():
+        path = artifacts / name
+        if not path.stat().st_size:
+            raise ValueError(f"Empty release asset: {name}")
+        if digest(path) != checksum:
+            raise ValueError(f"Release asset digest mismatch: {name}")
         files.append(path)
-        flatpaks.append(record)
-    installers = []
-    for installer in INSTALLER_TARGETS:
-        native = next(record for record in records if record["product"] == "3d" and record["target"] == installer.triple)
-        record = json.loads((artifacts / f"metadata-3d-installer-{installer.triple}.json").read_text())
-        expected = {**identity, "product": "3d", "target": installer.triple,
-                    "format": installer.format, "nativeArchiveSha256": native["sha256"]}
-        if any(record[key] != value for key, value in expected.items()):
-            raise ValueError(f"Installer release identity mismatch: {installer.triple}")
-        filename = installer.filename(version)
-        if record["installer"] != filename:
-            raise ValueError(f"Installer release filename mismatch: {installer.triple}")
-        path = artifacts / filename
-        if not path.stat().st_size or digest(path) != record["sha256"]:
-            raise ValueError(f"Installer release digest mismatch: {installer.triple}")
-        files.append(path)
-        installers.append(record)
     description = artifacts / "release-manifest.json"
-    write_json(description, {
-        "version": version, "commit": commit, "noticesSha256": notices_digest,
-        "native": records, "flatpaks": flatpaks, "installers": installers,
-        "assets": [{"name": path.name, "sha256": digest(path)} for path in files],
-    })
+    write_json(description, document)
     files.append(description)
     sums = artifacts / "SHA256SUMS"
     sums.write_text("".join(f"{digest(path)}  {path.name}\n" for path in sorted(files)))
@@ -468,16 +504,16 @@ def stage(artifacts: Path, tag: str) -> None:
     if not releases:
         remote = run("gh", "api", f"repos/merklejerk/holtburger/commits/{tag}", "--jq", ".sha")
         if remote != commit:
-            raise ValueError("Remote alpha tag does not point to the candidate commit")
+            raise ValueError("Remote candidate tag does not point to the candidate commit")
         # The create response owns the draft identity. A fresh list can omit the new draft.
         created = run("gh", "api", "repos/merklejerk/holtburger/releases", "--method", "POST",
                       "--raw-field", f"tag_name={tag}", "--raw-field", f"target_commitish={commit}",
                       "--raw-field", f"name=Holtburger {check_versions()}",
                       "--field", "draft=true", "--field", "prerelease=true",
-                      "--field", f"body=@{ROOT / 'release/ALPHA_RELEASE_NOTES.md'}")
+                      "--field", f"body=@{ROOT / 'release/RELEASE_NOTES.md'}")
         releases = [json.loads(created)]
     if len(releases) != 1:
-        raise ValueError("Expected exactly one alpha draft release")
+        raise ValueError("Expected exactly one candidate draft release")
     release = releases[0]
     if not release["draft"] or release["target_commitish"] != commit:
         raise ValueError("Refusing to modify a published release or a draft for another commit")
@@ -516,14 +552,14 @@ def flatpak_recipe(product: str, *, nightly_cli: bool = False) -> dict:
 def require_flatpak_candidate(info: dict) -> None:
     """Admit only an inspected Linux package with the current candidate identity."""
     if info["target"] != "x86_64-unknown-linux-gnu":
-        raise ValueError("The alpha Flatpaks require Linux x86-64 inputs")
+        raise ValueError("The candidate Flatpaks require Linux x86-64 inputs")
     commit, _ = source_identity()
     if (info["commit"], info["version"], info["modified"]) != (commit, check_versions(), False):
         raise ValueError("Flatpak input does not match the clean candidate identity")
 
 
 def flatpak_runtime_ref(recipe: dict) -> str:
-    """Canonical runtime identity for the alpha's supported Linux x86-64 architecture."""
+    """Canonical runtime identity for the candidate's supported Linux x86-64 architecture."""
     return f"{recipe['runtime']}/x86_64/{recipe['runtime-version']}"
 
 
@@ -640,8 +676,7 @@ def main() -> None:
     planning.add_argument("--purpose", choices=("candidate", "diagnostic"), default="candidate")
     planning.add_argument("--product", choices=("both", *PRODUCTS), default="both")
     planning.add_argument("--target", choices=("all", *(entry.triple for entry in TARGETS)), default="all")
-    tag = commands.add_parser("create-tag")
-    tag.add_argument("tag")
+    planning.add_argument("--version")
     build = commands.add_parser("assemble")
     build.add_argument("--product", choices=PRODUCTS, required=True)
     build.add_argument("--target", choices=[target.triple for target in TARGETS], required=True)
@@ -672,9 +707,7 @@ def main() -> None:
     record.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args()
     if arguments.command == "plan":
-        plan(arguments.product, arguments.target, arguments.purpose)
-    elif arguments.command == "create-tag":
-        create_tag(arguments.tag)
+        plan(arguments.product, arguments.target, arguments.purpose, arguments.version)
     elif arguments.command == "assemble":
         assemble(arguments)
     elif arguments.command == "verify":

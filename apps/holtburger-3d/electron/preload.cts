@@ -132,6 +132,24 @@ contextBridge.exposeInMainWorld("holtburgerContent", {
 	},
 });
 
+if (process.argv.includes("--holtburger-mode=client")) {
+	contextBridge.exposeInMainWorld("holtburgerUpdates", {
+		snapshot: () => invoke("updates:snapshot"),
+		registerPregame: (visible: boolean) =>
+			invoke("updates:register-pregame", visible),
+		setPregameVisible: (token: string, visible: boolean) =>
+			invoke("updates:pregame-visible", token, visible),
+		releasePregame: (token: string) => invoke("updates:release-pregame", token),
+		openDownloads: () => invoke("updates:open-downloads"),
+		listen(handler: (snapshot: unknown) => void): () => void {
+			const listener = (_event: unknown, snapshot: unknown) =>
+				handler(snapshot);
+			ipcRenderer.on("updates:state", listener);
+			return () => ipcRenderer.removeListener("updates:state", listener);
+		},
+	});
+}
+
 contextBridge.exposeInMainWorld("holtburgerThemes", {
 	list(): Promise<unknown> {
 		return invoke("themes:list");

@@ -31,6 +31,9 @@ use std::sync::Arc;
 /// archive does not contain.
 pub type MotionAnimationRef = Arc<MotionAnimation>;
 
+/// Retail creature backward commands play the forward cycle at this fraction of walking speed.
+pub const RETAIL_BACKWARD_SPEED_FACTOR: f32 = 0.65;
+
 pub use rates::PLAYER_LOCOMOTION_BASELINE_TABLE;
 pub(crate) use rates::{MotionRow, baseline_row, locomotion_row};
 

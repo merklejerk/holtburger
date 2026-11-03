@@ -25,7 +25,7 @@ impl ClientRuntime {
 
     pub(super) fn arm_busy_operation(&mut self, operation: PendingOperation) -> bool {
         if let Some(active) = self.active_busy_operation.as_ref() {
-            log::warn!(
+            log::debug!(
                 "Ignoring busy-tracked {:?} while {:?} is still pending.",
                 operation,
                 active.operation

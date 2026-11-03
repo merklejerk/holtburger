@@ -5,7 +5,10 @@ use crate::spatial::ContactState;
 use holtburger_common::Guid;
 use holtburger_common::position::WorldPosition;
 
-use super::{CharacterMotionPresentation, MotionCommand, MotionContact, MotionOrder};
+use super::{
+    CharacterMotionPresentation, MotionCommand, MotionContact, MotionOrder,
+    RETAIL_BACKWARD_SPEED_FACTOR,
+};
 
 /// Retail physics epsilon expressed as radians.
 const TURN_COMPLETION_THRESHOLD_RAD: f32 = 0.000_2_f32.to_radians();
@@ -53,9 +56,9 @@ enum MoveToPhase {
     },
     /// Translate with the command and gait chosen when the node began.
     Moving {
-        /// Walk/run/backwards command admitted to interpreted playback.
+        /// Walk/run/backwards intent retained for heading selection before playback conversion.
         command: MotionCommand,
-        /// Authored animation-rate multiplier after applying the Run hold key.
+        /// Requested speed after applying the Run hold key, before backward playback conversion.
         speed_mod: f32,
         /// Whether progress increases as distance from the target increases.
         moving_away: bool,
@@ -577,7 +580,18 @@ fn directed_order(
 ) -> MotionOrder {
     MotionOrder {
         style: steady_order.style,
-        forward,
+        // Retail converts backward intent before table selection. Keep the raw intent in the
+        // movement phase so retreat still faces the target and completes by increasing distance.
+        forward: forward.map(|(command, speed)| {
+            if command == MotionCommand::WALK_BACKWARDS {
+                (
+                    MotionCommand::WALK_FORWARD,
+                    -RETAIL_BACKWARD_SPEED_FACTOR * speed,
+                )
+            } else {
+                (command, speed)
+            }
+        }),
         sidestep: None,
         turn,
     }
@@ -767,6 +781,15 @@ mod tests {
         OrderedMotionPosition, OrderedMotionScalar,
     };
     use holtburger_common::{Quaternion, Vector3};
+    use holtburger_content::MotionSequenceCatalog;
+    use holtburger_dat::file_type::animation::AnimationFlags;
+    use holtburger_dat::file_type::motion_table::{AnimData, MotionData, MotionDataFlags};
+    use holtburger_dat::file_type::setup_model::AnimationFrame;
+    use holtburger_dat::file_type::{Animation, MotionTable};
+    use holtburger_dat::graphics::Frame;
+    use std::collections::HashMap;
+
+    use crate::motion::{BodyMotionRuntime, MotionPresentation};
 
     const STYLE: MotionCommand = MotionCommand(0x8000_003D);
 
@@ -817,6 +840,125 @@ mod tests {
             style: Some(STYLE),
             ..MotionOrder::default()
         }
+    }
+
+    #[test]
+    fn retreat_reverses_forward_playback_while_facing_target_until_separated() {
+        const TABLE: u32 = 0x0900_0008;
+        const ANIMATION: u32 = 0x0300_0001;
+        const WALK_FRAMERATE: f32 = 4.0;
+        const WALK_SPEED: f32 = 1.0;
+        const REQUESTED_SPEED: f32 = 2.0;
+        let row = |speed| MotionData {
+            bitfield: 0,
+            flags: MotionDataFlags::HAS_VELOCITY,
+            anims: vec![AnimData {
+                anim_id: ANIMATION,
+                low_frame: 0,
+                high_frame: -1,
+                framerate: WALK_FRAMERATE,
+            }],
+            velocity: Some(Vector3::new(0.0, speed, 0.0)),
+            omega: None,
+        };
+        let catalog = MotionSequenceCatalog::assemble(
+            [MotionTable {
+                id: TABLE,
+                default_style: STYLE.raw(),
+                style_defaults: HashMap::from([(STYLE.raw(), MotionCommand::READY.raw())]),
+                cycles: HashMap::from([
+                    (
+                        MotionTable::cycle_key(STYLE.raw(), MotionCommand::READY.raw()),
+                        row(0.0),
+                    ),
+                    (
+                        MotionTable::cycle_key(STYLE.raw(), MotionCommand::WALK_FORWARD.raw()),
+                        row(WALK_SPEED),
+                    ),
+                ]),
+                modifiers: HashMap::new(),
+                links: HashMap::new(),
+            }],
+            [Animation {
+                id: ANIMATION,
+                flags: AnimationFlags::POS_FRAMES,
+                num_parts: 0,
+                num_frames: 1,
+                pos_frames: vec![Frame {
+                    origin: Vector3::zero(),
+                    orientation: Quaternion::identity(),
+                }],
+                part_frames: vec![AnimationFrame {
+                    frames: vec![],
+                    hooks: vec![],
+                }],
+            }],
+            [],
+        )
+        .expect("retreat fixture assembles");
+        let table = catalog.table(TABLE).expect("retreat table is present");
+        let params = EntityMoveToParameters {
+            speed: scalar(REQUESTED_SPEED),
+            ..move_params(CAN_WALK | CAN_RUN | CAN_CHARGE | MOVE_TOWARDS | MOVE_AWAY)
+        };
+        let mut current = position(0.0, 0.0, 0.0);
+        let target = target_position(0.0, 1.0);
+        current.rotation = Quaternion::from_heading(current.heading_to(&target.world_position()));
+        let state = begin_server_directed_motion(
+            EntityMotionDirective::MoveToPosition {
+                admission: admission(),
+                target,
+                params,
+                run_rate: scalar(3.0),
+            },
+            current,
+            None,
+        );
+        let support = DirectedMotionSupport::PositionOnly;
+        let ServerDirectedMotionResolution::Active(step) =
+            resolve_server_directed_motion(state, steady(), current, support, None)
+        else {
+            panic!("nearby target should trigger retreat");
+        };
+        let reverse_rate = -RETAIL_BACKWARD_SPEED_FACTOR * REQUESTED_SPEED;
+        assert_eq!(
+            step.order.forward,
+            Some((MotionCommand::WALK_FORWARD, reverse_rate))
+        );
+        assert_eq!(step.order.turn, None);
+        assert!(step.travel.expect("retreat has travel").moving_away);
+
+        let ServerDirectedMotionResolution::Active(step) =
+            resolve_server_directed_motion(step.state, steady(), current, support, None)
+        else {
+            panic!("retreat should remain active before separation");
+        };
+        assert_eq!(
+            step.order.forward,
+            Some((MotionCommand::WALK_FORWARD, reverse_rate))
+        );
+        assert_eq!(step.order.turn, None);
+
+        let mut runtime = BodyMotionRuntime::new(table);
+        let tick = runtime.drive(table, step.order, 1.0);
+        assert!((tick.offset.translation.y - WALK_SPEED * reverse_rate).abs() < f32::EPSILON);
+        assert_eq!(tick.offset.rotation, Quaternion::identity());
+        current.coords = current.coords + current.rotation.rotate_vector(tick.offset.translation);
+        let playback = runtime
+            .motion_playback()
+            .expect("retreat publishes playback");
+        let MotionPresentation::Playing(clip) =
+            playback.ordinary.expect("ordinary walk is active").clip
+        else {
+            panic!("retreat should advance its forward clip backwards");
+        };
+        assert_eq!(clip.framerate, WALK_FRAMERATE * reverse_rate);
+        assert_eq!(
+            resolve_server_directed_motion(step.state, steady(), current, support, None),
+            ServerDirectedMotionResolution::Complete {
+                sticky_target: None
+            }
+        );
     }
 
     #[test]

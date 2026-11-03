@@ -142,7 +142,7 @@ export const CLIENT_TUNING = {
 		/** Flight lifetime measured from the burst at fill completion. */
 		sparkleMs: 1_800,
 		/** Number of particles emitted on arrival at the new XP position. */
-		sparkleCount: 8,
+		sparkleCount: 4,
 		/** Fixed pool bounds overlapping flights without clearing them on new gains. */
 		sparkleCapacity: 32,
 		/** Constant downward acceleration in CSS pixels per second squared. */

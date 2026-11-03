@@ -1,3 +1,5 @@
+import type { AnimationAssetSource } from "../../lib/assets/animation-asset-source";
+import { createRotationMat4 } from "../../lib/game/math/matrices";
 import type { DecodedStaticPresentation } from "../../lib/assets/decode-static-source-record";
 import {
 	createCutoutVisual,
@@ -9,12 +11,16 @@ import type {
 	SetupVisualSource,
 } from "../../lib/assets/setup-visual-source";
 import type { LandblockOwnerId } from "../../lib/game/game-types";
-import { AABB3, Mat4, Vec3 } from "../../lib/game/math/types";
+import { AABB3, Mat4, Quat, Vec3 } from "../../lib/game/math/types";
 import {
 	cellId,
 	type DynamicEntityView,
 } from "../../lib/game/runtime/dynamic-entity-feed";
 
+/** Thin animated door geometry used only by the realized targeting runtime probe. */
+export const SYNTHETIC_TARGETING_SETUP_DID = 0x0200_fffb;
+export const SYNTHETIC_TARGETING_MOTION_TABLE_DID = 0x0900_fffb;
+export const SYNTHETIC_TARGETING_ANIMATION_ID = "0x0300fffb";
 export const SYNTHETIC_NAMEPLATE_SETUP_DID = 0x0200_fffe;
 const SYNTHETIC_NAMEPLATE_WALL_SETUP_DID = 0x0200_fffd;
 const SYNTHETIC_SHADOW_CROWD_SETUP_DID = 0x0200_fffc;
@@ -99,6 +105,35 @@ export class SyntheticNameplateSetupVisualSource implements SetupVisualSource {
 		setupDid: number,
 		appearance: SetupVisualAppearance,
 	): Promise<DecodedStaticPresentation> {
+		if (setupDid === SYNTHETIC_TARGETING_SETUP_DID) {
+			const bounds = new AABB3(new Vec3(-0.5, 0, 0), new Vec3(0.5, 2, 0));
+			return Promise.resolve({
+				...VISUAL,
+				setupId: "0x0200fffb",
+				localBounds: bounds,
+				behavior: {
+					kind: "animation-only",
+					animationId: SYNTHETIC_TARGETING_ANIMATION_ID,
+					soundTableId: null,
+					motionTableId: null,
+					physicsScriptId: null,
+					physicsScriptTableId: null,
+				},
+				presentation: {
+					...VISUAL.presentation,
+					appearanceKey: "appearance:synthetic-targeting",
+					sourceAssetId: "0x0200fffb",
+					parts: VISUAL.presentation.parts.map((part) => ({
+						...part,
+						geometry: {
+							...part.geometry,
+							id: "geometry:synthetic-targeting",
+							bounds,
+						},
+					})),
+				},
+			});
+		}
 		if (
 			setupDid === SYNTHETIC_NAMEPLATE_SETUP_DID &&
 			(appearance.paletteDid === CUTOUT_PALETTE ||
@@ -449,5 +484,32 @@ function createShadowCrowdVisual(): DecodedStaticPresentation {
 			sourceAssetId: "0x0200fffc",
 		},
 		setupId: "0x0200fffc",
+	};
+}
+
+/** Borrow the ordinary source while supplying one checked-in two-frame opening-door animation. */
+export function syntheticTargetingAnimationSource(
+	delegate: AnimationAssetSource,
+): AnimationAssetSource {
+	return {
+		destroy: () => {},
+		loadMotionTableClosure: (id) =>
+			id === "0x0900fffb"
+				? Promise.resolve([SYNTHETIC_TARGETING_ANIMATION_ID])
+				: delegate.loadMotionTableClosure(id),
+		loadAnimation: (id) =>
+			id === SYNTHETIC_TARGETING_ANIMATION_ID
+				? Promise.resolve({
+						id,
+						frameCount: 2,
+						partCount: 1,
+						hooks: [],
+						partFrames: [
+							Mat4.identity(),
+							createRotationMat4(new Quat(Math.SQRT1_2, 0, Math.SQRT1_2, 0)),
+						],
+						positionFrames: [],
+					})
+				: delegate.loadAnimation(id),
 	};
 }

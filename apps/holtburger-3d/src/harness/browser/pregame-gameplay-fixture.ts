@@ -1,3 +1,4 @@
+import type { ClientEntitySnapshot } from "../../client/client-entity-mirror";
 import type { PlayerVisualCapture } from "../../client/client-object-preview-contract";
 import type {
 	HostCommandName,
@@ -20,6 +21,7 @@ import type { ObjectPreviewVisual } from "../../lib/game/runtime/object-preview-
 import {
 	cellId,
 	type DynamicEntityView,
+	type DynamicEntityWorldPlacement,
 } from "../../lib/game/runtime/dynamic-entity-feed";
 import { emptyHousing } from "../../client/client-housing-contract";
 import {
@@ -32,11 +34,17 @@ import { createLandblockWorldOrigin } from "../../lib/game/landblocks";
 type ClientEventName = HostEventName;
 
 /** Controlled authority only: production lifecycle/camera/portal consumers still validate each event. */
-export function pregameGameplayFixture(body: ObjectPreviewVisual) {
+export function pregameGameplayFixture(
+	body: ObjectPreviewVisual,
+	initialPoint?: Pick<
+		DynamicEntityWorldPlacement["pose"],
+		"landblockId" | "coords"
+	>,
+) {
 	const guid = 0x50000043;
 	const tuning = CLIENT_PREGAME_SCENE_TUNING.locations[0];
 	const origin = createLandblockWorldOrigin(tuning.landblockId);
-	const point = {
+	const point = initialPoint ?? {
 		landblockId: Number(tuning.camera.envCellId),
 		coords: {
 			x: tuning.camera.position.x - origin.x,
@@ -85,8 +93,11 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 				rotation: { w: 1, x: 0, y: 0, z: 0 },
 			},
 			spatialMembership: {
-				reachesOutdoors: false,
-				reachedEnvCellIds: [cellId(point.landblockId)],
+				reachesOutdoors: (point.landblockId & 0xffff) < 0x100,
+				reachedEnvCellIds:
+					(point.landblockId & 0xffff) >= 0x100
+						? [cellId(point.landblockId)]
+						: [],
 			},
 			contact: "grounded",
 			sampleMode: "authoritative-only",
@@ -96,6 +107,7 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 	const handlers = new Map<ClientEventName, (payload: unknown) => void>();
 	let state = currentState(player);
 	let cameraGeneration = 0;
+	let cameraTick: ClientCameraTick | null = null;
 	let acknowledgements = 0;
 	let logoutRequests = 0;
 	const emit = (event: ClientEventName, payload: unknown) =>
@@ -397,6 +409,7 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 					contactPasses: 0,
 				},
 			};
+			cameraTick = tick;
 			emit("client-camera", tick);
 		} else if (command === "acknowledge_client_world_reveal") {
 			acknowledgements++;
@@ -407,6 +420,30 @@ export function pregameGameplayFixture(body: ObjectPreviewVisual) {
 	const transport: ClientLifecycleTransport = { listen, invoke };
 	const session = new ClientLifecycleSession(transport);
 	return {
+		/** Publish a complete controlled population through the real authority/event seam. */
+		publishEntities: (
+			entities: readonly DynamicEntityView[],
+			facts: ClientEntitySnapshot,
+		) => {
+			state = {
+				...state,
+				entities: facts,
+				dynamic: { ...state.dynamic, entities: [...entities] },
+			};
+			emit("client-current-state", state);
+		},
+		/** Explicit host-owned boom placement for browser camera/visibility probes. */
+		reseedCamera: (position: typeof point, visualPivot: typeof point) => {
+			if (cameraTick === null || cameraTick.kind !== "reseeded")
+				throw new Error("Camera fixture must be started before reseeding.");
+			const endpoint = { position, visualPivot };
+			cameraTick = {
+				...cameraTick,
+				sequence: cameraTick.sequence + 1,
+				path: { initial: endpoint, legs: [{ endFraction: 1, end: endpoint }] },
+			};
+			emit("client-camera", cameraTick);
+		},
 		combatRepro,
 		session,
 		transport,

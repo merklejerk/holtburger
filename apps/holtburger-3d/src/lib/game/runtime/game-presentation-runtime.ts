@@ -1,3 +1,4 @@
+import type { EntitySelectionBounds } from "../selection/entity-selection-bounds";
 import type { DynamicPresentationOverride } from "./dynamic-presentation-override";
 import { isContentFailure } from "../../host/host-command-result";
 import { formatError } from "../../format-error";
@@ -4423,6 +4424,26 @@ export class GamePresentationRuntime {
 	/** Cosmetic time advances independently of scene readiness or world simulation. */
 	advanceCombatEffects(nowMs: number): void {
 		this.#combatEffects?.advance(nowMs);
+	}
+
+	/** Borrow raw posed boxes independently of camera culling and pointer sphere policy. */
+	visitRealizedEntitySelectionBounds(
+		visit: (entity: DynamicEntityView, bounds: EntitySelectionBounds) => void,
+	): void {
+		for (const [guid, installed] of this.#spawnedPresentations) {
+			const desired = this.#spawnedDesiredEntities.get(guid);
+			if (
+				desired === undefined ||
+				desired.authoritative.placement.kind !== "world" ||
+				installed.generation !== desired.entity.generation ||
+				installed.visualKey !== desired.visualKey ||
+				!this.#isDynamicScopeReady(desired.entity)
+			)
+				continue;
+			this.#dynamics.withSelectionGeometry(installed.nodeId, (geometry) => {
+				if (geometry.parts.length > 0) visit(desired.authoritative, geometry);
+			});
+		}
 	}
 
 	/** Borrow one realized entity's current posed CPU geometry for an exact interaction query. */

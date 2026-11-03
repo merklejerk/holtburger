@@ -1,12 +1,17 @@
+import type { CycleSelectionPresentationFrame } from "./client-cycle-selection-controller";
+import { createScaleMat4, multiplyMat4 } from "../lib/game/math/matrices";
 import {
 	cellId,
 	type DynamicEntityView,
 	type DynamicEntityWorldPlacement,
 } from "../lib/game/runtime/dynamic-entity-feed";
 import { sceneVec3 } from "../lib/assets/ac-frame";
-import { datAssetId } from "../lib/game/runtime/dynamic-entity-presentation";
+import {
+	datAssetId,
+	dynamicEntityPlacement,
+} from "../lib/game/runtime/dynamic-entity-presentation";
 import type { LandblockOwnerId } from "../lib/game/game-types";
-import { Quat, Vec3 } from "../lib/game/math/types";
+import { Quat, Vec3, type AABB3 } from "../lib/game/math/types";
 import type { PrimaryCameraView } from "../lib/game/runtime/types";
 
 /** Asset-free accepted entity; scenarios control pose and semantic facts independently. */
@@ -84,3 +89,33 @@ export const TARGETING_TEST_VIEW: PrimaryCameraView = {
 	},
 	extent: { width: 100, height: 100 },
 };
+
+/** Explicit synthetic realized population for semantics/input tests; runtime integration uses real owners. */
+export function realizedSelectionFrame(
+	view: PrimaryCameraView | null,
+	parts: readonly {
+		readonly entity: DynamicEntityView;
+		readonly bounds: AABB3;
+	}[],
+): CycleSelectionPresentationFrame {
+	return {
+		view,
+		visitRealizedEntitySelectionBounds: (visit) => {
+			for (const { entity, bounds } of parts) {
+				if (entity.placement.kind !== "world")
+					throw new Error("Realized fixture must have world placement.");
+				const placement = dynamicEntityPlacement(entity);
+				const scale = entity.presentation.objectScale;
+				const sourceToLandblock = multiplyMat4(
+					placement.localTransform,
+					createScaleMat4(new Vec3(scale, scale, scale)),
+				);
+				visit(entity, {
+					landblockId: placement.landblockId,
+					sourceToLandblock,
+					parts: [{ localBounds: bounds, sourceToLandblock }],
+				});
+			}
+		},
+	};
+}

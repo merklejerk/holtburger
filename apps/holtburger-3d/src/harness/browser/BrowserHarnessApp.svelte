@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { probeRealizedCycleTargeting } from "./realized-cycle-targeting-probe";
 	import { startPresentationFrameLoop } from "../../app/presentation-frame-loop";
 	import { probeCombatEffectsAppearance } from "./combat-effects-appearance-probe";
 	import {
@@ -42,6 +43,7 @@
 		createSyntheticNameplateWorkload,
 		SyntheticNameplateSetupVisualSource,
 		type SyntheticNameplateWorkload,
+		syntheticTargetingAnimationSource,
 	} from "./synthetic-nameplate-workload";
 	import { OPENED_CONTAINER_NAMEPLATE_ICON_ID } from "../../lib/game/renderer/nameplate-icon-source";
 	import {
@@ -620,6 +622,10 @@
 		readonly probeDynamicViews: () => ReturnType<typeof probeDynamicViews>;
 		/** Compare one plural entity with each single-domain material control. */
 		readonly probeDynamicDomains: () => ReturnType<typeof probeDynamicDomains>;
+		/** Exercise posed-volume cycle acquisition through the real gameplay adapter and input owner. */
+		readonly probeRealizedCycleTargeting: () => ReturnType<
+			typeof probeRealizedCycleTargeting
+		>;
 		/** Compare merged blend output with independent equations on a synthetic triangle. */
 		readonly probeDynamicBlendFlags: () => ReturnType<
 			typeof probeDynamicBlendFlags | typeof probeMixedTransparency
@@ -4332,7 +4338,7 @@
 					contentSource,
 				);
 				presentationAssets = await PresentationAssetService.build({
-					animationSource: contentSource,
+					animationSource: syntheticTargetingAnimationSource(contentSource),
 					particleEmitterSource: contentSource,
 					physicsScriptSource: contentSource,
 					setupVisualSource,
@@ -4708,6 +4714,72 @@
 						);
 					},
 					probeSyntheticAppearanceReplacement,
+					probeRealizedCycleTargeting: async () => {
+						const activeRuntime = runtime;
+						const canvas = canvasElement;
+						const anchor = spawnedEntities[0];
+						const previousCamera = cameraEvidence;
+						const radii = lastInterestRadii;
+						const target = activeRuntime?.sceneInterestState().resolvedTarget;
+						const coordinator = sceneInterestCoordinator;
+						const content = contentSource;
+						const entities = [...spawnedEntities];
+						if (
+							!activeRuntime ||
+							!canvas ||
+							anchor === undefined ||
+							previousCamera === null ||
+							previousCamera.envCellId !== null ||
+							radii === null ||
+							target === null ||
+							target === undefined ||
+							coordinator === undefined ||
+							content === undefined
+						)
+							throw new Error(
+								"Realized targeting probe requires a synthetic outdoor entity and an active runtime.",
+							);
+						if (frameHandle !== undefined)
+							window.cancelAnimationFrame(frameHandle);
+						try {
+							return await probeRealizedCycleTargeting(
+								activeRuntime,
+								anchor,
+								canvas,
+								content,
+							);
+						} finally {
+							activeRuntime.updateSceneInterest(
+								await coordinator.request(target.requested, radii).promise,
+							);
+							setOutdoorCamera(
+								previousCamera.landblockId,
+								previousCamera.position,
+								previousCamera.yawDegrees,
+								previousCamera.pitchDegrees,
+							);
+							await activeRuntime.replaceDynamicEntitySnapshot(entities);
+							const deadline = performance.now() + 20_000;
+							while (true) {
+								activeRuntime.tick();
+								await activeRuntime.reevaluateDynamicEntityEligibility();
+								let restored = 0;
+								activeRuntime.visitRealizedEntitySelectionBounds(
+									() => restored++,
+								);
+								if (restored === entities.length) break;
+								if (performance.now() > deadline)
+									throw new Error(
+										"Realized targeting probe failed to restore its borrowed world.",
+									);
+								await new Promise<void>((resolve) =>
+									requestAnimationFrame(() => resolve()),
+								);
+							}
+							activeRuntime.render(performance.now() / 1000);
+							frameHandle = window.requestAnimationFrame(frame);
+						}
+					},
 					probeDynamicDomains: () => {
 						const current = spawnedEntities[0];
 						if (

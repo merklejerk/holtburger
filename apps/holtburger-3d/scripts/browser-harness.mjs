@@ -825,6 +825,7 @@ function parseArgs(args) {
 		lifecycle: false,
 		fixture: null,
 		nameplateWorkload: null,
+		realizedTargeting: false,
 		nameplateLifecycle: false,
 		appearanceReplacement: false,
 		dynamicViews: false,
@@ -1657,6 +1658,9 @@ function parseArgs(args) {
 			case "--probe-dynamic-blend-flags":
 				parsed.dynamicBlendFlags = true;
 				break;
+			case "--probe-realized-targeting":
+				parsed.realizedTargeting = true;
+				break;
 			case "--probe-dynamic-domains":
 				parsed.dynamicDomains = true;
 				break;
@@ -2016,6 +2020,14 @@ function parseArgs(args) {
 			);
 		}
 	}
+	if (
+		parsed.realizedTargeting &&
+		parsed.nameplateWorkload !== "occlusion-open"
+	) {
+		throw new Error(
+			"--probe-realized-targeting requires --nameplate-workload occlusion-open.",
+		);
+	}
 	return parsed;
 }
 
@@ -2244,6 +2256,7 @@ Options:
   --probe-dynamic-blend-flags
                          Check cutout/blend pixels, or mixed ordering with --fixture blended.
                          Requires --nameplate-workload occlusion-open and --screenshot.
+  --probe-realized-targeting Verify realized-volume cycle acquisition with the real gameplay adapter. Requires --nameplate-workload occlusion-open.
   --probe-dynamic-domains
                          Compare portal-plural material draws with single-domain controls.
                          Requires --frame-mode portal and --screenshot.
@@ -2662,6 +2675,7 @@ function briefHarnessReport(result) {
 		dynamicViews: result.dynamicViews,
 		dynamicBlendFlags: result.dynamicBlendFlags,
 		dynamicDomains: result.dynamicDomains,
+		realizedTargeting: result.realizedTargeting,
 		dynamicResources: result.state.dynamicResources,
 		staticResourceCounts:
 			staticObjects === null
@@ -5775,6 +5789,13 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.state",
 			[],
 		);
+		const realizedTargeting = options.realizedTargeting
+			? await evaluate(
+					client,
+					"globalThis.__HOLTBURGER_3D_BROWSER_HARNESS__.probeRealizedCycleTargeting",
+					[],
+				)
+			: null;
 		let dynamicDomains = null;
 		if (options.dynamicDomains) {
 			if (
@@ -6959,6 +6980,7 @@ async function runHarness({ contentHostUrl, viteUrl }) {
 			dynamicViews,
 			dynamicBlendFlags,
 			dynamicDomains,
+			realizedTargeting,
 
 			measuredFrameThroughput,
 			portalTraversalSurvey,

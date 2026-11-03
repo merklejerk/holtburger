@@ -220,7 +220,7 @@ export const CLIENT_TUNING = {
 			/** First band width; subsequent widths double with distance. */
 			initialDistanceBandMeters: 2.5,
 			/** Smart Tab acquisition half-angle; elevation does not restrict it. */
-			immediateMaxAngleDegrees: 30,
+			immediateMaxAngleDegrees: 22.5,
 		},
 		/** Modest staleness is sufficient for cursor feedback and selection range expiry. */
 		sampleIntervalMs: 1_000 / 15,

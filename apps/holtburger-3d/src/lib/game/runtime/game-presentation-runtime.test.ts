@@ -195,6 +195,221 @@ function testRenderer(overrides: Partial<Renderer> = {}): Renderer {
 	};
 }
 
+/** Capture scalar evidence inside the borrowed visit; matrices never escape it. */
+function realizedBoundsEvidence(runtime: GamePresentationRuntime) {
+	const rows: {
+		guid: number;
+		generation: number;
+		partCount: number;
+		x: number;
+		firstPartX: number;
+	}[] = [];
+	runtime.visitRealizedEntitySelectionBounds((entity, bounds) => {
+		const first = bounds.parts[0];
+		if (first === undefined)
+			throw new Error("Realized evidence requires selectable parts.");
+		rows.push({
+			guid: entity.identity.guid,
+			generation: entity.generation,
+			partCount: bounds.parts.length,
+			x: bounds.sourceToLandblock.m41,
+			firstPartX: first.sourceToLandblock.m41,
+		});
+	});
+	return rows;
+}
+
+describe("realized selection volume population", () => {
+	it("keeps offscreen world roots but excludes hidden, no-draw and attached entities", async () => {
+		const runtime = await buildSpawnRuntime({
+			load: async () => {
+				const visual = spawnedVisual();
+				return {
+					...visual,
+					presentation: {
+						...visual.presentation,
+						holdingLocations: new Map([
+							[
+								"right-hand",
+								{
+									location: "right-hand",
+									partIndex: 0,
+									offsetTransform: Mat4.identity(),
+								},
+							],
+						]),
+					},
+				};
+			},
+		});
+		onTestFinished(() => runtime.destroy());
+		const parent = spawnedEntity(7, 1);
+		await runtime.replaceDynamicEntitySnapshot([
+			parent,
+			spawnedEntity(8, 1, { hidden: true }),
+			spawnedEntity(9, 1, { noDraw: true }),
+			spawnedEntity(10, 1, { translucency: 1 }),
+			attachedEntity(11, 1, 7),
+		]);
+		expect(realizedBoundsEvidence(runtime).map((r) => r.guid)).toEqual([7, 10]);
+		setTestCamera(runtime, {
+			...SPAWN_TEST_CAMERA,
+			placement: {
+				...SPAWN_TEST_CAMERA.placement,
+				rotation: new Quat(0, 0, 1, 0),
+			},
+		});
+		expect(realizedBoundsEvidence(runtime).map((r) => r.guid)).toEqual([7, 10]);
+		await activateSpawnScene(runtime, "0x0002ffff", 2);
+		expect(realizedBoundsEvidence(runtime)).toEqual([]);
+		await activateSpawnScene(runtime, "0x0001ffff", 3);
+		await runtime.reevaluateDynamicEntityEligibility();
+		expect(realizedBoundsEvidence(runtime).map((r) => r.guid)).toEqual([7, 10]);
+	});
+	it("omits installed entities whose parts are all degrade-hidden", async () => {
+		const visual = appearanceVisual(1);
+		const runtime = await buildSpawnRuntime({
+			load: async () => ({
+				...visual,
+				presentation: {
+					...visual.presentation,
+					parts: visual.presentation.parts.map((part) => ({
+						...part,
+						retailVisibility: "degrade-hidden" as const,
+					})),
+				},
+			}),
+		});
+		onTestFinished(() => runtime.destroy());
+		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
+		expect(runtime.dynamicEntityPresentationState(7).kind).toBe("realized");
+		expect(realizedBoundsEvidence(runtime)).toEqual([]);
+	});
+
+	it("borrows planar carrier boxes even when pointer selection uses a live-particle sphere", async () => {
+		const visual = appearanceVisual(1);
+		const scriptId: DatAssetId = "0x33000001";
+		const emitterId: DatAssetId = "0x32000001";
+		const meshId: DatAssetId = "0x01000001";
+		const runtime = await buildSpawnRuntime(
+			{
+				load: async () => ({
+					...visual,
+					behavior: {
+						kind: "animation-and-script",
+						animationId: IDLE_ANIMATION_ID,
+						motionTableId: null,
+						soundTableId: null,
+						physicsScriptTableId: null,
+						physicsScriptId: scriptId,
+					},
+				}),
+			},
+			ANIMATION_SOURCE,
+			undefined,
+			{
+				destroy() {},
+				loadPhysicsScript: async () => ({
+					id: scriptId,
+					lengthSeconds: 0,
+					records: [
+						{
+							kind: "create-particle",
+							emitterInfoId: emitterId,
+							emitterId: 1,
+							partIndex: 0,
+							offsetOrigin: acVector3([0, 0, 0]),
+							startTime: 0,
+							authoredOrder: 0,
+						},
+					],
+				}),
+			},
+			PHYSICS_SCRIPT_TABLE_SOURCE,
+			{
+				destroy() {},
+				loadParticleEmitter: async () => particleEmitterInfo(emitterId, meshId),
+			},
+			{
+				destroy() {},
+				loadParticleMeshes: async () => ({
+					presentations: new Map([
+						[meshId, { orientation: "authored", presentation: visual }],
+					]),
+					textureDependencies: [],
+				}),
+			},
+		);
+		onTestFinished(() => runtime.destroy());
+		await runtime.upsertDynamicEntity(
+			spawnedEntity(7, 1, { defaultScript: true }),
+		);
+		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		runtime.frame(0);
+		expect(
+			runtime.withSpawnedEntitySelectionGeometry(
+				7,
+				(geometry) => geometry.kind,
+			),
+		).toBe("sphere-proxy");
+		const boxes: number[][] = [];
+		runtime.visitRealizedEntitySelectionBounds((_entity, bounds) => {
+			for (const { localBounds } of bounds.parts)
+				boxes.push([
+					localBounds.min.x,
+					localBounds.min.y,
+					localBounds.min.z,
+					localBounds.max.x,
+					localBounds.max.y,
+					localBounds.max.z,
+				]);
+		});
+		expect(boxes).toEqual([[-1, 0, 0, 1, 1, 0]]);
+	});
+
+	it("excludes stale visual keys until the replacement is committed", async () => {
+		const delayed = controlledPromise<DecodedStaticPresentation>();
+		const runtime = await buildSpawnRuntime({
+			load: (_setup, appearance) =>
+				appearance.paletteDid === 2
+					? delayed.promise
+					: Promise.resolve(appearanceVisual(0)),
+		});
+		onTestFinished(() => runtime.destroy());
+		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
+		expect(realizedBoundsEvidence(runtime).map((r) => r.guid)).toEqual([7]);
+		const replacement = spawnedEntity(7, 1);
+		replacement.presentation.appearance.paletteDid = 2;
+		const pending = runtime.upsertDynamicEntity(replacement);
+		expect(realizedBoundsEvidence(runtime)).toEqual([]);
+		delayed.resolve(appearanceVisual(2));
+		await pending;
+		expect(realizedBoundsEvidence(runtime).map((r) => r.guid)).toEqual([7]);
+		runtime.removeDynamicEntity(7, 1);
+		expect(realizedBoundsEvidence(runtime)).toEqual([]);
+	});
+	it("excludes a loading generation without resurrecting the previous one", async () => {
+		const delayed = controlledPromise<DecodedStaticPresentation>();
+		const runtime = await buildSpawnRuntime({
+			load: (_setup, appearance) =>
+				appearance.paletteDid === 2
+					? delayed.promise
+					: Promise.resolve(appearanceVisual(0)),
+		});
+		onTestFinished(() => runtime.destroy());
+		await runtime.upsertDynamicEntity(spawnedEntity(7, 1));
+		const replacement = spawnedEntity(7, 2);
+		replacement.presentation.appearance.paletteDid = 2;
+		const pending = runtime.upsertDynamicEntity(replacement);
+		expect(realizedBoundsEvidence(runtime)).toEqual([]);
+		delayed.resolve(appearanceVisual(2));
+		await pending;
+		expect(realizedBoundsEvidence(runtime).map((r) => r.generation)).toEqual([
+			2,
+		]);
+	});
+});
+
 describe("GamePresentationRuntime view and interest control", () => {
 	it("contains an unavailable entity body while keeping siblings installed and retries explicitly", async () => {
 		let broken = true;
@@ -4306,7 +4521,7 @@ describe("opt-in distant animation sampling", () => {
 	}
 
 	it("holds distant poses, follows current placement, and resumes immediately when disabled", async () => {
-		const { runtime } = await buildCadenceRuntime();
+		const { runtime, entity } = await buildCadenceRuntime();
 		runtime.setDistantAnimationSampling({
 			minimumDistance: 10,
 			sampleIntervalSeconds: 1,
@@ -4332,11 +4547,37 @@ describe("opt-in distant animation sampling", () => {
 				.lastVisibleSampleCount,
 		).toBe(1);
 		setTestCamera(runtime, SPAWN_TEST_CAMERA);
+		const heldBounds = realizedBoundsEvidence(runtime);
 		runtime.render(0.03);
+		expect(realizedBoundsEvidence(runtime)).toEqual(heldBounds);
 		expect(
 			runtime.getAuthoredDynamicRuntimeDiagnostics().presentationCadence
 				.lastVisibleSampleCount,
 		).toBe(0);
+		if (entity.placement.kind !== "world")
+			throw new Error("Cadence fixture requires world placement.");
+		await runtime.upsertDynamicEntity({
+			...entity,
+			placement: {
+				...entity.placement,
+				pose: {
+					...entity.placement.pose,
+					coords: {
+						...entity.placement.pose.coords,
+						x: entity.placement.pose.coords.x + 1,
+					},
+				},
+			},
+		});
+		runtime.render(0.035);
+		const movedBounds = realizedBoundsEvidence(runtime);
+		const held = heldBounds[0];
+		if (held === undefined)
+			throw new Error("Cadence fixture requires a realized part.");
+		expect(movedBounds[0]).toMatchObject({
+			x: held.x + 1,
+			firstPartX: held.firstPartX + 1,
+		});
 		runtime.setDistantAnimationSampling(null);
 		runtime.render(0.04);
 		expect(

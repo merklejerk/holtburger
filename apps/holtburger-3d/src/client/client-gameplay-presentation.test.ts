@@ -75,6 +75,42 @@ import type { PrimaryCameraView } from "../lib/game/runtime/types";
 import { projectClientTargetIndicator } from "./client-target-indicator";
 
 describe("ClientGameplayPresentation", () => {
+	it("borrows a ready-empty cycle frame and withdraws the source during destruction", async () => {
+		const transport = new FakeClientTransport(currentState(0x0101_0001));
+		const lifecycle = new ClientLifecycleSession(transport);
+		await lifecycle.start();
+		const runtime = new FakePresentationRuntime();
+		const read = vi.spyOn(runtime, "visitRealizedEntitySelectionBounds");
+		const presentation = new ClientGameplayPresentation({
+			canvas: fakeCanvas(),
+			session: lifecycle,
+			resources: fakeOwner(runtime, activeRegion()),
+		});
+		const callback = vi.fn(() => true);
+		expect(presentation.withCycleSelectionFrame(callback)).toBeNull();
+		await presentation.start();
+		try {
+			await vi.waitFor(() => {
+				presentation.frame(1000);
+				expect(presentation.status().kind).toBe("ready");
+			});
+			expect(
+				presentation.withCycleSelectionFrame((frame) => {
+					frame.visitRealizedEntitySelectionBounds(() => {
+						throw new Error("Empty runtime must not invent geometry.");
+					});
+					return frame.view !== null;
+				}),
+			).toBe(true);
+			expect(read).toHaveBeenCalledTimes(1);
+		} finally {
+			await presentation.destroy();
+			lifecycle.stop();
+		}
+		expect(presentation.withCycleSelectionFrame(callback)).toBeNull();
+		expect(callback).not.toHaveBeenCalled();
+	});
+
 	it("blocks a refused local-player body with its cause and never acknowledges portal reveal", async () => {
 		const playerGuid = 0x01010001;
 		const transport = new FakeClientTransport({
@@ -2061,6 +2097,8 @@ class FakePresentationRuntime implements ClientGameplayRuntime {
 				: { frame: this.entityFrame, kind: "realized" })
 		);
 	}
+
+	visitRealizedEntitySelectionBounds(): void {}
 
 	withSpawnedEntitySelectionGeometry<T>(): T | null {
 		return null;

@@ -5,9 +5,16 @@ import {
 	type ContentFailure,
 } from "../src/app/content-startup-contract.js";
 import type { ClientLaunchConfiguration } from "./client-launch.js";
-import { MAX_PENDING_REQUESTS } from "../src/lib/host/host-limits.js";
+import {
+	MAX_PENDING_REQUESTS,
+	MAX_CONCURRENT_CONTENT_REQUESTS,
+} from "../src/lib/host/host-limits.js";
 export { MAX_PENDING_REQUESTS } from "../src/lib/host/host-limits.js";
-import { HOST_EVENT_NAMES } from "../src/lib/host/host-transport.js";
+import { HostRequestGate } from "../src/lib/host/host-request-gate.js";
+import {
+	HOST_EVENT_NAMES,
+	isContentHostCommand,
+} from "../src/lib/host/host-transport.js";
 import {
 	hostCommandErrorSchema,
 	type HostCommandFailure,
@@ -281,6 +288,10 @@ export class SidecarHostClient {
 	#connected: Promise<void>;
 	#resolveConnected!: () => void;
 	#rejectConnected!: (reason: unknown) => void;
+	/** One budget for every content caller on this sidecar connection. */
+	readonly #contentRequests = new HostRequestGate(
+		MAX_CONCURRENT_CONTENT_REQUESTS,
+	);
 	#shutdown: Promise<void> | undefined;
 	#failure: SidecarProtocolError | undefined;
 	/** Both facts become available atomically when the versioned handshake is accepted. */
@@ -373,7 +384,10 @@ export class SidecarHostClient {
 		command: HostCommandName,
 		args?: HostCommandArguments,
 	): Promise<unknown> {
-		return this.#invokeWire(wireCommand(command, args));
+		const operation = () => this.#invokeWire(wireCommand(command, args));
+		return isContentHostCommand(command)
+			? this.#contentRequests.schedule(operation)
+			: operation();
 	}
 
 	/** Sends the one launch-only client command; this method is not part of the preload bridge. */
@@ -415,6 +429,11 @@ export class SidecarHostClient {
 	async #invokeWire(command: Record<string, unknown>): Promise<unknown> {
 		await this.#connected;
 		if (this.#failure) throw this.#failure;
+		if (this.#shutdown)
+			throw new SidecarProtocolError(
+				"host_shutdown",
+				"Host requests are stopped.",
+			);
 		if (this.#pending.size >= MAX_PENDING_REQUESTS) {
 			throw new SidecarProtocolError(
 				"pending_limit",
@@ -436,6 +455,9 @@ export class SidecarHostClient {
 	/** Requests an orderly host shutdown and force-kills only after the bounded grace period. */
 	async shutdown(): Promise<void> {
 		if (this.#shutdown) return this.#shutdown;
+		this.#contentRequests.destroy(
+			new SidecarProtocolError("host_shutdown", "Host requests are stopped."),
+		);
 		this.#shutdown = this.#stop();
 		return this.#shutdown;
 	}
@@ -687,6 +709,7 @@ export class SidecarHostClient {
 	#fail(error: SidecarProtocolError, terminate: boolean): void {
 		if (this.#failure) return;
 		this.#failure = error;
+		this.#contentRequests.destroy(error);
 		clearTimeout(this.#handshakeTimeout);
 		this.#rejectConnected(error);
 		for (const pending of this.#pending.values()) pending.reject(error);

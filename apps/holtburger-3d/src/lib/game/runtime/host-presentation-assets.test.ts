@@ -61,7 +61,7 @@ describe("HostPresentationAssets", () => {
 		await retirement;
 		await expect(
 			first.setupVisualSource.load(0x02000001, appearance),
-		).rejects.toThrow("Host requests are stopped");
+		).rejects.toThrow("Setup visual source is stopped");
 		await expect(owner.resources()).rejects.toMatchObject({
 			name: "AbortError",
 		});

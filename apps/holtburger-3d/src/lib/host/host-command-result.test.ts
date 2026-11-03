@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	HostCommandError,
 	isContentFailure,
+	isHostCapacityFailure,
 	unwrapHostCommandResult,
 } from "./host-command-result";
 
@@ -79,5 +80,37 @@ describe("host command outcomes", () => {
 		);
 		aggregate.cause = aggregate;
 		expect(isContentFailure(aggregate)).toBe(false);
+	});
+});
+
+describe("host capacity failure policy", () => {
+	it("requires every contextual or aggregate failure to be a capacity rejection", () => {
+		const capacity = new HostCommandError({
+			code: "pending_limit",
+			message: "Full",
+		});
+		const source = new HostCommandError(failure);
+		expect(isHostCapacityFailure(capacity)).toBe(true);
+		expect(isContentFailure(capacity)).toBe(false);
+		expect(
+			isHostCapacityFailure(
+				new Error("Batch", {
+					cause: new AggregateError([capacity, capacity], "Loads"),
+				}),
+			),
+		).toBe(true);
+		for (const error of [
+			new AggregateError([], "Empty"),
+			new AggregateError([capacity, source], "Mixed"),
+			new AggregateError([capacity], "Mixed cause", {
+				cause: new Error("Invariant"),
+			}),
+			new HostCommandError({ ...failure, code: "pending_limit" }),
+			new Error("host already has 512 pending requests"),
+		])
+			expect(isHostCapacityFailure(error)).toBe(false);
+		const cycle = new Error("Cycle");
+		cycle.cause = cycle;
+		expect(isHostCapacityFailure(cycle)).toBe(false);
 	});
 });

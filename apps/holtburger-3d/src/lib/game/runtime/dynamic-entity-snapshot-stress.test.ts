@@ -1,35 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_PENDING_REQUESTS } from "../host/host-limits";
-import { HostRequestGate } from "../host/host-request-gate";
-import { MAX_SETUP_VISUAL_REQUESTS } from "./setup-visual-host-source";
 import {
 	DynamicEntityMirror,
 	type DynamicEntitySnapshot,
 	type DynamicEntityView,
-} from "../game/runtime/dynamic-entity-feed";
+} from "./dynamic-entity-feed";
 
 const OBSERVED_ENTITY_COUNT = 308;
 const STRESS_ENTITY_COUNT = 600;
 
-describe("setup visual request gate", () => {
-	it("keeps the observed and stress snapshots below the sidecar pending cap", async () => {
-		const gate = new HostRequestGate(MAX_SETUP_VISUAL_REQUESTS);
-		let completed = 0;
-		const requests = Array.from({ length: STRESS_ENTITY_COUNT }, () =>
-			gate.schedule(async () => {
-				await new Promise((resolve) => setTimeout(resolve, 0));
-				completed += 1;
-			}),
-		);
-
-		await Promise.all(requests);
-
-		expect(completed).toBe(STRESS_ENTITY_COUNT);
-		expect(gate.peakActiveCount).toBe(MAX_SETUP_VISUAL_REQUESTS);
-		expect(gate.peakActiveCount).toBeLessThan(MAX_PENDING_REQUESTS);
-	});
-
+describe("dynamic entity snapshot generations", () => {
 	it("reconciles 308 then 600 entities while stale generations remain refused", () => {
 		const mirror = new DynamicEntityMirror(() => 1);
 		mirror.apply({

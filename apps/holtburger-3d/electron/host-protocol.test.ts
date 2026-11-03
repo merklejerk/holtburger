@@ -1,4 +1,6 @@
+import { decode } from "@msgpack/msgpack";
 import { describe, expect, it, vi } from "vitest";
+import { MAX_CONCURRENT_CONTENT_REQUESTS } from "../src/lib/host/host-limits.js";
 import { HOST_EVENT_NAMES } from "../src/lib/host/host-transport.js";
 import {
 	MAX_FRAME_BYTES,
@@ -636,5 +638,212 @@ describe("SidecarHostClient", () => {
 		} finally {
 			vi.useRealTimers();
 		}
+	});
+});
+
+/** Decode requests emitted by the real client so admission tests can hold and settle wire calls. */
+function writtenRequests(
+	process: FakeProcess,
+): Array<{ id: number; command: { command: string } }> {
+	return process.stdin.writes.flatMap((bytes) => {
+		const frame = decode(bytes.subarray(4)) as {
+			kind: string;
+			id: number;
+			command: { command: string };
+		};
+		return frame.kind === "request" ? [frame] : [];
+	});
+}
+
+function replyUnit(process: FakeProcess, id: number): void {
+	process.stdout.push(
+		encodeSidecarFrame({
+			kind: "response",
+			id,
+			result: { Ok: { kind: "unit" } },
+		}),
+	);
+}
+
+/** Drain promise continuations without advancing timer-based host timeouts. */
+async function flushRequests(): Promise<void> {
+	await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+describe("connection-wide content admission", () => {
+	it("bounds mixed content bursts while status and movement bypass the queue", async () => {
+		const process = new FakeProcess();
+		const client = await connect(process);
+		const commands = [
+			"load_animation",
+			"load_texture_pixels",
+			"load_audio",
+			"prepare_ui_icons",
+		] as const;
+		const requests = Array.from(
+			{ length: MAX_PENDING_REQUESTS + 1 },
+			(_, index) =>
+				client.invoke(commands[index % commands.length], {
+					request: { fixtureId: index },
+				}),
+		);
+		await flushRequests();
+		expect(writtenRequests(process)).toHaveLength(
+			MAX_CONCURRENT_CONTENT_REQUESTS,
+		);
+		expect(MAX_CONCURRENT_CONTENT_REQUESTS).toBeLessThan(MAX_PENDING_REQUESTS);
+		const status = client.invoke("host_status");
+		const movement = client.invoke("set_physical_fly_intent", { request: {} });
+		await flushRequests();
+		const bypass = writtenRequests(process).slice(
+			MAX_CONCURRENT_CONTENT_REQUESTS,
+		);
+		expect(bypass.map((frame) => frame.command.command)).toEqual([
+			"host_status",
+			"set_physical_fly_intent",
+		]);
+		for (const frame of bypass) replyUnit(process, frame.id);
+		await Promise.all([status, movement]);
+		let replied = MAX_CONCURRENT_CONTENT_REQUESTS + bypass.length;
+		for (const frame of writtenRequests(process).slice(
+			0,
+			MAX_CONCURRENT_CONTENT_REQUESTS,
+		))
+			replyUnit(process, frame.id);
+		while (replied < requests.length + bypass.length) {
+			await flushRequests();
+			const batch = writtenRequests(process).slice(replied);
+			expect(batch.length).toBeGreaterThan(0);
+			expect(batch.length).toBeLessThanOrEqual(MAX_CONCURRENT_CONTENT_REQUESTS);
+			for (const frame of batch) replyUnit(process, frame.id);
+			replied += batch.length;
+		}
+		await Promise.all(requests);
+		process.close(0, null);
+	});
+
+	it("releases admission after a content rejection without failing the connection", async () => {
+		const process = new FakeProcess();
+		const client = await connect(process);
+		const results = Promise.allSettled(
+			Array.from({ length: MAX_CONCURRENT_CONTENT_REQUESTS + 1 }, () =>
+				client.invoke("load_animation"),
+			),
+		);
+		await flushRequests();
+		const dispatched = writtenRequests(process);
+		const failure = {
+			code: "application_error",
+			message: "Animation missing",
+			resource: {
+				kind: "missing",
+				namespace: "eor/portal",
+				file_id: 0x03ffffff,
+			},
+		};
+		process.stdout.push(
+			encodeSidecarFrame({
+				kind: "response",
+				id: dispatched[0].id,
+				result: { Err: failure },
+			}),
+		);
+		await flushRequests();
+		expect(writtenRequests(process)).toHaveLength(
+			MAX_CONCURRENT_CONTENT_REQUESTS + 1,
+		);
+		for (const frame of writtenRequests(process).slice(1))
+			replyUnit(process, frame.id);
+		const settled = await results;
+		expect(settled[0]).toMatchObject({ status: "rejected", reason: failure });
+		expect(
+			settled.slice(1).every((result) => result.status === "fulfilled"),
+		).toBe(true);
+		const status = client.invoke("host_status");
+		await flushRequests();
+		const statusFrame = writtenRequests(process).at(-1);
+		if (statusFrame === undefined) throw new Error("Expected status request");
+		replyUnit(process, statusFrame.id);
+		await status;
+		process.close(0, null);
+	});
+
+	it("rejects active, queued, and future content with the same host failure", async () => {
+		const process = new FakeProcess();
+		const client = await connect(process);
+		const results = Promise.allSettled(
+			Array.from({ length: MAX_CONCURRENT_CONTENT_REQUESTS + 1 }, () =>
+				client.invoke("load_animation"),
+			),
+		);
+		await flushRequests();
+		process.stdout.push(Uint8Array.of(1, 0, 0, 0, 0xc1));
+		const failures = await results;
+		for (const result of failures)
+			expect(result).toMatchObject({
+				status: "rejected",
+				reason: { code: "malformed_frame" },
+			});
+		const first = failures[0];
+		if (first.status !== "rejected") throw new Error("Expected host failure");
+		await expect(client.invoke("load_audio")).rejects.toBe(first.reason);
+		for (const result of failures)
+			if (result.status === "rejected")
+				expect(result.reason).toBe(first.reason);
+		expect(writtenRequests(process)).toHaveLength(
+			MAX_CONCURRENT_CONTENT_REQUESTS,
+		);
+	});
+
+	it("settles queued content when startup fails before handshake", async () => {
+		const process = new FakeProcess();
+		const client = new SidecarHostClient(process);
+		const connected = client.connect().catch((error: unknown) => error);
+		const results = Promise.allSettled(
+			Array.from({ length: MAX_CONCURRENT_CONTENT_REQUESTS + 1 }, () =>
+				client.invoke("load_animation"),
+			),
+		);
+		process.close(1, null);
+		const failure = await connected;
+		for (const result of await results)
+			expect(result).toEqual({ status: "rejected", reason: failure });
+		expect(process.stdin.writes).toHaveLength(0);
+	});
+
+	it("cancels queued content on shutdown but recognizes replies to dispatched requests", async () => {
+		const process = new FakeProcess();
+		const client = await connect(process);
+		const results = Promise.allSettled(
+			Array.from({ length: MAX_CONCURRENT_CONTENT_REQUESTS + 1 }, () =>
+				client.invoke("load_animation"),
+			),
+		);
+		await flushRequests();
+		const stopping = client.shutdown();
+		await expect(client.invoke("host_status")).rejects.toMatchObject({
+			code: "host_shutdown",
+		});
+		for (const frame of writtenRequests(process)) replyUnit(process, frame.id);
+		const settled = await results;
+		expect(
+			settled.filter((result) => result.status === "fulfilled"),
+		).toHaveLength(MAX_CONCURRENT_CONTENT_REQUESTS);
+		expect(settled.at(-1)).toMatchObject({
+			status: "rejected",
+			reason: { code: "host_shutdown" },
+		});
+		expect(writtenRequests(process)).toHaveLength(
+			MAX_CONCURRENT_CONTENT_REQUESTS,
+		);
+		process.stdout.push(
+			encodeSidecarFrame({
+				kind: "shutdown_ack",
+				id: MAX_CONCURRENT_CONTENT_REQUESTS + 1,
+			}),
+		);
+		process.close(0, null);
+		await stopping;
+		expect(process.killCount).toBe(0);
 	});
 });

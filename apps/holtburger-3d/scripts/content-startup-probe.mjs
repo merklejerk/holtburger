@@ -370,7 +370,15 @@ try {
 				}
 				if (!failure) throw new Error('Absent animation unexpectedly loaded');
 				await transport.invoke('load_animation', { request: { animationId: '0x0300055b' } });
-				return { failure, subsequentAnimation: '0x0300055b' };
+				const { MAX_PENDING_REQUESTS } = await import('/src/lib/host/host-limits.ts');
+				const closures = await Promise.all(['0x09000001', '0x0900020b', '0x09000228'].map((motionTableId) =>
+					transport.invoke('load_motion_table_closure', { request: { motionTableId } })));
+				const animationIds = [...new Set(closures.flat())];
+				if (animationIds.length <= MAX_PENDING_REQUESTS) throw new Error('Content fixture does not exceed the pending ceiling');
+				const burst = animationIds.map((animationId) => transport.invoke('load_animation', { request: { animationId } }));
+				const status = await transport.invoke('host_status');
+				await Promise.all(burst);
+				return { failure, subsequentAnimation: '0x0300055b', burstAnimations: animationIds.length, status };
 			})()`,
 			);
 			const state = await app.snapshot();

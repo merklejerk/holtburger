@@ -5,18 +5,18 @@ interface PendingHostRequest<T> {
 }
 
 /**
- * Bounded scheduler for frontend work that creates sidecar requests.
+ * Bounded scheduler for host requests or domain preparation jobs.
  *
- * The protocol pending-request ceiling is a final circuit breaker, not a work queue. Domain
- * requesters use this scheduler so they retain ordering and can decline stale work before it
- * crosses the host boundary.
+ * The protocol pending-request ceiling is a final circuit breaker, not a work queue.
+ * Connection admission and domain requesters use this scheduler to bound their own work.
+ * Domain requesters can additionally decline stale work before it crosses the host boundary.
  */
 export class HostRequestGate {
 	readonly #maxConcurrent: number;
 	readonly #pending: PendingHostRequest<unknown>[] = [];
 	#active = 0;
-	#peakActive = 0;
-	#destroyed = false;
+	/** Terminal reason shared by queued and future operations. */
+	#closedReason: Error | undefined;
 
 	constructor(maxConcurrent: number) {
 		if (!Number.isSafeInteger(maxConcurrent) || maxConcurrent <= 0) {
@@ -25,17 +25,9 @@ export class HostRequestGate {
 		this.#maxConcurrent = maxConcurrent;
 	}
 
-	get activeCount(): number {
-		return this.#active;
-	}
-
-	get peakActiveCount(): number {
-		return this.#peakActive;
-	}
-
 	schedule<T>(operation: () => Promise<T>): Promise<T> {
-		if (this.#destroyed) {
-			return Promise.reject(new Error("Host requests are stopped."));
+		if (this.#closedReason !== undefined) {
+			return Promise.reject(this.#closedReason);
 		}
 		return new Promise<T>((resolve, reject) => {
 			this.#pending.push({
@@ -48,19 +40,20 @@ export class HostRequestGate {
 	}
 
 	/** Reject queued operations; in-flight host calls are allowed to settle naturally. */
-	destroy(): void {
-		if (this.#destroyed) return;
-		this.#destroyed = true;
-		const error = new Error("Host requests are stopped.");
+	destroy(error: Error): void {
+		if (this.#closedReason !== undefined) return;
+		this.#closedReason = error;
 		for (const request of this.#pending.splice(0)) request.reject(error);
 	}
 
 	#drain(): void {
-		while (!this.#destroyed && this.#active < this.#maxConcurrent) {
+		while (
+			this.#closedReason === undefined &&
+			this.#active < this.#maxConcurrent
+		) {
 			const request = this.#pending.shift();
 			if (request === undefined) return;
 			this.#active += 1;
-			this.#peakActive = Math.max(this.#peakActive, this.#active);
 			let completion: Promise<unknown>;
 			try {
 				completion = request.operation();

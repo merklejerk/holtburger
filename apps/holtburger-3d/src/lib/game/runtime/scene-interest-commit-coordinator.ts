@@ -11,7 +11,7 @@ import type {
 } from "./scene-availability";
 import { HostRequestGate } from "../../host/host-request-gate";
 
-/** Leave ample protocol headroom while keeping the four-worker host content pool supplied. */
+/** Bound complete host/worker preparation jobs and retain the chance to skip stale interest. */
 const MAX_SCENE_LANDBLOCK_REQUESTS = 32;
 
 /** Runtime mutation callbacks kept outside the asynchronous scene-interest loading coordinator. */
@@ -101,7 +101,7 @@ export class SceneInterestCommitCoordinator {
 	/** Stop new publication; already running workers may finish and are then discarded. */
 	destroy(): void {
 		this.#destroyed = true;
-		this.#requests.destroy();
+		this.#requests.destroy(new Error("Scene preparation is stopped."));
 		this.#layerRevisions.clear();
 		this.#interest = new Map();
 	}

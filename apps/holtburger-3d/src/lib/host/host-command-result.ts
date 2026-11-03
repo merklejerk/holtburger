@@ -46,13 +46,29 @@ export function unwrapHostCommandResult(value: unknown): unknown {
 
 /** Only entirely source-classified failures can be contained; mixed aggregates remain fatal. */
 export function isContentFailure(error: unknown): boolean {
+	return everyHostFailure(error, (failure) => failure.resource !== undefined);
+}
+
+/** Capacity rejection is transient; a later acquisition may try again without an automatic retry. */
+export function isHostCapacityFailure(error: unknown): boolean {
+	return everyHostFailure(
+		error,
+		(failure) =>
+			failure.code === "pending_limit" && failure.resource === undefined,
+	);
+}
+
+/** Preserve contextual causes while requiring every aggregate branch to satisfy one policy. */
+function everyHostFailure(
+	error: unknown,
+	accepts: (failure: HostCommandFailure) => boolean,
+): boolean {
 	const ancestors = new Set<unknown>();
 	function visit(value: unknown): boolean {
 		if (ancestors.has(value)) return false;
 		ancestors.add(value);
 		try {
-			if (value instanceof HostCommandError)
-				return value.failure.resource !== undefined;
+			if (value instanceof HostCommandError) return accepts(value.failure);
 			if (value instanceof AggregateError)
 				return (
 					value.errors.length > 0 &&

@@ -102,9 +102,8 @@ import type {
 	ClientEntitySelectionQueryResult,
 } from "../../client/client-host-contract";
 
-/** Content/status commands implemented by the shared host-content capability. */
-const SHARED_HOST_COMMAND_NAMES = [
-	"host_status",
+/** Bulk content commands sharing one connection-wide admission budget. */
+const CONTENT_HOST_COMMAND_NAMES = [
 	"load_character_creation_catalog",
 	"resolve_character_creation_appearance",
 	"resolve_character_creation_stats",
@@ -130,6 +129,17 @@ const SHARED_HOST_COMMAND_NAMES = [
 	"load_particle_meshes",
 	"load_motion_table_closure",
 ] as const;
+
+/** Content/status commands implemented by the shared host-content capability. */
+const SHARED_HOST_COMMAND_NAMES = [
+	"host_status",
+	...CONTENT_HOST_COMMAND_NAMES,
+] as const;
+
+/** Derive admission policy from the command inventory rather than a second allowlist. */
+export function isContentHostCommand(command: HostCommandName): boolean {
+	return CONTENT_HOST_COMMAND_NAMES.some((name) => name === command);
+}
 
 /** Explorer-only commands; they are not accepted by a client-mode renderer. */
 const EXPLORER_HOST_COMMAND_NAMES = [

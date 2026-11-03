@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { HostCommandError } from "../../host/host-command-result";
 import type { DatAssetId } from "../game-types";
 import { PreparedAssetRepository } from "./prepared-asset-repository";
 
@@ -65,6 +66,76 @@ describe("PreparedAssetRepository residency", () => {
 		repository.evictFailed(FIRST);
 		await expect(repository.acquire(FIRST)).rejects.toThrow("missing");
 		expect(load).toHaveBeenCalledTimes(3);
+		repository.destroy();
+	});
+});
+
+describe("PreparedAssetRepository capacity failures", () => {
+	it("shares rejection but permits a fresh acquisition without explicit eviction", async () => {
+		const failure = new HostCommandError({
+			code: "pending_limit",
+			message: "Capacity reached",
+		});
+		const load = vi
+			.fn<(id: DatAssetId) => Promise<DatAssetId>>()
+			.mockRejectedValueOnce(new Error("Context", { cause: failure }))
+			.mockResolvedValue(FIRST);
+		const repository = new PreparedAssetRepository({
+			label: "Fixture",
+			retention: "referenced",
+			load,
+			prepare: (source) => source,
+			destroySource() {},
+		});
+		const first = repository.acquire(FIRST);
+		const shared = repository.acquire(FIRST);
+		// A failed consumer can immediately reacquire without a separate retry/eviction step.
+		const replacement = first.catch(() => repository.acquire(FIRST));
+		const failures = await Promise.allSettled([first, shared]);
+		expect(failures[0]).toMatchObject({
+			status: "rejected",
+			reason: { cause: failure },
+		});
+		expect(failures[1]).toEqual(failures[0]);
+		const handle = await replacement;
+		expect(load).toHaveBeenCalledTimes(2);
+		expect(handle.asset).toBe(FIRST);
+		expect(repository.getDiagnostics()).toMatchObject({
+			assetCount: 1,
+			referenceCount: 1,
+			failedCount: 0,
+		});
+		handle.release();
+		expect(repository.getDiagnostics().assetCount).toBe(0);
+		repository.destroy();
+	});
+
+	it.each([
+		new Error("Decoder invariant"),
+		new HostCommandError({ code: "host_exit", message: "Host exited" }),
+		new HostCommandError({
+			code: "application_error",
+			message: "Missing",
+			resource: { kind: "missing", namespace: "fixture", file_id: 1 },
+		}),
+	])("keeps non-capacity failures cached: %s", async (failure) => {
+		const load = vi.fn(async () => {
+			throw failure;
+		});
+		const repository = new PreparedAssetRepository({
+			label: "Fixture",
+			retention: "session",
+			load,
+			prepare: (source) => source,
+			destroySource() {},
+		});
+		await expect(repository.acquire(FIRST)).rejects.toBe(failure);
+		await expect(repository.acquire(FIRST)).rejects.toBe(failure);
+		expect(load).toHaveBeenCalledTimes(1);
+		expect(repository.getDiagnostics()).toMatchObject({
+			failedCount: 1,
+			referenceCount: 0,
+		});
 		repository.destroy();
 	});
 });

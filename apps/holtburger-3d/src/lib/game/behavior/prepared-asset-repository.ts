@@ -1,5 +1,8 @@
 import type { DatAssetId } from "../game-types";
-import { isContentFailure } from "../../host/host-command-result";
+import {
+	isContentFailure,
+	isHostCapacityFailure,
+} from "../../host/host-command-result";
 import { formatError } from "../../format-error";
 
 /** One deterministic reference to a shared prepared asset. */
@@ -47,7 +50,7 @@ export interface PreparedAssetRepositoryOptions<TSource, TPrepared> {
  *
  * Asset families choose residency separately from active handle ownership. Preparation is shared
  * by id; session-retained definitions survive their last release until repository destruction.
- * Failed entries remain cached until explicit eviction, preventing repeated failed transfers.
+ * Failed entries remain cached until explicit eviction, except transient host capacity rejections.
  */
 export class PreparedAssetRepository<TSource, TPrepared> {
 	readonly #options: PreparedAssetRepositoryOptions<TSource, TPrepared>;
@@ -263,8 +266,11 @@ export class PreparedAssetRepository<TSource, TPrepared> {
 				return asset;
 			})
 			.catch((cause: unknown) => {
-				if (this.#entries.get(id) === entry)
-					entry.state = { cause, kind: "failed" };
+				if (this.#entries.get(id) === entry) {
+					// Existing waiters retain their entry; a fresh acquisition may start a new load.
+					if (isHostCapacityFailure(cause)) this.#entries.delete(id);
+					else entry.state = { cause, kind: "failed" };
+				}
 				throw cause;
 			});
 		entry.state = { completion, kind: "preparing" };

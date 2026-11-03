@@ -1,8 +1,8 @@
 use crate::error::{Result, ToolError};
 use holtburger_dat::file_type::{Animation, EnvCell, GfxObj, SetupModel};
 use holtburger_dat::{
-    DatDatabase, DatFileType, EOR_CELL_NAMESPACE, EOR_PORTAL_NAMESPACE, HbaStreamWriter,
-    StripperManifest,
+    DatDatabase, DatFileType, EOR_CELL_NAMESPACE, EOR_LANGUAGE_NAMESPACE, EOR_PORTAL_NAMESPACE,
+    HbaStreamWriter, StripperManifest,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -264,6 +264,8 @@ fn infer_input_namespace_fallback(path: &Path) -> &'static str {
 
     if stem.contains("cell") {
         EOR_CELL_NAMESPACE
+    } else if stem.starts_with("client_local_") {
+        EOR_LANGUAGE_NAMESPACE
     } else {
         EOR_PORTAL_NAMESPACE
     }
@@ -379,7 +381,6 @@ pub fn run(options: Dat2HbaOptions) -> Result<()> {
 mod tests {
     use super::*;
     use holtburger_common::{Quaternion, Vector3};
-    use holtburger_dat::EOR_LANGUAGE_NAMESPACE;
     use holtburger_dat::file_type::animation::AnimationFlags;
     use holtburger_dat::file_type::setup_model::{
         AnimationFrame, AnimationHook, AnimationHookPayload, AttackConeHookPayload,
@@ -543,6 +544,29 @@ mod tests {
     fn input_namespace_fallback_defaults_to_portal() {
         assert_eq!(
             infer_input_namespace_fallback(Path::new("client_portal.dat")),
+            EOR_PORTAL_NAMESPACE
+        );
+    }
+
+    #[test]
+    fn input_namespace_fallback_uses_language_filename_hint() {
+        for filename in ["client_local_English.dat", "CLIENT_LOCAL_GERMAN.DAT"] {
+            assert_eq!(
+                infer_input_namespace_fallback(Path::new(filename)),
+                EOR_LANGUAGE_NAMESPACE
+            );
+        }
+    }
+
+    #[test]
+    fn header_namespace_takes_precedence_over_language_filename() {
+        assert_eq!(
+            resolve_namespace_hint(
+                None,
+                Path::new("client_local_English.dat"),
+                Some(EOR_PORTAL_NAMESPACE)
+            )
+            .unwrap(),
             EOR_PORTAL_NAMESPACE
         );
     }

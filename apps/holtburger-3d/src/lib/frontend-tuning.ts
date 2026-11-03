@@ -609,7 +609,7 @@ export const SHARED_FRONTEND_TUNING = {
 		},
 		frameDefaults: {
 			/** White ambient in sealed interiors; retail uses 0.2. */
-			sealedInteriorAmbientLevel: 0.2,
+			sealedInteriorAmbientLevel: 0.3,
 			/** Whether region-authored distance fog is enabled initially. */
 			distanceFogEnabled: true,
 			/**

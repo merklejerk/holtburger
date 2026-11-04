@@ -22,7 +22,7 @@ Open **World** and use the map to explore Dereth. Drag to pan and scroll to zoom
 
 Use **Map visibility** to show or hide town names, contracts, waypoints and housing. Keep the layers useful for your current trip; contract and housing searches add their own destinations.
 
-<Media id="map" />
+<Media id="world-map-controls" detail />
 
 ## Follow a waypoint
 

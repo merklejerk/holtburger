@@ -90,6 +90,16 @@ Use a safe outdoor area with several nearby creatures or objects, a short practi
 - Expected result: Show a tight crop of the selected name, health bar, magnifying glass and open actions menu.
 - Used in: [3d/combat/#use-the-selected-entity-hud](https://merklejerk.github.io/holtburger/3d/combat/#use-the-selected-entity-hud)
 
+### Read the jump preview
+
+**First · user · pending · still** — ID: `jump-preview`
+
+- Setup: A safe jump with a visible landing and precise jump mode active.
+- Frame: Crop to the character, complete arc, landing target and power control; omit unrelated HUD panels.
+- Action/purpose: Show the landing target, trajectory arc and power control together in a focused world-view crop.
+- Expected result: Show the landing target, trajectory arc and power control together in a focused world-view crop.
+- Used in: [3d/movement-camera/#precise-jumping](https://merklejerk.github.io/holtburger/3d/movement-camera/#precise-jumping)
+
 ### Watch for a name
 
 **Later · user · pending · clip** — ID: `nearby-alerts`
@@ -238,6 +248,16 @@ Group location-dependent work together: a party member for trade/party, an owned
 - Expected result: Show outdoor terrain, buildings, impassable areas and elevation, then walk a winding dungeon passage and retrace part of the visible breadcrumb trail.
 - Used in: [3d/#read-the-route-ahead](https://merklejerk.github.io/holtburger/3d/#read-the-route-ahead), [3d/maps-travel/#navigate-with-the-minimap](https://merklejerk.github.io/holtburger/3d/maps-travel/#navigate-with-the-minimap)
 
+### Read the world map
+
+**First · user · pending · still** — ID: `world-map-controls`
+
+- Setup: Open the World map with a recognizable location and its visibility controls.
+- Frame: Crop to the map panel; keep labels and layer controls readable.
+- Action/purpose: Crop the World map with its visibility controls, a useful destination and pan/zoom context.
+- Expected result: Crop the World map with its visibility controls, a useful destination and pan/zoom context.
+- Used in: [3d/maps-travel/#read-the-world-map](https://merklejerk.github.io/holtburger/3d/maps-travel/#read-the-world-map)
+
 ### Review both offers
 
 **Later · user · pending · still** — ID: `player-trade`
@@ -361,6 +381,16 @@ Use sample server/account names. Hide passwords and personal paths. Choose a com
 - Action/purpose: Show the TreeStats search results, server software and import action.
 - Expected result: Show the TreeStats search results, server software and import action.
 - Used in: [startup/servers/#import-your-server](https://merklejerk.github.io/holtburger/startup/servers/#import-your-server)
+
+### Choose a character
+
+**First · user · pending · still** — ID: `character-roster`
+
+- Setup: The character selection screen with a sample roster and a selected character.
+- Frame: Keep the roster and selected-character preview together with the enter-world control; omit unused background.
+- Action/purpose: Crop the roster, selected-character preview and enter-world control.
+- Expected result: Crop the roster, selected-character preview and enter-world control.
+- Used in: [startup/characters/#choose-your-character](https://merklejerk.github.io/holtburger/startup/characters/#choose-your-character)
 
 ### Choose your game data
 

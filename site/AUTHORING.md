@@ -126,7 +126,8 @@ Prefer tight component crops beside the relevant instructions. Use a still to
 identify a control or read a panel; use a short clip for one interaction or state
 change. Keep enough surrounding context to orient the reader, and preserve readable
 text at the displayed size. Reserve full gameplay frames for spatial tasks or
-layout overviews. Place compact media with `<Media id="..." detail />`; it fits
+layout overviews. Existing showcase screenshots belong on the home page and in
+the gallery; guide placements need captures framed for the task being explained. Place compact media with `<Media id="..." detail />`; it fits
 within the reading column without stretching a small component across the page.
 
 Media IDs and capture briefs live in `src/lib/media/catalog.ts`. Place a capture

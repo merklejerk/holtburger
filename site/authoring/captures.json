@@ -373,6 +373,30 @@
 			"framing": "Crop the confirmation and enough item context to identify the attempt.",
 			"expected": "Show the target, success chance and confirmation for a crafting attempt.",
 			"priority": "later"
+		},
+		"world-map-controls": {
+			"owner": "user",
+			"session": "world",
+			"setup": "Open the World map with a recognizable location and its visibility controls.",
+			"framing": "Crop to the map panel; keep labels and layer controls readable.",
+			"expected": "Crop the World map with its visibility controls, a useful destination and pan/zoom context.",
+			"priority": "first"
+		},
+		"jump-preview": {
+			"owner": "user",
+			"session": "controls",
+			"setup": "A safe jump with a visible landing and precise jump mode active.",
+			"framing": "Crop to the character, complete arc, landing target and power control; omit unrelated HUD panels.",
+			"expected": "Show the landing target, trajectory arc and power control together in a focused world-view crop.",
+			"priority": "first"
+		},
+		"character-roster": {
+			"owner": "user",
+			"session": "setup",
+			"setup": "The character selection screen with a sample roster and a selected character.",
+			"framing": "Keep the roster and selected-character preview together with the enter-world control; omit unused background.",
+			"expected": "Crop the roster, selected-character preview and enter-world control.",
+			"priority": "first"
 		}
 	}
 }

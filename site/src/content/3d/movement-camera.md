@@ -22,7 +22,7 @@ Left-drag orbits the camera without turning your character. With mouse movement 
 4. Inspect the target and trajectory preview.
 5. Click to launch the chosen jump. Press **Escape** to cancel instead.
 
-<Media id="jump" />
+<Media id="jump-preview" />
 
 ## Read the preview
 

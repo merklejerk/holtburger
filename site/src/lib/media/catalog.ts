@@ -147,6 +147,24 @@ export const media = {
 		brief:
 			'Show the target, success chance and confirmation for a crafting attempt.'
 	},
+	'world-map-controls': {
+		kind: 'planned-image',
+		title: 'Read the world map',
+		brief:
+			'Crop the World map with its visibility controls, a useful destination and pan/zoom context.'
+	},
+	'jump-preview': {
+		kind: 'planned-image',
+		title: 'Read the jump preview',
+		brief:
+			'Show the landing target, trajectory arc and power control together in a focused world-view crop.'
+	},
+	'character-roster': {
+		kind: 'planned-image',
+		title: 'Choose a character',
+		brief:
+			'Crop the roster, selected-character preview and enter-world control.'
+	},
 	'smart-tab': {
 		kind: 'planned-video',
 		title: 'Smart Tab in action',
